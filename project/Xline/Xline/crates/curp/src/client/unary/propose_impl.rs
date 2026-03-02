@@ -10,7 +10,9 @@ use crate::{
     rpc::{CurpError, OpResponse, ProposeId, ProposeRequest, RecordRequest, ResponseOp},
     super_quorum,
 };
-
+// use tonic::Status;
+// TODO: use our own status type
+// use xlinerpc::status::Status;
 use super::Unary;
 
 /// A stream of propose events
@@ -186,7 +188,7 @@ impl<C: Command> Unary<C> {
             )
             .await
             .filter_map(|res| future::ready(res.ok()))
-            .filter(|resp| future::ready(resp.get_ref().term == term))
+            .filter(|resp| future::ready(resp.term == term))
             .take(expect)
             .count()
             .map(|c| c >= expect)
@@ -215,7 +217,7 @@ impl<C: Command> Unary<C> {
             })
             .await
             .filter_map(|res| future::ready(res.ok()))
-            .filter(|resp| future::ready(!resp.get_ref().conflict))
+            .filter(|resp| future::ready(!resp.conflict))
             .take(expect)
             .count()
             .map(move |c| ProposeEvent::Record {
@@ -230,19 +232,13 @@ impl<C: Command> Unary<C> {
     /// Flattens the result of `ConnectApi::propose_stream`
     ///
     /// It is considered a propose failure when the stream returns a `CurpError`
-    #[allow(clippy::type_complexity)] // copied from the return value of `ConnectApi::propose_stream`
     fn flatten_propose_stream_result(
-        result: Result<
-            tonic::Response<Box<dyn Stream<Item = Result<OpResponse, tonic::Status>> + Send>>,
-            CurpError,
-        >,
+        result: Result<Box<dyn Stream<Item = Result<OpResponse, CurpError>> + Send>, CurpError>,
     ) -> EventStream<'static, C> {
         match result {
             Ok(stream) => {
-                let pinned_stream = Box::into_pin(stream.into_inner());
-                Box::new(
-                    pinned_stream.map(|r| r.map_err(CurpError::from).map(ProposeEvent::<C>::from)),
-                )
+                let pinned_stream = Box::into_pin(stream);
+                Box::new(pinned_stream.map(|r| r.map(ProposeEvent::<C>::from)))
             }
             Err(e) => Box::new(future::ready(Err(e)).into_stream()),
         }

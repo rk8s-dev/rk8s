@@ -64,16 +64,16 @@ pub struct ServerArgs {
     auth_public_key: Option<PathBuf>,
     /// Open jaeger offline
     #[clap(long)]
-    jaeger_offline: bool,
+    offline: bool,
     /// output dir for jaeger offline
     #[clap(long, default_value = "./jaeger_jsons")]
-    jaeger_output_dir: PathBuf,
+    output_dir: PathBuf,
     /// Open jaeger online
     #[clap(long)]
-    jaeger_online: bool,
+    online: bool,
     /// Trace level of jaeger
     #[clap(long, value_parser = parse_log_level, default_value_t = default_log_level())]
-    jaeger_level: LevelConfig,
+    level: LevelConfig,
     /// Whether to enable metrics
     #[clap(long, default_value_t = default_metrics_enable())]
     metrics_enable: bool,
@@ -140,7 +140,7 @@ pub struct ServerArgs {
     /// Curp client initial retry timeout [default: 50ms]
     #[clap(long, value_parser = parse_duration)]
     client_initial_retry_timeout: Option<Duration>,
-    /// Curp client max retry timeout [default: 10_000ms]
+    /// Curp client max retry timeout [default: `10_000ms`]
     #[clap(long, value_parser = parse_duration)]
     client_max_retry_timeout: Option<Duration>,
     /// Curp client use fixed backoff
@@ -294,12 +294,7 @@ impl From<ServerArgs> for XlineServerConfig {
             initial_cluster_state,
         );
         let log = LogConfig::new(args.log_file, args.log_rotate, args.log_level);
-        let trace = TraceConfig::new(
-            args.jaeger_online,
-            args.jaeger_offline,
-            args.jaeger_output_dir,
-            args.jaeger_level,
-        );
+        let trace = TraceConfig::new(args.online, args.offline, args.output_dir, args.level);
         let auth = AuthConfig::new(args.auth_public_key, args.auth_private_key);
         let auto_compactor_cfg = if let Some(mode) = args.auto_compact_mode {
             match mode.as_str() {

@@ -90,7 +90,6 @@
     clippy::shadow_unrelated,
     clippy::str_to_string,
     clippy::string_add,
-    clippy::string_to_string,
     clippy::todo,
     clippy::unimplemented,
     clippy::unnecessary_self_imports,
@@ -142,7 +141,8 @@
 )]
 #![allow(
     clippy::multiple_crate_versions, // caused by the dependency, can't be fixed
-    clippy::missing_fields_in_debug
+    clippy::missing_fields_in_debug,
+    clippy::doc_lazy_continuation, // caused by generated code from prost
 )]
 #![cfg_attr(
     test,

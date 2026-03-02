@@ -120,6 +120,23 @@ Alternatively, use `--libfuse` option to avoid sudo (uses userspace FUSE):
 
 Here the last optional `.` specifies the build context, which by default is `.`.
 
+#### `-t` and output directory behavior
+
+- `-t/--tag` is an image reference.
+- Accepted format: `[registry/]repository[:tag]`. You can repeat `-t` multiple times.
+- If no explicit tag is provided, rkforge treats it as `latest`.
+- Build output directory is derived from the first `-t` under `-o/--output-dir`:
+  - `-t image1` -> `output/image1`
+  - `-t nginx:latest` -> `output/nginx-latest`
+  - `-t example.com/ns/app:v1 -t example.com/ns/app:latest` -> `output/app-v1`
+
+Example:
+
+```sh
+sudo rkforge build -f Dockerfile -t nginx:latest -o output .
+# OCI layout output directory: output/nginx-latest
+```
+
 ### Example result
 
 The output is as follows:
@@ -299,7 +316,7 @@ rkforge pull nginx:latest
 rkforge pull library/nginx:latest
 
 # Similarly for push:
-rkforge push --path output/nginx nginx:latest  # Pushes to library/nginx:latest
+rkforge push --path output/nginx-latest nginx:latest  # Pushes to library/nginx:latest
 ```
 
 This behavior matches Docker Hub, where official images are stored under the `library/` namespace. To use this feature, create a user named `library` on your distribution server and configure rkforge with that user's credentials.
@@ -339,7 +356,23 @@ curl -u "username:password" "http://your-distribution-server.com/auth/token"
 # [[entries]]
 # pat = "your-token-here"
 # url = "your-distribution-server.com"
+#
+# # Optional: override image storage root
+# [image]
+# storage = "/data/rkforge"
 ```
+
+You can also configure the storage path from CLI:
+
+```sh
+rkforge config set image.storage /data/rkforge
+rkforge config get image.storage
+```
+
+`rkforge config set image.storage` accepts absolute paths and `~` / `~/...`.
+`~username/...` is not supported. `rkforge config get image.storage` prints the
+resolved effective path (for example, `~/data` is shown as `/home/<user>/data`).
+The same path rules apply when you edit `rkforge.toml` manually.
 
 Tokens expire after a configurable period (default: 1 hour). When a token expires, repeat the token retrieval process and update the configuration file.
 
@@ -410,6 +443,7 @@ Usage: rkforge <COMMAND>
 
 Commands:
   build   Build a container image from Dockerfile
+  config  Get or set rkforge configuration
   push    Push an image to specific distribution server
   pull    Pull an image from specific distribution server
   login   Login to distribution server
@@ -424,11 +458,14 @@ Options:
 ### Build Command
 
 ```sh
-Usage: rkforge build [OPTIONS]
+Usage: rkforge build [OPTIONS] [CONTEXT]
+
+Arguments:
+  [CONTEXT]  Build context. Defaults to the directory of the Dockerfile [default: .]
 
 Options:
   -f, --file <FILE>       Dockerfile or Containerfile
-  -t, --tag <IMAGE NAME>  Name of the resulting image
+  -t, --tag <NAME>        Image identifier (format: "[registry/]repository[:tag]"), can be set multiple times
   -v, --verbose           Turn verbose logging on
   -l, --libfuse           Use libfuse-rs or linux mount
   -o, --output-dir <DIR>  Output directory for the image

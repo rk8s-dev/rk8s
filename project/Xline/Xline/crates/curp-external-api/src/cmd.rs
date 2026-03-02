@@ -41,7 +41,7 @@ pub trait Command: pri::Serializable + ConflictCheck + PbCodec {
     /// Execution result
     type ER: pri::Serializable + PbCodec;
 
-    /// After_sync result
+    /// `after_sync` result
     type ASR: pri::Serializable + PbCodec;
 
     /// Get keys of the command
@@ -112,7 +112,7 @@ where
     /// command.
     fn execute_ro(&self, cmd: &C) -> Result<(C::ER, C::ASR), C::Error>;
 
-    /// Batch execute the after_sync callback
+    /// Batch execute the `after_sync` callback
     ///
     /// This `highest_index` means the last log index of the `cmds`
     fn after_sync(

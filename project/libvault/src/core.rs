@@ -668,8 +668,8 @@ impl Core {
             self.handle_log_phase(&handlers, req, &mut resp).await?;
         }
 
-        if err.is_some() {
-            return Err(err.unwrap());
+        if let Some(e) = err {
+            return Err(e);
         }
 
         Ok(resp)

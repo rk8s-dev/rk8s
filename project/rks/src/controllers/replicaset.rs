@@ -4,7 +4,8 @@ use crate::controllers::manager::{ResourceWatchResponse, WatchEvent};
 use anyhow::Result;
 use async_trait::async_trait;
 use common::{
-    LabelSelectorOperator, OwnerReference, PodTask, PodTemplateSpec, ReplicaSet, ResourceKind,
+    ConditionStatus, LabelSelectorOperator, OwnerReference, PodConditionType, PodTask,
+    PodTemplateSpec, ReplicaSet, ResourceKind,
 };
 use rand::random;
 use std::collections::HashSet;
@@ -173,10 +174,25 @@ impl ReplicaSetController {
         rs.status.replicas = actual;
         rs.status.fully_labeled_replicas = matching.len() as i32;
 
-        // Now consider all matching Pods as ready
-        // TODO: replace with real readiness check after integrating kubelet PodStatus updates
-        rs.status.ready_replicas = matching.len() as i32;
-        rs.status.available_replicas = matching.len() as i32;
+        // Count ready pods by checking PodStatus.conditions for PodReady==True
+        let ready_count = matching
+            .iter()
+            .filter(|p| {
+                p.status
+                    .conditions
+                    .as_ref()
+                    .and_then(|conds| {
+                        conds
+                            .iter()
+                            .find(|c| matches!(c.condition_type, PodConditionType::PodReady))
+                    })
+                    .map(|c| matches!(c.status, ConditionStatus::True))
+                    .unwrap_or(false)
+            })
+            .count();
+
+        rs.status.ready_replicas = ready_count as i32;
+        rs.status.available_replicas = ready_count as i32;
 
         if actual < desired {
             let to_create = (desired - actual) as usize;
@@ -219,8 +235,20 @@ impl ReplicaSetController {
             }
         } else if actual > desired {
             let to_delete = (actual - desired) as usize;
-            // prefer deleting pods that are not ready
-            matching.sort_by_key(|p| p.status.pod_ip.is_some()); // not ready first (None => true sorts before)
+            // prefer deleting pods that are not ready (use PodReady condition when available)
+            matching.sort_by_key(|p| {
+                p.status
+                    .conditions
+                    .as_ref()
+                    .and_then(|conds| {
+                        conds
+                            .iter()
+                            .find(|c| matches!(c.condition_type, PodConditionType::PodReady))
+                    })
+                    .map(|c| matches!(c.status, ConditionStatus::True))
+                    .unwrap_or(false)
+                // sort puts false (not ready) before true (ready)
+            });
             for pod in matching.into_iter().take(to_delete) {
                 let pod_name = pod.metadata.name.clone();
                 self.store.delete_pod(&pod_name).await?;

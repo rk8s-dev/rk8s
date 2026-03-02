@@ -56,7 +56,6 @@ mod file_handle;
 mod inode_store;
 mod mmap;
 mod mount_fd;
-pub mod newlogfs;
 mod os_compat;
 mod statx;
 pub mod util;

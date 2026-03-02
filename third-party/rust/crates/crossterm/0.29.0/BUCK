@@ -26,8 +26,8 @@ rust_library(
     features = ["windows"],
     rustc_flags = ["@$(location :crossterm-manifest[env_flags])"],
     os_deps = {
-        "linux": ["//third-party/rust/crates/rustix/1.1.2:rustix"],
-        "macos": ["//third-party/rust/crates/rustix/1.1.2:rustix"],
+        "linux": ["//third-party/rust/crates/rustix/1.1.3:rustix"],
+        "macos": ["//third-party/rust/crates/rustix/1.1.3:rustix"],
         "windows": [
             "//third-party/rust/crates/crossterm_winapi/0.9.1:crossterm_winapi",
             "//third-party/rust/crates/winapi/0.3.9:winapi",
@@ -35,7 +35,7 @@ rust_library(
     },
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/bitflags/2.10.0:bitflags",
+        "//third-party/rust/crates/bitflags/2.11.0:bitflags",
         "//third-party/rust/crates/document-features/0.2.12:document-features",
         "//third-party/rust/crates/parking_lot/0.12.5:parking_lot",
     ],

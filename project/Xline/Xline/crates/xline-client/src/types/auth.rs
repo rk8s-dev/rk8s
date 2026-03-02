@@ -26,9 +26,9 @@ impl Permission {
     /// `range_option` is the range option of how to get `range_end` from key.
     #[inline]
     #[must_use]
-    pub fn new(
+    pub fn new<K: Into<Vec<u8>>>(
         perm_type: PermissionType,
-        key: impl Into<Vec<u8>>,
+        key: K,
         range_option: Option<RangeOption>,
     ) -> Self {
         Self::from((perm_type, key.into(), range_option))

@@ -1,3 +1,4 @@
+use crate::commands::container::rootfs_mount::RootfsMount;
 use crate::commands::pod::PodInfo;
 use crate::commands::{Exec, ExecPod};
 use crate::commands::{delete, exec, load_container, start, state};
@@ -28,6 +29,11 @@ pub fn delete_pod(pod_name: &str) -> Result<(), anyhow::Error> {
 
     // Delete all containers
     for container_name in &pod_info.container_names {
+        // Get bundle_path for cleaning up overlay mount
+        let bundle_path = load_container(root_path.clone(), container_name)
+            .ok()
+            .map(|c| c.bundle().to_path_buf());
+
         let delete_args = Delete {
             container_id: container_name.clone(),
             force: true,
@@ -39,6 +45,14 @@ pub fn delete_pod(pod_name: &str) -> Result<(), anyhow::Error> {
             );
         } else {
             info!("Container deleted: {}", container_name);
+        }
+
+        // Stop the container's overlay rootfs mount
+        if let Some(bp) = bundle_path
+            && let Ok(Some(mount)) = RootfsMount::load(&bp)
+            && let Err(e) = mount.stop()
+        {
+            error!("Failed to stop rootfs overlay mount for {container_name}: {e}");
         }
     }
 
@@ -190,7 +204,8 @@ pub fn create_pod(pod_yaml: &str) -> Result<(), anyhow::Error> {
     );
 
     let mut container_ids = Vec::new();
-    for container in &task_runner.task.spec.containers {
+    let containers = task_runner.task.spec.containers.clone();
+    for container in &containers {
         let create_request =
             task_runner.build_create_container_request(&pod_sandbox_id, container)?;
         let create_response = task_runner.create_container(create_request)?;

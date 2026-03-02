@@ -12,6 +12,7 @@ use dashmap::DashMap;
 use engine::{Snapshot, TransactionApi};
 use event_listener::Event;
 use parking_lot::RwLock;
+use tonic::Status;
 use tracing::warn;
 use utils::{barrier::IdBarrier, table_names::META_TABLE};
 use xlineapi::{
@@ -20,6 +21,8 @@ use xlineapi::{
     command::{Command, CurpClient, SyncResponse},
     execute_error::ExecuteError,
 };
+// TODO: use our own status type
+// use xlinerpc::status::Status;
 
 use crate::{
     revision_number::RevisionNumberGeneratorState,
@@ -206,7 +209,7 @@ impl Alarmer {
     }
 
     /// Propose alarm request to other nodes
-    async fn alarm(&self, action: AlarmAction, alarm: AlarmType) -> Result<(), tonic::Status> {
+    async fn alarm(&self, action: AlarmAction, alarm: AlarmType) -> Result<(), Status> {
         let request = RequestWrapper::from(AlarmRequest::new(action, self.id, alarm));
         let cmd = Command::new(request);
         let _ig = self.client.propose(&cmd, None, true).await?;
@@ -478,10 +481,10 @@ impl CurpCommandExecutor<Command> for CommandExecutor {
         let auth_revision_state = auth_revision_gen.state();
 
         let txn_db = self.db.transaction();
-        if let Some(i) = highest_index {
-            if let Err(e) = txn_db.write_op(WriteOp::PutAppliedIndex(i)) {
-                return states.into_errors(e);
-            }
+        if let Some(i) = highest_index
+            && let Err(e) = txn_db.write_op(WriteOp::PutAppliedIndex(i))
+        {
+            return states.into_errors(e);
         }
 
         states.update_result(|c| {
@@ -507,13 +510,12 @@ impl CurpCommandExecutor<Command> for CommandExecutor {
                 _ => unreachable!("Must be one of kv, auth, lease, alarm"),
             }?;
 
-            if let RequestWrapper::CompactionRequest(ref compact_req) = *wrapper {
-                if compact_req.physical {
-                    if let Some(n) = self.compact_events.get(&cmd.compact_id()) {
-                        let _ignore = n.notify(usize::MAX);
-                    }
-                }
-            };
+            if let RequestWrapper::CompactionRequest(ref compact_req) = *wrapper
+                && compact_req.physical
+                && let Some(n) = self.compact_events.get(&cmd.compact_id())
+            {
+                let _ignore = n.notify(usize::MAX);
+            }
 
             self.lease_storage.mark_lease_synced(wrapper);
 
@@ -527,17 +529,15 @@ impl CurpCommandExecutor<Command> for CommandExecutor {
         general_revision_state.commit();
         auth_revision_state.commit();
 
-        if !quota_enough {
-            if let Some(alarmer) = self.alarmer.read().clone() {
-                let _ig = tokio::spawn(async move {
-                    if let Err(e) = alarmer
-                        .alarm(AlarmAction::Activate, AlarmType::Nospace)
-                        .await
-                    {
-                        warn!("{} propose alarm failed: {:?}", alarmer.id, e);
-                    }
-                });
-            }
+        if !quota_enough && let Some(alarmer) = self.alarmer.read().clone() {
+            let _ig = tokio::spawn(async move {
+                if let Err(e) = alarmer
+                    .alarm(AlarmAction::Activate, AlarmType::Nospace)
+                    .await
+                {
+                    warn!("{} propose alarm failed: {:?}", alarmer.id, e);
+                }
+            });
         }
 
         states.into_results()

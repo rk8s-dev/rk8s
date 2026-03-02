@@ -1,7 +1,10 @@
 use curp::cmd::Command as CurpCommand;
 use thiserror::Error;
+use tonic::Status;
+use tonic::transport::Error;
 use xlineapi::{command::Command, execute_error::ExecuteError};
-
+// TODO: use our own status type
+// use xlinerpc::status::Status;
 /// The result type for `xline-client`
 pub type Result<T> = std::result::Result<T, XlineClientError<Command>>;
 
@@ -30,16 +33,16 @@ impl XlineClientBuildError {
     }
 }
 
-impl From<tonic::transport::Error> for XlineClientBuildError {
+impl From<Error> for XlineClientBuildError {
     #[inline]
-    fn from(e: tonic::transport::Error) -> Self {
+    fn from(e: Error) -> Self {
         Self::RpcError(e.to_string())
     }
 }
 
-impl From<tonic::Status> for XlineClientBuildError {
+impl From<Status> for XlineClientBuildError {
     #[inline]
-    fn from(e: tonic::Status) -> Self {
+    fn from(e: Status) -> Self {
         Self::RpcError(e.to_string())
     }
 }
@@ -86,16 +89,16 @@ pub enum XlineClientError<C: CurpCommand> {
     WrongClusterVersion,
 }
 
-impl From<tonic::transport::Error> for XlineClientError<Command> {
+impl From<Error> for XlineClientError<Command> {
     #[inline]
-    fn from(e: tonic::transport::Error) -> Self {
+    fn from(e: Error) -> Self {
         Self::RpcError(e.to_string())
     }
 }
 
-impl From<tonic::Status> for XlineClientError<Command> {
+impl From<Status> for XlineClientError<Command> {
     #[inline]
-    fn from(e: tonic::Status) -> Self {
+    fn from(e: Status) -> Self {
         Self::RpcError(e.to_string())
     }
 }

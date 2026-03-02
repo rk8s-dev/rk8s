@@ -1,0 +1,42 @@
+[package]
+name = "aardvark-dns"
+# This version specification right below is reused by .packit.sh to generate rpm version
+version = "1.17.0"
+edition = "2018"
+authors = ["github.com/containers"]
+license = "Apache-2.0"
+readme = "README.md"
+description = "A container-focused DNS server"
+homepage = "https://github.com/containers/aardvark-dns"
+repository = "https://github.com/containers/aardvark-dns"
+categories = ["virtualization"]
+exclude = ["/.cirrus.yml", "/.github/*"]
+rust-version = "1.86"
+
+[package.metadata.vendor-filter]
+# This list is not exhaustive.
+platforms = ["x86_64-unknown-linux-gnu", "aarch64-unknown-linux-gnu", "powerpc64le-unknown-linux-gnu",
+             "s390x-unknown-linux-gnu", "riscv64gc-unknown-linux-gnu",
+             "x86_64-unknown-linux-musl", "aarch64-unknown-linux-musl",
+             ]
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+clap = { version = "~4.5.51", features = ["derive"] }
+syslog = "^7.0.0"
+log = "0.4.28"
+hickory-server = "0.25.2"
+hickory-proto = { version = "0.25.2", features = ["tokio"] }
+hickory-client = "0.25.2"
+futures-util = { version = "0.3.31", default-features = false }
+tokio = { version = "1.48.0", features = ["macros", "rt-multi-thread", "net", "signal"] }
+nix = { version = "0.30.1", features = ["fs", "signal", "net"] }
+libc = "0.2.177"
+arc-swap = "1.7.1"
+flume = "0.11.1"
+inotify = "0.11.0"
+futures = "0.3.31"
+
+[build-dependencies]
+chrono = "0.4.42"

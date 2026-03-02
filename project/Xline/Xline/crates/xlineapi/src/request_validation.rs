@@ -2,9 +2,11 @@ use std::collections::{HashMap, hash_map::Entry};
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
+use tonic::{Code, Status};
 use utils::interval_map::{Interval, IntervalMap};
 use utils::lca_tree::LCATree;
-
+// TODO: use our own status type
+// use xlinerpc::status::{Code,Status};
 use crate::{
     AuthRoleAddRequest, AuthRoleGrantPermissionRequest, AuthUserAddRequest, DeleteRangeRequest,
     PutRequest, RangeRequest, Request, RequestOp, SortOrder, SortTarget, TxnRequest,
@@ -294,52 +296,52 @@ pub enum ValidationError {
 // In order to create an etcd-compatible API with Xline, it is necessary to return exact GRPC statuses to the etcd client.
 // Refer to `https://github.com/etcd-io/etcd/blob/main/api/v3rpc/rpctypes/error.go` for etcd's error parsing mechanism,
 // and refer to `https://github.com/etcd-io/etcd/blob/main/client/v3/doc.go` for how errors are handled by etcd client.
-impl From<ValidationError> for tonic::Status {
+impl From<ValidationError> for Status {
     #[inline]
     fn from(err: ValidationError) -> Self {
         let (code, message) = match err {
             ValidationError::EmptyKey => (
-                tonic::Code::InvalidArgument,
+                Code::InvalidArgument,
                 "etcdserver: key is not provided".to_owned(),
             ),
             ValidationError::ValueProvided => (
-                tonic::Code::InvalidArgument,
+                Code::InvalidArgument,
                 "etcdserver: value is provided".to_owned(),
             ),
             ValidationError::LeaseProvided => (
-                tonic::Code::InvalidArgument,
+                Code::InvalidArgument,
                 "etcdserver: lease is provided".to_owned(),
             ),
             ValidationError::InvalidSortOption => (
-                tonic::Code::InvalidArgument,
+                Code::InvalidArgument,
                 "etcdserver: invalid sort option".to_owned(),
             ),
             ValidationError::TooManyOps => (
-                tonic::Code::InvalidArgument,
+                Code::InvalidArgument,
                 "etcdserver: too many operations in txn request".to_owned(),
             ),
             ValidationError::DuplicateKey => (
-                tonic::Code::InvalidArgument,
+                Code::InvalidArgument,
                 "etcdserver: duplicate key given in txn request".to_owned(),
             ),
             ValidationError::UserEmpty => (
-                tonic::Code::InvalidArgument,
+                Code::InvalidArgument,
                 "etcdserver: user name is empty".to_owned(),
             ),
             ValidationError::RoleEmpty => (
-                tonic::Code::InvalidArgument,
+                Code::InvalidArgument,
                 "etcdserver: role name is empty".to_owned(),
             ),
             ValidationError::PermissionNotGiven => (
-                tonic::Code::InvalidArgument,
+                Code::InvalidArgument,
                 "etcdserver: permission not given".to_owned(),
             ),
             ValidationError::RequestNotProvided | ValidationError::PasswordEmpty => {
-                (tonic::Code::InvalidArgument, err.to_string())
+                (Code::InvalidArgument, err.to_string())
             }
         };
 
-        tonic::Status::new(code, message)
+        Status::new(code, message)
     }
 }
 

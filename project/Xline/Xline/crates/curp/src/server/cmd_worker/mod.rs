@@ -32,7 +32,7 @@ where
             let pool_entry = PoolEntry::new(entry.propose_id, Arc::clone(c));
             sp.remove(&pool_entry);
             ucp.remove(&pool_entry);
-        };
+        }
     }
 }
 
@@ -94,7 +94,7 @@ fn after_sync_cmds<C: Command, CE: CommandExecutor<C>, RC: RoleChange>(
                 // has been elected, and the entry has been recovered from the log
                 // or the speculative pool. In such cases, these entries needs to
                 // be re-executed.
-                tx.as_ref().map_or(true, |t| t.is_conflict()),
+                tx.as_ref().is_none_or(|t| t.is_conflict()),
             )
         })
         .collect();
@@ -186,8 +186,7 @@ async fn after_sync_others<C: Command, CE: CommandExecutor<C>, RC: RoleChange>(
                         if curp
                             .handle_move_leader(maybe_new_leader)
                             .unwrap_or_default()
-                        {
-                            if let Err(e) = curp
+                            && let Err(e) = curp
                                 .connects()
                                 .get(&maybe_new_leader)
                                 .unwrap_or_else(|| {
@@ -195,14 +194,13 @@ async fn after_sync_others<C: Command, CE: CommandExecutor<C>, RC: RoleChange>(
                                 })
                                 .try_become_leader_now(curp.cfg().wait_synced_timeout)
                                 .await
-                            {
-                                warn!(
-                                    "{} send try become leader now to {} failed: {:?}",
-                                    curp.id(),
-                                    maybe_new_leader,
-                                    e
-                                );
-                            };
+                        {
+                            warn!(
+                                "{} send try become leader now to {} failed: {:?}",
+                                curp.id(),
+                                maybe_new_leader,
+                                e
+                            );
                         }
                     } else {
                         info!(
@@ -256,23 +254,20 @@ pub(super) async fn worker_reset<C: Command, CE: CommandExecutor<C>, RC: RoleCha
     if let Some(snapshot) = snapshot {
         let meta = snapshot.meta;
         #[allow(clippy::expect_used)] // only in debug
-        match ce
+        if let Err(e) = ce
             .reset(Some((snapshot.into_inner(), meta.last_included_index)))
             .await
         {
-            Err(e) => {
-                error!("reset failed, {e}");
-            }
-            _ => {
-                debug_assert_eq!(
-                    ce.last_applied()
-                        .expect("failed to get last_applied from ce"),
-                    meta.last_included_index,
-                    "inconsistent last_applied"
-                );
-                debug!("{id}'s command executor has been reset by a snapshot");
-                curp.reset_by_snapshot(meta);
-            }
+            error!("reset failed, {e}");
+        } else {
+            debug_assert_eq!(
+                ce.last_applied()
+                    .expect("failed to get last_applied from ce"),
+                meta.last_included_index,
+                "inconsistent last_applied"
+            );
+            debug!("{id}'s command executor has been reset by a snapshot");
+            curp.reset_by_snapshot(meta);
         }
     } else {
         if let Err(e) = ce.reset(None).await {

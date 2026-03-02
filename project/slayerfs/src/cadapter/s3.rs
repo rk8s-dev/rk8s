@@ -520,6 +520,8 @@ impl ObjectBackend for S3Backend {
         }
     }
 
+    /// Get a range of bytes from an object.
+    /// Used for small range reads in intelligent read strategy.
     async fn get_object_range(&self, key: &str, offset: u64, buf: &mut [u8]) -> Result<usize> {
         if buf.is_empty() {
             return Ok(0);

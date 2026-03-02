@@ -11,17 +11,10 @@ license = "Apache-2.0"
 readme = "README.md"
 
 [dependencies]
-futures = "0.3.30"
-rand = "0.8.5"
-tokio = { version = "0.2.25", package = "madsim-tokio", features = [
-    "rt-multi-thread",
-    "time",
-    "fs",
-    "macros",
-    "net",
-    "signal",
-] }
-tonic = { version = "0.5.0", package = "madsim-tonic" }
+futures = { workspace = true }
+rand = { workspace = true }
+tokio = { workspace = true }
+tonic = { workspace = true }
 utils = { path = "../utils" }
 xline = { path = "../xline" }
 xline-client = { path = "../xline-client" }

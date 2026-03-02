@@ -16,13 +16,15 @@ pub async fn pull_layers(
     client: &Client,
     image_ref: &Reference,
     manifest: &OciImageManifest,
+    no_cache: bool,
+    quiet: bool,
 ) -> anyhow::Result<Vec<PathBuf>> {
     let to_download = manifest
         .layers
         .iter()
         .chain(iter::once(&manifest.config))
         .map(Ok)
-        .try_filter(|layer| Ok(!ultimate_blob_path(&layer.digest)?.exists()))
+        .try_filter(|layer| Ok(no_cache || !ultimate_blob_path(&layer.digest)?.exists()))
         .collect::<anyhow::Result<Vec<_>>>()?;
 
     let tasks = to_download.into_iter().map(|descriptor| {
@@ -30,7 +32,9 @@ pub async fn pull_layers(
         let image_ref = image_ref.clone();
         let descriptor = descriptor.clone();
 
-        tokio::spawn(async move { pull_and_unpack_layer(&client, &image_ref, &descriptor).await })
+        tokio::spawn(async move {
+            pull_and_unpack_layer(&client, &image_ref, &descriptor, no_cache, quiet).await
+        })
     });
 
     futures::future::try_join_all(tasks).await?;
@@ -47,6 +51,8 @@ async fn pull_and_unpack_layer(
     client: &Client,
     image_ref: &Reference,
     descriptor: &OciDescriptor,
+    no_cache: bool,
+    quiet: bool,
 ) -> anyhow::Result<()> {
     let digest = &descriptor.digest;
 
@@ -54,9 +60,39 @@ async fn pull_and_unpack_layer(
     let packed_blob_path = temp_dir.path().join(digest);
     let ultimate_blob_path = ultimate_blob_path(digest)?;
 
-    pull_layer(client, image_ref, descriptor, &packed_blob_path).await?;
+    pull_layer(client, image_ref, descriptor, &packed_blob_path, quiet).await?;
 
-    if !ultimate_blob_path.exists() {
+    if no_cache && ultimate_blob_path.exists() {
+        let metadata = tokio::fs::symlink_metadata(&ultimate_blob_path)
+            .await
+            .with_context(|| {
+                format!(
+                    "Failed to stat cached blob {}",
+                    ultimate_blob_path.display()
+                )
+            })?;
+        if metadata.file_type().is_dir() {
+            tokio::fs::remove_dir_all(&ultimate_blob_path)
+                .await
+                .with_context(|| {
+                    format!(
+                        "Failed to remove cached blob directory {}",
+                        ultimate_blob_path.display()
+                    )
+                })?;
+        } else {
+            tokio::fs::remove_file(&ultimate_blob_path)
+                .await
+                .with_context(|| {
+                    format!(
+                        "Failed to remove cached blob {}",
+                        ultimate_blob_path.display()
+                    )
+                })?;
+        }
+    }
+
+    if no_cache || !ultimate_blob_path.exists() {
         unpack_layer(descriptor, &packed_blob_path, &ultimate_blob_path).await?;
     }
 
@@ -68,11 +104,12 @@ async fn pull_layer(
     image_ref: &Reference,
     descriptor: &OciDescriptor,
     dest: impl AsRef<Path>,
+    quiet: bool,
 ) -> anyhow::Result<()> {
     let dest = dest.as_ref();
     let digest = descriptor.digest.split_digest()?;
 
-    let progress_bar = new_progress_bar(descriptor.size as u64, digest);
+    let progress_bar = new_progress_bar(descriptor.size as u64, digest, quiet);
 
     let raw_layer_file = tokio::fs::File::create(dest)
         .await
@@ -113,13 +150,23 @@ async fn unpack_layer(
         .with_context(|| format!("Failed to unpack layer {}", descriptor.digest))
 }
 
-fn new_progress_bar(total_size: u64, digest: impl AsRef<str>) -> ProgressBar {
-    let progress_bar = ProgressBar::new(total_size);
+fn new_progress_bar(total_size: u64, digest: impl AsRef<str>, quiet: bool) -> ProgressBar {
+    let progress_bar = if quiet {
+        ProgressBar::hidden()
+    } else {
+        ProgressBar::new(total_size)
+    };
 
-    progress_bar.set_style(ProgressStyle::default_bar()
-        .template("{msg} [{elapsed_precise}] [{bar:40.cyan/blue}] {bytes}/{total_bytes} ({bytes_per_sec})")
-        .unwrap()
-        .progress_chars("#>-"));
-    progress_bar.set_message(format!("Downloading layer {}", digest.as_ref()));
+    if !quiet {
+        progress_bar.set_style(
+            ProgressStyle::default_bar()
+                .template(
+                    "{msg} [{elapsed_precise}] [{bar:40.cyan/blue}] {bytes}/{total_bytes} ({bytes_per_sec})",
+                )
+                .unwrap()
+                .progress_chars("#>-"),
+        );
+        progress_bar.set_message(format!("Downloading layer {}", digest.as_ref()));
+    }
     progress_bar
 }

@@ -31,7 +31,7 @@ rust_library(
     rustc_flags = ["@$(location :toml_edit-manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/indexmap/2.12.1:indexmap",
+        "//third-party/rust/crates/indexmap/2.13.0:indexmap",
         "//third-party/rust/crates/serde/1.0.228:serde",
         "//third-party/rust/crates/serde_spanned/0.6.9:serde_spanned",
         "//third-party/rust/crates/toml_datetime/0.6.11:toml_datetime",

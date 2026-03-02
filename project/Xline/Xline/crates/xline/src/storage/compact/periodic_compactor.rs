@@ -98,9 +98,8 @@ impl<C: Compactable> PeriodicCompactor<C> {
             revision, self.period
         );
 
-        let Some(ref compactable) = *self.compactable.read().await else {
-            return None;
-        };
+        let guard = self.compactable.read().await;
+        let compactable = (*guard).as_ref()?;
 
         match compactable.compact(revision).await {
             Ok(rev) => {

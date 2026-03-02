@@ -269,15 +269,15 @@ impl KvStore {
             );
             self.update_compacted_revision(finished_rev);
         }
-        if let Some(scheduled_rev) = self.get_compact_revision(SCHEDULED_COMPACT_REVISION)? {
-            if scheduled_rev > self.compacted_revision() {
-                let event = Arc::new(event_listener::Event::new());
-                let listener = event.listen();
-                if let Err(e) = self.compact_task_tx.send((scheduled_rev, Some(event))) {
-                    panic!("the compactor exited unexpectedly: {e:?}");
-                }
-                listener.await;
+        if let Some(scheduled_rev) = self.get_compact_revision(SCHEDULED_COMPACT_REVISION)?
+            && scheduled_rev > self.compacted_revision()
+        {
+            let event = Arc::new(event_listener::Event::new());
+            let listener = event.listen();
+            if let Err(e) = self.compact_task_tx.send((scheduled_rev, Some(event))) {
+                panic!("the compactor exited unexpectedly: {e:?}");
             }
+            listener.await;
         }
         Ok(())
     }
@@ -372,7 +372,7 @@ impl KvStore {
             (SortTarget::Value, SortOrder::Descend) => {
                 kvs.sort_by(|a, b| b.value.cmp(&a.value));
             }
-        };
+        }
     }
 
     /// filter kvs by `{max,min}_{mod,create}_revision`
@@ -505,9 +505,9 @@ impl KvStore {
     /// Compact kv storage
     pub(crate) fn compact(&self, revisions: &[Vec<u8>]) -> Result<(), ExecuteError> {
         let mut ops = Vec::new();
-        revisions
-            .iter()
-            .for_each(|rev| ops.push(WriteOp::DeleteKeyValue(rev.as_ref())));
+        for rev in revisions {
+            ops.push(WriteOp::DeleteKeyValue(rev.as_ref()));
+        }
         self.inner.db.write_ops(ops)?;
         Ok(())
     }
@@ -656,7 +656,9 @@ impl KvStore {
             kvs.truncate(req.limit.numeric_cast());
         }
         if req.keys_only {
-            kvs.iter_mut().for_each(|kv| kv.value.clear());
+            for kv in &mut kvs {
+                kv.value.clear();
+            }
         }
         response.kvs = kvs;
 
@@ -679,7 +681,7 @@ impl KvStore {
         };
         if req.lease != 0 && self.lease_collection.look_up(req.lease).is_none() {
             return Err(ExecuteError::LeaseNotFound(req.lease));
-        };
+        }
 
         if req.prev_kv || req.ignore_lease || req.ignore_value {
             let prev_kv =
@@ -688,7 +690,7 @@ impl KvStore {
                 return Err(ExecuteError::KeyNotFound);
             }
             if req.prev_kv {
-                response.prev_kv = prev_kv.clone();
+                response.prev_kv.clone_from(&prev_kv);
             }
             return Ok((response, prev_kv));
         }
@@ -740,13 +742,14 @@ impl KvStore {
                 .lease;
         }
         if req.ignore_value {
-            kv.value = prev_kv
-                .as_ref()
-                .unwrap_or_else(|| {
-                    unreachable!("Should returns an error when prev kv does not exist")
-                })
-                .value
-                .clone();
+            kv.value.clone_from(
+                &prev_kv
+                    .as_ref()
+                    .unwrap_or_else(|| {
+                        unreachable!("Should returns an error when prev kv does not exist")
+                    })
+                    .value,
+            );
         }
         txn_db.write_op(WriteOp::PutKeyValue(new_rev.as_revision(), kv.clone()))?;
         *sub_revision = sub_revision.overflow_add(1);
@@ -991,9 +994,9 @@ impl KvStore {
                 kv.lease = prev.lease;
             }
             if req.ignore_value {
-                kv.value = prev.value.clone();
+                kv.value.clone_from(&prev.value);
             }
-        };
+        }
 
         let old_lease = self.get_lease(&kv.key);
         if old_lease != 0 {
@@ -1119,7 +1122,7 @@ impl KvStore {
         let ops = vec![WriteOp::PutScheduledCompactRevision(revision)];
         // TODO: Remove the physical process logic here. It's better to move into the
         // KvServer
-        // FIXME: madsim is single threaded, we cannot use synchronous wait here
+
         let index = self.index();
         let target_revisions = index
             .compact(revision)
@@ -1357,6 +1360,7 @@ mod test {
         StoreWrapper(Some(storage), task_manager)
     }
 
+    #[allow(clippy::unwrap_in_result)]
     fn exe_as_and_flush(
         store: &Arc<KvStore>,
         request: &RequestWrapper,
@@ -1384,6 +1388,7 @@ mod test {
 
     #[tokio::test(flavor = "multi_thread")]
     #[abort_on_panic]
+    #[allow(clippy::unwrap_in_result)]
     async fn test_keys_only() -> Result<(), ExecuteError> {
         let db = DB::open(&EngineConfig::Memory)?;
         let (store, _rev) = init_store(db)?;
@@ -1405,6 +1410,7 @@ mod test {
 
     #[tokio::test(flavor = "multi_thread")]
     #[abort_on_panic]
+    #[allow(clippy::unwrap_in_result)]
     async fn test_range_empty() -> Result<(), ExecuteError> {
         let db = DB::open(&EngineConfig::Memory)?;
         let (store, _rev) = init_store(db)?;
@@ -1425,6 +1431,7 @@ mod test {
 
     #[tokio::test(flavor = "multi_thread")]
     #[abort_on_panic]
+    #[allow(clippy::unwrap_in_result)]
     async fn test_range_filter() -> Result<(), ExecuteError> {
         let db = DB::open(&EngineConfig::Memory)?;
         let (store, _rev) = init_store(db)?;
@@ -1450,6 +1457,7 @@ mod test {
 
     #[tokio::test(flavor = "multi_thread")]
     #[abort_on_panic]
+    #[allow(clippy::unwrap_in_result)]
     async fn test_range_sort() -> Result<(), ExecuteError> {
         let db = DB::open(&EngineConfig::Memory)?;
         let (store, _rev) = init_store(db)?;
@@ -1513,6 +1521,7 @@ mod test {
 
     #[tokio::test(flavor = "multi_thread")]
     #[abort_on_panic]
+    #[allow(clippy::unwrap_in_result)]
     async fn test_recover() -> Result<(), ExecuteError> {
         let db = DB::open(&EngineConfig::Memory)?;
         let ops = vec![WriteOp::PutScheduledCompactRevision(8)];
@@ -1550,6 +1559,7 @@ mod test {
 
     #[tokio::test(flavor = "multi_thread")]
     #[abort_on_panic]
+    #[allow(clippy::unwrap_in_result)]
     async fn test_txn() -> Result<(), ExecuteError> {
         let txn_req = RequestWrapper::from(TxnRequest {
             compare: vec![Compare {
@@ -1636,6 +1646,7 @@ mod test {
 
     #[tokio::test(flavor = "multi_thread")]
     #[allow(clippy::too_many_lines)] // TODO: splits this test
+    #[allow(clippy::unwrap_in_result)]
     async fn test_compaction() -> Result<(), ExecuteError> {
         let db = DB::open(&EngineConfig::Memory)?;
         let store = init_empty_store(db);

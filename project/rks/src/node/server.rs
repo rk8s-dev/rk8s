@@ -117,7 +117,15 @@ impl QUICServer {
                                 AuthConnection::<Unauthenticated>::new(connection, shared.clone());
                             conn.serve().await
                         };
-                        log_error!(result)
+                        if let Err(e) = result {
+                            let msg = e.to_string();
+                            // "closed by peer: 0" means normal QUIC NO_ERROR close
+                            if msg.contains("closed by peer: 0") {
+                                debug!("connection closed normally");
+                            } else {
+                                error!("{e}");
+                            }
+                        }
                     }
                     Err(e) => error!("Connection failed: {e}"),
                 }

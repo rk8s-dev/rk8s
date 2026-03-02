@@ -6,11 +6,14 @@ use event_listener::Event;
 use periodic_compactor::PeriodicCompactor;
 use revision_compactor::RevisionCompactor;
 use tokio::time::sleep;
+use tonic::Status;
 use utils::{
     config::AutoCompactConfig,
     task_manager::{Listener, TaskManager, tasks::TaskName},
 };
 use xlineapi::{RequestWrapper, command::Command, execute_error::ExecuteError};
+// TODO: use our own status type
+// use xlinerpc::status::Status;
 
 use super::{KvStore, index::Index};
 use crate::{revision_number::RevisionNumberGenerator, rpc::CompactionRequest};
@@ -42,27 +45,24 @@ pub(crate) trait Compactor<C: Compactable>: Send + Sync {
 #[async_trait]
 pub(crate) trait Compactable: Send + Sync + 'static {
     /// do compact, return the compacted revision or rpc error
-    async fn compact(&self, revision: i64) -> Result<i64, tonic::Status>;
+    async fn compact(&self, revision: i64) -> Result<i64, Status>;
 }
 
 #[async_trait]
-impl Compactable
-    for Arc<dyn ClientApi<Error = tonic::Status, Cmd = Command> + Sync + Send + 'static>
-{
-    async fn compact(&self, revision: i64) -> Result<i64, tonic::Status> {
+impl Compactable for Arc<dyn ClientApi<Error = Status, Cmd = Command> + Sync + Send + 'static> {
+    async fn compact(&self, revision: i64) -> Result<i64, Status> {
         let request = RequestWrapper::from(CompactionRequest {
             revision,
             physical: false,
         });
         let cmd = Command::new(request);
-        let err = match self.propose(&cmd, None, true).await? {
-            Ok(_) => return Ok(revision),
-            Err(err) => err,
+        let Err(err) = self.propose(&cmd, None, true).await? else {
+            return Ok(revision);
         };
         if let ExecuteError::RevisionCompacted(_, compacted_rev) = err {
             return Ok(compacted_rev);
         }
-        Err(tonic::Status::from(err))
+        Err(Status::from(err))
     }
 }
 

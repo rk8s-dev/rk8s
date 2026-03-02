@@ -27,6 +27,6 @@ rust_library(
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/arrayvec/0.7.6:arrayvec",
-        "//third-party/rust/crates/itoa/1.0.15:itoa",
+        "//third-party/rust/crates/itoa/1.0.17:itoa",
     ],
 )

@@ -5,7 +5,7 @@ use ipc_channel::ipc::{IpcOneShotServer, IpcSender};
 use serde::{Deserialize, Serialize};
 use std::{
     path::PathBuf,
-    process::{Child, Command},
+    process::{Child, Command, Stdio},
 };
 use tracing::trace;
 
@@ -18,12 +18,16 @@ pub struct RunTask {
     /// User to run the command as. Format: "user", "uid", "user:group", "uid:gid", etc.
     /// If None, runs as root.
     pub user: Option<String>,
+    /// Suppress stdout while keeping stderr visible.
+    pub quiet: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct CopyTask {
     pub src: Vec<PathBuf>,
     pub dest: PathBuf,
+    /// Suppress stdout while keeping stderr visible.
+    pub quiet: bool,
 }
 
 /// A trait for tasks to be executed during building an image.
@@ -95,6 +99,10 @@ impl TaskExec for RunTask {
             command.arg("--user").arg(user);
         }
 
+        if self.quiet {
+            command.stdout(Stdio::null());
+        }
+
         let status = command.status().context("Failed to run run command")?;
         if !status.success() {
             anyhow::bail!("Run command exited with status: {status}");
@@ -106,12 +114,14 @@ impl TaskExec for RunTask {
 impl TaskExec for CopyTask {
     fn run(&self, session: &mut MountSession) -> Result<()> {
         let mut command = session.create_command("copy")?;
-        command
-            .arg("--dest")
-            .arg(&self.dest)
-            .arg("--src")
-            .args(&self.src);
+        command.arg("--dest").arg(&self.dest);
+        for src in &self.src {
+            command.arg("--src").arg(src);
+        }
         trace!("Running command: {:?}", command);
+        if self.quiet {
+            command.stdout(Stdio::null());
+        }
 
         let status = command.status().context("Failed to run copy command")?;
         if !status.success() {

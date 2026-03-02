@@ -24,11 +24,8 @@ pub struct AuthClient {
     /// The client running the CURP protocol, communicate with all servers.
     curp_client: Arc<CurpClient>,
     /// The auth RPC client, only communicate with one server at a time
-    #[cfg(not(madsim))]
+    #[allow(clippy::struct_field_names)]
     auth_client: xlineapi::AuthClient<AuthService<Channel>>,
-    /// The auth RPC client, only communicate with one server at a time
-    #[cfg(madsim)]
-    auth_client: xlineapi::AuthClient<Channel>,
     /// The auth token
     token: Option<String>,
 }
@@ -187,10 +184,10 @@ impl AuthClient {
     /// }
     /// ```
     #[inline]
-    pub async fn authenticate(
+    pub async fn authenticate<N: Into<String>, P: Into<String>>(
         &mut self,
-        name: impl Into<String>,
-        password: impl Into<String>,
+        name: N,
+        password: P,
     ) -> Result<AuthenticateResponse> {
         Ok(self
             .auth_client
@@ -231,10 +228,10 @@ impl AuthClient {
     /// }
     ///```
     #[inline]
-    pub async fn user_add(
+    pub async fn user_add<N: Into<String>, P: AsRef<str>>(
         &self,
-        name: impl Into<String>,
-        password: impl AsRef<str>,
+        name: N,
+        password: P,
         allow_no_password: bool,
     ) -> Result<AuthUserAddResponse> {
         let name = name.into();
@@ -295,7 +292,7 @@ impl AuthClient {
     /// }
     ///```
     #[inline]
-    pub async fn user_get(&self, name: impl Into<String>) -> Result<AuthUserGetResponse> {
+    pub async fn user_get<N: Into<String>>(&self, name: N) -> Result<AuthUserGetResponse> {
         self.handle_req(xlineapi::AuthUserGetRequest { name: name.into() }, true)
             .await
     }
@@ -361,7 +358,7 @@ impl AuthClient {
     /// }
     ///```
     #[inline]
-    pub async fn user_delete(&self, name: impl Into<String>) -> Result<AuthUserDeleteResponse> {
+    pub async fn user_delete<N: Into<String>>(&self, name: N) -> Result<AuthUserDeleteResponse> {
         self.handle_req(xlineapi::AuthUserDeleteRequest { name: name.into() }, false)
             .await
     }
@@ -396,10 +393,10 @@ impl AuthClient {
     /// }
     ///```
     #[inline]
-    pub async fn user_change_password(
+    pub async fn user_change_password<N: Into<String>, P: AsRef<str>>(
         &self,
-        name: impl Into<String>,
-        password: impl AsRef<str>,
+        name: N,
+        password: P,
     ) -> Result<AuthUserChangePasswordResponse> {
         let password: &str = password.as_ref();
         if password.is_empty() {
@@ -449,10 +446,10 @@ impl AuthClient {
     /// }
     ///```
     #[inline]
-    pub async fn user_grant_role(
+    pub async fn user_grant_role<N: Into<String>, R: Into<String>>(
         &self,
-        name: impl Into<String>,
-        role: impl Into<String>,
+        name: N,
+        role: R,
     ) -> Result<AuthUserGrantRoleResponse> {
         self.handle_req(
             xlineapi::AuthUserGrantRoleRequest {
@@ -492,10 +489,10 @@ impl AuthClient {
     /// }
     ///```
     #[inline]
-    pub async fn user_revoke_role(
+    pub async fn user_revoke_role<N: Into<String>, R: Into<String>>(
         &self,
-        name: impl Into<String>,
-        role: impl Into<String>,
+        name: N,
+        role: R,
     ) -> Result<AuthUserRevokeRoleResponse> {
         self.handle_req(
             xlineapi::AuthUserRevokeRoleRequest {
@@ -533,7 +530,7 @@ impl AuthClient {
     /// }
     ///```
     #[inline]
-    pub async fn role_add(&self, name: impl Into<String>) -> Result<AuthRoleAddResponse> {
+    pub async fn role_add<N: Into<String>>(&self, name: N) -> Result<AuthRoleAddResponse> {
         let name = name.into();
         if name.is_empty() {
             return Err(XlineClientError::InvalidArgs(String::from(
@@ -575,7 +572,7 @@ impl AuthClient {
     /// }
     ///```
     #[inline]
-    pub async fn role_get(&self, name: impl Into<String>) -> Result<AuthRoleGetResponse> {
+    pub async fn role_get<N: Into<String>>(&self, name: N) -> Result<AuthRoleGetResponse> {
         self.handle_req(xlineapi::AuthRoleGetRequest { role: name.into() }, true)
             .await
     }
@@ -646,7 +643,7 @@ impl AuthClient {
     /// }
     ///```
     #[inline]
-    pub async fn role_delete(&self, name: impl Into<String>) -> Result<AuthRoleDeleteResponse> {
+    pub async fn role_delete<N: Into<String>>(&self, name: N) -> Result<AuthRoleDeleteResponse> {
         self.handle_req(xlineapi::AuthRoleDeleteRequest { role: name.into() }, false)
             .await
     }
@@ -689,11 +686,11 @@ impl AuthClient {
     /// }
     ///```
     #[inline]
-    pub async fn role_grant_permission(
+    pub async fn role_grant_permission<N: Into<String>, K: Into<Vec<u8>>>(
         &self,
-        name: impl Into<String>,
+        name: N,
         perm_type: PermissionType,
-        perm_key: impl Into<Vec<u8>>,
+        perm_key: K,
         range_option: Option<RangeOption>,
     ) -> Result<AuthRoleGrantPermissionResponse> {
         self.handle_req(
@@ -741,10 +738,10 @@ impl AuthClient {
     /// }
     ///```
     #[inline]
-    pub async fn role_revoke_permission(
+    pub async fn role_revoke_permission<N: Into<String>, K: Into<Vec<u8>>>(
         &self,
-        name: impl Into<String>,
-        key: impl Into<Vec<u8>>,
+        name: N,
+        key: K,
         range_option: Option<RangeOption>,
     ) -> Result<AuthRoleRevokePermissionResponse> {
         let mut key = key.into();

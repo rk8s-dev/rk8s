@@ -4,7 +4,7 @@ fn main() {
             "ProposeConfChangeRequest.ConfChange",
             "#[derive(serde::Deserialize, serde::Serialize)]",
         )
-        .compile(
+        .compile_protos(
             &["./proto/common/src/curp-command.proto"],
             &["./proto/common/src"],
         )
@@ -13,7 +13,7 @@ fn main() {
     let mut prost_config = prost_build::Config::new();
     prost_config.bytes([".inner_messagepb.InstallSnapshotRequest"]);
     tonic_build::configure()
-        .compile_with_config(
+        .compile_protos_with_config(
             prost_config,
             &["./proto/inner_message.proto"],
             &["./proto/"],

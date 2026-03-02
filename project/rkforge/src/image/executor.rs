@@ -1,16 +1,20 @@
 use crate::{
     compressor::{LayerCompressionConfig, LayerCompressionResult, LayerCompressor},
-    image::{BLOBS, config::ImageConfig, context::StageContext, stage_executor::StageExecutor},
+    image::{
+        BLOBS, BuildProgressMode, config::ImageConfig, context::StageContext,
+        stage_executor::StageExecutor,
+    },
     oci_spec::{
         builder::OciBuilder, config::OciImageConfig, index::OciImageIndex,
         manifest::OciImageManifest,
     },
     overlayfs::{MountConfig, OverlayGuard},
 };
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use dockerfile_parser::Dockerfile;
 use rayon::prelude::*;
 use std::fs;
+use std::io::IsTerminal;
 use std::sync::Arc;
 use std::{collections::HashMap, path::PathBuf};
 
@@ -30,16 +34,38 @@ pub struct Executor {
     pub image_config: ImageConfig,
     pub image_aliases: HashMap<String, String>,
     pub image_layers: Vec<LayerCompressionResult>,
+    pub image_ref_names: Vec<String>,
+    pub cli_build_args: HashMap<String, String>,
     pub global_args: HashMap<String, Option<String>>,
+    pub target: Option<String>,
+    pub no_cache: bool,
+    pub quiet: bool,
+    pub progress_mode: BuildProgressMode,
+    pub cli_labels: HashMap<String, String>,
 
     pub compressor: Arc<dyn LayerCompressor + Send + Sync>,
 }
 
 impl Executor {
+    fn resolve_progress_mode(progress_mode: BuildProgressMode) -> BuildProgressMode {
+        match progress_mode {
+            BuildProgressMode::Auto => {
+                if std::io::stdout().is_terminal() {
+                    BuildProgressMode::Tty
+                } else {
+                    BuildProgressMode::Plain
+                }
+            }
+            other => other,
+        }
+    }
+
     pub fn new(
         dockerfile: Dockerfile,
         context: PathBuf,
         image_output_dir: PathBuf,
+        image_ref_names: Vec<String>,
+        cli_build_args: HashMap<String, String>,
         global_args: HashMap<String, Option<String>>,
         compressor: Arc<dyn LayerCompressor + Send + Sync>,
     ) -> Self {
@@ -53,7 +79,14 @@ impl Executor {
             image_config: ImageConfig::default(),
             image_aliases: HashMap::new(),
             image_layers: Vec::new(),
+            image_ref_names,
+            cli_build_args,
             global_args,
+            target: None,
+            no_cache: false,
+            quiet: false,
+            progress_mode: BuildProgressMode::Auto,
+            cli_labels: HashMap::new(),
             compressor,
         }
     }
@@ -62,28 +95,88 @@ impl Executor {
         self.mount_config.libfuse = libfuse;
     }
 
+    pub fn target(&mut self, target: Option<String>) {
+        self.target = target;
+    }
+
+    pub fn no_cache(&mut self, no_cache: bool) {
+        self.no_cache = no_cache;
+    }
+
+    pub fn output_options(&mut self, quiet: bool, progress_mode: BuildProgressMode) {
+        self.quiet = quiet;
+        self.progress_mode = progress_mode;
+    }
+
+    pub fn cli_labels(&mut self, labels: HashMap<String, String>) {
+        self.cli_labels = labels;
+    }
+
     pub fn build_image(&mut self) -> Result<()> {
         self.execute_stages()?;
+        // Apply CLI labels last so they override Dockerfile LABEL with the same key.
+        self.apply_cli_labels();
         self.compress_layers()?;
         self.generate_oci_metadata()?;
 
         Ok(())
     }
 
+    fn apply_cli_labels(&mut self) {
+        for (key, value) in &self.cli_labels {
+            self.image_config.add_label(key.clone(), value.clone());
+        }
+    }
+
     fn execute_stages(&mut self) -> Result<()> {
         let stages = self.dockerfile.stages();
-        stages.into_iter().try_for_each(|stage| {
-            let ctx = StageContext::new(
-                &mut self.mount_config,
-                &mut self.image_config,
-                &mut self.image_aliases,
-                HashMap::new(),
-                &self.global_args,
-                self.context.clone(),
-            );
-            let mut stage_executor = StageExecutor::new(ctx, stage);
-            stage_executor.execute()
-        })
+        let progress_mode = Self::resolve_progress_mode(self.progress_mode);
+        if stages.stages.is_empty() {
+            bail!("No build stages found in Dockerfile");
+        }
+        if self.no_cache && !self.quiet {
+            println!("# no-cache enabled");
+        }
+
+        let target_index = if let Some(target) = &self.target {
+            stages
+                .get(target)
+                .map(|stage| stage.index)
+                .with_context(|| format!("target stage `{target}` not found"))?
+        } else {
+            stages.stages.len() - 1
+        };
+
+        stages
+            .into_iter()
+            .take(target_index + 1)
+            .try_for_each(|stage| {
+                if !self.quiet && progress_mode == BuildProgressMode::Plain {
+                    let stage_name = stage.name.as_deref().unwrap_or("<unnamed>");
+                    println!("# stage {} ({stage_name})", stage.index);
+                } else if !self.quiet && progress_mode == BuildProgressMode::Tty {
+                    let stage_name = stage.name.as_deref().unwrap_or("<unnamed>");
+                    println!(
+                        "=> stage {} ({stage_name}) [{} instructions]",
+                        stage.index,
+                        stage.instructions.len()
+                    );
+                }
+                let ctx = StageContext {
+                    mount_config: &mut self.mount_config,
+                    image_config: &mut self.image_config,
+                    image_aliases: &mut self.image_aliases,
+                    args: HashMap::new(),
+                    cli_build_args: &self.cli_build_args,
+                    global_args: &self.global_args,
+                    build_context: self.context.clone(),
+                    no_cache: self.no_cache,
+                    quiet: self.quiet,
+                    progress_mode,
+                };
+                let mut stage_executor = StageExecutor::new(ctx, stage);
+                stage_executor.execute()
+            })
     }
 
     fn compress_layers(&mut self) -> Result<()> {
@@ -139,7 +232,7 @@ impl Executor {
                 .collect::<Vec<(u64, String)>>(),
         )?;
 
-        let image_index = OciImageIndex::default();
+        let image_index = OciImageIndex::default().reference_names(self.image_ref_names.clone());
         let oci_builder = OciBuilder::default()
             .image_dir(self.image_output_dir.clone())
             .oci_image_config(image_config)

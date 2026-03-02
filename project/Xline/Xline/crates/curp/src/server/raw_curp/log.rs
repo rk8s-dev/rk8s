@@ -94,7 +94,7 @@ impl<T> From<RangeInclusive<T>> for LogRange<T> {
 /// ```
 pub(super) struct Log<C: Command> {
     /// Log entries, should be persisted
-    /// A VecDeque to store log entries, it will be serialized and persisted
+    /// A `VecDeque` to store log entries, it will be serialized and persisted
     /// Note that the logical index in `LogEntry` is different from physical index
     entries: VecDeque<Entry<C>>,
     /// Each element `batch_end[i]` represents the right inclusive bound of a log batch whose size is less than or equal to `batch_limit`
@@ -245,7 +245,7 @@ impl<C: Command> Log<C> {
                 } else {
                     self.first_idx_in_cur_batch -= 1;
                 }
-                let _ = self
+                let _ig = self
                     .batch_end
                     .pop_front()
                     .unwrap_or_else(|| unreachable!("The batch_end cannot be empty"));
@@ -397,7 +397,7 @@ impl<C: Command> Log<C> {
             if self
                 .entries
                 .get(pi)
-                .map_or(true, |old_entry| old_entry.inner.term != entry.term)
+                .is_none_or(|old_entry| old_entry.inner.term != entry.term)
             {
                 break;
             }
@@ -541,7 +541,7 @@ impl<C: Command> Log<C> {
         while self
             .entries
             .front()
-            .map_or(false, |entry| entry.inner.index <= compact_from)
+            .is_some_and(|entry| entry.inner.index <= compact_from)
         {
             let res = self.pop_front();
             match res {

@@ -42,7 +42,7 @@ async fn xline_add_node() -> Result<(), Box<dyn Error>> {
         .await;
     let mut etcd_client = etcd_client::Client::connect(&new_node_client_urls, None).await?;
     let res = etcd_client.get("key", None).await?;
-    assert_eq!(res.kvs().get(0).unwrap().value(), b"value");
+    assert_eq!(res.kvs().first().unwrap().value(), b"value");
     Ok(())
 }
 
@@ -59,8 +59,8 @@ async fn xline_update_node() -> Result<(), Box<dyn Error>> {
         .peer_ur_ls
         .first()
         .unwrap()
-        .split(':')
-        .last()
+        .rsplit(':')
+        .next()
         .unwrap()
         .parse::<u16>()
         .unwrap();

@@ -5,9 +5,6 @@ use bytes::{Bytes, BytesMut};
 use opentelemetry::metrics::Histogram;
 use utils::define_metrics;
 
-#[cfg(madsim)]
-use crate::mock_rocksdb_engine::RocksEngine;
-#[cfg(not(madsim))]
 use crate::rocksdb_engine::RocksEngine;
 use crate::{EngineError, SnapshotApi, StorageEngine, StorageOps, TransactionApi, WriteOperation};
 
@@ -44,9 +41,9 @@ impl Layer<RocksEngine> {
     ///
     /// Return `EngineError` when `RocksDB` returns an error.
     #[inline]
-    pub async fn apply_snapshot_from_file(
+    pub async fn apply_snapshot_from_file<P: AsRef<Path>>(
         &self,
-        snap_path: impl AsRef<Path>,
+        snap_path: P,
         tables: &[&'static str],
     ) -> Result<(), EngineError> {
         self.engine

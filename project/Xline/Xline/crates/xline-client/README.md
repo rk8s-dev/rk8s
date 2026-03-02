@@ -21,41 +21,41 @@ Official Xline API client for Rust that supports the [CURP](https://github.com/x
 - Lease
   - [x] Grant
   - [x] Revoke
-  - [x] KeepAlive
-  - [x] TimeToLive
+  - [x] `KeepAlive`
+  - [x] `TimeToLive`
   - [x] Leases
 - Watch
-  - [x] WatchCreate
-  - [x] WatchCancel
+  - [x] `WatchCreate`
+  - [x] `WatchCancel`
 - Auth
   - [x] Authenticate
-  - [x] RoleAdd
-  - [x] RoleGet
-  - [x] RoleList
-  - [x] RoleDelete
-  - [x] RoleGrantPermission
-  - [x] RoleRevokePermission
-  - [x] UserAdd
-  - [x] UserGet
-  - [x] UserList
-  - [x] UserDelete
-  - [x] UserChangePassword
-  - [x] UserGrantRole
-  - [x] UserRevokeRole
-  - [x] AuthEnable
-  - [x] AuthDisable
-  - [x] AuthStatus
+  - [x] `RoleAdd`
+  - [x] `RoleGet`
+  - [x] `RoleList`
+  - [x] `RoleDelete`
+  - [x] `RoleGrantPermission`
+  - [x] `RoleRevokePermission`
+  - [x] `UserAdd`
+  - [x] `UserGet`
+  - [x] `UserList`
+  - [x] `UserDelete`
+  - [x] `UserChangePassword`
+  - [x] `UserGrantRole`
+  - [x] `UserRevokeRole`
+  - [x] `AuthEnable`
+  - [x] `AuthDisable`
+  - [x] `AuthStatus`
 - Cluster
-  - [ ] MemberAdd
-  - [ ] MemberRemove
-  - [ ] MemberUpdate
-  - [x] MemberList
-  - [ ] MemberPromote
+  - [ ] `MemberAdd`
+  - [ ] `MemberRemove`
+  - [ ] `MemberUpdate`
+  - [x] `MemberList`
+  - [ ] `MemberPromote`
 - Election
-  - [ ] Campaign
-  - [ ] Proclaim
-  - [ ] Resign
-  - [ ] Leader
+  - [ ] `Campaign`
+  - [ ] `Proclaim`
+  - [ ] `Resign`
+  - [ ] `Leader`
   - [ ] Observe
 - Lock
   - [x] Lock
@@ -66,7 +66,7 @@ Official Xline API client for Rust that supports the [CURP](https://github.com/x
   - [ ] Defragment
   - [ ] Hash
   - [x] Snapshot
-  - [ ] MoveLeader
+  - [ ] `MoveLeader`
 
 Note that certain APIs that have not been implemented in Xline will also not be implemented in `xline-client`.
 

@@ -303,8 +303,8 @@ impl Xutex {
             // if no key on prefix or the key is created by current Xutex, that indicates we have already held the lock
             if lock_owner
                 .kvs
-                .get(0)
-                .map_or(false, |kv| kv.create_revision == self.rev)
+                .first()
+                .is_some_and(|kv| kv.create_revision == self.rev)
             {
                 self.header = resp.header;
                 return Ok(XutexGuard::new(

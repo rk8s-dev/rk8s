@@ -1,7 +1,7 @@
 use anyhow::Result;
 use std::collections::HashMap;
 use std::{env, fs, net::SocketAddr, path::Path, sync::Arc, time::Duration};
-use tokio::sync::OnceCell;
+// use tokio::sync::OnceCell;
 
 use tokio::time;
 
@@ -23,7 +23,7 @@ use crate::quic::client::{Daemon as ClientDaemon, QUICClient};
 use sysinfo::{Disks, System};
 use tracing::{error, info, warn};
 
-pub static DAEMON_CLIENT: OnceCell<Arc<QUICClient<ClientDaemon>>> = OnceCell::const_new();
+// pub static DAEMON_CLIENT: OnceCell<Arc<QUICClient<ClientDaemon>>> = OnceCell::const_new();
 
 fn get_subnet_file_path() -> String {
     if let Ok(path) = env::var("SUBNET_FILE_PATH") {
@@ -140,9 +140,9 @@ pub async fn run_once(
 
     let client = QUICClient::<ClientDaemon>::connect(server_addr.to_string(), &tls_cfg).await?;
     info!("[worker] connected to RKS at {server_addr}");
-    DAEMON_CLIENT
-        .set(Arc::new(client.clone()))
-        .map_err(|_| anyhow::anyhow!("Failed to set DAEMON_CLIENT"))?;
+    // DAEMON_CLIENT
+    //     .set(Arc::new(client.clone()))
+    //     .map_err(|_| anyhow::anyhow!("Failed to set DAEMON_CLIENT"))?;
 
     // register to rks by sending RegisterNode(Box<Node>)
     let register_msg = RksMessage::RegisterNode(Box::new(node.clone()));
@@ -153,7 +153,7 @@ pub async fn run_once(
     let hb_conn = client.clone();
     let node_name = node.metadata.name.clone();
     let heartbeat_iface = ext_iface.clone();
-    tokio::spawn(async move {
+    let hb_handle = tokio::spawn(async move {
         loop {
             time::sleep(Duration::from_secs(5)).await;
             // Generate fresh status but reuse the same node identity
@@ -290,9 +290,13 @@ pub async fn run_once(
                                         .unwrap_or(&result.pod_ip)
                                         .to_string();
 
-                                    let _ = client
+                                    info!("[worker] SetPodip {} -> {}", pod_name, pod_ip);
+                                    if let Err(e) = client
                                         .send_msg(&RksMessage::SetPodip((pod_name, pod_ip)))
-                                        .await;
+                                        .await
+                                    {
+                                        error!("[worker] SetPodip send failed: {e}");
+                                    }
                                 }
 
                                 Err(e) => {
@@ -412,7 +416,8 @@ pub async fn run_once(
             }
             Err(e) => {
                 error!("[worker] accept_uni error: {e}, breaking to reconnect");
-                break Ok(());
+                hb_handle.abort();
+                return Err(anyhow::anyhow!("accept_uni failed: {e}"));
             }
         }
     }
@@ -514,7 +519,7 @@ pub async fn generate_node_status(ext_iface: &ExternalInterface) -> Result<NodeS
     let conditions = vec![
         ready_condition(),
         memory_condition(0.9),
-        disk_condition(0.9),
+        disk_condition(1.0),
         pid_condition(0.9),
         network_condition(),
     ];

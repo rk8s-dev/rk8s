@@ -9,7 +9,10 @@
 //! conditions (PodReady, ContainersReady, PodScheduled, PodInitialized) with server-side
 //! conditions to preserve pod status ownership contracts.
 
-use std::sync::Arc;
+use std::{
+    collections::{HashMap, HashSet},
+    sync::Arc,
+};
 
 use chrono::{DateTime, Utc};
 use common::{
@@ -66,8 +69,10 @@ impl Default for VersionedPodStatus {
 /// and synchronizes changes to the rks API server over QUIC. Implements both on-demand (signal-driven)
 /// and periodic (5-second ticker) synchronization strategies.
 pub struct StatusManager {
-    client: QUICClient<Cli>,
+    server_address: String,
+    tls_cfg: Arc<TLSConnectionArgs>,
     pod_statuses: Arc<DashMap<Uuid, VersionedPodStatus>>,
+    pending_container_readiness: Arc<DashMap<Uuid, HashMap<String, bool>>>,
     pod_status_update_signal: Arc<Notify>,
     api_status_versions: Arc<DashMap<Uuid, u64>>,
     sync_loop_handle: Option<tokio::task::JoinHandle<anyhow::Result<()>>>,
@@ -80,7 +85,8 @@ impl std::fmt::Debug for StatusManager {
 }
 
 struct State {
-    client: QUICClient<Cli>,
+    server_address: String,
+    tls_cfg: Arc<TLSConnectionArgs>,
     pod_statuses: Arc<DashMap<Uuid, VersionedPodStatus>>,
     pod_status_update_signal: Arc<Notify>,
     api_status_versions: Arc<DashMap<Uuid, u64>>,
@@ -96,16 +102,18 @@ impl StatusManager {
     /// # Errors
     /// Returns an error if the QUIC connection fails to establish.
     pub async fn try_new(
-        server_addr: String,
+        server_address: String,
         tls_cfg: Arc<TLSConnectionArgs>,
     ) -> anyhow::Result<Self> {
-        let client = QUICClient::<Cli>::connect(&server_addr, &tls_cfg).await?;
         let pod_statuses = Arc::new(DashMap::new());
+        let pending_container_readiness = Arc::new(DashMap::new());
         let pod_status_update_signal = Arc::new(Notify::new());
         let api_status_versions = Arc::new(DashMap::new());
         Ok(StatusManager {
-            client,
+            server_address,
+            tls_cfg,
             pod_statuses,
+            pending_container_readiness,
             pod_status_update_signal,
             api_status_versions,
             sync_loop_handle: None,
@@ -130,7 +138,8 @@ impl StatusManager {
         info!("[StatusManager] Starting to sync pod status to rks.");
 
         let state = Arc::new(State {
-            client: self.client.clone(),
+            server_address: self.server_address.clone(),
+            tls_cfg: self.tls_cfg.clone(),
             pod_statuses: self.pod_statuses.clone(),
             pod_status_update_signal: self.pod_status_update_signal.clone(),
             api_status_versions: self.api_status_versions.clone(),
@@ -220,9 +229,10 @@ impl StatusManager {
     ///
     /// Does nothing if:
     /// - Pod UID is not found on the rks API server
-    /// - Pod status has not been cached yet
-    /// - Container does not exist in the cached status
     /// - Container readiness is already set to the requested value
+    ///
+    /// If pod status is not cached yet (or the target container status is not present yet),
+    /// readiness is buffered and applied on the next pod status update.
     ///
     /// # Arguments
     /// * `pod_uid` - The UUID of the pod whose container is being updated
@@ -243,7 +253,9 @@ impl StatusManager {
             is_ready,
             "[StatusManager] Setting container readiness"
         );
-        let pod = match get_pod_by_uid(&self.client, &pod_uid).await? {
+
+        let client = QUICClient::<Cli>::connect(&self.server_address, &self.tls_cfg).await?;
+        let pod = match get_pod_by_uid(&client, &pod_uid).await? {
             Some(p) => p,
             None => {
                 debug!(
@@ -255,6 +267,8 @@ impl StatusManager {
                 return Ok(());
             }
         };
+        let resolved_name = resolve_runtime_container_name(&pod.metadata.name, container_name)
+            .unwrap_or_else(|| container_name.to_string());
 
         let (is_cached, mut cached_status) = match self.pod_statuses.get(&pod_uid) {
             Some(s) => (true, s.value().clone()),
@@ -262,18 +276,16 @@ impl StatusManager {
         };
 
         if !is_cached {
+            self.cache_pending_container_readiness(pod_uid, &resolved_name, is_ready);
             debug!(
                 pod_uid = %pod_uid,
                 pod_name = %pod.metadata.name,
-                container_name,
+                container_name = %resolved_name,
                 is_ready,
-                "[StatusManager] Container readiness changed before pod status was cached"
+                "[StatusManager] Container readiness changed before pod status was cached; deferred"
             );
             return Ok(());
         }
-
-        let resolved_name = resolve_runtime_container_name(&pod.metadata.name, container_name)
-            .unwrap_or_else(|| container_name.to_string());
 
         let container_status = cached_status
             .status
@@ -282,12 +294,13 @@ impl StatusManager {
             .find(|container_status| container_status.name == resolved_name);
 
         if container_status.is_none() {
+            self.cache_pending_container_readiness(pod_uid, &resolved_name, is_ready);
             debug!(
                 pod_uid = %pod_uid,
                 pod_name = %cached_status.pod_name,
-                container_name,
+                container_name = %resolved_name,
                 is_ready,
-                "[StatusManager] Container not found in cached status; skipping readiness update"
+                "[StatusManager] Container not found in cached status; deferred readiness update"
             );
             return Ok(());
         }
@@ -295,57 +308,27 @@ impl StatusManager {
         let container_status = container_status.unwrap();
 
         if container_status.ready == is_ready {
+            self.remove_pending_container_readiness(pod_uid, &resolved_name);
             debug!(
                 pod_uid = %pod_uid,
                 pod_name = %cached_status.pod_name,
-                container_name,
+                container_name = %resolved_name,
                 is_ready,
                 "[StatusManager] Container readiness already up to date; skipping"
             );
             return Ok(());
         }
         container_status.ready = is_ready;
+        self.remove_pending_container_readiness(pod_uid, &resolved_name);
 
-        // updates the corresponding type of condition
-        let mut update_condition = |condition_type: PodConditionType, condition: &PodCondition| {
-            if let Some(conditions) = cached_status.status.conditions.as_mut() {
-                if let Some(idx) = conditions
-                    .iter()
-                    .position(|c| c.condition_type == condition_type)
-                {
-                    conditions[idx] = condition.clone();
-                } else {
-                    conditions.push(condition.clone());
-                }
-            } else {
-                cached_status.status.conditions = Some(vec![condition.clone()]);
-            }
-        };
-
-        update_condition(
-            PodConditionType::ContainersReady,
-            &create_containers_ready_condition(
-                &pod,
-                &cached_status.status.container_statuses,
-                cached_status.status.phase,
-            ),
-        );
-
-        update_condition(
-            PodConditionType::PodReady,
-            &create_pod_ready_condition(
-                &pod,
-                &cached_status.status.container_statuses,
-                cached_status.status.phase,
-            ),
-        );
+        refresh_ready_conditions(&pod, &mut cached_status.status);
 
         self.update_status_internal(&pod, &cached_status.status, false, false)
             .await?;
         debug!(
             pod_uid = %pod_uid,
             pod_name = %pod.metadata.name,
-            container_name,
+            container_name = %resolved_name,
             is_ready,
             "[StatusManager] Container readiness update persisted"
         );
@@ -362,6 +345,9 @@ impl StatusManager {
     ) -> anyhow::Result<()> {
         let pod_uid = pod.metadata.uid;
         let mut status = status.clone();
+        filter_non_workload_container_statuses(pod, &mut status);
+        refresh_container_probe_statuses(pod, &mut status);
+        self.apply_pending_container_readiness(pod, &mut status);
         debug!(
             pod_uid = %pod_uid,
             pod_name = %pod.metadata.name,
@@ -398,9 +384,7 @@ impl StatusManager {
 
         update_last_transition_time(&old_status, &mut status, &PodConditionType::PodScheduled)?;
 
-        if let Some(start_time) = old_status.start_time {
-            status.start_time = Some(start_time);
-        }
+        preserve_or_infer_pod_start_time(&old_status, &mut status);
 
         if is_cached && is_status_owned_by_rkl_equal(&old_status, &status) && !force_update {
             debug!(
@@ -447,6 +431,80 @@ impl StatusManager {
         );
         Ok(())
     }
+
+    fn cache_pending_container_readiness(
+        &self,
+        pod_uid: Uuid,
+        container_name: &str,
+        is_ready: bool,
+    ) {
+        self.pending_container_readiness
+            .entry(pod_uid)
+            .and_modify(|pending| {
+                pending.insert(container_name.to_string(), is_ready);
+            })
+            .or_insert_with(|| {
+                let mut pending = HashMap::new();
+                pending.insert(container_name.to_string(), is_ready);
+                pending
+            });
+    }
+
+    fn remove_pending_container_readiness(&self, pod_uid: Uuid, container_name: &str) {
+        let Some(mut pending_entry) = self.pending_container_readiness.get_mut(&pod_uid) else {
+            return;
+        };
+
+        pending_entry.remove(container_name);
+        let should_remove = pending_entry.is_empty();
+        drop(pending_entry);
+
+        if should_remove {
+            self.pending_container_readiness.remove(&pod_uid);
+        }
+    }
+
+    fn apply_pending_container_readiness(&self, pod: &PodTask, status: &mut PodStatus) {
+        let pod_uid = pod.metadata.uid;
+        let Some(pending) = self
+            .pending_container_readiness
+            .get(&pod_uid)
+            .map(|entry| entry.value().clone())
+        else {
+            return;
+        };
+
+        let (readiness_changed, applied_containers) =
+            apply_pending_container_readiness_to_status(pod, status, &pending);
+
+        if applied_containers.is_empty() {
+            return;
+        }
+
+        if let Some(mut pending_entry) = self.pending_container_readiness.get_mut(&pod_uid) {
+            for container_name in &applied_containers {
+                pending_entry.remove(container_name);
+            }
+            let should_remove = pending_entry.is_empty();
+            drop(pending_entry);
+
+            if should_remove {
+                self.pending_container_readiness.remove(&pod_uid);
+            }
+        }
+
+        if readiness_changed {
+            refresh_ready_conditions(pod, status);
+        }
+
+        debug!(
+            pod_uid = %pod_uid,
+            pod_name = %pod.metadata.name,
+            applied_pending_count = applied_containers.len(),
+            readiness_changed,
+            "[StatusManager] Applied deferred container readiness updates"
+        );
+    }
 }
 
 impl Drop for StatusManager {
@@ -463,29 +521,38 @@ async fn sync_batch(state: &Arc<State>, sync_all: bool) -> anyhow::Result<()> {
         "[StatusManager] sync_batch start"
     );
     let mut updated_status: Vec<(Uuid, VersionedPodStatus)> = Vec::new();
+    let mut pods_to_remove_from_cache: Vec<Uuid> = Vec::new();
 
     // Clean up orphaned versions.
     if sync_all {
-        let mut removed_orphans = 0usize;
-        for entry in state.api_status_versions.iter() {
-            let uid = *entry.key();
-            let has_pod = state.pod_statuses.get(&uid).is_some();
-            if !has_pod {
-                state.api_status_versions.remove(&uid);
-                removed_orphans += 1;
-            }
+        let orphaned_uids: Vec<Uuid> = state
+            .api_status_versions
+            .iter()
+            .filter_map(|entry| {
+                let uid = *entry.key();
+                if state.pod_statuses.contains_key(&uid) {
+                    None
+                } else {
+                    Some(uid)
+                }
+            })
+            .collect();
+        for uid in &orphaned_uids {
+            state.api_status_versions.remove(uid);
         }
         debug!(
-            removed_orphans,
+            removed_orphans = orphaned_uids.len(),
             "[StatusManager] Removed orphaned API status versions during full sync"
         );
     }
 
     // Decide which pods need status updates.
-    for entry in state.pod_statuses.iter() {
-        let pod_uid = *entry.key();
-        let pod_status = entry.value().clone();
-
+    let cached_statuses: Vec<(Uuid, VersionedPodStatus)> = state
+        .pod_statuses
+        .iter()
+        .map(|entry| (*entry.key(), entry.value().clone()))
+        .collect();
+    for (pod_uid, pod_status) in cached_statuses {
         if !sync_all {
             if let Some(api_version) = state.api_status_versions.get(&pod_uid)
                 && *api_version.value() >= pod_status.version
@@ -504,12 +571,30 @@ async fn sync_batch(state: &Arc<State>, sync_all: bool) -> anyhow::Result<()> {
             continue;
         }
 
-        if need_update(state, &pod_uid, &pod_status).await? {
-            updated_status.push((pod_uid, pod_status));
-        } else if need_reconcile(state, &pod_uid, &pod_status).await {
-            state.api_status_versions.remove(&pod_uid);
-            updated_status.push((pod_uid, pod_status));
+        match need_update(state, &pod_uid, &pod_status).await? {
+            NeedUpdateDecision::Upload => {
+                updated_status.push((pod_uid, pod_status));
+            }
+            NeedUpdateDecision::Skip => {
+                if need_reconcile(state, &pod_uid, &pod_status).await? {
+                    state.api_status_versions.remove(&pod_uid);
+                    updated_status.push((pod_uid, pod_status));
+                }
+            }
+            NeedUpdateDecision::RemoveLocalCache => {
+                pods_to_remove_from_cache.push(pod_uid);
+            }
         }
+    }
+
+    if !pods_to_remove_from_cache.is_empty() {
+        for pod_uid in &pods_to_remove_from_cache {
+            state.pod_statuses.remove(pod_uid);
+        }
+        debug!(
+            removed_pod_count = pods_to_remove_from_cache.len(),
+            "[StatusManager] Removed pods missing on server from local cache"
+        );
     }
 
     debug!(
@@ -543,7 +628,8 @@ async fn sync_pod(
         version = pod_status.version,
         "[StatusManager] sync_pod start"
     );
-    let pod = match get_pod_by_uid(&state.client, &pod_uid).await? {
+    let client = QUICClient::<Cli>::connect(&state.server_address, &state.tls_cfg).await?;
+    let pod = match get_pod_by_uid(&client, &pod_uid).await? {
         Some(p) => p,
         None => {
             debug!(
@@ -552,6 +638,7 @@ async fn sync_pod(
                 version = pod_status.version,
                 "[StatusManager] Pod not found on server; skipping status sync"
             );
+            state.pod_statuses.remove(&pod_uid);
             return Ok(());
         }
     };
@@ -568,7 +655,7 @@ async fn sync_pod(
 
     // Update the pod status on the server
     update_pod_status(
-        &state.client,
+        state,
         &pod.metadata.name,
         &pod.metadata.namespace,
         &merged_status,
@@ -590,7 +677,7 @@ async fn sync_pod(
 }
 
 async fn update_pod_status(
-    client: &QUICClient<Cli>,
+    state: &State,
     pod_name: &str,
     pod_namespace: &str,
     pod_status: &PodStatus,
@@ -602,6 +689,8 @@ async fn update_pod_status(
         container_status_count = pod_status.container_statuses.len(),
         "[StatusManager] Sending UpdatePodStatus request"
     );
+
+    let client = QUICClient::<Cli>::connect(&state.server_address, &state.tls_cfg).await?;
     client
         .send_msg(&RksMessage::UpdatePodStatus {
             pod_name: pod_name.to_string(),
@@ -694,12 +783,19 @@ fn condition_type_owned_by_rkl(condition_type: &common::PodConditionType) -> boo
     )
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum NeedUpdateDecision {
+    Upload,
+    Skip,
+    RemoveLocalCache,
+}
+
 /// Determine whether the status is stale for the given pod uid.
 async fn need_update(
     state: &Arc<State>,
     pod_uid: &Uuid,
     pod_status: &VersionedPodStatus,
-) -> anyhow::Result<bool> {
+) -> anyhow::Result<NeedUpdateDecision> {
     let latest_api_version = match state.api_status_versions.get(pod_uid) {
         Some(v) => *v.value(),
         None => {
@@ -709,7 +805,7 @@ async fn need_update(
                 local_version = pod_status.version,
                 "[StatusManager] No API version cached; pod status needs upload"
             );
-            return Ok(true);
+            return Ok(NeedUpdateDecision::Upload);
         }
     };
 
@@ -721,10 +817,11 @@ async fn need_update(
             api_version = latest_api_version,
             "[StatusManager] Local status version is newer than API version"
         );
-        return Ok(true);
+        return Ok(NeedUpdateDecision::Upload);
     }
 
-    let pod = match get_pod_by_uid(&state.client, pod_uid).await? {
+    let client = QUICClient::<Cli>::connect(&state.server_address, &state.tls_cfg).await?;
+    let pod = match get_pod_by_uid(&client, pod_uid).await? {
         Some(p) => p,
         None => {
             debug!(
@@ -732,11 +829,15 @@ async fn need_update(
                 pod_name = %pod_status.pod_name,
                 "[StatusManager] Pod not found on server while checking need_update"
             );
-            return Ok(false);
+            return Ok(NeedUpdateDecision::RemoveLocalCache);
         }
     };
 
-    can_be_deleted(pod_status, &pod)
+    if can_be_deleted(pod_status, &pod)? {
+        Ok(NeedUpdateDecision::Upload)
+    } else {
+        Ok(NeedUpdateDecision::Skip)
+    }
 }
 
 fn can_be_deleted(local_status: &VersionedPodStatus, remote_pod: &PodTask) -> anyhow::Result<bool> {
@@ -759,15 +860,16 @@ async fn need_reconcile(
     state: &Arc<State>,
     pod_uid: &Uuid,
     pod_status: &VersionedPodStatus,
-) -> bool {
-    let pod_option = get_pod_by_uid(&state.client, pod_uid).await.ok().flatten();
+) -> anyhow::Result<bool> {
+    let client = QUICClient::<Cli>::connect(&state.server_address, &state.tls_cfg).await?;
+    let pod_option = get_pod_by_uid(&client, pod_uid).await.ok().flatten();
     if pod_option.is_none() {
-        return false;
+        return Ok(false);
     }
     let pod = pod_option.unwrap();
 
     if pod_status.status == pod.status {
-        return false;
+        return Ok(false);
     }
 
     debug!(
@@ -779,7 +881,7 @@ async fn need_reconcile(
         "[StatusManager] Pod status mismatch detected; reconciliation required"
     );
 
-    true
+    Ok(true)
 }
 
 /// Ensures that no container is trying to transition
@@ -880,6 +982,7 @@ fn update_pod_condition(status: &mut PodStatus, new_condition: PodCondition) -> 
             if old_condition.status != new_condition.status {
                 let mut updated_condition = new_condition.clone();
                 updated_condition.last_transition_time = Some(now);
+                updated_condition.last_probe_time = Some(now);
                 if let Some(conditions) = &mut status.conditions {
                     conditions[index] = updated_condition;
                 }
@@ -891,6 +994,7 @@ fn update_pod_condition(status: &mut PodStatus, new_condition: PodCondition) -> 
         None => {
             let mut condition_to_add = new_condition.clone();
             condition_to_add.last_transition_time = Some(now);
+            condition_to_add.last_probe_time = Some(now);
             if let Some(conditions) = &mut status.conditions {
                 conditions.push(condition_to_add);
             } else {
@@ -906,20 +1010,48 @@ fn update_last_transition_time(
     status: &mut PodStatus,
     condition_type: &PodConditionType,
 ) -> anyhow::Result<()> {
+    let now = chrono::Utc::now();
     let Some((_, new_condition)) = get_pod_condition_mut(status, condition_type) else {
         return Ok(());
     };
 
     let last_transition_time = match get_pod_condition(old_status, condition_type) {
-        Some((_, old_condition)) if old_condition.status == new_condition.status => old_condition
-            .last_transition_time
-            .unwrap_or_else(chrono::Utc::now),
-        _ => chrono::Utc::now(),
+        Some((_, old_condition)) if old_condition.status == new_condition.status => {
+            old_condition.last_transition_time.unwrap_or(now)
+        }
+        _ => now,
     };
 
     new_condition.last_transition_time = Some(last_transition_time);
+    new_condition.last_probe_time = Some(now);
 
     Ok(())
+}
+
+fn preserve_or_infer_pod_start_time(old_status: &PodStatus, status: &mut PodStatus) {
+    if let Some(start_time) = old_status.start_time.as_ref() {
+        status.start_time = Some(*start_time);
+        return;
+    }
+
+    if status.start_time.is_some() {
+        return;
+    }
+
+    status.start_time = infer_start_time_from_container_statuses(&status.container_statuses);
+}
+
+fn infer_start_time_from_container_statuses(
+    container_statuses: &[ContainerStatus],
+) -> Option<DateTime<Utc>> {
+    container_statuses
+        .iter()
+        .filter_map(|container_status| match container_status.state.as_ref() {
+            Some(ContainerState::Running { started_at }) => *started_at,
+            Some(ContainerState::Terminated { started_at, .. }) => *started_at,
+            _ => None,
+        })
+        .min()
 }
 
 /// Check if the given pod statuses are equal when non-rkl-owned pod conditions are excluded.
@@ -1017,7 +1149,11 @@ fn create_containers_ready_condition(
     let mut unready_containers: Vec<String> = Vec::new();
     let mut unknown_containers: Vec<String> = Vec::new();
     for container in &pod.spec.containers {
-        if let Some(container_status) = get_container_status(container_statuses, &container.name) {
+        let status_container_name =
+            resolve_container_status_name(pod, &container.name, container_statuses);
+        if let Some(container_status) =
+            get_container_status(container_statuses, &status_container_name)
+        {
             if !container_status.ready {
                 unready_containers.push(container.name.clone());
             }
@@ -1074,6 +1210,150 @@ fn get_container_status<'a>(
     container_statuses
         .iter()
         .find(|cs| cs.name == container_name)
+}
+
+fn resolve_container_status_name(
+    pod: &PodTask,
+    container_name: &str,
+    container_statuses: &[ContainerStatus],
+) -> String {
+    if let Some(runtime_name) = resolve_runtime_container_name(&pod.metadata.name, container_name) {
+        return runtime_name;
+    }
+
+    let candidates: Vec<String> = container_statuses
+        .iter()
+        .map(|container_status| container_status.name.clone())
+        .collect();
+    match_container_name(container_name, &candidates).unwrap_or_else(|| container_name.to_string())
+}
+
+fn filter_non_workload_container_statuses(pod: &PodTask, status: &mut PodStatus) {
+    if status.container_statuses.is_empty() {
+        return;
+    }
+
+    let candidates: Vec<String> = status
+        .container_statuses
+        .iter()
+        .map(|container_status| container_status.name.clone())
+        .collect();
+
+    let mut allowed_names: HashSet<String> = HashSet::new();
+    for container_spec in pod
+        .spec
+        .containers
+        .iter()
+        .chain(pod.spec.init_containers.iter())
+    {
+        allowed_names.insert(container_spec.name.clone());
+
+        if let Some(runtime_name) =
+            resolve_runtime_container_name(&pod.metadata.name, &container_spec.name)
+        {
+            allowed_names.insert(runtime_name);
+            continue;
+        }
+
+        if let Some(runtime_name) = match_container_name(&container_spec.name, &candidates) {
+            allowed_names.insert(runtime_name);
+        }
+    }
+
+    status
+        .container_statuses
+        .retain(|container_status| allowed_names.contains(&container_status.name));
+}
+
+fn apply_pending_container_readiness_to_status(
+    pod: &PodTask,
+    status: &mut PodStatus,
+    pending: &HashMap<String, bool>,
+) -> (bool, Vec<String>) {
+    let mut readiness_changed = false;
+    let mut applied_containers = Vec::new();
+
+    for (pending_container_name, pending_readiness) in pending {
+        let resolved_name =
+            resolve_runtime_container_name(&pod.metadata.name, pending_container_name)
+                .unwrap_or_else(|| pending_container_name.clone());
+
+        let mut target_idx = status
+            .container_statuses
+            .iter()
+            .position(|container_status| container_status.name == resolved_name);
+
+        if target_idx.is_none() && resolved_name != *pending_container_name {
+            target_idx = status
+                .container_statuses
+                .iter()
+                .position(|container_status| container_status.name == *pending_container_name);
+        }
+
+        let Some(target_idx) = target_idx else {
+            continue;
+        };
+
+        let container_status = &mut status.container_statuses[target_idx];
+        if container_status.ready != *pending_readiness {
+            container_status.ready = *pending_readiness;
+            readiness_changed = true;
+        }
+        applied_containers.push(pending_container_name.clone());
+    }
+
+    (readiness_changed, applied_containers)
+}
+
+fn refresh_container_probe_statuses(pod: &PodTask, status: &mut PodStatus) {
+    let candidates: Vec<String> = status
+        .container_statuses
+        .iter()
+        .map(|container_status| container_status.name.clone())
+        .collect();
+
+    for container_spec in &pod.spec.containers {
+        let status_name = resolve_runtime_container_name(&pod.metadata.name, &container_spec.name)
+            .or_else(|| match_container_name(&container_spec.name, &candidates))
+            .unwrap_or_else(|| container_spec.name.clone());
+
+        let mut target_idx = status
+            .container_statuses
+            .iter()
+            .position(|container_status| container_status.name == status_name);
+        if target_idx.is_none() && status_name != container_spec.name {
+            target_idx = status
+                .container_statuses
+                .iter()
+                .position(|container_status| container_status.name == container_spec.name);
+        }
+    }
+}
+
+fn refresh_ready_conditions(pod: &PodTask, status: &mut PodStatus) {
+    upsert_pod_condition(
+        status,
+        create_containers_ready_condition(pod, &status.container_statuses, status.phase),
+    );
+    upsert_pod_condition(
+        status,
+        create_pod_ready_condition(pod, &status.container_statuses, status.phase),
+    );
+}
+
+fn upsert_pod_condition(status: &mut PodStatus, condition: PodCondition) {
+    if let Some(conditions) = status.conditions.as_mut() {
+        if let Some(idx) = conditions
+            .iter()
+            .position(|existing| existing.condition_type == condition.condition_type)
+        {
+            conditions[idx] = condition;
+        } else {
+            conditions.push(condition);
+        }
+    } else {
+        status.conditions = Some(vec![condition]);
+    }
 }
 
 fn resolve_runtime_container_name(pod_name: &str, container_name: &str) -> Option<String> {
@@ -1139,6 +1419,67 @@ mod tests {
             state,
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn apply_pending_container_readiness_updates_matching_container() {
+        let pod = make_pod_task(&["app"], RestartPolicy::Never);
+        let mut status = PodStatus {
+            phase: PodPhase::Running,
+            container_statuses: vec![make_container_status(
+                "app",
+                false,
+                Some(ContainerState::Running { started_at: None }),
+            )],
+            ..Default::default()
+        };
+        let pending = HashMap::from([(String::from("app"), true)]);
+
+        let (readiness_changed, applied_containers) =
+            apply_pending_container_readiness_to_status(&pod, &mut status, &pending);
+
+        assert!(readiness_changed);
+        assert_eq!(applied_containers, vec![String::from("app")]);
+        assert!(status.container_statuses[0].ready);
+    }
+
+    #[test]
+    fn apply_pending_container_readiness_ignores_unknown_container() {
+        let pod = make_pod_task(&["app"], RestartPolicy::Never);
+        let mut status = PodStatus {
+            phase: PodPhase::Running,
+            container_statuses: vec![make_container_status(
+                "app",
+                false,
+                Some(ContainerState::Running { started_at: None }),
+            )],
+            ..Default::default()
+        };
+        let pending = HashMap::from([(String::from("sidecar"), true)]);
+
+        let (readiness_changed, applied_containers) =
+            apply_pending_container_readiness_to_status(&pod, &mut status, &pending);
+
+        assert!(!readiness_changed);
+        assert!(applied_containers.is_empty());
+        assert!(!status.container_statuses[0].ready);
+    }
+
+    #[test]
+    fn filter_non_workload_container_statuses_removes_sandbox_entry() {
+        let pod = make_pod_task(&["container1"], RestartPolicy::Never);
+        let mut status = PodStatus {
+            container_statuses: vec![
+                make_container_status("pod-container1", true, None),
+                make_container_status("pod", false, None),
+            ],
+            ..Default::default()
+        };
+
+        filter_non_workload_container_statuses(&pod, &mut status);
+
+        assert_eq!(status.container_statuses.len(), 1);
+        assert_eq!(status.container_statuses[0].name, "pod-container1");
     }
 
     #[test]
@@ -1276,6 +1617,20 @@ mod tests {
     }
 
     #[test]
+    fn containers_ready_condition_matches_runtime_name_suffix() {
+        let pod = make_pod_task(&["container1", "test-pod"], RestartPolicy::Never);
+        let statuses = vec![
+            make_container_status("test-pod-container1", true, None),
+            make_container_status("test-pod", true, None),
+        ];
+
+        let condition = create_containers_ready_condition(&pod, &statuses, PodPhase::Running);
+        assert_eq!(condition.status, ConditionStatus::True);
+        assert!(condition.reason.is_none());
+        assert!(condition.message.is_none());
+    }
+
+    #[test]
     fn containers_ready_condition_reports_unknown_containers() {
         let pod = make_pod_task(&["app", "sidecar"], RestartPolicy::Never);
         let statuses = vec![make_container_status("app", true, None)];
@@ -1342,6 +1697,7 @@ mod tests {
             .1;
         assert_eq!(condition.status, ConditionStatus::True);
         assert!(condition.last_transition_time.is_some());
+        assert!(condition.last_probe_time.is_some());
     }
 
     #[test]
@@ -1428,6 +1784,7 @@ mod tests {
             .unwrap()
             .1;
         assert_eq!(condition.last_transition_time, Some(fixed_time));
+        assert!(condition.last_probe_time.is_some());
     }
 
     #[test]
@@ -1458,6 +1815,63 @@ mod tests {
             .1;
         assert!(condition.last_transition_time.is_some());
         assert_ne!(condition.last_transition_time, Some(fixed_time));
+    }
+
+    #[test]
+    fn preserve_or_infer_pod_start_time_prefers_old_start_time() {
+        let old_start_time = DateTime::<Utc>::from_timestamp_millis(1000).unwrap();
+        let running_started_at = DateTime::<Utc>::from_timestamp_millis(5000).unwrap();
+        let old_status = PodStatus {
+            start_time: Some(old_start_time),
+            ..Default::default()
+        };
+        let mut new_status = PodStatus {
+            container_statuses: vec![make_container_status(
+                "app",
+                true,
+                Some(ContainerState::Running {
+                    started_at: Some(running_started_at),
+                }),
+            )],
+            ..Default::default()
+        };
+
+        preserve_or_infer_pod_start_time(&old_status, &mut new_status);
+        assert_eq!(new_status.start_time, Some(old_start_time));
+    }
+
+    #[test]
+    fn preserve_or_infer_pod_start_time_infers_from_container_started_at() {
+        let started_at_1 = DateTime::<Utc>::from_timestamp_millis(4000).unwrap();
+        let started_at_2 = DateTime::<Utc>::from_timestamp_millis(2000).unwrap();
+        let old_status = PodStatus::default();
+        let mut new_status = PodStatus {
+            container_statuses: vec![
+                make_container_status(
+                    "app",
+                    true,
+                    Some(ContainerState::Running {
+                        started_at: Some(started_at_1),
+                    }),
+                ),
+                make_container_status(
+                    "sidecar",
+                    false,
+                    Some(ContainerState::Terminated {
+                        exit_code: 0,
+                        signal: None,
+                        reason: None,
+                        message: None,
+                        started_at: Some(started_at_2),
+                        finished_at: None,
+                    }),
+                ),
+            ],
+            ..Default::default()
+        };
+
+        preserve_or_infer_pod_start_time(&old_status, &mut new_status);
+        assert_eq!(new_status.start_time, Some(started_at_2));
     }
 
     #[test]

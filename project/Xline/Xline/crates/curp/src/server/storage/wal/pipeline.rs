@@ -27,17 +27,13 @@ pub(super) struct FilePipeline {
     file_size: u64,
     /// The file receive iterator
     ///
-    /// As tokio::fs is generally slower than std::fs, we use synchronous file allocation.
-    /// Please also refer to the issue discussed on the tokio repo: https://github.com/tokio-rs/tokio/issues/3664
+    /// As `tokio::fs` is generally slower than `std::fs`, we use synchronous file allocation.
+    /// Please also refer to the issue discussed on the tokio repo: <https://github.com/tokio-rs/tokio/issues/3664>
     file_iter: Option<flume::IntoIter<LockedFile>>,
     /// Stopped flag
     stopped: Arc<AtomicBool>,
     /// Join handle of the allocation task
     file_alloc_task_handle: Option<JoinHandle<()>>,
-    // #[cfg_attr(not(madsim), allow(unused))]
-    #[cfg(madsim)]
-    /// File count used in madsim tests
-    file_count: usize,
 }
 
 impl FilePipeline {
@@ -51,7 +47,6 @@ impl FilePipeline {
         let stopped = Arc::new(AtomicBool::new(false));
         let stopped_c = Arc::clone(&stopped);
 
-        #[cfg(not(madsim))]
         {
             let (file_tx, file_rx) = flume::bounded(1);
             let file_alloc_task_handle = std::thread::spawn(move || {
@@ -86,22 +81,10 @@ impl FilePipeline {
                 file_alloc_task_handle: Some(file_alloc_task_handle),
             }
         }
-
-        #[cfg(madsim)]
-        {
-            Self {
-                dir,
-                file_size,
-                file_iter: None,
-                stopped,
-                file_alloc_task_handle: None,
-                file_count: 0,
-            }
-        }
     }
 
     /// Stops the pipeline
-    pub(super) fn stop(&mut self) {
+    pub(super) fn stop(&self) {
         self.stopped.store(true, Ordering::Relaxed);
     }
 
@@ -118,10 +101,10 @@ impl FilePipeline {
     fn clean_up(dir: &PathBuf) -> io::Result<()> {
         for result in std::fs::read_dir(dir)? {
             let file = result?;
-            if let Some(filename) = file.file_name().to_str() {
-                if filename.ends_with(TEMP_FILE_EXT) {
-                    std::fs::remove_file(file.path())?;
-                }
+            if let Some(filename) = file.file_name().to_str()
+                && filename.ends_with(TEMP_FILE_EXT)
+            {
+                std::fs::remove_file(file.path())?;
             }
         }
         Ok(())
@@ -142,7 +125,6 @@ impl Drop for FilePipeline {
 impl Iterator for FilePipeline {
     type Item = io::Result<LockedFile>;
 
-    #[cfg(not(madsim))]
     fn next(&mut self) -> Option<Self::Item> {
         if self.stopped.load(Ordering::Relaxed) {
             return None;
@@ -152,14 +134,6 @@ impl Iterator for FilePipeline {
             .unwrap_or_else(|| unreachable!("Option is always `Some`"))
             .next()
             .map(Ok)
-    }
-
-    #[cfg(madsim)]
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.stopped.load(Ordering::Relaxed) {
-            return None;
-        }
-        Some(Self::alloc(&self.dir, self.file_size, &mut self.file_count))
     }
 }
 

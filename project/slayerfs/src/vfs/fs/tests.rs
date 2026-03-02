@@ -427,6 +427,68 @@ mod io_tests {
         entries
     }
 
+    fn synth_data(seed: u64, len: usize) -> Vec<u8> {
+        let mut x = seed ^ 0x9E37_79B9_7F4A_7C15;
+        if x == 0 {
+            x = 0xA5A5_A5A5_5A5A_5A5A;
+        }
+
+        let mut out = Vec::with_capacity(len);
+        for _ in 0..len {
+            x ^= x << 13;
+            x ^= x >> 7;
+            x ^= x << 17;
+            out.push((x & 0xFF) as u8);
+        }
+        out
+    }
+
+    #[tokio::test]
+    async fn test_fs_regression_fs_ops_pwrite_slice_relative_upload_offset() {
+        let layout = ChunkLayout {
+            chunk_size: 128,
+            block_size: 64,
+        };
+        let tmp = tempfile::tempdir().unwrap();
+        let client = ObjectClient::new(LocalFsBackend::new(tmp.path()));
+        let store = ObjectBlockStore::new(client);
+
+        let meta_handle = create_meta_store_from_url("sqlite::memory:").await.unwrap();
+        let meta_store = meta_handle.store();
+        let fs = VFS::new(layout, store, meta_store).await.unwrap();
+
+        fs.mkdir_p("/fuzz/d0").await.unwrap();
+        fs.create_file("/fuzz/d0/f5").await.unwrap();
+
+        const WRITE_OFFSET: u64 = 158;
+        const WRITE_LEN: usize = 256;
+        const WRITE_SEED: u64 = 85_849_867_896_815_615;
+
+        let data = synth_data(WRITE_SEED, WRITE_LEN);
+        write_path(&fs, "/fuzz/d0/f5", WRITE_OFFSET, &data).await;
+
+        let (ino, _) = fs
+            .core
+            .meta_layer
+            .lookup_path("/fuzz/d0/f5")
+            .await
+            .unwrap()
+            .unwrap();
+        let inode = fs.ensure_inode_registered(ino).await.unwrap();
+        let writer = fs.state.writer.ensure_file(inode);
+        writer.flush().await.unwrap();
+
+        let got = read_path(&fs, "/fuzz/d0/f5", 0, WRITE_OFFSET as usize + WRITE_LEN).await;
+
+        let mut expect = vec![0u8; WRITE_OFFSET as usize];
+        expect.extend_from_slice(&data);
+
+        assert_eq!(got, expect);
+
+        let stat = fs.stat("/fuzz/d0/f5").await.unwrap();
+        assert_eq!(stat.size, WRITE_OFFSET + WRITE_LEN as u64);
+    }
+
     #[tokio::test]
     async fn test_fs_mkdir_create_write_read_readdir() {
         let layout = ChunkLayout::default();

@@ -24,14 +24,14 @@ async fn test_watch() -> Result<(), Box<dyn Error>> {
     let (_watcher, mut stream) = watch_client.watch("foo", None).await?;
     let handle = tokio::spawn(async move {
         if let Ok(Some(res)) = stream.message().await {
-            let event = res.events.get(0).unwrap();
+            let event = res.events.first().unwrap();
             assert_eq!(event_type(event.r#type), EventType::Put);
             let kv = event.kv.clone().unwrap();
             assert_eq!(kv.key, b"foo");
             assert_eq!(kv.value, b"bar");
         }
         if let Ok(Some(res)) = stream.message().await {
-            let event = res.events.get(0).unwrap();
+            let event = res.events.first().unwrap();
             let kv = event.kv.clone().unwrap();
             assert_eq!(event_type(event.r#type), EventType::Delete);
             assert_eq!(kv.key, b"foo");

@@ -13,12 +13,14 @@ use curp_test_utils::{
     test_cmd::{TestCommand, TestCommandResult, TestCommandType},
 };
 use futures::stream::FuturesUnordered;
-use madsim::rand::{Rng, thread_rng};
+use rand::{Rng, thread_rng};
 use test_macros::abort_on_panic;
 use tokio::net::TcpListener;
 use tokio_stream::StreamExt;
+use tonic::Code;
 use utils::{config::ClientConfig, timestamp};
-
+// TODO: use our own status type
+// use xlinerpc::status::Code;
 use crate::common::curp_group::{CurpGroup, DEFAULT_SHUTDOWN_TIMEOUT, FetchClusterRequest};
 
 #[tokio::test(flavor = "multi_thread")]
@@ -310,7 +312,7 @@ async fn shutdown_rpc_should_shutdown_the_cluster() {
                     // due to the cluster has been shutted down.
                     // If we do not break here, it may retry 3 times (10.5s) for all
                     // 10 nodes, that will cause the test timeout failure.
-                    if err.code() == tonic::Code::DeadlineExceeded
+                    if err.code() == Code::DeadlineExceeded
                         || matches!(
                             err.into(),
                             CurpError::ShuttingDown(_) | CurpError::RpcTransport(())

@@ -113,7 +113,7 @@ impl From<PutOptions> for xlineapi::PutRequest {
 /// Options for `range` function.
 #[derive(Debug, PartialEq, Default)]
 pub struct RangeOptions {
-    /// Inner request, RangeRequest = inner + key + range_end
+    /// Inner request, `RangeRequest` = inner + key + `range_end`
     inner: xlineapi::RangeRequest,
     /// Range end options, indicates how to generate `range_end` from key.
     range_end_options: RangeOption,
@@ -123,7 +123,7 @@ impl RangeOptions {
     /// `key` is the first key for the range. If `range_end` is not given, the request only looks up key.
     #[inline]
     #[must_use]
-    pub fn with_key(mut self, key: impl Into<Vec<u8>>) -> Self {
+    pub fn with_key<K: Into<Vec<u8>>>(mut self, key: K) -> Self {
         self.inner.key = key.into();
         self
     }
@@ -148,7 +148,7 @@ impl RangeOptions {
     /// If `range_end` is '\0', the range is all keys >= key.
     #[inline]
     #[must_use]
-    pub fn with_range_end(mut self, range_end: impl Into<Vec<u8>>) -> Self {
+    pub fn with_range_end<R: Into<Vec<u8>>>(mut self, range_end: R) -> Self {
         self.range_end_options = RangeOption::RangeEnd(range_end.into());
         self
     }
@@ -360,7 +360,7 @@ impl DeleteRangeOptions {
     /// `key` is the first key for the range. If `range_end` is not given, the request only looks up key.
     #[inline]
     #[must_use]
-    pub fn with_key(mut self, key: impl Into<Vec<u8>>) -> Self {
+    pub fn with_key<K: Into<Vec<u8>>>(mut self, key: K) -> Self {
         self.inner.key = key.into();
         self
     }
@@ -384,7 +384,7 @@ impl DeleteRangeOptions {
     /// If set, Xline will delete all keys in range `[key, range_end)`.
     #[inline]
     #[must_use]
-    pub fn with_range_end(mut self, range_end: impl Into<Vec<u8>>) -> Self {
+    pub fn with_range_end<R: Into<Vec<u8>>>(mut self, range_end: R) -> Self {
         self.range_end_options = RangeOption::RangeEnd(range_end.into());
         self
     }
@@ -433,8 +433,8 @@ impl Compare {
     /// `target` is the key-value field to inspect for the comparison.
     /// `target_union` is the union that wrap the target value
     #[inline]
-    fn new(
-        key: impl Into<Vec<u8>>,
+    fn new<K: Into<Vec<u8>>>(
+        key: K,
         cmp: CompareResult,
         target: CompareTarget,
         target_union: TargetUnion,
@@ -450,7 +450,7 @@ impl Compare {
 
     /// Compares the version of the given key.
     #[inline]
-    pub fn version(key: impl Into<Vec<u8>>, cmp: CompareResult, version: i64) -> Self {
+    pub fn version<K: Into<Vec<u8>>>(key: K, cmp: CompareResult, version: i64) -> Self {
         Self::new(
             key,
             cmp,
@@ -461,7 +461,7 @@ impl Compare {
 
     /// Compares the creation revision of the given key.
     #[inline]
-    pub fn create_revision(key: impl Into<Vec<u8>>, cmp: CompareResult, revision: i64) -> Self {
+    pub fn create_revision<K: Into<Vec<u8>>>(key: K, cmp: CompareResult, revision: i64) -> Self {
         Self::new(
             key,
             cmp,
@@ -472,7 +472,7 @@ impl Compare {
 
     /// Compares the last modified revision of the given key.
     #[inline]
-    pub fn mod_revision(key: impl Into<Vec<u8>>, cmp: CompareResult, revision: i64) -> Self {
+    pub fn mod_revision<K: Into<Vec<u8>>>(key: K, cmp: CompareResult, revision: i64) -> Self {
         Self::new(
             key,
             cmp,
@@ -483,7 +483,7 @@ impl Compare {
 
     /// Compares the value of the given key.
     #[inline]
-    pub fn value(key: impl Into<Vec<u8>>, cmp: CompareResult, value: impl Into<Vec<u8>>) -> Self {
+    pub fn value<K: Into<Vec<u8>>, V: Into<Vec<u8>>>(key: K, cmp: CompareResult, value: V) -> Self {
         Self::new(
             key,
             cmp,
@@ -494,14 +494,14 @@ impl Compare {
 
     /// Compares the lease id of the given key.
     #[inline]
-    pub fn lease(key: impl Into<Vec<u8>>, cmp: CompareResult, lease: i64) -> Self {
+    pub fn lease<K: Into<Vec<u8>>>(key: K, cmp: CompareResult, lease: i64) -> Self {
         Self::new(key, cmp, CompareTarget::Lease, TargetUnion::Lease(lease))
     }
 
     /// Sets the comparison to scan the range [key, end).
     #[inline]
     #[must_use]
-    pub fn with_range(mut self, end: impl Into<Vec<u8>>) -> Self {
+    pub fn with_range<E: Into<Vec<u8>>>(mut self, end: E) -> Self {
         self.0.range_end = end.into();
         self
     }
@@ -526,9 +526,9 @@ impl TxnOp {
     /// Creates a `Put` operation.
     #[inline]
     #[must_use]
-    pub fn put(
-        key: impl Into<Vec<u8>>,
-        value: impl Into<Vec<u8>>,
+    pub fn put<K: Into<Vec<u8>>, V: Into<Vec<u8>>>(
+        key: K,
+        value: V,
         option: Option<PutOptions>,
     ) -> Self {
         TxnOp {
@@ -544,7 +544,7 @@ impl TxnOp {
     /// Creates a `Range` operation.
     #[inline]
     #[must_use]
-    pub fn range(key: impl Into<Vec<u8>>, option: Option<RangeOptions>) -> Self {
+    pub fn range<K: Into<Vec<u8>>>(key: K, option: Option<RangeOptions>) -> Self {
         TxnOp {
             inner: xlineapi::Request::RequestRange(option.unwrap_or_default().with_key(key).into()),
         }
@@ -553,7 +553,7 @@ impl TxnOp {
     /// Creates a `DeleteRange` operation.
     #[inline]
     #[must_use]
-    pub fn delete(key: impl Into<Vec<u8>>, option: Option<DeleteRangeOptions>) -> Self {
+    pub fn delete<K: Into<Vec<u8>>>(key: K, option: Option<DeleteRangeOptions>) -> Self {
         TxnOp {
             inner: xlineapi::Request::RequestDeleteRange(
                 option.unwrap_or_default().with_key(key).into(),
@@ -591,6 +591,13 @@ pub struct TxnRequest {
     c_else: bool,
 }
 
+impl Default for TxnRequest {
+    #[inline]
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl TxnRequest {
     /// Creates a new transaction.
     #[inline]
@@ -617,7 +624,7 @@ impl TxnRequest {
     /// panics if `when` is called twice or called after `when` or called after `or_else`
     #[inline]
     #[must_use]
-    pub fn when(mut self, compares: impl Into<Vec<Compare>>) -> Self {
+    pub fn when<C: Into<Vec<Compare>>>(mut self, compares: C) -> Self {
         assert!(!self.c_when, "cannot call when twice");
         assert!(!self.c_then, "cannot call when after and_then");
         assert!(!self.c_else, "cannot call when after or_else");
@@ -636,7 +643,7 @@ impl TxnRequest {
     /// panics if `and_then` is called twice or called after `or_else`
     #[inline]
     #[must_use]
-    pub fn and_then(mut self, operations: impl Into<Vec<TxnOp>>) -> Self {
+    pub fn and_then<O: Into<Vec<TxnOp>>>(mut self, operations: O) -> Self {
         assert!(!self.c_then, "cannot call and_then twice");
         assert!(!self.c_else, "cannot call and_then after or_else");
 
@@ -659,7 +666,7 @@ impl TxnRequest {
     /// panics if `or_else` is called twice
     #[inline]
     #[must_use]
-    pub fn or_else(mut self, operations: impl Into<Vec<TxnOp>>) -> Self {
+    pub fn or_else<O: Into<Vec<TxnOp>>>(mut self, operations: O) -> Self {
         assert!(!self.c_else, "cannot call or_else twice");
 
         self.c_else = true;

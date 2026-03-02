@@ -19,7 +19,7 @@ liboci-cli = { workspace = true }
 libfuse-fs = { workspace = true }
 rfuse3 = { workspace = true, features = ["tokio-runtime", "unprivileged"] }
 clap = { workspace = true, features = ["derive", "env"] }
-nix = { workspace = true, features = ["fs", "process", "user", "sched", "mount"] }
+nix = { workspace = true, features = ["fs", "process", "user", "sched", "mount", "term"] }
 tokio = { workspace = true, features = ["full"] }
 libc = { workspace = true }
 dockerfile-parser = { workspace = true }
@@ -73,3 +73,8 @@ hickory-server = { version = "0.25.2", features=["resolver"] }
 hickory-proto = { workspace = true }
 hickory-resolver = { workspace = true }
 hickory-client = { workspace = true }
+ipnet = "2.11.0"
+netavark = "1.17.1"
+
+[dev-dependencies]
+qlean = { workspace = true }

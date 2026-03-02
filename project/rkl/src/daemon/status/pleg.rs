@@ -422,6 +422,7 @@ fn set_current_pod_records(
     );
     let mut updated_records = 0usize;
     let mut inserted_records = 0usize;
+    let live_pod_ids = pods.iter().map(|pod| pod.id).collect::<HashSet<_>>();
     for pod in pods {
         let pod_id = pod.id;
         if let Some(mut record) = pod_records.get_mut(&pod_id) {
@@ -437,17 +438,38 @@ fn set_current_pod_records(
             inserted_records += 1;
         }
     }
+
+    // Mark vanished pods as deleted for one relist cycle so removal events can be generated.
+    let cached_pod_ids = pod_records
+        .iter()
+        .map(|record| *record.key())
+        .collect::<Vec<_>>();
     let mut removed_records = 0usize;
-    for record in pod_records.iter() {
-        let pod_id = *record.key();
-        if !pods.iter().any(|p| p.id == pod_id) {
-            pod_records.remove(&pod_id);
+    let mut marked_deleted_records = 0usize;
+    for pod_id in cached_pod_ids {
+        if live_pod_ids.contains(&pod_id) {
+            continue;
+        }
+
+        let mut should_remove = false;
+        if let Some(mut record) = pod_records.get_mut(&pod_id) {
+            if record.current_pod.is_some() {
+                let temp = record.current_pod.take();
+                record.old_pod = temp;
+                marked_deleted_records += 1;
+            } else {
+                should_remove = true;
+            }
+        }
+
+        if should_remove && pod_records.remove(&pod_id).is_some() {
             removed_records += 1;
         }
     }
     debug!(
         updated_records,
         inserted_records,
+        marked_deleted_records,
         removed_records,
         cached_record_count = pod_records.len(),
         "[pleg] Cached pod records updated"
@@ -633,5 +655,27 @@ mod tests {
         let record = pod_records.get(&pod_id).unwrap();
         assert_eq!(record.old_pod.as_ref().unwrap().name, "pod-first");
         assert_eq!(record.current_pod.as_ref().unwrap().name, "pod-second");
+    }
+
+    #[test]
+    fn set_current_pod_records_marks_deleted_before_cleanup() {
+        let pod_records = Arc::new(DashMap::new());
+        let pod_id = Uuid::new_v4();
+        let pod = make_pod(
+            pod_id,
+            "pod-delete",
+            vec![make_container("c1", container::ContainerStatus::Running)],
+        );
+
+        set_current_pod_records(&pod_records, &[pod.clone()]).unwrap();
+        set_current_pod_records(&pod_records, &[]).unwrap();
+
+        let record = pod_records.get(&pod_id).unwrap();
+        assert_eq!(record.old_pod.as_ref().unwrap().name, "pod-delete");
+        assert!(record.current_pod.is_none());
+        drop(record);
+
+        set_current_pod_records(&pod_records, &[]).unwrap();
+        assert!(pod_records.get(&pod_id).is_none());
     }
 }

@@ -6,6 +6,9 @@ use std::{
 use async_trait::async_trait;
 use event_listener::Event;
 use futures::Stream;
+// use tonic::Status;
+// TODO: use our own status type
+// use xlinerpc::status::Status;
 
 use crate::{
     members::ServerId,
@@ -54,7 +57,7 @@ impl<C: ConnectApi> Reconnect<C> {
 
     /// Try to reconnect if the result is `Err`
     async fn try_reconnect<R>(&self, result: Result<R, CurpError>) -> Result<R, CurpError> {
-        // TODO: use `tonic::Status` instead of `CurpError`, we can't tell
+        // TODO: use `Status` instead of `CurpError`, we can't tell
         // if a reconnect is required from `CurpError`.
         if matches!(
             result,
@@ -88,7 +91,7 @@ impl<C: ConnectApi> ConnectApi for Reconnect<C> {
     }
 
     /// Update server addresses, the new addresses will override the old ones
-    async fn update_addrs(&self, addrs: Vec<String>) -> Result<(), tonic::transport::Error> {
+    async fn update_addrs(&self, addrs: Vec<String>) -> Result<(), CurpError> {
         let connect = self.connect.read().await;
         connect.as_ref().unwrap().update_addrs(addrs).await
     }
@@ -99,10 +102,7 @@ impl<C: ConnectApi> ConnectApi for Reconnect<C> {
         request: ProposeRequest,
         token: Option<String>,
         timeout: Duration,
-    ) -> Result<
-        tonic::Response<Box<dyn Stream<Item = Result<OpResponse, tonic::Status>> + Send>>,
-        CurpError,
-    > {
+    ) -> Result<Box<dyn Stream<Item = Result<OpResponse, CurpError>> + Send>, CurpError> {
         execute_with_reconnect!(self, ConnectApi::propose_stream, request, token, timeout)
     }
 
@@ -111,15 +111,12 @@ impl<C: ConnectApi> ConnectApi for Reconnect<C> {
         &self,
         request: RecordRequest,
         timeout: Duration,
-    ) -> Result<tonic::Response<RecordResponse>, CurpError> {
+    ) -> Result<RecordResponse, CurpError> {
         execute_with_reconnect!(self, ConnectApi::record, request, timeout)
     }
 
     /// Send `ReadIndexRequest`
-    async fn read_index(
-        &self,
-        timeout: Duration,
-    ) -> Result<tonic::Response<ReadIndexResponse>, CurpError> {
+    async fn read_index(&self, timeout: Duration) -> Result<ReadIndexResponse, CurpError> {
         execute_with_reconnect!(self, ConnectApi::read_index, timeout)
     }
 
@@ -128,7 +125,7 @@ impl<C: ConnectApi> ConnectApi for Reconnect<C> {
         &self,
         request: ProposeConfChangeRequest,
         timeout: Duration,
-    ) -> Result<tonic::Response<ProposeConfChangeResponse>, CurpError> {
+    ) -> Result<ProposeConfChangeResponse, CurpError> {
         execute_with_reconnect!(self, ConnectApi::propose_conf_change, request, timeout)
     }
 
@@ -137,7 +134,7 @@ impl<C: ConnectApi> ConnectApi for Reconnect<C> {
         &self,
         request: PublishRequest,
         timeout: Duration,
-    ) -> Result<tonic::Response<PublishResponse>, CurpError> {
+    ) -> Result<PublishResponse, CurpError> {
         execute_with_reconnect!(self, ConnectApi::publish, request, timeout)
     }
 
@@ -146,7 +143,7 @@ impl<C: ConnectApi> ConnectApi for Reconnect<C> {
         &self,
         request: ShutdownRequest,
         timeout: Duration,
-    ) -> Result<tonic::Response<ShutdownResponse>, CurpError> {
+    ) -> Result<ShutdownResponse, CurpError> {
         execute_with_reconnect!(self, ConnectApi::shutdown, request, timeout)
     }
 
@@ -155,7 +152,7 @@ impl<C: ConnectApi> ConnectApi for Reconnect<C> {
         &self,
         request: FetchClusterRequest,
         timeout: Duration,
-    ) -> Result<tonic::Response<FetchClusterResponse>, CurpError> {
+    ) -> Result<FetchClusterResponse, CurpError> {
         execute_with_reconnect!(self, ConnectApi::fetch_cluster, request, timeout)
     }
 
@@ -164,7 +161,7 @@ impl<C: ConnectApi> ConnectApi for Reconnect<C> {
         &self,
         request: FetchReadStateRequest,
         timeout: Duration,
-    ) -> Result<tonic::Response<FetchReadStateResponse>, CurpError> {
+    ) -> Result<FetchReadStateResponse, CurpError> {
         execute_with_reconnect!(self, ConnectApi::fetch_read_state, request, timeout)
     }
 
@@ -173,7 +170,7 @@ impl<C: ConnectApi> ConnectApi for Reconnect<C> {
         &self,
         request: MoveLeaderRequest,
         timeout: Duration,
-    ) -> Result<tonic::Response<MoveLeaderResponse>, CurpError> {
+    ) -> Result<MoveLeaderResponse, CurpError> {
         execute_with_reconnect!(self, ConnectApi::move_leader, request, timeout)
     }
 

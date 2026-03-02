@@ -54,7 +54,7 @@ impl ConflictPoolOp for KvUncomPool {
             if self
                 .map
                 .get_mut(&interval)
-                .map_or(false, |m| m.remove_cmd(entry))
+                .is_some_and(|m| m.remove_cmd(entry))
             {
                 let _ignore = self.map.remove(&interval);
             }
@@ -137,10 +137,10 @@ impl ConflictPoolOp for LeaseUncomPool {
 
     fn remove(&mut self, entry: &Self::Entry) {
         for id in self.ids.remove(&entry.id()).into_iter().flatten() {
-            if let hash_map::Entry::Occupied(mut e) = self.leases.entry(id) {
-                if e.get_mut().remove_cmd(entry) {
-                    let _ignore = e.remove_entry();
-                }
+            if let hash_map::Entry::Occupied(mut e) = self.leases.entry(id)
+                && e.get_mut().remove_cmd(entry)
+            {
+                let _ignore = e.remove_entry();
             }
         }
     }

@@ -10,7 +10,9 @@ use crate::{
     members::ServerId,
     rpc::{ConfChange, CurpError, FetchClusterResponse, Member, ReadState, Redirect},
 };
-
+use tonic::Status;
+// TODO: use our own status type
+// use xlinerpc::status::Status;
 /// Backoff config
 #[derive(Debug, Clone)]
 enum BackoffConfig {
@@ -78,6 +80,7 @@ impl RetryConfig {
 
 impl Backoff {
     /// Get the next delay duration, None means the end.
+    #[allow(clippy::arithmetic_side_effects)]
     fn next_delay(&mut self) -> Option<Duration> {
         if self.count == 0 {
             return None;
@@ -96,7 +99,7 @@ impl Backoff {
 }
 
 /// The retry client automatically retry the requests of the inner client api
-/// which raises the [`tonic::Status`] error
+/// which raises the [`Status`] error
 #[derive(Debug)]
 pub(super) struct Retry<Api> {
     /// Inner client
@@ -130,7 +133,7 @@ where
     }
 
     /// Takes a function f and run retry.
-    async fn retry<'a, R, F>(&'a self, f: impl Fn(&'a Api) -> F) -> Result<R, tonic::Status>
+    async fn retry<'a, R, F>(&'a self, f: impl Fn(&'a Api) -> F) -> Result<R, Status>
     where
         F: Future<Output = Result<R, CurpError>>,
     {
@@ -150,7 +153,7 @@ where
                 | CurpError::NodeNotExists(())
                 | CurpError::NodeAlreadyExists(())
                 | CurpError::LearnerNotCatchUp(()) => {
-                    return Err(tonic::Status::from(err));
+                    return Err(Status::from(err));
                 }
 
                 // some errors that could have a retry
@@ -204,7 +207,7 @@ where
             tokio::time::sleep(delay).await;
         }
 
-        Err(tonic::Status::deadline_exceeded(format!(
+        Err(Status::deadline_exceeded(format!(
             "request timeout, last error: {:?}",
             last_err.unwrap_or_else(|| unreachable!("last error must be set"))
         )))
@@ -217,7 +220,7 @@ where
     Api: RepeatableClientApi<Error = CurpError> + LeaderStateUpdate + Send + Sync + 'static,
 {
     /// The client error
-    type Error = tonic::Status;
+    type Error = Status;
 
     /// Inherit the command type
     type Cmd = Api::Cmd;
@@ -229,7 +232,7 @@ where
         cmd: &Self::Cmd,
         token: Option<&String>,
         use_fast_path: bool,
-    ) -> Result<ProposeResponse<Self::Cmd>, tonic::Status> {
+    ) -> Result<ProposeResponse<Self::Cmd>, Status> {
         self.retry::<_, _>(|client| async move {
             let propose_id = self.inner.gen_propose_id().await?;
             RepeatableClientApi::propose(client, *propose_id, cmd, token, use_fast_path).await
@@ -238,10 +241,7 @@ where
     }
 
     /// Send propose configuration changes to the cluster
-    async fn propose_conf_change(
-        &self,
-        changes: Vec<ConfChange>,
-    ) -> Result<Vec<Member>, tonic::Status> {
+    async fn propose_conf_change(&self, changes: Vec<ConfChange>) -> Result<Vec<Member>, Status> {
         self.retry::<_, _>(|client| {
             let changes_c = changes.clone();
             async move {
@@ -253,7 +253,7 @@ where
     }
 
     /// Send propose to shutdown cluster
-    async fn propose_shutdown(&self) -> Result<(), tonic::Status> {
+    async fn propose_shutdown(&self) -> Result<(), Status> {
         self.retry::<_, _>(|client| async move {
             let propose_id = self.inner.gen_propose_id().await?;
             RepeatableClientApi::propose_shutdown(client, *propose_id).await
@@ -293,7 +293,7 @@ where
     }
 
     /// Send fetch read state from leader
-    async fn fetch_read_state(&self, cmd: &Self::Cmd) -> Result<ReadState, tonic::Status> {
+    async fn fetch_read_state(&self, cmd: &Self::Cmd) -> Result<ReadState, Status> {
         self.retry::<_, _>(|client| client.fetch_read_state(cmd))
             .await
     }
@@ -302,10 +302,7 @@ where
     /// know who the leader is.)
     ///
     /// Note: The fetched cluster may still be outdated if `linearizable` is false
-    async fn fetch_cluster(
-        &self,
-        linearizable: bool,
-    ) -> Result<FetchClusterResponse, tonic::Status> {
+    async fn fetch_cluster(&self, linearizable: bool) -> Result<FetchClusterResponse, Status> {
         self.retry::<_, _>(|client| client.fetch_cluster(linearizable))
             .await
     }

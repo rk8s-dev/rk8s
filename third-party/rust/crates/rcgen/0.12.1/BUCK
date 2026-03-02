@@ -33,7 +33,7 @@ rust_library(
     deps = [
         "//third-party/rust/crates/pem/3.0.6:pem",
         "//third-party/rust/crates/ring/0.17.14:ring",
-        "//third-party/rust/crates/time/0.3.44:time",
+        "//third-party/rust/crates/time/0.3.47:time",
         "//third-party/rust/crates/yasna/0.5.2:yasna",
     ],
 )

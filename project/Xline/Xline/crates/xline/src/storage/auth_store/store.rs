@@ -16,12 +16,15 @@ use pbkdf2::{
     Pbkdf2,
     password_hash::{PasswordHash, PasswordVerifier},
 };
+use tonic::Status;
 use utils::parking_lot_lock::RwLockMap;
 use xlineapi::{
     AuthInfo,
     command::{CommandResponse, KeyRange, SyncResponse},
     execute_error::ExecuteError,
 };
+// TODO: use our own status type
+// use xlinerpc::status::Status;
 
 use super::{
     backend::{ROOT_ROLE, ROOT_USER},
@@ -126,10 +129,11 @@ impl AuthStore {
     }
 
     /// Try get auth info from tonic request
+    #[allow(clippy::result_large_err)]
     pub(crate) fn try_get_auth_info_from_request<T>(
         &self,
         request: &tonic::Request<T>,
-    ) -> Result<Option<AuthInfo>, tonic::Status> {
+    ) -> Result<Option<AuthInfo>, Status> {
         if !self.is_enabled() {
             return Ok(None);
         }
@@ -173,7 +177,7 @@ impl AuthStore {
     fn get_user_permissions(&self, user: &User, skip_role: Option<&str>) -> UserPermissions {
         let mut user_permission = UserPermissions::new();
         for role_name in &user.roles {
-            if skip_role.map_or(false, |r| r == role_name) {
+            if skip_role.is_some_and(|r| r == role_name) {
                 continue;
             }
             let Ok(role) = self.backend.get_role(role_name) else {
@@ -376,7 +380,7 @@ impl AuthStore {
     ) -> Result<AuthUserChangePasswordResponse, ExecuteError> {
         debug!("handle_user_change_password_request");
         let user = self.backend.get_user(&req.name)?;
-        let need_password = user.options.as_ref().map_or(true, |o| !o.no_password);
+        let need_password = user.options.as_ref().is_none_or(|o| !o.no_password);
         if need_password && req.hashed_password.is_empty() {
             return Err(ExecuteError::NoPasswordUser);
         }
@@ -666,7 +670,7 @@ impl AuthStore {
             cache.role_to_users_map.iter_mut().for_each(|(_, users)| {
                 if let Some((idx, _)) = users.iter().find_position(|uname| uname == &&req.name) {
                     let _old = users.swap_remove(idx);
-                };
+                }
             });
         });
         ops.push(WriteOp::PutAuthRevision(revision));
@@ -747,7 +751,7 @@ impl AuthStore {
                 .and_modify(|users| {
                     if let Some((i, _)) = users.iter().find_position(|uname| uname == &&req.name) {
                         let _old = users.swap_remove(i);
-                    };
+                    }
                 });
             let _old = cache
                 .user_permissions
@@ -891,7 +895,7 @@ impl AuthStore {
             return Err(ExecuteError::AuthNotEnabled);
         }
         let user = self.backend.get_user(username)?;
-        let need_password = user.options.as_ref().map_or(true, |o| !o.no_password);
+        let need_password = user.options.as_ref().is_none_or(|o| !o.no_password);
         if !need_password {
             return Err(ExecuteError::NoPasswordUser);
         }
@@ -1334,6 +1338,7 @@ mod test {
     }
 
     #[test]
+    #[allow(clippy::unwrap_in_result)]
     fn test_recover() -> Result<(), ExecuteError> {
         let db = DB::open(&EngineConfig::Memory).unwrap();
         let store = init_auth_store(Arc::clone(&db));

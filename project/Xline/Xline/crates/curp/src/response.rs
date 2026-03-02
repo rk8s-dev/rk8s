@@ -2,7 +2,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use curp_external_api::cmd::Command;
 use tonic::Status;
-
+// TODO: use our own status type
+// use xlinerpc::status::Status;
 use crate::rpc::{OpResponse, ProposeResponse, ResponseOp, SyncedResponse};
 
 /// The response sender

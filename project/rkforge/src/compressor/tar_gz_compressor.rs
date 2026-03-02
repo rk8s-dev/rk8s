@@ -384,7 +384,11 @@ mod tests {
 
     #[test]
     fn test_compress_fs() {
-        let layer_path = std::path::Path::new("/home/yu/layers/lower");
+        let layer_tmp = tempdir().unwrap();
+        let layer_path = layer_tmp.path();
+        fs::create_dir_all(layer_path.join("nested")).unwrap();
+        fs::write(layer_path.join("root.txt"), "root-file").unwrap();
+        fs::write(layer_path.join("nested").join("child.txt"), "nested-file").unwrap();
 
         let tmp_dir = tempdir().unwrap();
         let output_dir = tmp_dir.path().to_path_buf();

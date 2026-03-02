@@ -51,13 +51,13 @@ impl Streaming {
                 tokio::time::sleep(RETRY_DELAY).await;
                 continue;
             };
-            if let Some(local_id) = self.state.local_server_id() {
-                if leader_id == local_id {
-                    self.state.check_gen_local_client_id().await;
-                    debug!("skip keep heartbeat for local connection, wait for leadership update");
-                    self.state.leader_notifier().listen().await;
-                    continue;
-                }
+            if let Some(local_id) = self.state.local_server_id()
+                && leader_id == local_id
+            {
+                self.state.check_gen_local_client_id().await;
+                debug!("skip keep heartbeat for local connection, wait for leadership update");
+                self.state.leader_notifier().listen().await;
+                continue;
             }
             return self.state.map_server(leader_id, f).await;
         }

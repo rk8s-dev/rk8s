@@ -53,7 +53,7 @@ impl Metrics {
                     rlim_cur: 0, // soft limit
                     rlim_max: 0, // hard limit
                 };
-                let errno = nix::libc::getrlimit(nix::libc::RLIMIT_NOFILE, &mut rlimit);
+                let errno = nix::libc::getrlimit(nix::libc::RLIMIT_NOFILE, &raw mut rlimit);
                 if errno < 0 {
                     error!("invoke getrlimit failed!");
                     None

@@ -21,8 +21,6 @@ mod state;
 #[cfg(test)]
 mod tests;
 
-#[cfg(madsim)]
-use std::sync::atomic::AtomicU64;
 use std::{collections::HashMap, fmt::Debug, ops::Deref, sync::Arc, time::Duration};
 
 use async_trait::async_trait;
@@ -30,12 +28,12 @@ use curp_external_api::cmd::Command;
 use futures::{StreamExt, stream::FuturesUnordered};
 use parking_lot::RwLock;
 use tokio::task::JoinHandle;
-#[cfg(not(madsim))]
 use tonic::transport::ClientTlsConfig;
+use tonic::{Code, Status};
 use tracing::{debug, warn};
-#[cfg(madsim)]
-use utils::ClientTlsConfig;
 use utils::{build_endpoint, config::ClientConfig};
+// TODO: use our own status type
+// use xlinerpc::status::{Code,Status};
 
 use self::{
     retry::{Retry, RetryConfig},
@@ -159,7 +157,7 @@ impl Drop for ProposeIdGuard<'_> {
     }
 }
 
-/// This trait override some unrepeatable methods in ClientApi, and a client with this trait will be able to retry.
+/// This trait override some unrepeatable methods in `ClientApi`, and a client with this trait will be able to retry.
 #[async_trait]
 trait RepeatableClientApi: ClientApi {
     /// Generate a unique propose id during the retry process.
@@ -218,6 +216,8 @@ pub struct ClientBuilder {
     config: ClientConfig,
     /// Client tls config
     tls_config: Option<ClientTlsConfig>,
+    /// Transport configuration (default: Tonic)
+    transport: crate::rpc::transport::TransportConfig,
 }
 
 /// A client builder with bypass with local server
@@ -291,19 +291,56 @@ impl ClientBuilder {
         self
     }
 
+    /// Use QUIC transport (default is tonic gRPC)
+    #[cfg(feature = "quic")]
+    #[inline]
+    #[must_use]
+    pub fn quic_transport(mut self, quic_client: Arc<gm_quic::prelude::QuicClient>) -> Self {
+        self.transport = crate::rpc::transport::TransportConfig::Quic(
+            quic_client,
+            crate::rpc::quic_transport::channel::DnsFallback::Disabled,
+        );
+        self
+    }
+
+    /// Use QUIC transport with localhost DNS fallback (test only)
+    ///
+    /// When DNS resolution fails for a hostname, falls back to 127.0.0.1
+    /// with the original hostname as SNI. Only use this for testing with
+    /// fake hostnames like "s0.test".
+    #[cfg(all(feature = "quic", any(test, feature = "quic-test")))]
+    #[inline]
+    #[must_use]
+    pub fn quic_transport_for_test(
+        mut self,
+        quic_client: Arc<gm_quic::prelude::QuicClient>,
+    ) -> Self {
+        self.transport = crate::rpc::transport::TransportConfig::Quic(
+            quic_client,
+            crate::rpc::quic_transport::channel::DnsFallback::LocalhostForTest,
+        );
+        self
+    }
+
     /// Discover the initial states from some endpoints
     ///
     /// # Errors
     ///
-    /// Return `tonic::Status` for connection failure or some server errors.
+    /// Return `Status` for connection failure or some server errors.
     #[inline]
-    pub async fn discover_from(mut self, addrs: Vec<String>) -> Result<Self, tonic::Status> {
+    pub async fn discover_from(mut self, addrs: Vec<String>) -> Result<Self, Status> {
+        #[cfg(feature = "quic")]
+        if matches!(self.transport, crate::rpc::TransportConfig::Quic(..)) {
+            return Err(tonic::Status::internal(
+                "discover_from uses tonic transport; use quic_discover_from for QUIC",
+            ));
+        }
         /// Sleep duration in secs when the cluster is unavailable
         const DISCOVER_SLEEP_DURATION: u64 = 1;
         loop {
             match self.try_discover_from(&addrs).await {
                 Ok(()) => return Ok(self),
-                Err(e) if matches!(e.code(), tonic::Code::Unavailable) => {
+                Err(e) if matches!(e.code(), Code::Unavailable) => {
                     warn!("cluster is unavailable, sleep for {DISCOVER_SLEEP_DURATION} secs");
                     tokio::time::sleep(Duration::from_secs(DISCOVER_SLEEP_DURATION)).await;
                 }
@@ -316,9 +353,9 @@ impl ClientBuilder {
     ///
     /// # Errors
     ///
-    /// Return `tonic::Status` for connection failure or some server errors.
+    /// Return `Status` for connection failure or some server errors.
     #[inline]
-    pub async fn try_discover_from(&mut self, addrs: &[String]) -> Result<(), tonic::Status> {
+    pub async fn try_discover_from(&mut self, addrs: &[String]) -> Result<(), Status> {
         let propose_timeout = *self.config.propose_timeout();
         let mut futs: FuturesUnordered<_> = addrs
             .iter()
@@ -326,20 +363,20 @@ impl ClientBuilder {
                 let tls_config = self.tls_config.clone();
                 async move {
                     let endpoint = build_endpoint(addr, tls_config.as_ref()).map_err(|e| {
-                        tonic::Status::internal(format!("create endpoint failed, error: {e}"))
+                        Status::internal(format!("create endpoint failed, error: {e}"))
                     })?;
                     let channel = endpoint.connect().await.map_err(|e| {
-                        tonic::Status::cancelled(format!("cannot connect to addr, error: {e}"))
+                        Status::cancelled(format!("cannot connect to addr, error: {e}"))
                     })?;
                     let mut protocol_client = ProtocolClient::new(channel);
                     let mut req = tonic::Request::new(FetchClusterRequest::default());
                     req.set_timeout(propose_timeout);
                     let fetch_cluster_res = protocol_client.fetch_cluster(req).await?.into_inner();
-                    Ok::<FetchClusterResponse, tonic::Status>(fetch_cluster_res)
+                    Ok::<FetchClusterResponse, Status>(fetch_cluster_res)
                 }
             })
             .collect();
-        let mut err = tonic::Status::invalid_argument("addrs is empty");
+        let mut err = Status::invalid_argument("addrs is empty");
         // find the first one return `FetchClusterResponse`
         while let Some(r) = futs.next().await {
             match r {
@@ -361,13 +398,101 @@ impl ClientBuilder {
         Err(err)
     }
 
-    /// Ensures that no server has an empty list of addresses.
-    fn ensure_no_empty_address(
+    /// Discover the initial states from some endpoints using QUIC transport
+    ///
+    /// This is the QUIC equivalent of `discover_from`. It uses `QuicChannel`
+    /// to connect to the given addresses and fetch cluster information.
+    ///
+    /// # Errors
+    ///
+    /// Return `CurpError` for connection failure or some server errors.
+    #[cfg(feature = "quic")]
+    #[inline]
+    pub async fn quic_discover_from(
+        mut self,
+        addrs: Vec<String>,
+    ) -> Result<Self, crate::rpc::CurpError> {
+        use crate::rpc::{CurpError, MethodId, quic_transport::channel::QuicChannel};
+
+        let (quic_client, dns_fallback) = match self.transport {
+            crate::rpc::transport::TransportConfig::Quic(ref c, fallback) => {
+                (Arc::clone(c), fallback)
+            }
+            _ => {
+                return Err(CurpError::internal(
+                    "quic_discover_from requires quic_transport to be set",
+                ));
+            }
+        };
+
+        let propose_timeout = *self.config.propose_timeout();
+        let mut futs: FuturesUnordered<_> = addrs
+            .iter()
+            .map(|addr| {
+                let client = Arc::clone(&quic_client);
+                let addr = addr.clone();
+                async move {
+                    let channel = match dns_fallback {
+                        #[cfg(any(test, feature = "quic-test"))]
+                        crate::rpc::quic_transport::channel::DnsFallback::LocalhostForTest => {
+                            QuicChannel::connect_single_for_test(&addr, client).await?
+                        }
+                        crate::rpc::quic_transport::channel::DnsFallback::Disabled => {
+                            QuicChannel::connect_single(&addr, client).await?
+                        }
+                    };
+                    let resp: FetchClusterResponse = channel
+                        .unary_call(
+                            MethodId::FetchCluster,
+                            FetchClusterRequest::default(),
+                            vec![],
+                            propose_timeout,
+                        )
+                        .await?;
+                    Ok::<FetchClusterResponse, CurpError>(resp)
+                }
+            })
+            .collect();
+
+        let mut err = CurpError::internal("addrs is empty");
+        while let Some(r) = futs.next().await {
+            match r {
+                Ok(r) => {
+                    self.cluster_version = Some(r.cluster_version);
+                    if let Some(ref id) = r.leader_id {
+                        self.leader_state = Some((id.into(), r.term));
+                    }
+                    self.all_members = if self.is_raw_curp {
+                        Some(r.into_peer_urls())
+                    } else {
+                        Some(Self::quic_ensure_no_empty_address(r.into_client_urls())?)
+                    };
+                    return Ok(self);
+                }
+                Err(e) => err = e,
+            }
+        }
+        Err(err)
+    }
+
+    /// Ensures that no server has an empty list of addresses (QUIC variant)
+    #[cfg(feature = "quic")]
+    fn quic_ensure_no_empty_address(
         urls: HashMap<ServerId, Vec<String>>,
-    ) -> Result<HashMap<ServerId, Vec<String>>, tonic::Status> {
+    ) -> Result<HashMap<ServerId, Vec<String>>, crate::rpc::CurpError> {
         (!urls.values().any(Vec::is_empty))
             .then_some(urls)
-            .ok_or(tonic::Status::unavailable("cluster not published"))
+            .ok_or(crate::rpc::CurpError::internal("cluster not published"))
+    }
+
+    /// Ensures that no server has an empty list of addresses.
+    #[allow(clippy::result_large_err)]
+    fn ensure_no_empty_address(
+        urls: HashMap<ServerId, Vec<String>>,
+    ) -> Result<HashMap<ServerId, Vec<String>>, Status> {
+        (!urls.values().any(Vec::is_empty))
+            .then_some(urls)
+            .ok_or(Status::unavailable("cluster not published"))
     }
 
     /// Init state builder
@@ -385,6 +510,7 @@ impl ClientBuilder {
             builder.set_leader_state(id, term);
         }
         builder.set_is_raw_curp(self.is_raw_curp);
+        builder.set_transport(self.transport.clone());
         builder
     }
 
@@ -428,12 +554,11 @@ impl ClientBuilder {
     ///
     /// Return `tonic::transport::Error` for connection failure.
     #[inline]
+    #[allow(clippy::result_large_err)]
     pub fn build<C: Command>(
         &self,
-    ) -> Result<
-        impl ClientApi<Error = tonic::Status, Cmd = C> + Send + Sync + 'static + use<C>,
-        tonic::Status,
-    > {
+    ) -> Result<impl ClientApi<Error = Status, Cmd = C> + Send + Sync + 'static + use<C>, Status>
+    {
         let state = Arc::new(self.init_state_builder().build());
         let client = Retry::new(
             Unary::new(Arc::clone(&state), self.init_unary_config()),
@@ -442,32 +567,6 @@ impl ClientBuilder {
         );
 
         Ok(client)
-    }
-
-    #[cfg(madsim)]
-    /// Build the client, also returns the current client id
-    ///
-    /// # Errors
-    ///
-    /// Return `tonic::transport::Error` for connection failure.
-    #[inline]
-    #[must_use]
-    pub fn build_with_client_id<C: Command>(
-        &self,
-    ) -> (
-        impl ClientApi<Error = tonic::Status, Cmd = C> + Send + Sync + 'static,
-        Arc<AtomicU64>,
-    ) {
-        let state = Arc::new(self.init_state_builder().build());
-
-        let client = Retry::new(
-            Unary::new(Arc::clone(&state), self.init_unary_config()),
-            self.init_retry_config(),
-            Some(self.spawn_bg_tasks(Arc::clone(&state))),
-        );
-        let client_id = state.clone_client_id();
-
-        (client, client_id)
     }
 }
 
@@ -478,9 +577,8 @@ impl<P: Protocol> ClientBuilderWithBypass<P> {
     ///
     /// Return `tonic::transport::Error` for connection failure.
     #[inline]
-    pub fn build<C: Command>(
-        self,
-    ) -> Result<impl ClientApi<Error = tonic::Status, Cmd = C>, tonic::Status> {
+    #[allow(clippy::result_large_err)]
+    pub fn build<C: Command>(self) -> Result<impl ClientApi<Error = Status, Cmd = C>, Status> {
         let state = self
             .inner
             .init_state_builder()

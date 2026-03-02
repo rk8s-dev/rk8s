@@ -41,7 +41,7 @@
 
     clippy::all,
     clippy::pedantic,
-    clippy::cargo,
+    // clippy::cargo, # removed due to multiple_crate_versions false positives
 
 
     // The followings are selected restriction lints for rust 1.57
@@ -93,7 +93,6 @@
     clippy::shadow_unrelated,
     clippy::str_to_string,
     clippy::string_add,
-    clippy::string_to_string,
     clippy::todo,
     clippy::unimplemented,
     clippy::unnecessary_self_imports,

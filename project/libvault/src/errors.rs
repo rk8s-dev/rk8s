@@ -174,10 +174,26 @@ pub enum RvError {
     ErrPkiDataInvalid,
     #[error("PKI internal error.")]
     ErrPkiInternal,
-    #[error("Credentail is invalid.")]
-    ErrCredentailInvalid,
-    #[error("Credentail is not config.")]
-    ErrCredentailNotConfig,
+    #[error("PKI SSH CA is not configured.")]
+    ErrPkiSshCaNotConfig,
+    #[error("PKI SSH role is not found.")]
+    ErrPkiSshRoleNotFound,
+    #[error("PKI SSH certificate type is invalid.")]
+    ErrPkiSshCertTypeInvalid,
+    #[error("PKI SSH public key is invalid.")]
+    ErrPkiSshPublicKeyInvalid,
+    #[error("PKI SSH principal is not allowed by role.")]
+    ErrPkiSshPrincipalNotAllowed,
+    #[error("PKI PGP key is not found.")]
+    ErrPkiPgpKeyNotFound,
+    #[error("PKI PGP key_name already exists.")]
+    ErrPkiPgpKeyNameAlreadyExist,
+    #[error("PKI PGP key generation failed.")]
+    ErrPkiPgpKeyGenerationFailed,
+    #[error("Credential is invalid.")]
+    ErrCredentialInvalid,
+    #[error("Credential is not config.")]
+    ErrCredentialNotConfig,
     #[error("Storage backend doesn't require a lock.")]
     ErrStorageBackendLockless,
     #[error("Storage backend lock failed.")]
@@ -345,7 +361,9 @@ impl RvError {
             | RvError::ErrRequestInvalid
             | RvError::ErrRequestClientTokenMissing
             | RvError::ErrRequestFieldNotFound
-            | RvError::ErrRequestFieldInvalid => 400,
+            | RvError::ErrRequestFieldInvalid
+            | RvError::ErrPkiSshCertTypeInvalid
+            | RvError::ErrPkiSshPublicKeyInvalid => 400,
             RvError::ErrBarrierSealed => 503,
             RvError::ErrPermissionDenied => 403,
             RvError::ErrRouterMountNotFound => 404,
@@ -440,8 +458,15 @@ impl PartialEq for RvError {
             | (RvError::ErrPkiRoleNotFound, RvError::ErrPkiRoleNotFound)
             | (RvError::ErrPkiDataInvalid, RvError::ErrPkiDataInvalid)
             | (RvError::ErrPkiInternal, RvError::ErrPkiInternal)
-            | (RvError::ErrCredentailInvalid, RvError::ErrCredentailInvalid)
-            | (RvError::ErrCredentailNotConfig, RvError::ErrCredentailNotConfig)
+            | (RvError::ErrPkiSshCaNotConfig, RvError::ErrPkiSshCaNotConfig)
+            | (RvError::ErrPkiSshRoleNotFound, RvError::ErrPkiSshRoleNotFound)
+            | (RvError::ErrPkiSshCertTypeInvalid, RvError::ErrPkiSshCertTypeInvalid)
+            | (RvError::ErrPkiSshPublicKeyInvalid, RvError::ErrPkiSshPublicKeyInvalid)
+            | (RvError::ErrPkiPgpKeyNotFound, RvError::ErrPkiPgpKeyNotFound)
+            | (RvError::ErrPkiPgpKeyNameAlreadyExist, RvError::ErrPkiPgpKeyNameAlreadyExist)
+            | (RvError::ErrPkiPgpKeyGenerationFailed, RvError::ErrPkiPgpKeyGenerationFailed)
+            | (RvError::ErrCredentialInvalid, RvError::ErrCredentialInvalid)
+            | (RvError::ErrCredentialNotConfig, RvError::ErrCredentialNotConfig)
             | (RvError::ErrUnknown, RvError::ErrUnknown) => true,
             (RvError::ErrResponse(a), RvError::ErrResponse(b)) => a == b,
             (RvError::ErrResponseStatus(sa, ta), RvError::ErrResponseStatus(sb, tb)) => {

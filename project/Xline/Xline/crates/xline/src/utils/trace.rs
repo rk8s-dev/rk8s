@@ -32,9 +32,9 @@ pub fn init_subscriber(
     log_config: &LogConfig,
     trace_config: &TraceConfig,
 ) -> Result<Option<WorkerGuard>> {
-    let jaeger_level = *trace_config.jaeger_level();
+    let jaeger_level = *trace_config.level();
     let jaeger_online_layer = trace_config
-        .jaeger_online()
+        .online()
         .then(|| {
             let otlp_exporter = opentelemetry_otlp::new_exporter().tonic();
             opentelemetry_otlp::new_pipeline()
@@ -53,10 +53,10 @@ pub fn init_subscriber(
                 .with_tracer(tracer)
                 .with_filter(jaeger_level)
         });
-    let jaeger_offline_layer = trace_config.jaeger_offline().then(|| {
+    let jaeger_offline_layer = trace_config.offline().then(|| {
         tracing_opentelemetry::layer().with_tracer(
             JaegerJsonExporter::new(
-                trace_config.jaeger_output_dir().clone(),
+                trace_config.output_dir().clone(),
                 name.to_owned(),
                 name.to_owned(),
                 Tokio,

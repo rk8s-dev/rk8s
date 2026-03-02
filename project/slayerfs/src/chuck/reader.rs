@@ -1,7 +1,7 @@
 //! DataFetcher: fetch data from blocks according to offset/length, handling gaps with zeros.
 
 use super::chunk::ChunkLayout;
-use super::slice::{SliceDesc, block_span_iter};
+use super::slice::{ChunkOffset, SliceDesc, SliceOffset, block_span_iter_slice};
 use super::store::BlockStore;
 use crate::meta::MetaLayer;
 use crate::utils::Intervals;
@@ -60,9 +60,10 @@ where
         name = "DataFetcher.read_at",
         level = "trace",
         skip(self),
-        fields(chunk_id = self.id, offset, len, need_reads = tracing::field::Empty)
+        fields(chunk_id = self.id, offset = offset.0, len, need_reads = tracing::field::Empty)
     )]
-    pub(crate) async fn read_at(&mut self, offset: u64, len: usize) -> Result<Vec<u8>> {
+    pub(crate) async fn read_at(&mut self, offset: ChunkOffset, len: usize) -> Result<Vec<u8>> {
+        let offset = offset.get();
         if len == 0 {
             return Ok(Vec::new());
         }
@@ -109,17 +110,18 @@ where
                 tail = rest;
                 cursor = start + len;
 
-                let desc = SliceDesc {
-                    offset: l,
-                    length: r - l,
-                    ..slice
-                };
+                // The blocks to fetch must be computed relative to the slice itself;
+                // otherwise we may read the wrong block/range for this slice and populate
+                // the wrong region of the output buffer.
+                let slice_offset = SliceOffset::from(l - slice.offset);
+                let slice_len = r - l;
+                let slice_id = slice.slice_id;
 
                 let span = tracing::trace_span!(
                     "fetch.read_slice",
-                    slice_id = desc.slice_id,
-                    offset = desc.offset,
-                    len = desc.length,
+                    slice_id,
+                    offset = slice_offset.0,
+                    len = slice_len,
                     blocks = tracing::field::Empty
                 );
 
@@ -127,13 +129,13 @@ where
                     async move {
                         let mut pos = 0_usize;
                         let mut blocks = 0usize;
-                        for span in block_span_iter(desc, layout) {
+                        for block in block_span_iter_slice(slice_offset, slice_len, layout) {
                             blocks += 1;
-                            let take = span.len.as_usize();
+                            let take = block.len.as_usize();
                             let out = &mut seg[pos..pos + take];
                             backend
                                 .store()
-                                .read_range((desc.slice_id, span.index.as_u32()), span.offset, out)
+                                .read_range((slice_id, block.index.as_u32()), block.offset, out)
                                 .await?;
                             pos += take;
                         }
@@ -175,22 +177,35 @@ mod tests {
         {
             let buf = vec![1u8; (layout.block_size / 2) as usize];
             let slice_id = meta.next_id(SLICE_ID_KEY).await.unwrap();
-            let uploader = DataUploader::new(layout, 7, backend.as_ref());
-            let desc = uploader
+            let uploader = DataUploader::new(layout, backend.as_ref());
+            uploader
                 .write_at_vectored(
                     slice_id as u64,
-                    layout.block_size as u64,
+                    0u64.into(),
                     &[bytes::Bytes::copy_from_slice(&buf)],
                 )
                 .await
                 .unwrap();
-            meta.append_slice(7, desc).await.unwrap();
+            meta.append_slice(
+                7,
+                SliceDesc {
+                    slice_id: slice_id as u64,
+                    chunk_id: 7,
+                    offset: layout.block_size as u64,
+                    length: buf.len() as u64,
+                },
+            )
+            .await
+            .unwrap();
         }
         let mut r = DataFetcher::new(layout, 7, backend.as_ref());
         r.prepare_slices().await.unwrap();
         // Read from the back half of block 0 to the front half of block 1 (one block total)
         let off = layout.block_size as u64 / 2;
-        let res = r.read_at(off, layout.block_size as usize).await.unwrap();
+        let res = r
+            .read_at(off.into(), layout.block_size as usize)
+            .await
+            .unwrap();
         assert_eq!(res.len(), layout.block_size as usize);
         // The first half should be zero-filled and the second half should be ones
         assert!(
@@ -221,20 +236,30 @@ mod tests {
         let offset = layout.block_size as u64 - 512;
         let data = vec![7u8; 2048];
         let slice_id = meta.next_id(SLICE_ID_KEY).await.unwrap();
-        let uploader = DataUploader::new(layout, 3, backend.as_ref());
-        let desc = uploader
+        let uploader = DataUploader::new(layout, backend.as_ref());
+        uploader
             .write_at_vectored(
                 slice_id as u64,
-                offset,
+                0u64.into(),
                 &[bytes::Bytes::copy_from_slice(&data)],
             )
             .await
             .unwrap();
-        meta.append_slice(3, desc).await.unwrap();
+        meta.append_slice(
+            3,
+            SliceDesc {
+                slice_id: slice_id as u64,
+                chunk_id: 3,
+                offset,
+                length: data.len() as u64,
+            },
+        )
+        .await
+        .unwrap();
 
         let mut fetcher = DataFetcher::new(layout, 3, backend.as_ref());
         fetcher.prepare_slices().await.unwrap();
-        let out = fetcher.read_at(offset, data.len()).await.unwrap();
+        let out = fetcher.read_at(offset.into(), data.len()).await.unwrap();
         assert_eq!(out, data);
     }
 
@@ -255,31 +280,51 @@ mod tests {
         let data2 = vec![2u8; 2048];
 
         let slice_id1 = meta.next_id(SLICE_ID_KEY).await.unwrap();
-        let uploader = DataUploader::new(layout, 9, backend.as_ref());
-        let desc1 = uploader
+        let uploader = DataUploader::new(layout, backend.as_ref());
+        uploader
             .write_at_vectored(
                 slice_id1 as u64,
-                0,
+                0u64.into(),
                 &[bytes::Bytes::copy_from_slice(&data1)],
             )
             .await
             .unwrap();
-        meta.append_slice(9, desc1).await.unwrap();
+        meta.append_slice(
+            9,
+            SliceDesc {
+                slice_id: slice_id1 as u64,
+                chunk_id: 9,
+                offset: 0,
+                length: data1.len() as u64,
+            },
+        )
+        .await
+        .unwrap();
 
         let slice_id2 = meta.next_id(SLICE_ID_KEY).await.unwrap();
-        let desc2 = uploader
+        uploader
             .write_at_vectored(
                 slice_id2 as u64,
-                1024,
+                0u64.into(),
                 &[bytes::Bytes::copy_from_slice(&data2)],
             )
             .await
             .unwrap();
-        meta.append_slice(9, desc2).await.unwrap();
+        meta.append_slice(
+            9,
+            SliceDesc {
+                slice_id: slice_id2 as u64,
+                chunk_id: 9,
+                offset: 1024,
+                length: data2.len() as u64,
+            },
+        )
+        .await
+        .unwrap();
 
         let mut fetcher = DataFetcher::new(layout, 9, backend.as_ref());
         fetcher.prepare_slices().await.unwrap();
-        let out = fetcher.read_at(0, 3072).await.unwrap();
+        let out = fetcher.read_at(0u64.into(), 3072).await.unwrap();
         assert_eq!(&out[..1024], &data1[..1024]);
         assert_eq!(&out[1024..], &data2[..]);
     }

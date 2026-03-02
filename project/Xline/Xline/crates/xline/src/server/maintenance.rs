@@ -7,12 +7,14 @@ use curp::{cmd::CommandExecutor as _, members::ClusterInfo, server::RawCurp};
 use engine::SnapshotApi;
 use futures::stream::Stream;
 use sha2::{Digest, Sha256};
+use tonic::Status;
 use tracing::{debug, error};
 use xlineapi::{
     RequestWrapper,
     command::{Command, CommandResponse, CurpClient, SyncResponse},
 };
-
+// TODO: use our own status type
+// use xlinerpc::status::Status;
 use super::command::CommandExecutor;
 use crate::{
     header_gen::HeaderGenerator,
@@ -84,7 +86,7 @@ impl MaintenanceServer {
     async fn propose<T>(
         &self,
         request: tonic::Request<T>,
-    ) -> Result<(CommandResponse, Option<SyncResponse>), tonic::Status>
+    ) -> Result<(CommandResponse, Option<SyncResponse>), Status>
     where
         T: Into<RequestWrapper> + Debug,
     {
@@ -101,7 +103,7 @@ impl Maintenance for MaintenanceServer {
     async fn alarm(
         &self,
         request: tonic::Request<AlarmRequest>,
-    ) -> Result<tonic::Response<AlarmResponse>, tonic::Status> {
+    ) -> Result<tonic::Response<AlarmResponse>, Status> {
         let (res, sync_res) = self.propose(request).await?;
         let mut res: AlarmResponse = res.into_inner().into();
         if let Some(sync_res) = sync_res {
@@ -117,17 +119,17 @@ impl Maintenance for MaintenanceServer {
     async fn status(
         &self,
         _request: tonic::Request<StatusRequest>,
-    ) -> Result<tonic::Response<StatusResponse>, tonic::Status> {
+    ) -> Result<tonic::Response<StatusResponse>, Status> {
         let is_learner = self.cluster_info.self_member().is_learner;
         let (leader, term, _) = self.raw_curp.leader();
         let commit_index = self.raw_curp.commit_index();
         let size = self.db.file_size().map_err(|e| {
             error!("get file size failed, {e}");
-            tonic::Status::internal("get file size failed")
+            Status::internal("get file size failed")
         })?;
         let last_applied = self.ce.last_applied().map_err(|e| {
             error!("get last applied failed, {e}");
-            tonic::Status::internal("get last applied failed")
+            Status::internal("get last applied failed")
         })?;
         let mut errors = vec![];
         if leader.is_none() {
@@ -154,8 +156,8 @@ impl Maintenance for MaintenanceServer {
     async fn defragment(
         &self,
         _request: tonic::Request<DefragmentRequest>,
-    ) -> Result<tonic::Response<DefragmentResponse>, tonic::Status> {
-        Err(tonic::Status::unimplemented(
+    ) -> Result<tonic::Response<DefragmentResponse>, Status> {
+        Err(Status::unimplemented(
             "defragment is unimplemented".to_owned(),
         ))
     }
@@ -163,7 +165,7 @@ impl Maintenance for MaintenanceServer {
     async fn hash(
         &self,
         _request: tonic::Request<HashRequest>,
-    ) -> Result<tonic::Response<HashResponse>, tonic::Status> {
+    ) -> Result<tonic::Response<HashResponse>, Status> {
         Ok(tonic::Response::new(HashResponse {
             header: Some(self.header_gen.gen_header()),
             hash: self.db.hash()?,
@@ -173,7 +175,7 @@ impl Maintenance for MaintenanceServer {
     async fn hash_kv(
         &self,
         request: tonic::Request<HashKvRequest>,
-    ) -> Result<tonic::Response<HashKvResponse>, tonic::Status> {
+    ) -> Result<tonic::Response<HashKvResponse>, Status> {
         let revision = request.get_ref().revision;
         let (hash, compact_revision, _hash_revision) = self.kv_store.hash_kv(revision)?;
         Ok(tonic::Response::new(HashKvResponse {
@@ -184,13 +186,12 @@ impl Maintenance for MaintenanceServer {
         }))
     }
 
-    type SnapshotStream =
-        Pin<Box<dyn Stream<Item = Result<SnapshotResponse, tonic::Status>> + Send>>;
+    type SnapshotStream = Pin<Box<dyn Stream<Item = Result<SnapshotResponse, Status>> + Send>>;
 
     async fn snapshot(
         &self,
         _request: tonic::Request<SnapshotRequest>,
-    ) -> Result<tonic::Response<Self::SnapshotStream>, tonic::Status> {
+    ) -> Result<tonic::Response<Self::SnapshotStream>, Status> {
         let stream = snapshot_stream(self.header_gen.as_ref(), self.db.as_ref())?;
 
         Ok(tonic::Response::new(Box::pin(stream)))
@@ -199,7 +200,7 @@ impl Maintenance for MaintenanceServer {
     async fn move_leader(
         &self,
         request: tonic::Request<MoveLeaderRequest>,
-    ) -> Result<tonic::Response<MoveLeaderResponse>, tonic::Status> {
+    ) -> Result<tonic::Response<MoveLeaderResponse>, Status> {
         let node_id = request.into_inner().target_id;
         self.client.move_leader(node_id).await?;
         Ok(tonic::Response::new(MoveLeaderResponse {
@@ -210,22 +211,23 @@ impl Maintenance for MaintenanceServer {
     async fn downgrade(
         &self,
         _request: tonic::Request<DowngradeRequest>,
-    ) -> Result<tonic::Response<DowngradeResponse>, tonic::Status> {
-        Err(tonic::Status::unimplemented(
+    ) -> Result<tonic::Response<DowngradeResponse>, Status> {
+        Err(Status::unimplemented(
             "downgrade is unimplemented".to_owned(),
         ))
     }
 }
 
 /// Generate snapshot stream
+#[allow(clippy::result_large_err)]
 fn snapshot_stream(
     header_gen: &HeaderGenerator,
     db: &DB,
-) -> Result<impl Stream<Item = Result<SnapshotResponse, tonic::Status>> + use<>, tonic::Status> {
+) -> Result<impl Stream<Item = Result<SnapshotResponse, Status>> + use<>, Status> {
     let tmp_path = format!("/tmp/snapshot-{}", uuid::Uuid::new_v4());
     let mut snapshot = db.get_snapshot(tmp_path).map_err(|e| {
         error!("get snapshot failed, {e}");
-        tonic::Status::internal("get snapshot failed")
+        Status::internal("get snapshot failed")
     })?;
 
     let header = header_gen.gen_header();
@@ -242,7 +244,7 @@ fn snapshot_stream(
             let buf_size = std::cmp::min(MAINTENANCE_SNAPSHOT_CHUNK_SIZE, remain_size);
             let mut buf = BytesMut::with_capacity(buf_size.numeric_cast());
             remain_size = remain_size.overflow_sub(buf_size);
-            snapshot.read_buf_exact(&mut buf).await.map_err(|_e| {tonic::Status::internal("snapshot read failed")})?;
+            snapshot.read_buf_exact(&mut buf).await.map_err(|_e| {Status::internal("snapshot read failed")})?;
             // etcd client will use the size of the snapshot to determine whether checksum is included,
             // and the check method size % 512 == sha256.size, So we need to pad snapshots to multiples
             // of 512 bytes
@@ -285,6 +287,7 @@ mod test {
 
     #[tokio::test]
     #[abort_on_panic]
+    #[allow(clippy::unwrap_in_result)]
     async fn test_snapshot_stream() -> Result<(), Box<dyn Error>> {
         let dir = TempDir::with_prefix("/tmp/test_snapshot_rpc").unwrap();
         let db_path = dir.path().join("db");

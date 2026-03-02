@@ -11,9 +11,11 @@ use curp::{
     },
 };
 use flume::r#async::RecvStream;
+use tonic::Status;
 use tracing::debug;
 use xlineapi::command::Command;
-
+// TODO: use our own status type
+// use xlinerpc::status::Status;
 use super::xline_server::CurpServer;
 use crate::storage::AuthStore;
 
@@ -37,12 +39,12 @@ impl AuthWrapper {
 
 #[tonic::async_trait]
 impl Protocol for AuthWrapper {
-    type ProposeStreamStream = RecvStream<'static, Result<OpResponse, tonic::Status>>;
+    type ProposeStreamStream = RecvStream<'static, Result<OpResponse, Status>>;
 
     async fn propose_stream(
         &self,
         mut request: tonic::Request<ProposeRequest>,
-    ) -> Result<tonic::Response<Self::ProposeStreamStream>, tonic::Status> {
+    ) -> Result<tonic::Response<Self::ProposeStreamStream>, Status> {
         debug!(
             "AuthWrapper received propose request: {}",
             request.get_ref().propose_id()
@@ -51,73 +53,73 @@ impl Protocol for AuthWrapper {
             let mut command: Command = request
                 .get_ref()
                 .cmd()
-                .map_err(|e| tonic::Status::internal(e.to_string()))?;
+                .map_err(|e| Status::internal(e.to_string()))?;
             command.set_auth_info(auth_info);
             request.get_mut().command = command.encode();
-        };
+        }
         self.curp_server.propose_stream(request).await
     }
 
     async fn record(
         &self,
         request: tonic::Request<RecordRequest>,
-    ) -> Result<tonic::Response<RecordResponse>, tonic::Status> {
+    ) -> Result<tonic::Response<RecordResponse>, Status> {
         self.curp_server.record(request).await
     }
 
     async fn read_index(
         &self,
         request: tonic::Request<ReadIndexRequest>,
-    ) -> Result<tonic::Response<ReadIndexResponse>, tonic::Status> {
+    ) -> Result<tonic::Response<ReadIndexResponse>, Status> {
         self.curp_server.read_index(request).await
     }
 
     async fn shutdown(
         &self,
         request: tonic::Request<ShutdownRequest>,
-    ) -> Result<tonic::Response<ShutdownResponse>, tonic::Status> {
+    ) -> Result<tonic::Response<ShutdownResponse>, Status> {
         self.curp_server.shutdown(request).await
     }
 
     async fn propose_conf_change(
         &self,
         request: tonic::Request<ProposeConfChangeRequest>,
-    ) -> Result<tonic::Response<ProposeConfChangeResponse>, tonic::Status> {
+    ) -> Result<tonic::Response<ProposeConfChangeResponse>, Status> {
         self.curp_server.propose_conf_change(request).await
     }
 
     async fn publish(
         &self,
         request: tonic::Request<PublishRequest>,
-    ) -> Result<tonic::Response<PublishResponse>, tonic::Status> {
+    ) -> Result<tonic::Response<PublishResponse>, Status> {
         self.curp_server.publish(request).await
     }
 
     async fn fetch_cluster(
         &self,
         request: tonic::Request<FetchClusterRequest>,
-    ) -> Result<tonic::Response<FetchClusterResponse>, tonic::Status> {
+    ) -> Result<tonic::Response<FetchClusterResponse>, Status> {
         self.curp_server.fetch_cluster(request).await
     }
 
     async fn fetch_read_state(
         &self,
         request: tonic::Request<FetchReadStateRequest>,
-    ) -> Result<tonic::Response<FetchReadStateResponse>, tonic::Status> {
+    ) -> Result<tonic::Response<FetchReadStateResponse>, Status> {
         self.curp_server.fetch_read_state(request).await
     }
 
     async fn move_leader(
         &self,
         request: tonic::Request<MoveLeaderRequest>,
-    ) -> Result<tonic::Response<MoveLeaderResponse>, tonic::Status> {
+    ) -> Result<tonic::Response<MoveLeaderResponse>, Status> {
         self.curp_server.move_leader(request).await
     }
 
     async fn lease_keep_alive(
         &self,
         request: tonic::Request<tonic::Streaming<LeaseKeepAliveMsg>>,
-    ) -> Result<tonic::Response<LeaseKeepAliveMsg>, tonic::Status> {
+    ) -> Result<tonic::Response<LeaseKeepAliveMsg>, Status> {
         self.curp_server.lease_keep_alive(request).await
     }
 }

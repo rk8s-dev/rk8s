@@ -2,9 +2,6 @@ use std::path::{Path, PathBuf};
 
 use bytes::{Bytes, BytesMut};
 
-#[cfg(madsim)]
-use crate::mock_rocksdb_engine::{RocksEngine, RocksSnapshot, RocksTransaction};
-#[cfg(not(madsim))]
 use crate::rocksdb_engine::{RocksEngine, RocksSnapshot, RocksTransaction};
 use crate::{
     SnapshotApi, StorageEngine, StorageOps, TransactionApi, WriteOperation,
@@ -56,9 +53,9 @@ impl Engine {
     ///
     /// Return `EngineError` when `RocksDB` returns an error.
     #[inline]
-    pub async fn apply_snapshot_from_file(
+    pub async fn apply_snapshot_from_file<P: AsRef<Path>>(
         &self,
-        snapshot_path: impl AsRef<Path>,
+        snapshot_path: P,
         tables: &[&'static str],
     ) -> Result<(), EngineError> {
         match *self {

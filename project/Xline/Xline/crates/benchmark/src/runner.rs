@@ -88,7 +88,8 @@ impl Stats {
         let size = 10;
         let mut buckets = Vec::with_capacity(size);
         let mut counts = vec![0; size];
-        let gap = (self.slowest - self.fastest) / (size.numeric_cast::<u32>().overflow_sub(1));
+        let gap = self.slowest.saturating_sub(self.fastest)
+            / (size.numeric_cast::<u32>().overflow_sub(1));
         for i in 0..size.numeric_cast::<u32>().overflow_sub(1) {
             buckets.push(self.fastest + gap * i);
         }

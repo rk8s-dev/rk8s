@@ -1,7 +1,7 @@
 fn main() {
     tonic_build::configure()
         .type_attribute(".", "#[derive(serde::Deserialize, serde::Serialize)]")
-        .compile(
+        .compile_protos(
             &[
                 "proto/src/kv.proto",
                 "proto/src/rpc.proto",

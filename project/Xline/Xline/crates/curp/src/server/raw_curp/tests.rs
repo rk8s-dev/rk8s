@@ -41,7 +41,7 @@ impl RawCurp<TestCommand, TestRoleChange> {
         let all_members: HashMap<_, _> = (0..n)
             .map(|i| (format!("S{i}"), vec![format!("S{i}")]))
             .collect();
-        let cluster_info = Arc::new(ClusterInfo::from_members_map(all_members, [], "S0"));
+        let cluster_info = Arc::new(ClusterInfo::from_members_map(all_members, &[], "S0"));
         let cmd_board = Arc::new(RwLock::new(CommandBoard::new()));
         let lease_manager = Arc::new(RwLock::new(LeaseManager::new()));
         let sync_events = cluster_info

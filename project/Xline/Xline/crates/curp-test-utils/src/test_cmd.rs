@@ -210,8 +210,7 @@ impl ConflictCheck for TestCommand {
         this_keys
             .iter()
             .cartesian_product(other_keys.iter())
-            .map(|(k1, k2)| k1.is_conflict(k2))
-            .any(|conflict| conflict)
+            .any(|(k1, k2)| k1.is_conflict(k2))
     }
 }
 

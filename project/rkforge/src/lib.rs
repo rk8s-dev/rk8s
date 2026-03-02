@@ -1,13 +1,13 @@
 #![allow(dead_code)]
 pub mod commands;
 mod compressor;
-mod config;
+pub mod config;
 mod image;
 mod images;
 mod login;
 mod logout;
 mod oci_spec;
-mod overlayfs;
+pub mod overlayfs;
 pub mod pod_task;
 pub mod pull;
 mod push;

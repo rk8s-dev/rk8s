@@ -17,11 +17,7 @@ const CHANNEL_SIZE: usize = 128;
 #[derive(Clone, Debug)]
 pub struct WatchClient {
     /// The watch RPC client, only communicate with one server at a time
-    #[cfg(not(madsim))]
     inner: xlineapi::WatchClient<AuthService<Channel>>,
-    /// The watch RPC client, only communicate with one server at a time
-    #[cfg(madsim)]
-    inner: xlineapi::WatchClient<Channel>,
 }
 
 impl WatchClient {
@@ -83,9 +79,9 @@ impl WatchClient {
     /// }
     /// ```
     #[inline]
-    pub async fn watch(
+    pub async fn watch<K: Into<Vec<u8>>>(
         &mut self,
-        key: impl Into<Vec<u8>>,
+        key: K,
         options: Option<WatchOptions>,
     ) -> Result<(Watcher, WatchStreaming)> {
         let (mut request_sender, request_receiver) =

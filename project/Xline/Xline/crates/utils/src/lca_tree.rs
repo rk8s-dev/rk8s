@@ -4,17 +4,17 @@ use std::ops::{Add, Sub as _};
 #[non_exhaustive]
 #[derive(Debug)]
 pub struct LCATree {
-    ///
+    /// Nodes in the LCA tree
     nodes: Vec<LCANode>,
 }
 
-///
+/// A node in the LCA tree
 #[non_exhaustive]
 #[derive(Debug)]
 pub struct LCANode {
-    ///
+    /// Parent nodes indices
     pub parent: Vec<usize>,
-    ///
+    /// Depth of this node in the tree
     pub depth: usize,
 }
 
@@ -49,7 +49,7 @@ impl LCATree {
     /// The function panics if given `parent` doesn't exist
     #[inline]
     #[must_use]
-    #[allow(clippy::as_conversions)]
+    #[allow(clippy::as_conversions, clippy::arithmetic_side_effects)]
     pub fn insert_node(&mut self, parent: usize) -> usize {
         let depth = if parent == 0 {
             0

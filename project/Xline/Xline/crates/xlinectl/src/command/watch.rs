@@ -43,7 +43,7 @@ type BuildRequestFn = dyn Fn(Option<&str>) -> WatchOptions;
 /// Build request from matches
 pub(crate) fn build_request(matches: &ArgMatches) -> Box<BuildRequestFn> {
     let prefix = matches.get_flag("prefix");
-    let rev = matches.get_one::<i64>("rev").map(Clone::clone);
+    let rev = matches.get_one::<i64>("rev").copied();
     let pre_kv = matches.get_flag("pre_kv");
     let progress_notify = matches.get_flag("progress_notify");
 
@@ -131,6 +131,7 @@ async fn exec_non_interactive(client: &mut Client, matches: &ArgMatches) -> Resu
 /// XLINE_WATCH_VALUE="bar"
 /// ```
 ///
+#[allow(clippy::unwrap_in_result)] // Event data from server is expected to be valid
 fn execute_command_on_events(command_to_execute: &[OsString], resp: &WatchResponse) -> Result<()> {
     let watch_revision = resp
         .header
@@ -188,6 +189,7 @@ fn execute_inner(command: &[OsString], envs: HashMap<&str, String>) -> Result<()
 }
 
 /// Execute the command in interactive mode
+#[allow(clippy::needless_continue)] // continue in macro is needed for loop control
 async fn exec_interactive(client: &mut Client, matches: &ArgMatches) -> Result<()> {
     let req_builder = build_request(matches);
     let mut watcher: Option<Watcher> = None;

@@ -26,7 +26,7 @@ rust_library(
     rustc_flags = ["@$(location :netlink-packet-core-manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/anyhow/1.0.100:anyhow",
+        "//third-party/rust/crates/anyhow/1.0.101:anyhow",
         "//third-party/rust/crates/byteorder/1.5.0:byteorder",
         "//third-party/rust/crates/netlink-packet-utils/0.5.2:netlink-packet-utils",
     ],

@@ -4,7 +4,9 @@ use curp::cmd::{PbCodec, PbSerializeError};
 use prost::Message;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
-
+use tonic::{Code, Status};
+// TODO: use our status/code to replace this.
+// use xlinerpc::status::{Code,Status};
 use crate::{PbExecuteError, PbExecuteErrorOuter, PbRevisions, PbUserRole};
 
 /// Error met when executing commands
@@ -218,101 +220,99 @@ impl PbCodec for ExecuteError {
 // In order to create an etcd-compatible API with Xline, it is necessary to return exact GRPC statuses to the etcd client.
 // Refer to `https://github.com/etcd-io/etcd/blob/main/api/v3rpc/rpctypes/error.go` for etcd's error parsing mechanism,
 // and refer to `https://github.com/etcd-io/etcd/blob/main/client/v3/doc.go` for how errors are handled by etcd client.
-impl From<ExecuteError> for tonic::Status {
+impl From<ExecuteError> for Status {
     #[inline]
     fn from(err: ExecuteError) -> Self {
         let (code, message) = match err {
             ExecuteError::KeyNotFound => (
-                tonic::Code::InvalidArgument,
+                Code::InvalidArgument,
                 "etcdserver: key not found".to_owned(),
             ),
             ExecuteError::RevisionTooLarge(_, _) => (
-                tonic::Code::OutOfRange,
+                Code::OutOfRange,
                 "etcdserver: mvcc: required revision is a future revision".to_owned(),
             ),
             ExecuteError::RevisionCompacted(_, _) => (
-                tonic::Code::OutOfRange,
+                Code::OutOfRange,
                 "etcdserver: mvcc: required revision has been compacted".to_owned(),
             ),
             ExecuteError::LeaseNotFound(_) => (
-                tonic::Code::NotFound,
+                Code::NotFound,
                 "etcdserver: requested lease not found".to_owned(),
             ),
             ExecuteError::LeaseTtlTooLarge(_) => (
-                tonic::Code::OutOfRange,
+                Code::OutOfRange,
                 "etcdserver: too large lease TTL".to_owned(),
             ),
             ExecuteError::LeaseAlreadyExists(_) => (
-                tonic::Code::FailedPrecondition,
+                Code::FailedPrecondition,
                 "etcdserver: lease already exists".to_owned(),
             ),
             ExecuteError::AuthNotEnabled => (
-                tonic::Code::FailedPrecondition,
+                Code::FailedPrecondition,
                 "etcdserver: authentication is not enabled".to_owned(),
             ),
             ExecuteError::AuthFailed => (
-                tonic::Code::InvalidArgument,
+                Code::InvalidArgument,
                 "etcdserver: authentication failed, invalid user ID or password".to_owned(),
             ),
             ExecuteError::UserNotFound(_) => (
-                tonic::Code::FailedPrecondition,
+                Code::FailedPrecondition,
                 "etcdserver: user name not found".to_owned(),
             ),
             ExecuteError::UserAlreadyExists(_) => (
-                tonic::Code::FailedPrecondition,
+                Code::FailedPrecondition,
                 "etcdserver: user name already exists".to_owned(),
             ),
             ExecuteError::RoleNotFound(_) => (
-                tonic::Code::FailedPrecondition,
+                Code::FailedPrecondition,
                 "etcdserver: role name not found".to_owned(),
             ),
             ExecuteError::RoleAlreadyExists(_) => (
-                tonic::Code::FailedPrecondition,
+                Code::FailedPrecondition,
                 "etcdserver: role name already exists".to_owned(),
             ),
             ExecuteError::RoleNotGranted(_) => (
-                tonic::Code::FailedPrecondition,
+                Code::FailedPrecondition,
                 "etcdserver: role is not granted to the user".to_owned(),
             ),
             ExecuteError::RootRoleNotExist => (
-                tonic::Code::FailedPrecondition,
+                Code::FailedPrecondition,
                 "etcdserver: root user does not have root role".to_owned(),
             ),
             ExecuteError::PermissionNotGranted => (
-                tonic::Code::FailedPrecondition,
+                Code::FailedPrecondition,
                 "etcdserver: permission is not granted to the role".to_owned(),
             ),
             ExecuteError::PermissionNotGiven => (
-                tonic::Code::InvalidArgument,
+                Code::InvalidArgument,
                 "etcdserver: permission not given".to_owned(),
             ),
             ExecuteError::InvalidAuthToken | ExecuteError::TokenOldRevision(_, _) => (
-                tonic::Code::Unauthenticated,
+                Code::Unauthenticated,
                 "etcdserver: invalid auth token".to_owned(),
             ),
             ExecuteError::PermissionDenied => (
-                tonic::Code::PermissionDenied,
+                Code::PermissionDenied,
                 "etcdserver: permission denied".to_owned(),
             ),
             ExecuteError::InvalidAuthManagement => (
-                tonic::Code::InvalidArgument,
+                Code::InvalidArgument,
                 "etcdserver: invalid auth management".to_owned(),
             ),
             ExecuteError::Nospace => (
-                tonic::Code::ResourceExhausted,
+                Code::ResourceExhausted,
                 "etcdserver: mvcc: database space exceeded".to_owned(),
             ),
-            ExecuteError::LeaseExpired(_) => (tonic::Code::DeadlineExceeded, err.to_string()),
+            ExecuteError::LeaseExpired(_) => (Code::DeadlineExceeded, err.to_string()),
             ExecuteError::UserAlreadyHasRole(_, _)
             | ExecuteError::NoPasswordUser
-            | ExecuteError::TokenManagerNotInit => {
-                (tonic::Code::FailedPrecondition, err.to_string())
-            }
-            ExecuteError::TokenNotProvided => (tonic::Code::InvalidArgument, err.to_string()),
-            ExecuteError::DbError(_) => (tonic::Code::Internal, err.to_string()),
+            | ExecuteError::TokenManagerNotInit => (Code::FailedPrecondition, err.to_string()),
+            ExecuteError::TokenNotProvided => (Code::InvalidArgument, err.to_string()),
+            ExecuteError::DbError(_) => (Code::Internal, err.to_string()),
         };
 
-        tonic::Status::new(code, message)
+        Status::new(code, message)
     }
 }
 

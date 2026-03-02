@@ -25,7 +25,7 @@ rust_library(
     edition = "2021",
     rustc_flags = ["@$(location :webpki-roots-manifest[env_flags])"],
     named_deps = {
-        "parent": "//third-party/rust/crates/webpki-roots/1.0.4:webpki-roots",
+        "parent": "//third-party/rust/crates/webpki-roots/1.0.6:webpki-roots",
     },
     visibility = ["PUBLIC"],
 )

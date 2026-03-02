@@ -13,9 +13,9 @@ const DEFAULT_LEASE_TTL: Duration = Duration::from_secs(8);
 
 /// Lease manager
 pub(crate) struct LeaseManager {
-    /// client_id => expired_at
+    /// `client_id` => `expired_at`
     ///
-    /// expiry queue to check the smallest expired_at
+    /// expiry queue to check the smallest `expired_at`
     expiry_queue: PriorityQueue<u64, Reverse<Instant>>,
     /// Bypassed client ids
     bypassed: HashSet<u64>,

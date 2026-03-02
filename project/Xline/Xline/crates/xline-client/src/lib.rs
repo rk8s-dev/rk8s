@@ -93,7 +93,6 @@
     clippy::shadow_unrelated,
     clippy::str_to_string,
     clippy::string_add,
-    clippy::string_to_string,
     clippy::todo,
     clippy::unimplemented,
     clippy::unnecessary_self_imports,
@@ -168,11 +167,8 @@ use std::{
 use curp::client::ClientBuilder as CurpClientBuilder;
 use http::{HeaderValue, Request, header::AUTHORIZATION};
 use tonic::transport::Channel;
-#[cfg(not(madsim))]
 use tonic::transport::ClientTlsConfig;
 use tower::Service;
-#[cfg(madsim)]
-use utils::ClientTlsConfig;
 use utils::{build_endpoint, config::ClientConfig};
 use xlineapi::command::{Command, CurpClient};
 
@@ -416,7 +412,7 @@ impl ClientOptions {
     /// Set `user`
     #[inline]
     #[must_use]
-    pub fn with_user(self, name: impl Into<String>, password: impl Into<String>) -> Self {
+    pub fn with_user<N: Into<String>, P: Into<String>>(self, name: N, password: P) -> Self {
         Self {
             user: Some((name.into(), password.into())),
             ..self
@@ -456,17 +452,8 @@ struct AuthService<S> {
 impl<S> AuthService<S> {
     /// Create a new `AuthService`
     #[inline]
-    #[cfg(not(madsim))]
     fn new(inner: S, token: Option<Arc<HeaderValue>>) -> Self {
         Self { inner, token }
-    }
-
-    /// Create a new `AuthService`
-    #[inline]
-    #[cfg(madsim)]
-    #[allow(clippy::needless_pass_by_value, clippy::new_ret_no_self)]
-    fn new(inner: S, _token: Option<Arc<HeaderValue>>) -> S {
-        inner
     }
 }
 

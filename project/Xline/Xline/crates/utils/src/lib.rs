@@ -93,7 +93,6 @@
     clippy::shadow_unrelated,
     clippy::str_to_string,
     clippy::string_add,
-    clippy::string_to_string,
     clippy::todo,
     clippy::unimplemented,
     clippy::unnecessary_self_imports,
@@ -165,23 +164,8 @@
 
 use std::str::FromStr;
 
-#[cfg(not(madsim))]
 use tonic::transport::ClientTlsConfig;
 use tonic::transport::Endpoint;
-
-/// Fake `ClientTlsConfig` for `madsim`
-#[cfg(madsim)]
-#[derive(Debug, Clone)]
-#[allow(missing_copy_implementations)] // Same as real config
-#[non_exhaustive]
-pub struct ClientTlsConfig;
-
-/// Fake `ServerTlsConfig` for `madsim`
-#[cfg(madsim)]
-#[derive(Debug, Clone)]
-#[allow(missing_copy_implementations)] // Same as real config
-#[non_exhaustive]
-pub struct ServerTlsConfig;
 
 /// Barrier util
 pub mod barrier;
@@ -269,7 +253,6 @@ pub fn build_endpoint(
         Some(_scheme) => Endpoint::from_str(addr)?,
         None => Endpoint::from_shared(format!("http://{addr}"))?,
     };
-    #[cfg(not(madsim))]
     match scheme_str {
         Some("http") | None => {}
         Some("https") => {
@@ -281,7 +264,7 @@ pub fn build_endpoint(
                 return endpoint.tls_config(tls_config.clone());
             }
         }
-    };
+    }
     Ok(endpoint)
 }
 
@@ -302,4 +285,193 @@ pub fn hash_password(password: &[u8]) -> Result<String, pbkdf2::password_hash::e
     let hashed_password =
         Pbkdf2.hash_password_customized(password, None, None, simple_para, &salt)?;
     Ok(hashed_password.to_string())
+}
+
+// ============================================================================
+// QUIC address parsing
+// ============================================================================
+
+/// Error type for QUIC address parsing
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum QuicAddrError {
+    /// Missing port in address
+    MissingPort,
+    /// Invalid port number
+    InvalidPort,
+    /// Invalid IPv6 format (mismatched brackets)
+    InvalidIpv6,
+    /// IP address without domain (when fallback is disabled)
+    IpWithoutDomain,
+}
+
+impl std::fmt::Display for QuicAddrError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match *self {
+            Self::MissingPort => write!(f, "missing port in address"),
+            Self::InvalidPort => write!(f, "invalid port number"),
+            Self::InvalidIpv6 => write!(f, "invalid IPv6 format"),
+            Self::IpWithoutDomain => write!(f, "IP address requires domain name for SNI"),
+        }
+    }
+}
+
+impl std::error::Error for QuicAddrError {}
+
+/// Parse QUIC address into (host, port, server_name)
+///
+/// # Arguments
+///
+/// * `addr` - Address string in format "host:port" or "quic://host:port"
+/// * `allow_ip_fallback` - If true, IP addresses will use "localhost" as SNI (test only)
+///
+/// # Returns
+///
+/// Tuple of (host, port, server_name) where server_name is used for TLS SNI
+///
+/// # Errors
+///
+/// Returns error if address format is invalid or IP address is used without fallback
+///
+/// # Examples
+///
+/// ```
+/// use utils::parse_quic_addr;
+///
+/// // Domain name
+/// let (host, port, sni) = parse_quic_addr("example.com:8443", false).unwrap();
+/// assert_eq!(host, "example.com");
+/// assert_eq!(port, 8443);
+/// assert_eq!(sni, "example.com");
+///
+/// // With scheme
+/// let (host, port, sni) = parse_quic_addr("quic://example.com:8443", false).unwrap();
+/// assert_eq!(host, "example.com");
+///
+/// // IPv4 with fallback (test mode)
+/// let (host, port, sni) = parse_quic_addr("127.0.0.1:8443", true).unwrap();
+/// assert_eq!(host, "127.0.0.1");
+/// assert_eq!(sni, "localhost");
+///
+/// // IPv6 with fallback (test mode)
+/// let (host, port, sni) = parse_quic_addr("[::1]:8443", true).unwrap();
+/// assert_eq!(host, "::1");
+/// assert_eq!(sni, "localhost");
+/// ```
+#[inline]
+pub fn parse_quic_addr(
+    addr: &str,
+    allow_ip_fallback: bool,
+) -> Result<(String, u16, String), QuicAddrError> {
+    // Strip scheme if present
+    let addr = addr
+        .strip_prefix("quic://")
+        .or_else(|| addr.strip_prefix("https://"))
+        .or_else(|| addr.strip_prefix("http://"))
+        .unwrap_or(addr);
+
+    // Parse host and port
+    let (host, port_str) = if addr.starts_with('[') {
+        // IPv6 format: [::1]:port
+        let bracket_end = addr.find(']').ok_or(QuicAddrError::InvalidIpv6)?;
+        let host = &addr[1..bracket_end];
+        let rest = &addr[bracket_end + 1..];
+        let port_str = rest.strip_prefix(':').ok_or(QuicAddrError::MissingPort)?;
+        (host.to_owned(), port_str)
+    } else {
+        // IPv4 or domain: host:port
+        let colon_pos = addr.rfind(':').ok_or(QuicAddrError::MissingPort)?;
+        let host = &addr[..colon_pos];
+        let port_str = &addr[colon_pos + 1..];
+        (host.to_owned(), port_str)
+    };
+
+    let port: u16 = port_str.parse().map_err(|_| QuicAddrError::InvalidPort)?;
+
+    // Determine server_name for SNI
+    let is_ip = host.parse::<std::net::IpAddr>().is_ok();
+    let server_name = if is_ip {
+        if allow_ip_fallback {
+            debug!(
+                "QUIC address {} is an IP, using 'localhost' as SNI (test mode only)",
+                host
+            );
+            "localhost".to_owned()
+        } else {
+            return Err(QuicAddrError::IpWithoutDomain);
+        }
+    } else {
+        host.clone()
+    };
+
+    Ok((host, port, server_name))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_quic_addr_domain() {
+        let (host, port, sni) = parse_quic_addr("example.com:8443", false).unwrap();
+        assert_eq!(host, "example.com");
+        assert_eq!(port, 8443);
+        assert_eq!(sni, "example.com");
+    }
+
+    #[test]
+    fn test_parse_quic_addr_with_scheme() {
+        let (host, port, sni) = parse_quic_addr("quic://example.com:8443", false).unwrap();
+        assert_eq!(host, "example.com");
+        assert_eq!(port, 8443);
+        assert_eq!(sni, "example.com");
+    }
+
+    #[test]
+    fn test_parse_quic_addr_ipv4_with_fallback() {
+        let (host, port, sni) = parse_quic_addr("127.0.0.1:8443", true).unwrap();
+        assert_eq!(host, "127.0.0.1");
+        assert_eq!(port, 8443);
+        assert_eq!(sni, "localhost");
+    }
+
+    #[test]
+    fn test_parse_quic_addr_ipv4_without_fallback() {
+        let result = parse_quic_addr("127.0.0.1:8443", false);
+        assert_eq!(result, Err(QuicAddrError::IpWithoutDomain));
+    }
+
+    #[test]
+    fn test_parse_quic_addr_ipv6_with_fallback() {
+        let (host, port, sni) = parse_quic_addr("[::1]:8443", true).unwrap();
+        assert_eq!(host, "::1");
+        assert_eq!(port, 8443);
+        assert_eq!(sni, "localhost");
+    }
+
+    #[test]
+    fn test_parse_quic_addr_ipv6_with_scheme() {
+        let (host, port, sni) = parse_quic_addr("quic://[::1]:8443", true).unwrap();
+        assert_eq!(host, "::1");
+        assert_eq!(port, 8443);
+        assert_eq!(sni, "localhost");
+    }
+
+    #[test]
+    fn test_parse_quic_addr_missing_port() {
+        let result = parse_quic_addr("example.com", false);
+        assert_eq!(result, Err(QuicAddrError::MissingPort));
+    }
+
+    #[test]
+    fn test_parse_quic_addr_invalid_port() {
+        let result = parse_quic_addr("example.com:abc", false);
+        assert_eq!(result, Err(QuicAddrError::InvalidPort));
+    }
+
+    #[test]
+    fn test_parse_quic_addr_invalid_ipv6() {
+        let result = parse_quic_addr("[::1:8443", false);
+        assert_eq!(result, Err(QuicAddrError::InvalidIpv6));
+    }
 }

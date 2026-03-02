@@ -36,7 +36,7 @@ use std::time::Duration;
 use futures_util::stream::{self, BoxStream};
 use rfuse3::raw::Filesystem;
 use rfuse3::{FileType as FuseFileType, SetAttr, Timestamp};
-use tracing::error;
+use tracing::{debug, error};
 #[cfg(all(test, target_os = "linux"))]
 mod mount_tests {
     use super::*;
@@ -187,6 +187,12 @@ where
 
     // Call into VFS to resolve parent inode + name → child inode; if found, build ReplyEntry
     async fn lookup(&self, req: Request, parent: u64, name: &OsStr) -> FuseResult<ReplyEntry> {
+        debug!(
+            unique = req.unique,
+            parent,
+            name = %name.to_string_lossy(),
+            "fuse.lookup"
+        );
         let name_str = name.to_string_lossy();
         let child = self.child_of(parent as i64, name_str.as_ref()).await;
         let Some(child_ino) = child else {
@@ -206,6 +212,7 @@ where
 
     // Open file: allocate a handle for read/write operations.
     async fn open(&self, _req: Request, ino: u64, flags: u32) -> FuseResult<ReplyOpen> {
+        debug!(ino, flags, "fuse.open");
         // Verify the inode exists and is a file
         let Some(attr) = self.stat_ino(ino as i64).await else {
             return Err(libc::ENOENT.into());
@@ -227,6 +234,7 @@ where
 
     // Open directory: create handle for caching
     async fn opendir(&self, _req: Request, ino: u64, _flags: u32) -> FuseResult<ReplyOpen> {
+        debug!(ino, "fuse.opendir");
         let Some(attr) = self.stat_ino(ino as i64).await else {
             return Err(libc::ENOENT.into());
         };
@@ -252,6 +260,7 @@ where
         offset: u64,
         size: u32,
     ) -> FuseResult<ReplyData> {
+        debug!(ino, fh, offset, size, "fuse.read");
         // Verify inode exists
         if self.stat_ino(ino as i64).await.is_none() {
             return Err(libc::ENOENT.into());
@@ -284,6 +293,7 @@ where
     }
 
     async fn readlink(&self, _req: Request, ino: u64) -> FuseResult<ReplyData> {
+        debug!(ino, "fuse.readlink");
         let target = self.readlink_ino(ino as i64).await.map_err(Errno::from)?;
 
         // Update atime after successful readlink
@@ -304,6 +314,7 @@ where
         _write_flags: u32,
         _flags: u32,
     ) -> FuseResult<ReplyWrite> {
+        debug!(ino, fh, offset, size = data.len(), "fuse.write");
         let n = if fh != 0 {
             self.write(fh, offset, data)
                 .await
@@ -324,6 +335,7 @@ where
         fh: Option<u64>,
         _flags: u32,
     ) -> FuseResult<ReplyAttr> {
+        debug!(unique = req.unique, ino, fh = ?fh, "fuse.getattr");
         let vattr_opt = self.stat_ino(ino as i64).await;
         let vattr = if let Some(vattr) = vattr_opt {
             vattr
@@ -356,6 +368,7 @@ where
         _fh: Option<u64>,
         set_attr: SetAttr,
     ) -> FuseResult<ReplyAttr> {
+        debug!(unique = req.unique, ino, set_attr = ?set_attr, "fuse.setattr");
         let (meta_req, meta_flags) = fuse_setattr_to_meta(&set_attr);
 
         // If no attributes to set, just return current attributes
@@ -391,6 +404,7 @@ where
         fh: u64,
         offset: i64,
     ) -> FuseResult<ReplyDirectory<BoxStream<'a, FuseResult<DirectoryEntry>>>> {
+        debug!(ino, fh, offset, "fuse.readdir");
         // Try to use handle first
         let entries = if fh != 0 {
             let entries_offset = offset.saturating_sub(3) as u64;
@@ -464,6 +478,7 @@ where
         offset: u64,
         _lock_owner: u64,
     ) -> FuseResult<ReplyDirectoryPlus<BoxStream<'a, FuseResult<DirectoryEntryPlus>>>> {
+        debug!(unique = req.unique, ino, fh, offset, "fuse.readdirplus");
         let ttl = Duration::from_secs(1);
         let mut all: Vec<DirectoryEntryPlus> = Vec::new();
 
@@ -595,6 +610,13 @@ where
         mode: u32,
         _rdev: u32,
     ) -> FuseResult<ReplyEntry> {
+        debug!(
+            unique = req.unique,
+            parent,
+            name = %name.to_string_lossy(),
+            mode,
+            "fuse.mknod"
+        );
         let name = name.to_string_lossy();
 
         // Validate parent
@@ -664,6 +686,14 @@ where
         mode: u32,
         umask: u32,
     ) -> FuseResult<ReplyEntry> {
+        debug!(
+            unique = req.unique,
+            parent,
+            name = %name.to_string_lossy(),
+            mode,
+            umask,
+            "fuse.mkdir"
+        );
         let name = name.to_string_lossy();
         // Parent must be a directory
         let Some(pattr) = self.stat_ino(parent as i64).await else {
@@ -710,6 +740,14 @@ where
         mode: u32,
         flags: u32,
     ) -> FuseResult<ReplyCreated> {
+        debug!(
+            unique = req.unique,
+            parent,
+            name = %name.to_string_lossy(),
+            mode,
+            flags,
+            "fuse.create"
+        );
         let name = name.to_string_lossy();
         // Validate parent
         let Some(pattr) = self.stat_ino(parent as i64).await else {
@@ -758,6 +796,13 @@ where
         new_parent: u64,
         new_name: &OsStr,
     ) -> FuseResult<ReplyEntry> {
+        debug!(
+            unique = req.unique,
+            ino,
+            new_parent,
+            new_name = %new_name.to_string_lossy(),
+            "fuse.link"
+        );
         let Some(existing_attr) = self.stat_ino(ino as i64).await else {
             return Err(libc::ENOENT.into());
         };
@@ -816,6 +861,13 @@ where
         name: &OsStr,
         link: &OsStr,
     ) -> FuseResult<ReplyEntry> {
+        debug!(
+            unique = req.unique,
+            parent,
+            name = %name.to_string_lossy(),
+            link = %link.to_string_lossy(),
+            "fuse.symlink"
+        );
         let name = name.to_string_lossy();
         if name.is_empty() {
             return Err(libc::EINVAL.into());
@@ -861,6 +913,7 @@ where
 
     // Remove a file
     async fn unlink(&self, _req: Request, parent: u64, name: &OsStr) -> FuseResult<()> {
+        debug!(parent, name = %name.to_string_lossy(), "fuse.unlink");
         let name = name.to_string_lossy();
         // Ensure parent directory exists and has the right type
         let Some(pattr) = self.stat_ino(parent as i64).await else {
@@ -891,6 +944,7 @@ where
 
     // Remove an empty directory
     async fn rmdir(&self, _req: Request, parent: u64, name: &OsStr) -> FuseResult<()> {
+        debug!(parent, name = %name.to_string_lossy(), "fuse.rmdir");
         let name = name.to_string_lossy();
         let Some(pattr) = self.stat_ino(parent as i64).await else {
             return Err(libc::ENOENT.into());
@@ -927,6 +981,13 @@ where
         new_parent: u64,
         new_name: &OsStr,
     ) -> FuseResult<()> {
+        debug!(
+            parent,
+            name = %name.to_string_lossy(),
+            new_parent,
+            new_name = %new_name.to_string_lossy(),
+            "fuse.rename"
+        );
         let name = name.to_string_lossy();
         let new_name = new_name.to_string_lossy();
 
@@ -1017,17 +1078,20 @@ where
         _lock_owner: u64,
         _flush: bool,
     ) -> FuseResult<()> {
+        debug!(fh, "fuse.release");
         let _ = self.close(fh).await;
         Ok(())
     }
 
     // Flush file (close path callback)
     async fn flush(&self, _req: Request, _inode: u64, fh: u64, _lock_owner: u64) -> FuseResult<()> {
+        debug!(fh, "fuse.flush");
         self.flush(fh).await.map_err(Errno::from)
     }
 
     // Sync file content to backend
     async fn fsync(&self, _req: Request, _inode: u64, fh: u64, datasync: bool) -> FuseResult<()> {
+        debug!(fh, datasync, "fuse.fsync");
         self.fsync(fh, datasync).await.map_err(Errno::from)
     }
 
@@ -1127,6 +1191,7 @@ where
 
     // Close directory handle
     async fn releasedir(&self, _req: Request, _inode: u64, fh: u64, _flags: u32) -> FuseResult<()> {
+        debug!(fh, "fuse.releasedir");
         if fh == 0 {
             return Ok(()); // No handle to release
         }
@@ -1135,7 +1200,7 @@ where
             match e {
                 VfsError::StaleNetworkFileHandle => {
                     // Handle not found, but that's ok - might be a stateless readdir
-                    tracing::debug!("releasedir: handle {} not found (stateless mode)", fh);
+                    debug!("releasedir: handle {} not found (stateless mode)", fh);
                 }
                 _ => {
                     error!("Error releasing directory handle {}: {:?}", fh, e);
@@ -1169,6 +1234,7 @@ where
         lock_type: u32,
         _pid: u32,
     ) -> FuseResult<ReplyLock> {
+        debug!(inode, lock_owner, start, end, lock_type, "fuse.getlk");
         // Convert FUSE lock type to our internal type
         let fl_type = match lock_type as i32 {
             libc::F_RDLCK => FileLockType::Read,
@@ -1215,6 +1281,10 @@ where
         pid: u32,
         block: bool,
     ) -> FuseResult<()> {
+        debug!(
+            inode,
+            lock_owner, start, end, lock_type, pid, block, "fuse.setlk"
+        );
         // Convert FUSE lock type to our internal type
         let fl_type = match lock_type as i32 {
             libc::F_RDLCK => FileLockType::Read,
@@ -1248,6 +1318,14 @@ where
 
     // Check file access permissions
     async fn access(&self, req: Request, ino: u64, mask: u32) -> FuseResult<()> {
+        debug!(
+            unique = req.unique,
+            ino,
+            mask,
+            uid = req.uid,
+            gid = req.gid,
+            "fuse.access"
+        );
         let Some(attr) = self.stat_ino(ino as i64).await else {
             return Err(libc::ENOENT.into());
         };

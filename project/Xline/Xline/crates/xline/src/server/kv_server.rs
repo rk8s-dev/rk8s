@@ -10,12 +10,15 @@ use dashmap::DashMap;
 use event_listener::Event;
 use futures::future::Either;
 use tokio::time::timeout;
+use tonic::Status;
 use tracing::{debug, instrument};
 use xlineapi::{
     AuthInfo, ResponseWrapper,
     command::{Command, CurpClient},
     request_validation::RequestValidator,
 };
+// TODO: use our own status type
+// use xlinerpc::status::{Code,Status};
 
 use crate::{
     revision_check::RevisionCheck,
@@ -39,7 +42,7 @@ pub(crate) struct KvServer {
     client: Arc<CurpClient>,
     /// Compact events
     compact_events: Arc<DashMap<u64, Arc<Event>>>,
-    /// Next compact_id
+    /// Next `compact_id`
     next_compact_id: AtomicU64,
 }
 
@@ -73,7 +76,8 @@ impl KvServer {
     }
 
     /// serializable execute request in current node
-    fn do_serializable(&self, command: &Command) -> Result<Response, tonic::Status> {
+    #[allow(clippy::result_large_err)]
+    fn do_serializable(&self, command: &Command) -> Result<Response, Status> {
         self.auth_storage
             .check_permission(command.request(), command.auth_info())?;
         let cmd_res = self.kv_storage.execute(command.request(), None)?;
@@ -81,11 +85,7 @@ impl KvServer {
     }
 
     /// Propose request and get result with fast/slow path
-    async fn propose<T>(
-        &self,
-        request: T,
-        auth_info: Option<AuthInfo>,
-    ) -> Result<Response, tonic::Status>
+    async fn propose<T>(&self, request: T, auth_info: Option<AuthInfo>) -> Result<Response, Status>
     where
         T: Into<RequestWrapper>,
     {
@@ -129,7 +129,7 @@ impl KvServer {
                     }
                 }
             }
-        };
+        }
     }
 }
 
@@ -140,7 +140,7 @@ impl Kv for KvServer {
     async fn range(
         &self,
         request: tonic::Request<RangeRequest>,
-    ) -> Result<tonic::Response<RangeResponse>, tonic::Status> {
+    ) -> Result<tonic::Response<RangeResponse>, Status> {
         let range_req = request.get_ref();
         range_req.validation()?;
         debug!("Receive grpc request: {}", range_req);
@@ -172,7 +172,7 @@ impl Kv for KvServer {
     async fn put(
         &self,
         request: tonic::Request<PutRequest>,
-    ) -> Result<tonic::Response<PutResponse>, tonic::Status> {
+    ) -> Result<tonic::Response<PutResponse>, Status> {
         let put_req: &PutRequest = request.get_ref();
         put_req.validation()?;
         debug!("Receive grpc request: {:?}", put_req);
@@ -185,7 +185,7 @@ impl Kv for KvServer {
         }
     }
 
-    /// DeleteRange deletes the given range from the key-value store.
+    /// `DeleteRange` deletes the given range from the key-value store.
     ///
     /// A delete request increments the revision of the key-value store
     /// and generates a delete event in the event history for every deleted key.
@@ -193,7 +193,7 @@ impl Kv for KvServer {
     async fn delete_range(
         &self,
         request: tonic::Request<DeleteRangeRequest>,
-    ) -> Result<tonic::Response<DeleteRangeResponse>, tonic::Status> {
+    ) -> Result<tonic::Response<DeleteRangeResponse>, Status> {
         let delete_range_req = request.get_ref();
         delete_range_req.validation()?;
         debug!("Receive grpc request: {:?}", delete_range_req);
@@ -215,7 +215,7 @@ impl Kv for KvServer {
     async fn txn(
         &self,
         request: tonic::Request<TxnRequest>,
-    ) -> Result<tonic::Response<TxnResponse>, tonic::Status> {
+    ) -> Result<tonic::Response<TxnResponse>, Status> {
         let txn_req = request.get_ref();
         txn_req.validation()?;
         debug!("Receive grpc request: {}", txn_req);
@@ -239,7 +239,7 @@ impl Kv for KvServer {
     async fn compact(
         &self,
         request: tonic::Request<CompactionRequest>,
-    ) -> Result<tonic::Response<CompactionResponse>, tonic::Status> {
+    ) -> Result<tonic::Response<CompactionResponse>, Status> {
         debug!("Receive CompactionRequest {:?}", request);
         let compacted_revision = self.kv_storage.compacted_revision();
         let current_revision = self.kv_storage.revision();
@@ -264,7 +264,7 @@ impl Kv for KvServer {
             .await
             .is_err()
         {
-            return Err(tonic::Status::deadline_exceeded("Compact timeout"));
+            return Err(Status::deadline_exceeded("Compact timeout"));
         }
 
         if let ResponseWrapper::CompactionResponse(response) = resp {
@@ -279,7 +279,7 @@ impl Kv for KvServer {
 mod test {
     use super::*;
     use crate::rpc::{Request, RequestOp};
-
+    use tonic::Code;
     #[test]
     fn txn_check() {
         let txn_req = TxnRequest {
@@ -334,12 +334,12 @@ mod test {
             ..Default::default()
         };
 
-        let expected_tonic_status = tonic::Status::from(
+        let expected_tonic_status = Status::from(
             range_request_with_future_rev
                 .check_revision(compacted_revision, current_revision)
                 .unwrap_err(),
         );
-        assert_eq!(expected_tonic_status.code(), tonic::Code::OutOfRange);
+        assert_eq!(expected_tonic_status.code(), Code::OutOfRange);
 
         let range_request_with_compacted_rev = RangeRequest {
             key: b"foo".to_vec(),
@@ -347,13 +347,13 @@ mod test {
             ..Default::default()
         };
 
-        let expected_tonic_status = tonic::Status::from(
+        let expected_tonic_status = Status::from(
             range_request_with_compacted_rev
                 .check_revision(compacted_revision, current_revision)
                 .unwrap_err(),
         );
 
-        assert_eq!(expected_tonic_status.code(), tonic::Code::OutOfRange);
+        assert_eq!(expected_tonic_status.code(), Code::OutOfRange);
     }
 
     #[tokio::test]
@@ -372,13 +372,13 @@ mod test {
             failure: vec![],
         };
 
-        let expected_tonic_status = tonic::Status::from(
+        let expected_tonic_status = Status::from(
             txn_request_with_future_revision
                 .check_revision(compacted_revision, current_revision)
                 .unwrap_err(),
         );
 
-        assert_eq!(expected_tonic_status.code(), tonic::Code::OutOfRange);
+        assert_eq!(expected_tonic_status.code(), Code::OutOfRange);
 
         let txn_request_with_compacted_revision = TxnRequest {
             compare: vec![],
@@ -392,13 +392,13 @@ mod test {
             failure: vec![],
         };
 
-        let expected_tonic_status = tonic::Status::from(
+        let expected_tonic_status = Status::from(
             txn_request_with_compacted_revision
                 .check_revision(compacted_revision, current_revision)
                 .unwrap_err(),
         );
 
-        assert_eq!(expected_tonic_status.code(), tonic::Code::OutOfRange);
+        assert_eq!(expected_tonic_status.code(), Code::OutOfRange);
     }
 
     #[tokio::test]
@@ -408,12 +408,11 @@ mod test {
             ..Default::default()
         };
 
-        let expected_tonic_status =
-            tonic::Status::from(compact_request.check_revision(3, 8).unwrap_err());
-        assert_eq!(expected_tonic_status.code(), tonic::Code::OutOfRange);
+        let expected_tonic_status = Status::from(compact_request.check_revision(3, 8).unwrap_err());
+        assert_eq!(expected_tonic_status.code(), Code::OutOfRange);
 
         let expected_tonic_status =
-            tonic::Status::from(compact_request.check_revision(13, 18).unwrap_err());
-        assert_eq!(expected_tonic_status.code(), tonic::Code::OutOfRange);
+            Status::from(compact_request.check_revision(13, 18).unwrap_err());
+        assert_eq!(expected_tonic_status.code(), Code::OutOfRange);
     }
 }

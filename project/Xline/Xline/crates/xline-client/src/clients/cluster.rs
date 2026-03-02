@@ -13,11 +13,7 @@ use xlineapi::{
 #[non_exhaustive]
 pub struct ClusterClient {
     /// Inner client
-    #[cfg(not(madsim))]
     inner: xlineapi::ClusterClient<AuthService<Channel>>,
-    /// Inner client
-    #[cfg(madsim)]
-    inner: xlineapi::ClusterClient<Channel>,
 }
 
 impl ClusterClient {
@@ -64,9 +60,9 @@ impl ClusterClient {
     /// }
     /// ```
     #[inline]
-    pub async fn member_add<I: Into<String>>(
+    pub async fn member_add<I: Into<String>, P: Into<Vec<I>>>(
         &mut self,
-        peer_urls: impl Into<Vec<I>>,
+        peer_urls: P,
         is_learner: bool,
     ) -> Result<MemberAddResponse> {
         Ok(self
@@ -176,10 +172,10 @@ impl ClusterClient {
     ///  }
     ///
     #[inline]
-    pub async fn member_update<I: Into<String>>(
+    pub async fn member_update<I: Into<String>, P: Into<Vec<I>>>(
         &mut self,
         id: u64,
-        peer_urls: impl Into<Vec<I>>,
+        peer_urls: P,
     ) -> Result<MemberUpdateResponse> {
         Ok(self
             .inner

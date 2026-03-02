@@ -114,7 +114,7 @@ impl WatchOptions {
     /// `key` is the key to register for watching.
     #[inline]
     #[must_use]
-    pub fn with_key(mut self, key: impl Into<Vec<u8>>) -> Self {
+    pub fn with_key<K: Into<Vec<u8>>>(mut self, key: K) -> Self {
         self.inner.key = key.into();
         self
     }
@@ -142,7 +142,7 @@ impl WatchOptions {
     /// then all keys with the prefix (the given key) will be watched.
     #[inline]
     #[must_use]
-    pub fn with_range_end(mut self, range_end: impl Into<Vec<u8>>) -> Self {
+    pub fn with_range_end<R: Into<Vec<u8>>>(mut self, range_end: R) -> Self {
         self.range_end_options = RangeOption::RangeEnd(range_end.into());
         self
     }
@@ -166,7 +166,7 @@ impl WatchOptions {
     /// `filters` filter the events on server side before it sends back to the watcher.
     #[inline]
     #[must_use]
-    pub fn with_filters(mut self, filters: impl Into<Vec<WatchFilterType>>) -> Self {
+    pub fn with_filters<F: Into<Vec<WatchFilterType>>>(mut self, filters: F) -> Self {
         self.inner.filters = filters.into().into_iter().map(Into::into).collect();
         self
     }
@@ -235,7 +235,7 @@ impl From<WatchFilterType> for i32 {
 pub struct WatchStreaming {
     /// Inner tonic stream
     inner: tonic::Streaming<WatchResponse>,
-    /// A sender of WatchResponse, used to keep response stream alive
+    /// A sender of `WatchResponse`, used to keep response stream alive
     _sender: Sender<xlineapi::WatchRequest>,
 }
 

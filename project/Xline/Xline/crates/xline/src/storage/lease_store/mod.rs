@@ -399,6 +399,7 @@ mod test {
 
     #[tokio::test(flavor = "multi_thread")]
     #[abort_on_panic]
+    #[allow(clippy::unwrap_in_result)]
     async fn test_lease_storage() -> Result<(), Box<dyn Error>> {
         let db = DB::open(&EngineConfig::Memory)?;
         let index = Index::new();
@@ -449,6 +450,7 @@ mod test {
     }
 
     #[tokio::test(flavor = "multi_thread")]
+    #[allow(clippy::unwrap_in_result)]
     async fn test_lease_sync() -> Result<(), Box<dyn Error>> {
         let db = DB::open(&EngineConfig::Memory)?;
         let txn = db.transaction();
@@ -504,6 +506,7 @@ mod test {
 
     #[tokio::test]
     #[abort_on_panic]
+    #[allow(clippy::unwrap_in_result)]
     async fn test_recover() -> Result<(), ExecuteError> {
         let db = DB::open(&EngineConfig::Memory)?;
         let index = Index::new();

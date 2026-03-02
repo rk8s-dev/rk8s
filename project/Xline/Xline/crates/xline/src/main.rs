@@ -92,7 +92,6 @@
     clippy::shadow_unrelated,
     clippy::str_to_string,
     clippy::string_add,
-    clippy::string_to_string,
     clippy::todo,
     clippy::unimplemented,
     clippy::unnecessary_self_imports,
@@ -151,7 +150,11 @@ use xline::{
 };
 
 #[tokio::main]
-#[allow(clippy::arithmetic_side_effects, clippy::ignored_unit_patterns)] // Introduced by tokio::select!
+#[allow(
+    clippy::arithmetic_side_effects,
+    clippy::ignored_unit_patterns,
+    clippy::unwrap_in_result
+)] // Introduced by tokio::select!
 async fn main() -> Result<()> {
     global::set_text_map_propagator(TraceContextPropagator::new());
     let config = parse_config().await?;

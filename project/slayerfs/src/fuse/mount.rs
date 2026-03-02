@@ -8,6 +8,10 @@ use std::num::NonZeroU32;
 use std::path::Path;
 
 use rfuse3::MountOptions;
+#[cfg(target_os = "linux")]
+use rfuse3::raw::logfs::LoggingFileSystem;
+#[cfg(target_os = "linux")]
+use tracing::info;
 
 use crate::chuck::store::BlockStore;
 use crate::meta::MetaLayer;
@@ -28,6 +32,16 @@ fn default_mount_options() -> MountOptions {
     mo
 }
 
+#[cfg(target_os = "linux")]
+fn fuse_op_log_enabled() -> bool {
+    std::env::var("SLAYERFS_FUSE_OP_LOG")
+        .map(|value| {
+            let normalized = value.trim().to_ascii_lowercase();
+            matches!(normalized.as_str(), "1" | "true" | "yes" | "on")
+        })
+        .unwrap_or(false)
+}
+
 /// Mount a VFS instance to the given empty directory using unprivileged mode when available.
 #[cfg(target_os = "linux")]
 #[allow(dead_code)]
@@ -39,10 +53,18 @@ where
     S: BlockStore + Send + Sync + 'static,
     M: MetaLayer + Send + Sync + 'static,
 {
-    let opts = default_mount_options();
-    let session = rfuse3::raw::Session::new(opts);
+    let mount_point = mount_point.as_ref();
     // Prefer unprivileged mount on Linux (requires fusermount3 in PATH)
-    session.mount_with_unprivileged(fs, mount_point).await
+    if fuse_op_log_enabled() {
+        info!("SLAYERFS_FUSE_OP_LOG enabled, mounting with FUSE operation log wrapper");
+        rfuse3::raw::Session::new(default_mount_options())
+            .mount_with_unprivileged(LoggingFileSystem::new(fs), mount_point)
+            .await
+    } else {
+        rfuse3::raw::Session::new(default_mount_options())
+            .mount_with_unprivileged(fs, mount_point)
+            .await
+    }
 }
 
 /// Fallback stub for non-Linux targets.

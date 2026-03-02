@@ -61,7 +61,7 @@ struct Watcher {
     event_tx: mpsc::Sender<WatchEvent>,
     /// Compacted flag
     compacted: bool,
-    /// TODO: remove it when https://github.com/xline-kv/Xline/issues/491 has been closed
+    /// TODO: remove it when <https://github.com/xline-kv/Xline/issues/491> has been closed
     /// Store the revision that has been notified
     notified_set: HashSet<i64>,
 }
@@ -117,7 +117,7 @@ impl Watcher {
     fn filter_events(&self, mut events: Vec<Event>) -> Vec<Event> {
         events.retain(|event| {
             self.filters.iter().all(|filter| filter != &event.r#type)
-                && (event.kv.as_ref().map_or(false, |kv| {
+                && (event.kv.as_ref().is_some_and(|kv| {
                     kv.mod_revision >= self.start_rev
                         && !self.notified_set.contains(&kv.mod_revision)
                 }))
@@ -145,7 +145,7 @@ impl Watcher {
                 || 0 == events_len)
         {
             return Ok(());
-        };
+        }
 
         match self.event_tx.try_send(watch_event) {
             Ok(()) => {
@@ -274,7 +274,7 @@ impl WatcherMap {
                     .filter(|pair| pair.0.watch_id() != watch_id)
                     .collect();
             }
-        };
+        }
     }
 }
 
@@ -336,7 +336,7 @@ impl KvWatcherOps for KvWatcher {
                         .is_none(),
                     "can't insert a watcher to victims twice"
                 );
-            };
+            }
             return;
         }
 
@@ -363,7 +363,7 @@ impl KvWatcherOps for KvWatcher {
                     "can't insert a watcher to victims twice"
                 );
                 return;
-            };
+            }
         }
         debug!("register watcher: {:?}", watcher);
         watcher_map_w.register(watcher);
@@ -443,6 +443,7 @@ impl KvWatcher {
             let victims = kv_watcher
                 .watcher_map
                 .map_write(|mut m| m.victims.drain().collect::<Vec<_>>());
+            #[allow(clippy::mutable_key_type)]
             let mut new_victims = HashMap::new();
             for (mut watcher, res) in victims {
                 // needn't to filter updates and get prev_kv, because the watcher is already filtered before inserted into victims
@@ -474,7 +475,7 @@ impl KvWatcher {
                                 "can't insert a watcher to new_victims twice"
                             );
                             break;
-                        };
+                        }
                     }
                     debug!(
                         watch_id = watcher.watch_id(),
@@ -541,7 +542,7 @@ pub(crate) struct WatchEvent {
     events: Vec<Event>,
     /// Revision when this event is generated
     revision: i64,
-    /// Compacted WatchEvent
+    /// Compacted `WatchEvent`
     compacted: bool,
 }
 

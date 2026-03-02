@@ -101,18 +101,18 @@ impl Index {
         let mut revs = HashSet::new();
         self.inner.iter().for_each(|entry| {
             entry.value().map_read(|revisions| {
-                if let Some(revision) = revisions.first() {
-                    if revision.mod_revision < at_rev {
-                        let pivot = revisions.partition_point(|rev| rev.mod_revision <= at_rev);
-                        let compacted_last_idx = pivot.overflow_sub(1);
-                        let key_rev = revisions.get(compacted_last_idx).unwrap_or_else(|| {
-                            unreachable!(
-                                "Oops, the key revision at {compacted_last_idx} should not be None",
-                            )
-                        });
-                        if !key_rev.is_deleted() {
-                            _ = revs.insert(key_rev.as_revision());
-                        }
+                if let Some(revision) = revisions.first()
+                    && revision.mod_revision < at_rev
+                {
+                    let pivot = revisions.partition_point(|rev| rev.mod_revision <= at_rev);
+                    let compacted_last_idx = pivot.overflow_sub(1);
+                    let key_rev = revisions.get(compacted_last_idx).unwrap_or_else(|| {
+                        unreachable!(
+                            "Oops, the key revision at {compacted_last_idx} should not be None",
+                        )
+                    });
+                    if !key_rev.is_deleted() {
+                        _ = revs.insert(key_rev.as_revision());
                     }
                 }
             });
@@ -204,27 +204,27 @@ impl Index {
 
         self.inner.iter().for_each(|entry| {
             entry.value().map_write(|mut revisions| {
-                if let Some(revision) = revisions.first() {
-                    if revision.mod_revision < at_rev {
-                        let pivot = revisions.partition_point(|rev| rev.mod_revision <= at_rev);
-                        let compacted_last_idx = pivot.overflow_sub(1);
-                        // There is at least 1 element in the first partition, so the key revision at `compacted_last_idx`
-                        // must exist.
-                        let key_rev = revisions.get(compacted_last_idx).unwrap_or_else(|| {
-                            unreachable!(
-                                "Oops, the key revision at {compacted_last_idx} should not be None",
-                            )
-                        });
-                        let compact_revs = if key_rev.is_deleted() {
-                            revisions.drain(..=compacted_last_idx)
-                        } else {
-                            revisions.drain(..compacted_last_idx)
-                        };
-                        revs.extend(compact_revs);
+                if let Some(revision) = revisions.first()
+                    && revision.mod_revision < at_rev
+                {
+                    let pivot = revisions.partition_point(|rev| rev.mod_revision <= at_rev);
+                    let compacted_last_idx = pivot.overflow_sub(1);
+                    // There is at least 1 element in the first partition, so the key revision at `compacted_last_idx`
+                    // must exist.
+                    let key_rev = revisions.get(compacted_last_idx).unwrap_or_else(|| {
+                        unreachable!(
+                            "Oops, the key revision at {compacted_last_idx} should not be None",
+                        )
+                    });
+                    let compact_revs = if key_rev.is_deleted() {
+                        revisions.drain(..=compacted_last_idx)
+                    } else {
+                        revisions.drain(..compacted_last_idx)
+                    };
+                    revs.extend(compact_revs);
 
-                        if revisions.is_empty() {
-                            del_keys.push(entry.key().clone());
-                        }
+                    if revisions.is_empty() {
+                        del_keys.push(entry.key().clone());
                     }
                 }
             });

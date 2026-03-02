@@ -21,6 +21,7 @@ pub(crate) mod buffer_pool;
 mod connection;
 mod filesystem;
 pub mod flags;
+pub mod logfs;
 mod object_safe_filesystem;
 pub mod reply;
 mod request;

@@ -8,7 +8,12 @@ use std::{
 use clippy_utilities::NumericCast;
 
 /// Bits of usize
-const USIZE_BITS: usize = size_of::<usize>() * 8;
+const USIZE_BITS: usize = {
+    #[allow(clippy::as_conversions)]
+    {
+        usize::BITS as usize
+    }
+};
 
 /// Default bit vec queue capacity, this is the number of inflight requests that a client expects.
 const DEFAULT_BIT_VEC_QUEUE_CAP: usize = 1024;
@@ -196,12 +201,13 @@ pub(super) struct Tracker {
     /// inflight seq nums proposed by the client, each bit
     /// represent the received status starting from `first_incomplete`.
     /// `BitVecQueue` has a better memory compression ratio than `HashSet`
-    /// if the requested seq_num is very compact.
+    /// if the requested `seq_num` is very compact.
     inflight: BitVecQueue,
 }
 
 impl Tracker {
     /// Record a sequence number, return whether it is duplicated
+    #[allow(clippy::arithmetic_side_effects)]
     pub(crate) fn record(&mut self, seq_num: u64) -> bool {
         if self.only_record(seq_num) {
             return true;
@@ -220,6 +226,7 @@ impl Tracker {
     }
 
     /// Like `record`, but not advance the `first_incomplete`
+    #[allow(clippy::arithmetic_side_effects)]
     pub(crate) fn only_record(&mut self, seq_num: u64) -> bool {
         if seq_num < self.first_incomplete {
             return true;
@@ -246,6 +253,7 @@ impl Tracker {
     }
 
     /// Advance `first_incomplete` without a check, return if it advanced
+    #[allow(clippy::arithmetic_side_effects)]
     pub(crate) fn must_advance_to(&mut self, first_incomplete: u64) -> bool {
         if self.first_incomplete >= first_incomplete {
             return false;

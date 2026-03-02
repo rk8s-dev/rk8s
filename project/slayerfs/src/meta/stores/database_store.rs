@@ -6,6 +6,7 @@ use super::{TrimAction, apply_truncate_plan, trim_action};
 use crate::chuck::SliceDesc;
 use crate::meta::client::session::{Session, SessionInfo};
 use crate::meta::config::{Config, DatabaseType};
+use crate::meta::entities::counter_meta;
 use crate::meta::entities::link_parent_meta;
 use crate::meta::entities::session_meta::{self, Entity as SessionMeta};
 use crate::meta::entities::slice_meta::{self, Entity as SliceMeta};
@@ -37,7 +38,6 @@ use std::collections::HashMap;
 use std::hash::Hash;
 use std::path::Path;
 use std::sync::OnceLock;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 use tokio::select;
 use tokio_util::sync::CancellationToken;
@@ -54,8 +54,6 @@ pub struct DatabaseMetaStore {
     db: DatabaseConnection,
     sid: OnceLock<Uuid>,
     _config: Config,
-    next_inode: AtomicU64,
-    next_slice: AtomicU64,
 }
 
 impl DatabaseMetaStore {
@@ -72,15 +70,12 @@ impl DatabaseMetaStore {
         let db = Self::create_connection(&_config).await?;
         Self::init_schema(&db).await?;
 
-        let next_inode = AtomicU64::new(Self::init_next_inode(&db).await?);
-        let next_slice = AtomicU64::new(Self::init_next_slice(&db).await?);
         let store = Self {
             db,
             sid: OnceLock::new(),
             _config,
-            next_inode,
-            next_slice,
         };
+        store.init_counters().await?;
         store.init_root_directory().await?;
 
         info!("DatabaseMetaStore initialized successfully");
@@ -95,15 +90,12 @@ impl DatabaseMetaStore {
         let db = Self::create_connection(&_config).await?;
         Self::init_schema(&db).await?;
 
-        let next_inode = AtomicU64::new(Self::init_next_inode(&db).await?);
-        let next_slice = AtomicU64::new(Self::init_next_slice(&db).await?);
         let store = Self {
             db,
             sid: OnceLock::new(),
             _config,
-            next_inode,
-            next_slice,
         };
+        store.init_counters().await?;
         store.init_root_directory().await?;
 
         info!("DatabaseMetaStore initialized successfully");
@@ -144,6 +136,98 @@ impl DatabaseMetaStore {
             .unwrap_or(0);
 
         Ok(max_slice + 1)
+    }
+
+    async fn init_counters(&self) -> Result<(), MetaError> {
+        let next_inode = i64::try_from(Self::init_next_inode(&self.db).await?)
+            .map_err(|_| MetaError::Internal("inode counter overflow".to_string()))?;
+        let next_slice = i64::try_from(Self::init_next_slice(&self.db).await?)
+            .map_err(|_| MetaError::Internal("slice counter overflow".to_string()))?;
+
+        Self::set_counter_floor(&self.db, INODE_ID_KEY, next_inode).await?;
+        Self::set_counter_floor(&self.db, SLICE_ID_KEY, next_slice).await?;
+        Ok(())
+    }
+
+    fn is_unique_violation(err: &sea_orm::DbErr) -> bool {
+        let msg = err.to_string().to_lowercase();
+        msg.contains("duplicate") || msg.contains("unique")
+    }
+
+    async fn set_counter_floor(
+        db: &DatabaseConnection,
+        key: &str,
+        floor: i64,
+    ) -> Result<(), MetaError> {
+        loop {
+            let existing = CounterMeta::find_by_id(key.to_string())
+                .one(db)
+                .await
+                .map_err(MetaError::Database)?;
+
+            match existing {
+                Some(model) if model.value >= floor => return Ok(()),
+                Some(_) => {
+                    let updated = CounterMeta::update_many()
+                        .col_expr(counter_meta::Column::Value, sea_query::Expr::value(floor))
+                        .filter(counter_meta::Column::Name.eq(key))
+                        .filter(counter_meta::Column::Value.lt(floor))
+                        .exec(db)
+                        .await
+                        .map_err(MetaError::Database)?;
+                    if updated.rows_affected > 0 {
+                        return Ok(());
+                    }
+                }
+                None => {
+                    let row = counter_meta::ActiveModel {
+                        name: Set(key.to_string()),
+                        value: Set(floor),
+                    };
+                    match row.insert(db).await {
+                        Ok(_) => return Ok(()),
+                        Err(err) if Self::is_unique_violation(&err) => continue,
+                        Err(err) => return Err(MetaError::Database(err)),
+                    }
+                }
+            }
+        }
+    }
+
+    async fn alloc_counter_id(&self, key: &str) -> Result<i64, MetaError> {
+        const MAX_RETRIES: usize = 64;
+
+        for _ in 0..MAX_RETRIES {
+            let Some(row) = CounterMeta::find_by_id(key.to_string())
+                .one(&self.db)
+                .await
+                .map_err(MetaError::Database)?
+            else {
+                Self::set_counter_floor(&self.db, key, 1).await?;
+                continue;
+            };
+
+            let next = row
+                .value
+                .checked_add(1)
+                .ok_or_else(|| MetaError::Internal(format!("counter overflow for key {key}")))?;
+
+            let updated = CounterMeta::update_many()
+                .col_expr(counter_meta::Column::Value, sea_query::Expr::value(next))
+                .filter(counter_meta::Column::Name.eq(key))
+                .filter(counter_meta::Column::Value.eq(row.value))
+                .exec(&self.db)
+                .await
+                .map_err(MetaError::Database)?;
+
+            if updated.rows_affected == 1 {
+                return Ok(row.value);
+            }
+        }
+
+        Err(MetaError::Internal(format!(
+            "failed to allocate counter value for key {key}: contention limit exceeded"
+        )))
     }
 
     /// Create database connection
@@ -199,6 +283,10 @@ impl DatabaseMetaStore {
         let schema = Schema::new(builder);
 
         let stmts = [
+            schema
+                .create_table_from_entity(CounterMeta)
+                .if_not_exists()
+                .to_owned(),
             schema
                 .create_table_from_entity(AccessMeta)
                 .if_not_exists()
@@ -347,6 +435,8 @@ impl DatabaseMetaStore {
 
     /// Create a new directory
     async fn create_directory(&self, parent_inode: i64, name: String) -> Result<i64, MetaError> {
+        let inode = self.alloc_counter_id(INODE_ID_KEY).await?;
+
         // Start transaction
         let txn = self.db.begin().await.map_err(MetaError::Database)?;
 
@@ -376,8 +466,6 @@ impl DatabaseMetaStore {
                 name,
             });
         }
-
-        let inode = self.generate_id();
 
         let now = Utc::now().timestamp_nanos_opt().unwrap_or(0);
 
@@ -448,6 +536,8 @@ impl DatabaseMetaStore {
         parent_inode: i64,
         name: String,
     ) -> Result<i64, MetaError> {
+        let inode = self.alloc_counter_id(INODE_ID_KEY).await?;
+
         // Start transaction
         let txn = self.db.begin().await.map_err(MetaError::Database)?;
 
@@ -477,8 +567,6 @@ impl DatabaseMetaStore {
                 name,
             });
         }
-
-        let inode = self.generate_id();
 
         let now = Utc::now().timestamp_nanos_opt().unwrap_or(0);
 
@@ -540,12 +628,6 @@ impl DatabaseMetaStore {
         txn.commit().await.map_err(MetaError::Database)?;
 
         Ok(inode)
-    }
-
-    /// Generate unique ID using atomic counter
-    fn generate_id(&self) -> i64 {
-        let id = self.next_inode.fetch_add(1, Ordering::SeqCst);
-        id as i64
     }
 
     fn now_nanos() -> i64 {
@@ -1447,6 +1529,7 @@ impl MetaStore for DatabaseMetaStore {
         name: &str,
         target: &str,
     ) -> Result<(i64, FileAttr), MetaError> {
+        let inode = self.alloc_counter_id(INODE_ID_KEY).await?;
         let txn = self.db.begin().await.map_err(MetaError::Database)?;
 
         let parent_dir = AccessMeta::find_by_id(parent)
@@ -1476,7 +1559,6 @@ impl MetaStore for DatabaseMetaStore {
         }
 
         let now = Self::now_nanos();
-        let inode = self.generate_id();
         let owner_uid = parent_dir.permission().uid;
         let owner_gid = parent_dir.permission().gid;
         let perm = Permission::new(0o120777, owner_uid, owner_gid);
@@ -2524,8 +2606,7 @@ impl MetaStore for DatabaseMetaStore {
     #[tracing::instrument(level = "trace", skip(self), fields(key))]
     async fn next_id(&self, key: &str) -> Result<i64, MetaError> {
         match key {
-            SLICE_ID_KEY => Ok(self.next_slice.fetch_add(1, Ordering::SeqCst) as i64),
-            INODE_ID_KEY => Ok(self.next_inode.fetch_add(1, Ordering::SeqCst) as i64),
+            SLICE_ID_KEY | INODE_ID_KEY => self.alloc_counter_id(key).await,
             other => Err(MetaError::NotSupported(format!(
                 "next_id not supported for key {other}"
             ))),
@@ -2776,6 +2857,18 @@ mod tests {
         }
     }
 
+    fn file_db_config(path: &std::path::Path) -> Config {
+        Config {
+            database: DatabaseConfig {
+                db_config: DatabaseType::Sqlite {
+                    url: format!("sqlite://{}?mode=rwc", path.display()),
+                },
+            },
+            cache: CacheConfig::default(),
+            client: ClientOptions::default(),
+        }
+    }
+
     /// Configuration for shared database testing (multi-session)
     fn shared_db_config() -> Config {
         Config {
@@ -2800,6 +2893,34 @@ mod tests {
         let store = new_test_store().await;
         store.set_sid(session_id).expect("Failed to set session ID");
         store
+    }
+
+    #[tokio::test]
+    async fn test_next_id_unique_across_store_instances() {
+        let temp_dir = tempfile::tempdir().expect("tempdir");
+        let db_path = temp_dir.path().join("counter-unique.db");
+        let config = file_db_config(&db_path);
+
+        let store1 = DatabaseMetaStore::from_config(config.clone())
+            .await
+            .expect("create store1");
+        let store2 = DatabaseMetaStore::from_config(config)
+            .await
+            .expect("create store2");
+
+        let parent = store1.root_ino();
+        let ino1 = store1
+            .create_file(parent, "counter_a".to_string())
+            .await
+            .expect("create file on store1");
+        let ino2 = store2
+            .create_file(parent, "counter_b".to_string())
+            .await
+            .expect("create file on store2");
+
+        assert_ne!(ino1, ino2, "inode ids must be unique across stores");
+        assert!(ino1 > 1);
+        assert!(ino2 > 1);
     }
 
     /// Helper struct to manage multiple test sessions

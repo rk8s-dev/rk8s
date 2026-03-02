@@ -2,19 +2,17 @@ use std::sync::Arc;
 
 use async_stream::stream;
 use clippy_utilities::OverflowArithmetic;
-#[cfg(not(madsim))]
-use tonic::transport::ClientTlsConfig;
-use tonic::transport::{Channel, Endpoint};
+use tonic::Status;
+use tonic::transport::{Channel, ClientTlsConfig, Endpoint};
 use tracing::debug;
-#[cfg(madsim)]
-use utils::ClientTlsConfig;
 use utils::build_endpoint;
 use xlineapi::{
     AuthInfo, EventType,
     command::{Command, CommandResponse, CurpClient, KeyRange, SyncResponse},
     execute_error::ExecuteError,
 };
-
+// TODO: use our own status type
+// use xlinerpc::status::Status;
 use crate::{
     id_gen::IdGenerator,
     rpc::{
@@ -71,7 +69,7 @@ impl LockServer {
         &self,
         request: T,
         auth_info: Option<AuthInfo>,
-    ) -> Result<(CommandResponse, Option<SyncResponse>), tonic::Status>
+    ) -> Result<(CommandResponse, Option<SyncResponse>), Status>
     where
         T: Into<RequestWrapper>,
     {
@@ -131,7 +129,7 @@ impl LockServer {
         pfx: String,
         my_rev: i64,
         auth_info: Option<&AuthInfo>,
-    ) -> Result<(), tonic::Status> {
+    ) -> Result<(), Status> {
         let rev = my_rev.overflow_sub(1);
         let mut watch_client =
             WatchClient::new(Channel::balance_list(self.addrs.clone().into_iter()));
@@ -180,7 +178,7 @@ impl LockServer {
         &self,
         key: &[u8],
         auth_info: Option<AuthInfo>,
-    ) -> Result<Option<ResponseHeader>, tonic::Status> {
+    ) -> Result<Option<ResponseHeader>, Status> {
         let del_req = DeleteRangeRequest {
             key: key.into(),
             ..Default::default()
@@ -191,7 +189,7 @@ impl LockServer {
     }
 
     /// Lease grant
-    async fn lease_grant(&self, auth_info: Option<AuthInfo>) -> Result<i64, tonic::Status> {
+    async fn lease_grant(&self, auth_info: Option<AuthInfo>) -> Result<i64, Status> {
         let lease_id = self.id_gen.next();
         let lease_grant_req = LeaseGrantRequest {
             ttl: DEFAULT_SESSION_TTL,
@@ -214,7 +212,7 @@ impl Lock for LockServer {
     async fn lock(
         &self,
         request: tonic::Request<LockRequest>,
-    ) -> Result<tonic::Response<LockResponse>, tonic::Status> {
+    ) -> Result<tonic::Response<LockResponse>, Status> {
         debug!("Receive LockRequest {:?}", request);
         let auth_info = self.auth_store.try_get_auth_info_from_request(&request)?;
         let lock_req = request.into_inner();
@@ -247,8 +245,8 @@ impl Lock for LockServer {
 
         let owner_key = owner_res.kvs;
         let header = if owner_key
-            .get(0)
-            .map_or(false, |kv| kv.create_revision == my_rev)
+            .first()
+            .is_some_and(|kv| kv.create_revision == my_rev)
         {
             owner_res.header
         } else {
@@ -288,7 +286,7 @@ impl Lock for LockServer {
     async fn unlock(
         &self,
         request: tonic::Request<UnlockRequest>,
-    ) -> Result<tonic::Response<UnlockResponse>, tonic::Status> {
+    ) -> Result<tonic::Response<UnlockResponse>, Status> {
         debug!("Receive UnlockRequest {:?}", request);
         let auth_info = self.auth_store.try_get_auth_info_from_request(&request)?;
         let header = self.delete_key(&request.get_ref().key, auth_info).await?;

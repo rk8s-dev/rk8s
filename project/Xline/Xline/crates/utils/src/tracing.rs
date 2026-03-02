@@ -2,11 +2,14 @@ use opentelemetry::{
     global,
     propagation::{Extractor, Injector},
 };
+use tonic::metadata::MetadataMap;
 use tracing::Span;
 use tracing_opentelemetry::OpenTelemetrySpanExt;
+// TODO: use our own MetaData.
+// use xlinerpc::MetaData as MetaDataMap;
 
 /// Struct for extract data from `MetadataMap`
-struct ExtractMap<'a>(&'a tonic::metadata::MetadataMap);
+struct ExtractMap<'a>(&'a MetadataMap);
 
 impl Extractor for ExtractMap<'_> {
     /// Get a value for a key from the `MetadataMap`.  If the value can't be converted to &str, returns None
@@ -32,7 +35,7 @@ pub trait Extract {
     fn extract_span(&self);
 }
 
-impl Extract for tonic::metadata::MetadataMap {
+impl Extract for MetadataMap {
     #[inline]
     fn extract_span(&self) {
         let parent_ctx = global::get_text_map_propagator(|prop| prop.extract(&ExtractMap(self)));
@@ -42,15 +45,15 @@ impl Extract for tonic::metadata::MetadataMap {
 }
 
 /// Struct for inject data to `MetadataMap`
-struct InjectMap<'a>(&'a mut tonic::metadata::MetadataMap);
+struct InjectMap<'a>(&'a mut MetadataMap);
 
 impl Injector for InjectMap<'_> {
     /// Set a key and value in the `MetadataMap`.  Does nothing if the key or value are not valid inputs
     fn set(&mut self, key: &str, value: String) {
-        if let Ok(key) = tonic::metadata::MetadataKey::from_bytes(key.as_bytes()) {
-            if let Ok(val) = tonic::metadata::MetadataValue::try_from(&value) {
-                let _option = self.0.insert(key, val);
-            }
+        if let Ok(key) = tonic::metadata::MetadataKey::from_bytes(key.as_bytes())
+            && let Ok(val) = tonic::metadata::MetadataValue::try_from(&value)
+        {
+            let _option = self.0.insert(key, val);
         }
     }
 }
@@ -68,7 +71,7 @@ pub trait Inject {
     }
 }
 
-impl Inject for tonic::metadata::MetadataMap {
+impl Inject for MetadataMap {
     #[inline]
     fn inject_span(&mut self, span: &Span) {
         let ctx = span.context();
@@ -91,6 +94,7 @@ mod test {
 
     use super::*;
     #[tokio::test(flavor = "multi_thread")]
+    #[allow(clippy::unwrap_in_result)]
     async fn test_inject_and_extract() -> Result<(), Box<dyn std::error::Error>> {
         init()?;
         global::set_text_map_propagator(TraceContextPropagator::new());

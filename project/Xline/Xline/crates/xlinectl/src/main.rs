@@ -92,7 +92,6 @@
     clippy::shadow_unrelated,
     clippy::str_to_string,
     clippy::string_add,
-    clippy::string_to_string,
     clippy::todo,
     clippy::unimplemented,
     clippy::unnecessary_self_imports,
@@ -263,6 +262,7 @@ fn cli() -> Command {
 }
 
 #[tokio::main]
+#[allow(clippy::unwrap_in_result)] // Required clap arguments
 async fn main() -> Result<()> {
     let matches = cli().get_matches();
     let user_opt = parse_user(&matches)?;

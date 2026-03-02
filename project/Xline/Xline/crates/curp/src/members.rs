@@ -11,11 +11,8 @@ use std::{
 use dashmap::{DashMap, mapref::one::Ref};
 use futures::{StreamExt, stream::FuturesUnordered};
 use itertools::Itertools;
-#[cfg(not(madsim))]
 use tonic::transport::ClientTlsConfig;
 use tracing::{debug, info};
-#[cfg(madsim)]
-use utils::ClientTlsConfig;
 
 use crate::rpc::{self, FetchClusterRequest, FetchClusterResponse, Member};
 
@@ -26,18 +23,19 @@ pub type ServerId = u64;
 impl Member {
     /// Create a new `Member`
     #[inline]
+    #[must_use]
     pub fn new(
         id: ServerId,
-        name: impl Into<String>,
-        peer_urls: impl Into<Vec<String>>,
-        client_urls: impl Into<Vec<String>>,
+        name: String,
+        peer_urls: Vec<String>,
+        client_urls: Vec<String>,
         is_learner: bool,
     ) -> Self {
         Self {
             id,
-            name: name.into(),
-            peer_urls: peer_urls.into(),
-            client_urls: client_urls.into(),
+            name,
+            peer_urls,
+            client_urls,
             is_learner,
         }
     }
@@ -106,18 +104,17 @@ impl ClusterInfo {
     #[must_use]
     pub fn from_members_map(
         all_members_peer_urls: HashMap<String, Vec<String>>,
-        self_client_urls: impl Into<Vec<String>>,
+        self_client_urls: &[String],
         self_name: &str,
     ) -> Self {
         let mut member_id = 0;
-        let self_client_urls = self_client_urls.into();
         let members = DashMap::new();
         for (name, peer_urls) in all_members_peer_urls {
             let id = Self::calculate_member_id(peer_urls.clone(), "", None);
-            let mut member = Member::new(id, name.clone(), peer_urls, [], false);
+            let mut member = Member::new(id, name.clone(), peer_urls, Vec::new(), false);
             if name == self_name {
                 member_id = id;
-                member.client_urls = self_client_urls.clone();
+                member.client_urls = self_client_urls.to_vec();
             }
             let _ig = members.insert(id, member);
         }
@@ -158,7 +155,7 @@ impl ClusterInfo {
                     .eq(sorted_self_addr.clone())
                 {
                     member_id = member.id;
-                    member.name = self_name.to_owned();
+                    self_name.clone_into(&mut member.name);
                     member.client_urls = self_client_urls.to_vec();
                 }
                 (member.id, member)
@@ -213,8 +210,8 @@ impl ClusterInfo {
 
     /// Update a member and return old addrs
     #[inline]
-    pub fn update(&self, id: &ServerId, addrs: impl Into<Vec<String>>) -> Vec<String> {
-        let mut addrs = addrs.into();
+    #[must_use]
+    pub fn update(&self, id: &ServerId, mut addrs: Vec<String>) -> Vec<String> {
         let mut member = self
             .members
             .get_mut(id)
@@ -456,7 +453,7 @@ pub async fn get_cluster_info_from_remote(
         if let Ok(cluster_res) = result {
             info!("get cluster info from remote success: {:?}", cluster_res);
             return Some(ClusterInfo::from_cluster(
-                cluster_res.into_inner(),
+                cluster_res,
                 self_peer_urls,
                 self_client_urls.as_slice(),
                 self_name,
@@ -478,9 +475,9 @@ mod tests {
             ("S3".to_owned(), vec!["S3".to_owned()]),
         ]);
 
-        let node1 = ClusterInfo::from_members_map(all_members.clone(), [], "S1");
-        let node2 = ClusterInfo::from_members_map(all_members.clone(), [], "S2");
-        let node3 = ClusterInfo::from_members_map(all_members, [], "S3");
+        let node1 = ClusterInfo::from_members_map(all_members.clone(), &[], "S1");
+        let node2 = ClusterInfo::from_members_map(all_members.clone(), &[], "S2");
+        let node3 = ClusterInfo::from_members_map(all_members, &[], "S3");
 
         assert_ne!(node1.self_id(), node2.self_id());
         assert_ne!(node1.self_id(), node3.self_id());
@@ -498,7 +495,7 @@ mod tests {
             ("S3".to_owned(), vec!["S3".to_owned()]),
         ]);
 
-        let node1 = ClusterInfo::from_members_map(all_members, [], "S1");
+        let node1 = ClusterInfo::from_members_map(all_members, &[], "S1");
         let peers = node1.peers_addrs();
         let node1_id = node1.self_id();
         let node1_url = node1.self_peer_urls();

@@ -12,7 +12,7 @@ impl PkiBackend {
         let backend = self.inner.clone();
 
         let mut path = Path::builder()
-            .pattern(r"root/generate/(?P<exported>.+)")
+            .pattern(r"root/tls/generate/(?P<exported>.+)")
             .operation(Operation::Write, {
                 let handler = backend.clone();
                 move |backend, req| {
@@ -34,7 +34,7 @@ impl PkiBackend {
         let backend = self.inner.clone();
 
         Path::builder()
-            .pattern(r"root")
+            .pattern(r"root/tls")
             .operation(Operation::Delete, {
                 let handler = backend.clone();
                 move |backend, req| {

@@ -1,6 +1,7 @@
 pub mod libfuse;
 pub mod linux;
 
+use crate::config::image::CONFIG;
 use anyhow::{Context, Result, bail};
 use base64::{Engine, engine::general_purpose};
 use clap::Parser;
@@ -12,8 +13,6 @@ use std::fs;
 use std::os::fd::AsFd;
 use std::path::{Path, PathBuf};
 
-use crate::config::image::CONFIG;
-
 pub static DNS_CONFIG: &str = "/etc/resolv.conf";
 pub static BIND_MOUNTS: [&str; 3] = ["/dev", "/proc", "/sys"];
 
@@ -23,6 +22,9 @@ pub struct MountArgs {
     config_base64: String,
     #[arg(long)]
     libfuse: bool,
+    /// Container runtime daemon mode: do not unshare mount namespace, control lifecycle via IPC messages (SIGTERM as fallback)
+    #[arg(long)]
+    daemon: bool,
 }
 
 pub fn do_mount(args: MountArgs) -> Result<()> {
@@ -47,11 +49,209 @@ pub fn do_mount(args: MountArgs) -> Result<()> {
         .send(tx)
         .context("Failed to send IPC sender to parent")?;
 
-    if args.libfuse {
+    if args.daemon {
+        daemon_mount(&cfg, child_tx, rx, args.libfuse)
+    } else if args.libfuse {
         libfuse::do_mount(&cfg, child_tx, rx)
     } else {
         linux::do_mount(&cfg, child_tx, rx)
     }
+}
+
+/// Daemon mode mount: do not unshare mount namespace, control lifecycle via IPC messages.
+/// The mount point is visible in the host namespace, ready for youki to use directly.
+///
+/// Lifecycle management strategy:
+/// - Normal exit: Parent process sends "exit" message via IPC, daemon unmounts gracefully upon receipt
+/// - Abnormal exit: Parent process crashes causing IPC disconnect, daemon detects it, attempts to unmount and exits
+/// - Fallback: Parent process can terminate daemon via SIGTERM signal (caught by tokio signal handler
+///   to ensure unmount before exit, rather than direct _exit causing resource leaks)
+fn daemon_mount(
+    cfg: &MountConfig,
+    tx: IpcSender<String>,
+    rx: IpcReceiver<String>,
+    use_libfuse: bool,
+) -> Result<()> {
+    check_mountpoint(cfg)?;
+
+    // setsid detaches from terminal, becoming the leader of a new session
+    nix::unistd::setsid().ok(); // ignore error (might already be session leader)
+
+    if use_libfuse {
+        daemon_mount_libfuse(cfg, tx, rx)
+    } else {
+        daemon_mount_native(cfg, tx, rx)
+    }
+}
+
+/// Mount overlayfs using libfuse in daemon mode.
+///
+/// Listens to three events simultaneously via tokio::select!:
+/// 1. FUSE mount handle completion/error
+/// 2. IPC receives explicit "exit" message (normal shutdown via `RootfsMount::stop()`)
+/// 3. SIGTERM signal (fallback shutdown path, used by `delete_container` after `RootfsMount::load()`)
+///
+/// IMPORTANT: IPC disconnect (parent process exiting) does NOT trigger unmount.
+/// The parent process (`rkforge run`) exits after starting the container, which drops
+/// the `IpcSender` and disconnects IPC. The daemon must keep serving the FUSE mount
+/// so the container can continue running. Cleanup happens via SIGTERM during container delete.
+fn daemon_mount_libfuse(
+    cfg: &MountConfig,
+    tx: IpcSender<String>,
+    rx: IpcReceiver<String>,
+) -> Result<()> {
+    use libfuse_fs::overlayfs::OverlayArgs;
+    use std::sync::Arc;
+
+    let mut lowerdir = cfg.lower_dir.clone();
+    lowerdir.reverse();
+
+    crate::rt::block_on(async {
+        let mut mount_handle = libfuse_fs::overlayfs::mount_fs(OverlayArgs {
+            lowerdir: &lowerdir,
+            upperdir: &cfg.upper_dir,
+            mountpoint: &cfg.mountpoint,
+            privileged: CONFIG.is_root,
+            mapping: None::<&str>,
+            name: None::<String>,
+            allow_other: true,
+        })
+        .await;
+
+        tx.send("ready".to_string())
+            .context("Failed to send ready message to parent")?;
+
+        let handle = &mut mount_handle;
+
+        // Register SIGTERM signal listener (tokio async signal handling, safe and composable)
+        let mut sigterm = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+            .context("Failed to register SIGTERM handler")?;
+
+        // Decouple IPC "exit" message from IPC disconnect using Notify.
+        // Only an explicit "exit" message triggers unmount; IPC disconnect (parent process
+        // exiting normally) is expected and the daemon continues serving.
+        let exit_notify = Arc::new(tokio::sync::Notify::new());
+        let notify_clone = exit_notify.clone();
+        tokio::task::spawn_blocking(move || match rx.recv() {
+            Ok(line) if line.trim() == "exit" => {
+                notify_clone.notify_one();
+            }
+            Ok(line) => {
+                tracing::error!("Unknown IPC message from parent: {line}");
+            }
+            Err(e) => {
+                // IPC disconnected: parent process exited normally after starting the container.
+                // Do NOT trigger unmount — the container is still running and needs the FUSE mount.
+                // The daemon will be cleaned up via SIGTERM during container delete.
+                tracing::info!(
+                    "IPC disconnected: {e}, parent exited. Continuing to serve overlay mount."
+                );
+            }
+        });
+
+        tokio::select! {
+            res = handle => {
+                res?;
+                Ok(())
+            },
+            _ = exit_notify.notified() => {
+                tracing::info!("Received 'exit' via IPC, unmounting libfuse overlay");
+                mount_handle.unmount().await?;
+                Ok(())
+            },
+            _ = sigterm.recv() => {
+                tracing::info!("Received SIGTERM, unmounting libfuse overlay");
+                mount_handle.unmount().await?;
+                Ok(())
+            }
+        }
+    })?
+}
+
+/// Mount Linux native overlayfs in daemon mode.
+///
+/// Native overlay is a kernel mount, the mount point persists even if the daemon process exits,
+/// but it should still be gracefully unmounted to avoid leftovers. Listens to both
+/// IPC explicit "exit" message and SIGTERM signal via tokio::select!.
+///
+/// IMPORTANT: IPC disconnect (parent process exiting) does NOT trigger unmount.
+/// See `daemon_mount_libfuse` for rationale.
+fn daemon_mount_native(
+    cfg: &MountConfig,
+    tx: IpcSender<String>,
+    rx: IpcReceiver<String>,
+) -> Result<()> {
+    use nix::mount::{MntFlags, MsFlags, mount, umount2};
+    use std::os::unix::ffi::OsStrExt;
+    use std::sync::Arc;
+
+    let lower_dirs_bytes: Vec<&[u8]> = cfg
+        .lower_dir
+        .iter()
+        .rev()
+        .map(|p| p.as_os_str().as_bytes())
+        .collect();
+    let lower_dir_option = lower_dirs_bytes.join(&b':');
+    let mut options = Vec::new();
+    options.extend_from_slice(b"lowerdir=");
+    options.extend_from_slice(&lower_dir_option);
+    options.extend_from_slice(b",upperdir=");
+    options.extend_from_slice(cfg.upper_dir.as_os_str().as_bytes());
+    options.extend_from_slice(b",workdir=");
+    options.extend_from_slice(cfg.work_dir.as_os_str().as_bytes());
+
+    mount(
+        Some("overlay".as_bytes()),
+        &cfg.mountpoint,
+        Some("overlay".as_bytes()),
+        MsFlags::empty(),
+        Some(&options[..]),
+    )
+    .context("Failed to mount native overlayfs")?;
+
+    tx.send("ready".to_string())
+        .context("Failed to send ready message to parent")?;
+
+    let mountpoint = cfg.mountpoint.clone();
+
+    // Decouple IPC "exit" message from IPC disconnect using Notify.
+    // Only an explicit "exit" message triggers unmount; IPC disconnect is expected.
+    let exit_notify = Arc::new(tokio::sync::Notify::new());
+    let notify_clone = exit_notify.clone();
+    // Spawn IPC listener in a background thread (must be outside the async block
+    // so that `rx` is moved into the thread, not into the async context)
+    std::thread::spawn(move || match rx.recv() {
+        Ok(line) if line.trim() == "exit" => {
+            notify_clone.notify_one();
+        }
+        Ok(line) => {
+            tracing::error!("Unknown IPC message from parent: {line}");
+        }
+        Err(e) => {
+            tracing::info!(
+                "IPC disconnected: {e}, parent exited. Continuing to serve overlay mount."
+            );
+        }
+    });
+
+    // Use tokio runtime to wait for exit_notify or SIGTERM signal
+    crate::rt::block_on(async move {
+        let mut sigterm = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+            .context("Failed to register SIGTERM handler")?;
+
+        tokio::select! {
+            _ = exit_notify.notified() => {
+                tracing::info!("Received 'exit' via IPC, unmounting native overlayfs");
+                umount2(&mountpoint, MntFlags::MNT_DETACH)
+                    .context("Failed to unmount native overlayfs")?;
+            },
+            _ = sigterm.recv() => {
+                tracing::info!("Received SIGTERM, unmounting native overlayfs");
+                let _ = umount2(&mountpoint, MntFlags::MNT_DETACH);
+            }
+        }
+        Ok(())
+    })?
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -64,7 +264,7 @@ pub struct MountConfig {
     ///
     /// When the struct is being dropped, remove this directory.
     pub overlay: PathBuf,
-    upper_cnt: i32,
+    pub(crate) upper_cnt: i32,
     pub libfuse: bool,
 }
 
@@ -439,22 +639,25 @@ mod tests {
 
     #[test]
     fn test_mount_config() {
-        let tmp_dir = tempdir().unwrap();
-        let tmp_path = tmp_dir.path().to_path_buf();
+        let overlay_tmp = tempdir().unwrap();
+        let lower_tmp = tempdir().unwrap();
+        let tmp_path = overlay_tmp.path().to_path_buf();
 
         let mut cfg = MountConfig::new(tmp_path, false);
+        cfg.lower_dir.push(lower_tmp.path().to_path_buf());
         cfg.init().unwrap();
-        assert_eq!(cfg.lower_dir.len(), 0);
+        assert_eq!(cfg.lower_dir.len(), 1);
 
         cfg.prepare().unwrap();
-        assert_eq!(cfg.lower_dir.len(), 0);
+        assert_eq!(cfg.lower_dir.len(), 1);
         assert!(cfg.upper_dir.exists());
         assert!(cfg.mountpoint.exists());
         assert!(cfg.work_dir.exists());
 
         cfg.finish().unwrap();
-        assert_eq!(cfg.lower_dir.len(), 1);
+        assert_eq!(cfg.lower_dir.len(), 2);
         assert!(cfg.lower_dir[0].exists());
+        assert!(cfg.lower_dir[1].exists());
         assert!(cfg.upper_dir.exists());
         assert!(cfg.mountpoint.exists());
         assert!(cfg.work_dir.exists());

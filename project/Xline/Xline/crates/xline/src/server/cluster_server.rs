@@ -9,6 +9,8 @@ use curp::{
 };
 use itertools::Itertools;
 use tonic::{Request, Response, Status};
+// TODO: use our own status type
+// use xlinerpc::status::Status;
 use utils::timestamp;
 use xlineapi::{
     Cluster, Member, MemberAddRequest, MemberAddResponse, MemberListRequest, MemberListResponse,

@@ -91,17 +91,13 @@ impl FieldTrait for Value {
     }
 
     fn is_comma_string_slice(&self) -> bool {
-        let arr = self.as_array();
-        if arr.is_some() {
-            let arr_val = arr.unwrap();
+        if let Some(arr_val) = self.as_array() {
             for item in arr_val.iter() {
-                let item_val = item.as_str();
-                if item_val.is_some() {
+                if item.as_str().is_some() {
                     continue;
                 }
 
-                let item_val = item.as_i64();
-                if item_val.is_some() {
+                if item.as_i64().is_some() {
                     continue;
                 }
 
@@ -111,13 +107,11 @@ impl FieldTrait for Value {
             return true;
         }
 
-        let value = self.as_i64();
-        if value.is_some() {
+        if self.as_i64().is_some() {
             return true;
         }
 
-        let value = self.as_str();
-        if value.is_some() {
+        if self.as_str().is_some() {
             return true;
         }
 
@@ -181,19 +175,15 @@ impl FieldTrait for Value {
 
     fn as_comma_string_slice(&self) -> Option<Vec<String>> {
         let mut ret = Vec::new();
-        let arr = self.as_array();
-        if arr.is_some() {
-            let arr_val = arr.unwrap();
+        if let Some(arr_val) = self.as_array() {
             for item in arr_val.iter() {
-                let item_val = item.as_str();
-                if item_val.is_some() {
-                    ret.push(item_val.unwrap().trim().to_string());
+                if let Some(s) = item.as_str() {
+                    ret.push(s.trim().to_string());
                     continue;
                 }
 
-                let item_val = item.as_i64();
-                if item_val.is_some() {
-                    ret.push(item_val.unwrap().to_string());
+                if let Some(n) = item.as_i64() {
+                    ret.push(n.to_string());
                     continue;
                 }
 
@@ -203,18 +193,14 @@ impl FieldTrait for Value {
             return Some(ret);
         }
 
-        let value = self.as_i64();
-        if value.is_some() {
-            ret.push(value.unwrap().to_string());
+        if let Some(n) = self.as_i64() {
+            ret.push(n.to_string());
             return Some(ret);
         }
 
-        let value = self.as_str();
-        if value.is_some() {
+        if let Some(s) = self.as_str() {
             return Some(
-                value
-                    .unwrap()
-                    .split(',')
+                s.split(',')
                     .map(|s| s.trim().to_string())
                     .filter(|s| !s.is_empty())
                     .collect(),

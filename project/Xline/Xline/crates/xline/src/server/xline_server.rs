@@ -1,5 +1,7 @@
 use std::{sync::Arc, time::Duration};
 
+use tokio::fs;
+
 use anyhow::{Result, anyhow};
 use clippy_utilities::{NumericCast, OverflowArithmetic};
 use curp::{
@@ -10,20 +12,17 @@ use curp::{
 };
 use dashmap::DashMap;
 use engine::{MemorySnapshotAllocator, RocksSnapshotAllocator, SnapshotAllocator};
-#[cfg(not(madsim))]
 use futures::Stream;
 use jsonwebtoken::{DecodingKey, EncodingKey};
-use tokio::fs;
-#[cfg(not(madsim))]
 use tokio::io::{AsyncRead, AsyncWrite};
-#[cfg(not(madsim))]
-use tonic::transport::{
-    Certificate, ClientTlsConfig, Identity, ServerTlsConfig, server::Connected,
-};
-use tonic::transport::{Server, server::Router};
+use tonic::transport::server::{Connected, Router};
+use tonic::transport::{Certificate, ClientTlsConfig, Identity, Server, ServerTlsConfig};
 use tracing::{info, warn};
-#[cfg(madsim)]
-use utils::{ClientTlsConfig, ServerTlsConfig};
+
+use tonic::Status;
+// TODO: use our own status type
+// use xlinerpc::status::Status;
+
 use utils::{
     barrier::IdBarrier,
     config::{
@@ -86,7 +85,6 @@ pub struct XlineServer {
     /// Client tls config
     client_tls_config: Option<ClientTlsConfig>,
     /// Server tls config
-    #[cfg_attr(madsim, allow(unused))]
     server_tls_config: Option<ServerTlsConfig>,
     /// Task Manager
     task_manager: Arc<TaskManager>,
@@ -106,12 +104,9 @@ impl XlineServer {
         storage_config: StorageConfig,
         compact_config: CompactConfig,
         auth_config: AuthConfig,
-        #[cfg_attr(madsim, allow(unused_variables))] tls_config: TlsConfig,
+        tls_config: TlsConfig,
     ) -> Result<Self> {
-        #[cfg(not(madsim))]
         let (client_tls_config, server_tls_config) = Self::read_tls_config(&tls_config).await?;
-        #[cfg(madsim)]
-        let (client_tls_config, server_tls_config) = (None, None);
         let curp_storage = Arc::new(CurpDB::open(&cluster_config.curp_config().engine_cfg)?);
         let cluster_info = Arc::new(
             Self::init_cluster_info(
@@ -158,14 +153,14 @@ impl XlineServer {
             (None, InitialClusterState::New) => {
                 info!("get cluster_info by args");
                 let cluster_info =
-                    ClusterInfo::from_members_map(all_members, self_client_urls, &name);
+                    ClusterInfo::from_members_map(all_members, &self_client_urls, &name);
                 curp_storage.put_cluster_info(&cluster_info)?;
                 Ok(cluster_info)
             }
             (None, InitialClusterState::Existing) => {
                 info!("get cluster_info from remote");
                 let cluster_info = get_cluster_info_from_remote(
-                    &ClusterInfo::from_members_map(all_members, self_client_urls, &name),
+                    &ClusterInfo::from_members_map(all_members, &self_client_urls, &name),
                     &self_peer_urls,
                     cluster_config.name(),
                     *cluster_config.client_config().wait_synced_timeout(),
@@ -305,7 +300,7 @@ impl XlineServer {
             curp_client,
         ) = self.init_servers(db, key_pair).await?;
         let mut builder = Server::builder();
-        #[cfg(not(madsim))]
+
         if let Some(ref cfg) = self.server_tls_config {
             builder = builder.tls_config(cfg.clone())?;
         }
@@ -322,7 +317,7 @@ impl XlineServer {
         let curp_router = builder
             .add_service(ProtocolServer::new(curp_server.clone()))
             .add_service(InnerProtocolServer::new(curp_server));
-        #[cfg(not(madsim))]
+
         let xline_router = {
             let (mut reporter, health_server) = tonic_health::server::health_reporter();
             reporter
@@ -339,35 +334,7 @@ impl XlineServer {
     ///
     /// Will return `Err` when `tonic::Server` serve return an error
     #[inline]
-    #[cfg(madsim)]
-    pub async fn start_from_single_addr(
-        &self,
-        xline_addr: std::net::SocketAddr,
-        curp_addr: std::net::SocketAddr,
-    ) -> Result<tokio::task::JoinHandle<Result<(), tonic::transport::Error>>> {
-        let n1 = self
-            .task_manager
-            .get_shutdown_listener(TaskName::TonicServer)
-            .unwrap_or_else(|| unreachable!("cluster should never shutdown before start"));
-        let n2 = n1.clone();
-        let db = DB::open(&self.storage_config.engine)?;
-        let key_pair = Self::read_key_pair(&self.auth_config).await?;
-        let (xline_router, curp_router, curp_client) = self.init_router(db, key_pair).await?;
-        let handle = tokio::spawn(async move {
-            tokio::select! {
-                _ = xline_router.serve_with_shutdown(xline_addr, n1.wait()) => {},
-                _ = curp_router.serve_with_shutdown(curp_addr, n2.wait()) => {},
-            }
-            Ok(())
-        });
-        if let Err(e) = self.publish(curp_client).await {
-            warn!("publish name to cluster failed: {:?}", e);
-        };
-        Ok(handle)
-    }
-
     /// inner start method shared by `start` and `start_from_listener`
-    #[cfg(not(madsim))]
     async fn start_inner<I1, I2, IO, IE>(&self, xline_incoming: I1, curp_incoming: I2) -> Result<()>
     where
         I1: Stream<Item = Result<IO, IE>> + Send + 'static,
@@ -389,7 +356,7 @@ impl XlineServer {
             });
         if let Err(e) = self.publish(curp_client).await {
             warn!("publish name to cluster failed: {e:?}");
-        };
+        }
         Ok(())
     }
 
@@ -399,7 +366,6 @@ impl XlineServer {
     ///
     /// Will return `Err` when `tonic::Server` serve return an error
     #[inline]
-    #[cfg(not(madsim))]
     pub async fn start(&self) -> Result<()> {
         let client_listen_urls = self.cluster_config.client_listen_urls();
         let peer_listen_urls = self.cluster_config.peer_listen_urls();
@@ -416,7 +382,6 @@ impl XlineServer {
     ///
     /// Will return `Err` when `tonic::Server` serve return an error
     #[inline]
-    #[cfg(not(madsim))]
     pub async fn start_from_listener(
         &self,
         xline_listener: tokio::net::TcpListener,
@@ -485,20 +450,19 @@ impl XlineServer {
             _ => unimplemented!(),
         };
 
-        let auto_compactor =
-            if let Some(auto_config_cfg) = *self.compact_config.auto_compact_config() {
-                Some(
-                    auto_compactor(
-                        *self.cluster_config.is_leader(),
-                        header_gen.general_revision_arc(),
-                        auto_config_cfg,
-                        Arc::clone(&self.task_manager),
-                    )
-                    .await,
+        let auto_compactor = if let Some(auto_config_cfg) = *self.compact_config.auto_compactor() {
+            Some(
+                auto_compactor(
+                    *self.cluster_config.is_leader(),
+                    header_gen.general_revision_arc(),
+                    auto_config_cfg,
+                    Arc::clone(&self.task_manager),
                 )
-            } else {
-                None
-            };
+                .await,
+            )
+        } else {
+            None
+        };
 
         let auto_compactor_c = auto_compactor.clone();
 
@@ -591,7 +555,7 @@ impl XlineServer {
     }
 
     /// Publish the name of current node to cluster
-    async fn publish(&self, curp_client: Arc<CurpClient>) -> Result<(), tonic::Status> {
+    async fn publish(&self, curp_client: Arc<CurpClient>) -> Result<(), Status> {
         curp_client
             .propose_publish(
                 self.cluster_info.self_id(),
@@ -626,7 +590,6 @@ impl XlineServer {
     }
 
     /// Read tls cert and key from file
-    #[cfg(not(madsim))]
     async fn read_tls_config(
         tls_config: &TlsConfig,
     ) -> Result<(Option<ClientTlsConfig>, Option<ServerTlsConfig>)> {
@@ -686,7 +649,6 @@ impl XlineServer {
 }
 
 /// Bind multiple addresses
-#[cfg(not(madsim))]
 fn bind_addrs(
     addrs: &[String],
 ) -> Result<impl Stream<Item = Result<tokio::net::TcpStream, std::io::Error>> + use<>> {

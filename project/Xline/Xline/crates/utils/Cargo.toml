@@ -17,34 +17,31 @@ std = []
 tokio = ["dep:async-trait"]
 
 [dependencies]
-async-trait = { version = "0.1.81", optional = true }
-clippy-utilities = "0.2.0"
-dashmap = "6.1.0"
-derive_builder = "0.20.0"
-event-listener = "5.3.1"
-futures = "0.3.30"
+async-trait = { workspace = true, optional = true }
+clippy-utilities = { workspace = true }
+dashmap = { workspace = true }
+derive_builder = { workspace = true }
+event-listener = { workspace = true }
+futures = { workspace = true }
 getset = "0.1"
 interval_map = { version = "0.1", package = "rb-interval-map" }
-opentelemetry = { version = "0.24.0", features = ["trace"] }
-opentelemetry_sdk = { version = "0.24.1", features = ["trace"] }
-parking_lot = "0.12.3"
-pbkdf2 = { version = "0.12.2", features = ["simple"] }
+opentelemetry = { workspace = true }
+opentelemetry_sdk = { workspace = true }
+parking_lot = { workspace = true }
+pbkdf2 = { workspace = true }
 regex = "1.10.5"
-serde = { version = "1.0.204", features = ["derive"] }
-thiserror = "1.0.61"
-tokio = { version = "0.2.25", package = "madsim-tokio", features = [
-  "sync",
-  "macros",
-  "rt-multi-thread",
-] }
-toml = "0.8.14"
-tonic = { version = "0.5.0", package = "madsim-tonic" }
-tracing = "0.1.37"
-tracing-appender = "0.2"
-tracing-opentelemetry = "0.25.0"
+serde = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+toml = { workspace = true }
+tonic = { workspace = true }
+tracing = { workspace = true }
+tracing-appender = { workspace = true }
+tracing-opentelemetry = { workspace = true }
+xlinerpc = { path = "../xlinerpc", version = "0.1.0"}
 
 [dev-dependencies]
-opentelemetry = { version = "0.24.0", features = ["trace"] }
+opentelemetry = { workspace = true }
 opentelemetry-jaeger-propagator = "0.3.0"
 opentelemetry-otlp = { version = "0.17.0", features = [
   "metrics",

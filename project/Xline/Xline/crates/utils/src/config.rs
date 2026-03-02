@@ -220,7 +220,7 @@ pub struct CompactConfig {
     compact_sleep_interval: Duration,
     /// The auto compactor config
     #[getset(get = "pub")]
-    auto_compact_config: Option<AutoCompactConfig>,
+    auto_compactor: Option<AutoCompactConfig>,
 }
 
 impl Default for CompactConfig {
@@ -229,7 +229,7 @@ impl Default for CompactConfig {
         Self {
             compact_batch_size: default_compact_batch_size(),
             compact_sleep_interval: default_compact_sleep_interval(),
-            auto_compact_config: None,
+            auto_compactor: None,
         }
     }
 }
@@ -241,12 +241,12 @@ impl CompactConfig {
     pub fn new(
         compact_batch_size: usize,
         compact_sleep_interval: Duration,
-        auto_compact_config: Option<AutoCompactConfig>,
+        auto_compactor: Option<AutoCompactConfig>,
     ) -> Self {
         Self {
             compact_batch_size,
             compact_sleep_interval,
-            auto_compact_config,
+            auto_compactor,
         }
     }
 }
@@ -307,7 +307,7 @@ pub struct CurpConfig {
 
     /// How many ticks a follower is allowed to miss before it starts a new round of election
     ///
-    /// The actual timeout will be randomized and in between heartbeat_interval * [follower_timeout_ticks, 2 * follower_timeout_ticks)
+    /// The actual timeout will be randomized and in between `heartbeat_interval` * [`follower_timeout_ticks`, 2 * `follower_timeout_ticks`)
     #[builder(default = "default_follower_timeout_ticks()")]
     #[serde(default = "default_follower_timeout_ticks")]
     pub follower_timeout_ticks: u8,
@@ -316,7 +316,7 @@ pub struct CurpConfig {
     ///
     /// It should be smaller than `follower_timeout_ticks`
     ///
-    /// The actual timeout will be randomized and in between heartbeat_interval * [candidate_timeout_ticks, 2 * candidate_timeout_ticks)
+    /// The actual timeout will be randomized and in between `heartbeat_interval` * [`candidate_timeout_ticks`, 2 * `candidate_timeout_ticks`)
     #[builder(default = "default_candidate_timeout_ticks()")]
     #[serde(default = "default_candidate_timeout_ticks")]
     pub candidate_timeout_ticks: u8,
@@ -388,18 +388,10 @@ pub const fn default_max_retry_timeout() -> Duration {
 }
 
 /// default retry count
-#[cfg(not(madsim))]
 #[must_use]
 #[inline]
 pub const fn default_retry_count() -> usize {
     3
-}
-/// default retry count
-#[cfg(madsim)]
-#[must_use]
-#[inline]
-pub const fn default_retry_count() -> usize {
-    10
 }
 
 /// default use backoff
@@ -698,7 +690,7 @@ pub enum AutoCompactConfig {
 pub enum EngineConfig {
     /// Memory Storage Engine
     Memory,
-    /// RocksDB Storage Engine
+    /// `RocksDB` Storage Engine
     RocksDB(PathBuf),
 }
 
@@ -896,27 +888,27 @@ pub fn file_appender(
 pub struct TraceConfig {
     /// Open jaeger online, sending data to jaeger agent directly
     #[getset(get = "pub")]
-    jaeger_online: bool,
-    /// Open jaeger offline, saving data to the `jaeger_output_dir`
+    online: bool,
+    /// Open jaeger offline, saving data to the `output_dir`
     #[getset(get = "pub")]
-    jaeger_offline: bool,
-    /// The dir path to save the data when `jaeger_offline` is on
+    offline: bool,
+    /// The dir path to save the data when `offline` is on
     #[getset(get = "pub")]
-    jaeger_output_dir: PathBuf,
+    output_dir: PathBuf,
     /// The verbosity level of tracing
     #[getset(get = "pub")]
     #[serde(with = "level_format", default = "default_log_level")]
-    jaeger_level: LevelConfig,
+    level: LevelConfig,
 }
 
 impl Default for TraceConfig {
     #[inline]
     fn default() -> Self {
         Self {
-            jaeger_online: false,
-            jaeger_offline: false,
-            jaeger_output_dir: "".into(),
-            jaeger_level: default_log_level(),
+            online: false,
+            offline: false,
+            output_dir: "".into(),
+            level: default_log_level(),
         }
     }
 }
@@ -925,17 +917,12 @@ impl TraceConfig {
     /// Generate a new `TraceConfig` object
     #[must_use]
     #[inline]
-    pub fn new(
-        jaeger_online: bool,
-        jaeger_offline: bool,
-        jaeger_output_dir: PathBuf,
-        jaeger_level: LevelConfig,
-    ) -> Self {
+    pub fn new(online: bool, offline: bool, output_dir: PathBuf, level: LevelConfig) -> Self {
         Self {
-            jaeger_online,
-            jaeger_offline,
-            jaeger_output_dir,
-            jaeger_level,
+            online,
+            offline,
+            output_dir,
+            level,
         }
     }
 }
@@ -1241,7 +1228,7 @@ mod tests {
             compact_batch_size = 123
             compact_sleep_interval = '5ms'
 
-            [compact.auto_compact_config]
+            [compact.auto_compactor]
             mode = 'periodic'
             retention = '10h'
 
@@ -1251,10 +1238,10 @@ mod tests {
             level = 'info'
 
             [trace]
-            jaeger_online = false
-            jaeger_offline = false
-            jaeger_output_dir = './jaeger_jsons'
-            jaeger_level = 'info'
+            online = false
+            offline = false
+            output_dir = './jaeger_jsons'
+            level = 'info'
 
             [auth]
             auth_public_key = './public_key.pem'
@@ -1352,7 +1339,7 @@ mod tests {
             CompactConfig {
                 compact_batch_size: 123,
                 compact_sleep_interval: Duration::from_millis(5),
-                auto_compact_config: Some(AutoCompactConfig::Periodic(Duration::from_secs(
+                auto_compactor: Some(AutoCompactConfig::Periodic(Duration::from_secs(
                     10 * 60 * 60
                 )))
             }
@@ -1416,10 +1403,10 @@ mod tests {
                 [compact]
 
                 [trace]
-                jaeger_online = false
-                jaeger_offline = false
-                jaeger_output_dir = './jaeger_jsons'
-                jaeger_level = 'info'
+                online = false
+                offline = false
+                output_dir = './jaeger_jsons'
+                level = 'info'
 
                 [auth]
 
@@ -1504,15 +1491,15 @@ mod tests {
 
                 [compact]
 
-                [compact.auto_compact_config]
+                [compact.auto_compactor]
                 mode = 'revision'
                 retention = 10000
 
                 [trace]
-                jaeger_online = false
-                jaeger_offline = false
-                jaeger_output_dir = './jaeger_jsons'
-                jaeger_level = 'info'
+                online = false
+                offline = false
+                output_dir = './jaeger_jsons'
+                level = 'info'
 
                 [auth]
 
@@ -1524,7 +1511,7 @@ mod tests {
         assert_eq!(
             config.compact,
             CompactConfig {
-                auto_compact_config: Some(AutoCompactConfig::Revision(10000)),
+                auto_compactor: Some(AutoCompactConfig::Revision(10000)),
                 ..Default::default()
             }
         );

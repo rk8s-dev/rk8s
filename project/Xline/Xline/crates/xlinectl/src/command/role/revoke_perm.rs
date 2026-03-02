@@ -26,7 +26,7 @@ pub(super) fn build_request(matches: &ArgMatches) -> AuthRoleRevokePermissionReq
 
     if let Some(range_end) = range_end {
         option = Some(RangeOption::RangeEnd(range_end.as_bytes().to_vec()));
-    };
+    }
 
     (name.into(), key, option)
 }

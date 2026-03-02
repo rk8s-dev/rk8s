@@ -13,7 +13,7 @@ use dashmap::{
 };
 use event_listener::Event;
 use futures::{Future, future};
-use madsim::rand::{Rng, thread_rng};
+use rand::{Rng, thread_rng};
 use tracing::{debug, warn};
 
 use super::Role;

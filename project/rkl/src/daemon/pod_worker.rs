@@ -407,6 +407,18 @@ async fn sync_pod_for_pod_lifecycle_event(
         pod_name = %event.pod_name,
         "[PodWorker] Persisted lifecycle-derived pod status to status manager"
     );
+
+    if pod_status.phase == PodPhase::Running {
+        for container_spec in pod.spec.containers {
+            if container_spec.readiness_probe.is_none() {
+                status_manager
+                    .set_container_readiness(pod.metadata.uid, &container_spec.name, true)
+                    .await?;
+                debug!(pod_name = %pod.metadata.name, container = %container_spec.name,
+                    "[PodWorker] Set container readiness due to no readiness prober configured");
+            }
+        }
+    }
     Ok(())
 }
 
@@ -719,7 +731,8 @@ async fn restart_container_locally(
             "Container spec not found for id {} in pod {}",
             container_id,
             event.pod_name
-        ))?;
+        ))?
+        .clone();
 
     if root_path.join(container_id).exists() {
         tracing::debug!(
@@ -738,7 +751,7 @@ async fn restart_container_locally(
     }
 
     let create_request = task_runner
-        .build_create_container_request(&pod_info.pod_sandbox_id, container_spec)
+        .build_create_container_request(&pod_info.pod_sandbox_id, &container_spec)
         .await?;
     let create_response = task_runner.create_container(create_request)?;
     task_runner.start_container(StartContainerRequest {

@@ -11,21 +11,22 @@ categories = ["Client"]
 keywords = ["Client", "Xline", "RPC"]
 
 [dependencies]
-anyhow = "1.0.90"
+anyhow = { workspace = true }
 async-dropper = { version = "0.3.1", features = ["tokio", "simple"] }
-async-trait = "0.1.81"
-clippy-utilities = "0.2.0"
+async-trait = { workspace = true }
+clippy-utilities = { workspace = true }
 curp = { path = "../curp" }
-futures = "0.3.25"
+futures = { workspace = true }
 getrandom = "0.2"
 http = "1.0"
-prost = "0.13"
-thiserror = "1.0.61"
-tokio = { version = "0.2.25", package = "madsim-tokio", features = ["sync"] }
-tonic = { version = "0.5.0", package = "madsim-tonic" }
+prost = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tonic = { workspace = true }
 tower = { version = "0.4", features = ["discover"] }
 utils = { path = "../utils" }
 xlineapi = { path = "../xlineapi" }
+xlinerpc = { path = "../xlinerpc"}
 
 [dev-dependencies]
 rand = "0.8.5"
@@ -33,7 +34,7 @@ test-macros = { path = "../test-macros" }
 xline-test-utils = { path = "../xline-test-utils" }
 
 [build-dependencies]
-tonic-build = { version = "0.5.0", package = "madsim-tonic-build" }
+tonic-build = { workspace = true }
 
 [lints]
 workspace = true

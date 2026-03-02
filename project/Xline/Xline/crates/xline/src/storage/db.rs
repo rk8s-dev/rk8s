@@ -360,6 +360,7 @@ mod test {
     use crate::storage::Revision;
     #[tokio::test]
     #[abort_on_panic]
+    #[allow(clippy::unwrap_in_result)]
     async fn test_reset() -> Result<(), ExecuteError> {
         let dir = TempDir::with_prefix("/tmp/test_reset").unwrap();
         let engine_path = dir.path().join("engine");
@@ -389,6 +390,7 @@ mod test {
 
     #[tokio::test]
     #[abort_on_panic]
+    #[allow(clippy::unwrap_in_result)]
     async fn test_db_snapshot() -> Result<(), ExecuteError> {
         let dir = TempDir::with_prefix("/tmp/test_db_snapshot").unwrap();
         let origin_db_path = dir.path().join("origin_db");
@@ -419,6 +421,7 @@ mod test {
 
     #[tokio::test]
     #[abort_on_panic]
+    #[allow(clippy::unwrap_in_result)]
     async fn test_db_snapshot_wrong_type() -> Result<(), ExecuteError> {
         let dir = TempDir::with_prefix("/tmp/test_db_snapshot_wrong_type").unwrap();
         let db_path = dir.path().join("db");
@@ -436,6 +439,7 @@ mod test {
 
     #[tokio::test]
     #[abort_on_panic]
+    #[allow(clippy::unwrap_in_result)]
     async fn test_get_snapshot() -> Result<(), ExecuteError> {
         let dir = TempDir::with_prefix("/tmp/test_get_snapshot").unwrap();
         let data_path = dir.path().join("data");

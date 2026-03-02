@@ -62,9 +62,8 @@ impl<C: Compactable> RevisionCompactor<C> {
             target_revision, self.retention
         );
 
-        let Some(ref compactable) = *self.compactable.read().await else {
-            return None;
-        };
+        let guard = self.compactable.read().await;
+        let compactable = (*guard).as_ref()?;
 
         match compactable.compact(target_revision).await {
             Ok(rev) => {

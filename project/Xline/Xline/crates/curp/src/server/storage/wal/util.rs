@@ -22,6 +22,7 @@ impl LockedFile {
     pub(super) fn open_rw(path: impl AsRef<Path>) -> io::Result<Self> {
         let file = OpenOptions::new()
             .create(true)
+            .truncate(false)
             .read(true)
             .write(true)
             .open(path.as_ref())?;
@@ -94,10 +95,10 @@ pub(super) fn get_file_paths_with_ext(
     let mut files = vec![];
     for result in std::fs::read_dir(dir)? {
         let file = result?;
-        if let Some(filename) = file.file_name().to_str() {
-            if filename.ends_with(ext) {
-                files.push(file.path());
-            }
+        if let Some(filename) = file.file_name().to_str()
+            && filename.ends_with(ext)
+        {
+            files.push(file.path());
         }
     }
     Ok(files)

@@ -33,6 +33,72 @@ pub fn pull(args: PullArgs) -> anyhow::Result<()> {
     Ok(())
 }
 
+pub fn sync_pull_or_get_image_with_policy(
+    image_ref: impl AsRef<str>,
+    url: Option<impl AsRef<str>>,
+    no_cache: bool,
+) -> anyhow::Result<(PathBuf, Vec<PathBuf>)> {
+    sync_pull_or_get_image_with_policy_and_output(image_ref, url, no_cache, false)
+}
+
+pub fn sync_pull_or_get_image_with_policy_and_output(
+    image_ref: impl AsRef<str>,
+    url: Option<impl AsRef<str>>,
+    no_cache: bool,
+    quiet: bool,
+) -> anyhow::Result<(PathBuf, Vec<PathBuf>)> {
+    let image_ref = image_ref.as_ref();
+
+    let auth_config = AuthConfig::load()?;
+
+    let url = auth_config.resolve_url(url);
+
+    let auth_method = match auth_config.find_entry_by_url(&url) {
+        Ok(entry) => RegistryAuth::Bearer(entry.pat.clone()),
+        Err(_) => RegistryAuth::Anonymous,
+    };
+
+    let client_config = ClientConfig {
+        protocol: client::ClientProtocol::Http,
+        ..Default::default()
+    };
+    let client = Client::new(client_config);
+
+    let image_ref = parse_image_ref(url, image_ref, None::<String>)?;
+    let do_pull = async move {
+        let (manifest, digest) = client
+            .pull_manifest(&image_ref, &auth_method)
+            .await
+            .map_err(|e| anyhow!("Failed to pull manifest: {e}"))?;
+
+        let layers = match &manifest {
+            OciManifest::Image(manifest) => {
+                pull_layers(&client, &image_ref, manifest, no_cache, quiet).await
+            }
+            OciManifest::ImageIndex(_) => anyhow::bail!("Image indexes are not supported yet"),
+        }?;
+
+        let manifest_path = write_manifest(&image_ref, &manifest, &digest).await?;
+        Ok((manifest_path, layers))
+    };
+    match Handle::try_current() {
+        Ok(handle) => {
+            let pull_or_get = thread::spawn(move || handle.block_on(do_pull));
+            pull_or_get.join().map_err(|_| anyhow!("thread panicked"))?
+        }
+        Err(_) => {
+            let rt = RUNTIME.get_or_init(|| {
+                tokio::runtime::Builder::new_multi_thread()
+                    .enable_all()
+                    .build()
+                    .expect("Failed to build tokio runtime")
+            });
+
+            rt.block_on(do_pull)
+        }
+    }
+}
+
 /// Ensures an image is available locally, pulling any missing components.
 ///
 /// This function implements a "local-first" strategy for image layers.
@@ -60,59 +126,20 @@ pub fn sync_pull_or_get_image(
     image_ref: impl AsRef<str>,
     url: Option<impl AsRef<str>>,
 ) -> anyhow::Result<(PathBuf, Vec<PathBuf>)> {
-    let image_ref = image_ref.as_ref();
-
-    let auth_config = AuthConfig::load()?;
-
-    let url = auth_config.resolve_url(url);
-
-    let auth_method = match auth_config.find_entry_by_url(&url) {
-        Ok(entry) => RegistryAuth::Bearer(entry.pat.clone()),
-        Err(_) => RegistryAuth::Anonymous,
-    };
-
-    let client_config = ClientConfig {
-        protocol: client::ClientProtocol::Http,
-        ..Default::default()
-    };
-    let client = Client::new(client_config);
-
-    let image_ref = parse_image_ref(url, image_ref, None::<String>)?;
-    let do_pull = async move {
-        let (manifest, digest) = client
-            .pull_manifest(&image_ref, &auth_method)
-            .await
-            .map_err(|e| anyhow!("Failed to pull manifest: {e}"))?;
-
-        let layers = match &manifest {
-            OciManifest::Image(manifest) => pull_layers(&client, &image_ref, manifest).await,
-            OciManifest::ImageIndex(_) => anyhow::bail!("Image indexes are not supported yet"),
-        }?;
-
-        let manifest_path = write_manifest(&image_ref, &manifest, &digest).await?;
-        Ok((manifest_path, layers))
-    };
-    match Handle::try_current() {
-        Ok(handle) => {
-            let pull_or_get = thread::spawn(move || handle.block_on(do_pull));
-            pull_or_get.join().map_err(|_| anyhow!("thread panicked"))?
-        }
-        Err(_) => {
-            let rt = RUNTIME.get_or_init(|| {
-                tokio::runtime::Builder::new_multi_thread()
-                    .enable_all()
-                    .build()
-                    .expect("Failed to build tokio runtime")
-            });
-
-            rt.block_on(do_pull)
-        }
-    }
+    sync_pull_or_get_image_with_policy(image_ref, url, false)
 }
 
 pub async fn pull_or_get_image(
     image_ref: impl AsRef<str>,
     url: Option<impl AsRef<str>>,
+) -> anyhow::Result<(PathBuf, Vec<PathBuf>)> {
+    pull_or_get_image_with_policy(image_ref, url, false).await
+}
+
+pub async fn pull_or_get_image_with_policy(
+    image_ref: impl AsRef<str>,
+    url: Option<impl AsRef<str>>,
+    no_cache: bool,
 ) -> anyhow::Result<(PathBuf, Vec<PathBuf>)> {
     let image_ref = image_ref.as_ref();
 
@@ -138,7 +165,9 @@ pub async fn pull_or_get_image(
         .with_context(|| "Failed to pull manifest")?;
 
     let layers = match &manifest {
-        OciManifest::Image(manifest) => pull_layers(&client, &image_ref, manifest).await,
+        OciManifest::Image(manifest) => {
+            pull_layers(&client, &image_ref, manifest, no_cache, false).await
+        }
         OciManifest::ImageIndex(_) => anyhow::bail!("Image indexes are not supported yet"),
     }?;
 

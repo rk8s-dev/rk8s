@@ -92,7 +92,6 @@
     clippy::shadow_unrelated,
     clippy::str_to_string,
     clippy::string_add,
-    clippy::string_to_string,
     clippy::todo,
     clippy::unimplemented,
     clippy::unnecessary_self_imports,
@@ -176,13 +175,9 @@ mod error;
 mod memory_engine;
 /// Metrics for engine
 mod metrics;
-#[cfg(madsim)]
-/// Mock `RocksDB` Storage Engine
-mod mock_rocksdb_engine;
 /// Snapshot Trait Definition And Implementation
 mod proxy;
 /// `RocksDB` Storage Engine
-#[cfg(not(madsim))]
 mod rocksdb_engine;
 /// Snapshot Allocator
 mod snapshot_allocator;

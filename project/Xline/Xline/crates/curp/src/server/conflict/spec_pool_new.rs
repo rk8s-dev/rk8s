@@ -64,7 +64,7 @@ impl<C> SpeculativePool<C> {
     pub(crate) fn all(&self) -> Vec<PoolEntry<C>> {
         let mut entries = Vec::new();
         for csp in &self.command_sps {
-            entries.extend(csp.all().into_iter().map(Into::into));
+            entries.extend(csp.all());
         }
         entries
     }

@@ -27,7 +27,7 @@ rust_library(
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/serde_json/1.0.149:serde_json",
-        "//third-party/rust/crates/tracing-core/0.1.35:tracing-core",
+        "//third-party/rust/crates/tracing-core/0.1.36:tracing-core",
         "//third-party/rust/crates/tracing-subscriber/0.3.22:tracing-subscriber",
     ],
 )

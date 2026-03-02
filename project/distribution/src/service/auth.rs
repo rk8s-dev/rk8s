@@ -16,6 +16,10 @@ use serde_json::json;
 use std::collections::HashMap;
 use std::sync::Arc;
 
+fn canonical_namespace(value: &str) -> String {
+    value.to_ascii_lowercase()
+}
+
 #[derive(Deserialize)]
 pub struct OAuthCallbackRequest {
     access_token: String,
@@ -40,10 +44,11 @@ pub async fn oauth_callback(
                 .await
             {
                 Ok(user) => {
+                    let canonical_username = canonical_namespace(&user.username);
                     let pat = gen_token(
                         state.config.jwt_lifetime_secs,
                         &state.config.jwt_secret,
-                        &user.username,
+                        &canonical_username,
                     );
 
                     Ok((
@@ -57,17 +62,18 @@ pub async fn oauth_callback(
                     let salt = gen_salt();
                     let original_password = gen_password();
                     let hashed = hash_password(&salt, &original_password)?;
+                    let canonical_username = canonical_namespace(&user_info.login);
 
                     let pat = gen_token(
                         state.config.jwt_lifetime_secs,
                         &state.config.jwt_secret,
-                        &user_info.login,
+                        &canonical_username,
                     );
                     let res = Json(json!({
                         "pat": pat,
                     }));
 
-                    let user = User::new(user_info.id, user_info.login, hashed, salt);
+                    let user = User::new(user_info.id, canonical_username, hashed, salt);
                     state.user_storage.create_user(user).await?;
                     Ok((StatusCode::CREATED, res))
                 }
@@ -144,10 +150,11 @@ pub(crate) async fn auth(
         Some(auth) => {
             let username = auth.username();
             let user = state.user_storage.query_user_by_name(username).await?;
+            let canonical_username = canonical_namespace(&user.username);
             let token = gen_token(
                 state.config.jwt_lifetime_secs,
                 &state.config.jwt_secret,
-                &user.username,
+                &canonical_username,
             );
             {
                 // Check password is a rather time-consuming operation. So it should be executed in `spawn_blocking`.
@@ -203,7 +210,18 @@ pub async fn create_user(
 
     let salt = gen_salt();
     let password = hash_password(&salt, &req.password)?;
-    let user = User::new(rng.random(), req.username, password, salt);
+    let canonical_username = canonical_namespace(&req.username);
+    let user = User::new(rng.random(), canonical_username, password, salt);
     state.user_storage.create_user(user).await?;
     Ok(StatusCode::CREATED)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::canonical_namespace;
+
+    #[test]
+    fn canonical_namespace_is_lowercase() {
+        assert_eq!(canonical_namespace("LingBou"), "lingbou");
+    }
 }

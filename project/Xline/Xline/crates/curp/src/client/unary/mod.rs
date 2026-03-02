@@ -12,7 +12,6 @@ use async_trait::async_trait;
 use curp_external_api::cmd::Command;
 use futures::{Future, StreamExt};
 use parking_lot::RwLock;
-use tonic::Response;
 use tracing::{debug, warn};
 
 use super::{
@@ -37,7 +36,7 @@ pub(super) struct UnaryConfig {
     propose_timeout: Duration,
     /// The rpc timeout of a 2-RTT request, usually takes longer than propose timeout
     ///
-    /// The recommended the values is within (propose_timeout, 2 * propose_timeout].
+    /// The recommended the values is within (`propose_timeout`, 2 * `propose_timeout`).
     wait_synced_timeout: Duration,
 }
 
@@ -195,7 +194,6 @@ impl<C: Command> ClientApi for Unary<C> {
         let state = self
             .map_leader(|conn| async move { conn.fetch_read_state(req, timeout).await })
             .await?
-            .into_inner()
             .read_state
             .unwrap_or_else(|| unreachable!("read_state must be set in fetch read state response"));
         Ok(state)
@@ -213,8 +211,7 @@ impl<C: Command> ClientApi for Unary<C> {
 
                 let resp = connect
                     .fetch_cluster(FetchClusterRequest::default(), FETCH_LOCAL_TIMEOUT)
-                    .await?
-                    .into_inner();
+                    .await?;
                 debug!("fetch local cluster {resp:?}");
 
                 return Ok(resp);
@@ -227,8 +224,7 @@ impl<C: Command> ClientApi for Unary<C> {
                 (
                     conn.id(),
                     conn.fetch_cluster(FetchClusterRequest { linearizable }, timeout)
-                        .await
-                        .map(Response::into_inner),
+                        .await,
                 )
             })
             .await;
@@ -285,7 +281,7 @@ impl<C: Command> ClientApi for Unary<C> {
                 if let Some(res) = res {
                     debug!("fetch cluster succeeded, result: {res:?}");
                     if let Err(e) = self.state.check_and_update(&res).await {
-                        warn!("update to a new cluster state failed, error {e}");
+                        warn!("update to a new cluster state failed, error {e:?}");
                     }
                     return Ok(res);
                 }
@@ -310,7 +306,7 @@ impl<C: Command> RepeatableClientApi for Unary<C> {
         let mut client_id = self.state.client_id();
         if client_id == 0 {
             client_id = self.state.wait_for_client_id().await?;
-        };
+        }
         let seq_num = self.new_seq_num();
         Ok(ProposeIdGuard::new(
             &self.tracker,
@@ -348,7 +344,6 @@ impl<C: Command> RepeatableClientApi for Unary<C> {
         let members = self
             .map_leader(|conn| async move { conn.propose_conf_change(req, timeout).await })
             .await?
-            .into_inner()
             .members;
         Ok(members)
     }

@@ -12,60 +12,65 @@ version = "0.1.0"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-async-stream = "0.3.4"
-async-trait = "0.1.81"
-bincode = "1.3.3"
-bytes = "1.7.1"
-clippy-utilities = "0.2.0"
+async-stream = { workspace = true }
+async-trait = { workspace = true }
+bincode = { workspace = true }
+bytes = { workspace = true }
+clippy-utilities = { workspace = true }
 curp-external-api = { path = "../curp-external-api" }
 curp-test-utils = { path = "../curp-test-utils" }
-dashmap = "6.1.0"
-derive_builder = "0.20.0"
+dashmap = { workspace = true }
+derive_builder = { workspace = true }
 engine = { path = "../engine" }
-event-listener = "5.3.1"
-flume = "0.11.0"
+event-listener = { workspace = true }
+flume = { workspace = true }
 fs2 = "0.4.3"
-futures = "0.3.21"
+futures = { workspace = true }
 indexmap = "2.2.6"
-itertools = "0.13"
-madsim = { version = "0.2.27", features = ["rpc", "macros"] }
-opentelemetry = { version = "0.24.0", features = ["metrics"] }
-parking_lot = "0.12.3"
-priority-queue = "2.0.2"
-prost = "0.13"
-rand = "0.8.5"
-serde = { version = "1.0.204", features = ["derive", "rc"] }
+itertools = { workspace = true }
+
+opentelemetry = { workspace = true }
+parking_lot = { workspace = true }
+priority-queue = { workspace = true }
+prost = { workspace = true }
+rand = { workspace = true }
+serde = { workspace = true }
 sha2 = "0.10.8"
-thiserror = "1.0.61"
-tokio = { version = "0.2.25", package = "madsim-tokio", features = [
-  "rt-multi-thread",
-] }
-tokio-stream = { git = "https://github.com/madsim-rs/tokio.git", rev = "ab251ad", features = [
-  "net",
-] }
-tokio-util = "0.7.11"
-tonic = { version = "0.5.0", package = "madsim-tonic", features = ["tls"] }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tokio-stream = { workspace = true }
+tokio-util = { workspace = true }
+tonic = { workspace = true }
 tower = { version = "0.4.13", features = ["filter"] }
 tracing = { version = "0.1.37", features = ["std", "log", "attributes"] }
 utils = { path = "../utils", version = "0.1.0" }
+xlinerpc = { path = "../xlinerpc"}
+
+# QUIC dependencies
+gm-quic = { git = "https://github.com/genmeta/gm-quic", rev = "4cbd9d93", optional = true }
+rustls = { version = "0.23", default-features = false, features = ["std", "ring"], optional = true }
 
 [dev-dependencies]
-anyhow = "1.0.90"
+anyhow = { workspace = true }
 curp-test-utils = { path = "../curp-test-utils" }
-itertools = "0.13"
-mockall = "0.12.1"
+itertools = { workspace = true }
+mockall = { workspace = true }
 once_cell = "1.17.0"
-tempfile = "3"
+rcgen = "0.13"
+serial_test = "3"
+tempfile = { workspace = true }
 test-macros = { path = "../test-macros" }
-tracing-subscriber = { version = "0.3.16", features = ["env-filter", "time"] }
+tracing-subscriber = { workspace = true, features = ["env-filter", "time"] }
 tracing-test = "0.2.4"
 
 [build-dependencies]
-prost-build = "0.13.0"
-tonic-build = { version = "0.5.0", package = "madsim-tonic-build" }
+prost-build = { workspace = true }
+tonic-build = { workspace = true }
 
 [features]
 client-metrics = []
+quic = ["gm-quic", "rustls"]
+quic-test = ["quic"]
 
 [lints]
 workspace = true

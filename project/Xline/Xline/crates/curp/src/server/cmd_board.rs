@@ -123,7 +123,7 @@ impl<C: Command> CommandBoard<C> {
     }
 
     /// Get a listener for shutdown
-    fn shutdown_listener(&mut self) -> EventListener {
+    fn shutdown_listener(&self) -> EventListener {
         self.shutdown_notifier.listen()
     }
 
@@ -162,7 +162,7 @@ impl<C: Command> CommandBoard<C> {
     }
 
     /// Notify `shutdown` requests
-    pub(super) fn notify_shutdown(&mut self) {
+    pub(super) fn notify_shutdown(&self) {
         let _ignore = self.shutdown_notifier.notify(usize::MAX);
     }
 

@@ -205,7 +205,7 @@ mod tests {
     #[tokio::test]
     #[abort_on_panic]
     async fn create_and_recover() -> Result<(), Box<dyn Error>> {
-        let db_dir = tempfile::tempdir().unwrap().into_path();
+        let db_dir = tempfile::tempdir().unwrap().keep();
         let storage_cfg = EngineConfig::RocksDB(db_dir.clone());
         {
             let s = DB::<TestCommand>::open(&storage_cfg)?;

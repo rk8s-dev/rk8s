@@ -18,6 +18,8 @@ pub trait ObjectBackend: Send + Sync {
 
     async fn get_object(&self, key: &str) -> Result<Option<Vec<u8>>>;
 
+    /// Get a range of bytes from an object.
+    /// Used for small range reads in intelligent read strategy.
     async fn get_object_range(&self, key: &str, offset: u64, buf: &mut [u8]) -> Result<usize>;
 
     #[allow(dead_code)]
@@ -49,6 +51,8 @@ impl<B: ObjectBackend> ObjectClient<B> {
         self.backend.get_object(key).await
     }
 
+    /// Get a range of bytes from an object.
+    /// Used for small range reads in intelligent read strategy.
     pub async fn get_object_range(&self, key: &str, offset: u64, buf: &mut [u8]) -> Result<usize> {
         self.backend.get_object_range(key, offset, buf).await
     }

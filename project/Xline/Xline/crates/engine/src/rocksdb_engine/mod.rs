@@ -48,7 +48,7 @@ impl From<RocksError> for EngineError {
                         EngineError::InvalidArgument(err_msg.to_owned())
                     }
                 }
-                "IO error" => EngineError::IoError(IoError::new(ErrorKind::Other, err_msg)),
+                "IO error" => EngineError::IoError(IoError::other(err_msg)),
                 _ => EngineError::UnderlyingError(err_msg.to_owned()),
             }
         } else {
@@ -75,7 +75,7 @@ impl RocksEngine {
     ///
     /// Return `EngineError` when DB open failed.
     #[inline]
-    pub fn new(data_dir: impl AsRef<Path>, tables: &[&'static str]) -> Result<Self, EngineError> {
+    pub fn new<P: AsRef<Path>>(data_dir: P, tables: &[&'static str]) -> Result<Self, EngineError> {
         let mut db_opts = Options::default();
         db_opts.create_missing_column_families(true);
         db_opts.create_if_missing(true);
@@ -183,7 +183,6 @@ impl RocksEngine {
                     std::thread::sleep(std::time::Duration::from_millis(retry_interval));
                     retry_interval = retry_interval.overflow_mul(2);
                     retry_count = retry_count.overflow_add(1);
-                    continue;
                 }
                 Err(err) => return Err(EngineError::UnderlyingError(err.to_string())),
             }
@@ -608,11 +607,10 @@ impl RocksSnapshot {
                     ErrorKind::UnexpectedEof,
                     "cannot read meta from buffer",
                 ));
-            };
+            }
             let meta_data = buf.split_to(meta_len.numeric_cast::<usize>().overflow_add(8));
             #[allow(clippy::indexing_slicing)]
-            let meta = bincode::deserialize(&meta_data[8..])
-                .map_err(|e| io::Error::new(ErrorKind::Other, e))?;
+            let meta = bincode::deserialize(&meta_data[8..]).map_err(io::Error::other)?;
 
             self.apply_snap_meta(meta);
             *self.meta.data.get_mut() = meta_data;
@@ -625,10 +623,10 @@ impl RocksSnapshot {
         while self.snap_file_idx < self.snap_files.len() {
             let snap_file = &mut self.snap_files[self.snap_file_idx];
             if snap_file.size == 0 {
-                return Err(io::Error::new(
-                    ErrorKind::Other,
-                    format!("snap file {} size is 0", snap_file.filename),
-                ));
+                return Err(io::Error::other(format!(
+                    "snap file {} size is 0",
+                    snap_file.filename
+                )));
             }
             let left = snap_file.remain_size().numeric_cast();
             let (write_len, switch, finished) = match buf.len().cmp(&left) {

@@ -40,7 +40,7 @@ rust_library(
         "//third-party/rust/crates/parking/2.2.1:parking",
         "//third-party/rust/crates/polling/2.8.0:polling",
         "//third-party/rust/crates/rustix/0.37.28:rustix",
-        "//third-party/rust/crates/slab/0.4.11:slab",
+        "//third-party/rust/crates/slab/0.4.12:slab",
         "//third-party/rust/crates/socket2/0.4.10:socket2",
         "//third-party/rust/crates/waker-fn/1.2.0:waker-fn",
     ],

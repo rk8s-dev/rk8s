@@ -93,9 +93,9 @@ message CurpError {
         // 3. failed to get last applied index from command executor.
         // 4. io::Error
         // 5. failed to encode and decode some stuff, like pb serialize or
-        // bincode serialize.
+        //   bincode serialize.
         // 6. failed in storage layer
-        // ...
+        //   ...
         string Internal = 12;
         // When the leader is transferring or an error occurred in the transfer
         string LeaderTransfer = 13;

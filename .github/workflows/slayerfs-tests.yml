@@ -47,3 +47,84 @@ jobs:
         run: |
           cd project
           cargo test -p slayerfs
+          
+      - name: Install nightly toolchain and cargo-fuzz
+        run: |
+          rustup toolchain install nightly --profile minimal
+          cargo install cargo-fuzz --locked --force
+
+      - name: Fuzz explore (fs_ops)
+        timeout-minutes: 30
+        run: |
+          cd project/slayerfs
+          cargo +nightly fuzz build fs_ops
+          BIN=$(find fuzz/target -type f -path "*/release/fs_ops" | head -n 1)
+          echo "Using fuzz binary: ${BIN}"
+
+          # CI clone may not contain local/untracked corpus dirs; create them defensively.
+          mkdir -p fuzz/corpus/fs_ops fuzz/artifacts/fs_ops
+
+          set +e
+          "${BIN}" -artifact_prefix=fuzz/artifacts/fs_ops/ fuzz/corpus/fs_ops -rss_limit_mb=1024 -max_total_time=180 -max_len=1024 -print_final_stats=1
+          status=$?
+          set -e
+
+          # libFuzzer exits with code 71 when hitting the RSS cap.
+          if [ "${status}" -eq 71 ]; then
+            echo "Stopped at RSS limit (expected)."
+            exit 0
+          fi
+
+          exit "${status}"
+
+      - name: Cleanup slayerfs fuzz outputs (always)
+        if: always()
+        run: |
+          cd project/slayerfs
+          rm -rf fuzz/artifacts/fs_ops/*
+          rm -rf fuzz/.tmp*
+          
+  xfstests:
+    name: xfstests
+    if: false
+    runs-on: [self-hosted]
+    timeout-minutes: 240
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cargo cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: project
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y pkg-config libfuse3-dev fuse3 sqlite3 protobuf-compiler
+          protoc --version
+
+      - name: Build slayerfs persistence demo
+        working-directory: project
+        run: cargo build -p slayerfs --example persistence_demo --release
+
+      - name: Run xfstests
+        run: |
+          chmod +x project/slayerfs/tests/scripts/xfstests_slayer.sh
+          project/slayerfs/tests/scripts/xfstests_slayer.sh
+
+      - name: Upload xfstests artifacts (always)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: slayerfs-xfstests-logs
+          path: |
+            /tmp/slayerfs.log
+            /tmp/xfstests-dev/results
+            /tmp/xfstests-dev/local.config
+          if-no-files-found: ignore
