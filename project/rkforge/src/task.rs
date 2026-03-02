@@ -1,4 +1,4 @@
-use crate::image::build_runtime::{BuildHostEntry, BuildUlimit};
+use crate::image::build_runtime::{BuildHostEntry, BuildNetworkMode, BuildUlimit};
 use crate::overlayfs::MountConfig;
 use anyhow::{Context, Result};
 use base64::{Engine, engine::general_purpose};
@@ -27,6 +27,10 @@ pub struct RunTask {
     pub shm_size: Option<u64>,
     /// Optional ulimit settings applied before command exec.
     pub ulimits: Vec<BuildUlimit>,
+    /// Network mode for build-time RUN containers.
+    pub network_mode: BuildNetworkMode,
+    /// Optional cgroup parent for build-time RUN containers.
+    pub cgroup_parent: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -113,6 +117,8 @@ impl TaskExec for RunTask {
             .arg(&session.mountpoint)
             .arg("--envp-base64")
             .arg(&envp_base64)
+            .arg("--network")
+            .arg(self.network_mode.as_cli_value())
             .arg("--commands-base64")
             .arg(commands_base64);
 
@@ -135,6 +141,9 @@ impl TaskExec for RunTask {
 
         if let Some(shm_size) = self.shm_size {
             command.arg("--shm-size").arg(shm_size.to_string());
+        }
+        if let Some(cgroup_parent) = &self.cgroup_parent {
+            command.arg("--cgroup-parent").arg(cgroup_parent);
         }
 
         if self.quiet {

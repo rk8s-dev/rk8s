@@ -1,5 +1,8 @@
+use anyhow::{Result, bail};
+use clap::ValueEnum;
 use serde::{Deserialize, Serialize};
 use std::net::IpAddr;
+use std::path::{Component, Path, PathBuf};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct BuildHostEntry {
@@ -62,4 +65,70 @@ pub struct BuildUlimit {
     pub resource: BuildUlimitResource,
     pub soft: BuildUlimitValue,
     pub hard: BuildUlimitValue,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize, ValueEnum)]
+pub enum BuildNetworkMode {
+    #[default]
+    Default,
+    None,
+    Host,
+}
+
+impl BuildNetworkMode {
+    pub fn as_cli_value(self) -> &'static str {
+        match self {
+            Self::Default => "default",
+            Self::None => "none",
+            Self::Host => "host",
+        }
+    }
+}
+
+pub fn normalize_cgroup_parent(raw: &str) -> Result<PathBuf> {
+    let raw = raw.trim();
+    if raw.is_empty() {
+        bail!("--cgroup-parent must not be empty");
+    }
+
+    let mut normalized = PathBuf::new();
+    for component in Path::new(raw).components() {
+        match component {
+            Component::CurDir | Component::RootDir => {}
+            Component::Normal(part) => normalized.push(part),
+            Component::ParentDir => {
+                bail!("--cgroup-parent must not contain `..`");
+            }
+            Component::Prefix(_) => {
+                bail!("--cgroup-parent has unsupported path prefix");
+            }
+        }
+    }
+    if normalized.as_os_str().is_empty() {
+        bail!("--cgroup-parent resolved to an empty path");
+    }
+    Ok(normalized)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::normalize_cgroup_parent;
+
+    #[test]
+    fn test_normalize_cgroup_parent() {
+        assert_eq!(
+            normalize_cgroup_parent("rkforge/build")
+                .unwrap()
+                .to_string_lossy(),
+            "rkforge/build"
+        );
+        assert_eq!(
+            normalize_cgroup_parent("./rkforge//build")
+                .unwrap()
+                .to_string_lossy(),
+            "rkforge/build"
+        );
+        assert!(normalize_cgroup_parent("").is_err());
+        assert!(normalize_cgroup_parent("../rkforge").is_err());
+    }
 }

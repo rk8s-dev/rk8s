@@ -3,6 +3,7 @@ pub mod config;
 pub mod context;
 pub mod execute;
 pub mod executor;
+pub mod metadata;
 pub mod stage_executor;
 
 use std::collections::{HashMap, HashSet};
@@ -11,12 +12,16 @@ use std::io::Write;
 use std::net::IpAddr;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::Instant;
 
 use crate::compressor::tar_gz_compressor::TarGzCompressor;
 use crate::image::build_runtime::{
-    BuildHostEntry, BuildUlimit, BuildUlimitResource, BuildUlimitValue,
+    BuildHostEntry, BuildNetworkMode, BuildUlimit, BuildUlimitResource, BuildUlimitValue,
+    normalize_cgroup_parent,
 };
 use crate::image::executor::Executor;
+use crate::image::metadata::{BuildMetadata, write_metadata_file};
+use crate::push::push_from_layout;
 use anyhow::{Context, Result, bail};
 use clap::{Parser, ValueEnum};
 use dockerfile_parser::Dockerfile;
@@ -94,6 +99,30 @@ pub struct BuildArgs {
     /// Ulimit options (format: NAME=SOFT:HARD), can be set multiple times
     #[arg(long = "ulimit", value_name = "NAME=SOFT:HARD", value_parser = parse_ulimit_option)]
     pub ulimits: Vec<BuildUlimit>,
+
+    /// Build result metadata output file (JSON)
+    #[arg(long = "metadata-file", value_name = "FILE")]
+    pub metadata_file: Option<PathBuf>,
+
+    /// Push image to registry after a successful build
+    #[arg(long)]
+    pub push: bool,
+
+    /// Set metadata annotation for OCI manifest descriptors (format: KEY=VALUE), can be set multiple times
+    #[arg(long = "annotation", value_name = "KEY=VALUE")]
+    pub annotations: Vec<String>,
+
+    /// Set networking mode for RUN instructions (default, none, host). In current single-node runtime, default behaves the same as host.
+    #[arg(long, value_enum, default_value = "default")]
+    pub network: BuildNetworkMode,
+
+    /// Set the parent cgroup for RUN instructions (requires cgroup v2 + sufficient privileges)
+    #[arg(long = "cgroup-parent", value_name = "PARENT")]
+    pub cgroup_parent: Option<String>,
+
+    /// Disable cache for specific stages by stage name or index (e.g. --no-cache-filter builder --no-cache-filter 0), can be set multiple times
+    #[arg(long = "no-cache-filter", value_name = "STAGE")]
+    pub no_cache_filter: Vec<String>,
 
     /// Build context. Defaults to the directory of the Dockerfile.
     #[arg(default_value = ".")]
@@ -338,6 +367,27 @@ fn write_iidfile<P: AsRef<Path>>(path: P, digest: &str) -> Result<()> {
     Ok(())
 }
 
+fn normalize_cgroup_parent_option(raw: Option<&str>) -> Result<Option<String>> {
+    let Some(raw) = raw else {
+        return Ok(None);
+    };
+
+    let normalized = normalize_cgroup_parent(raw)?;
+    Ok(Some(normalized.to_string_lossy().into_owned()))
+}
+
+fn normalize_no_cache_filters(filters: &[String]) -> Result<Vec<String>> {
+    let mut normalized = Vec::new();
+    for raw in filters {
+        let value = raw.trim();
+        if value.is_empty() {
+            bail!("invalid --no-cache-filter value: empty input");
+        }
+        normalized.push(value.to_string());
+    }
+    Ok(normalized)
+}
+
 #[derive(Debug, Clone)]
 struct ParsedTag {
     repository: String,
@@ -439,10 +489,18 @@ fn unique_ref_names(parsed_tags: &[ParsedTag]) -> Vec<String> {
 }
 
 pub fn build_image(build_args: &BuildArgs) -> Result<()> {
+    if build_args.push && build_args.tags.is_empty() {
+        bail!("--push requires at least one -t/--tag");
+    }
+
+    let build_started_at = Instant::now();
     let dockerfile_path = resolve_dockerfile_path(build_args)?;
     let dockerfile = parse_dockerfile(&dockerfile_path)?;
     let cli_build_args = parse_key_value_options(&build_args.build_args, "--build-arg")?;
     let cli_labels = parse_key_value_options(&build_args.labels, "--label")?;
+    let cli_annotations = parse_key_value_options(&build_args.annotations, "--annotation")?;
+    let no_cache_filters = normalize_no_cache_filters(&build_args.no_cache_filter)?;
+    let cgroup_parent = normalize_cgroup_parent_option(build_args.cgroup_parent.as_deref())?;
 
     let output_dir = build_args
         .output_dir
@@ -474,6 +532,7 @@ pub fn build_image(build_args: &BuildArgs) -> Result<()> {
     fs::create_dir_all(&image_output_dir)?;
 
     let global_args = parse_global_args(&dockerfile);
+    let metadata_build_args = cli_build_args.clone();
 
     let mut executor = Executor::new(
         dockerfile,
@@ -489,17 +548,36 @@ pub fn build_image(build_args: &BuildArgs) -> Result<()> {
     executor.target(build_args.target.clone());
     executor.output_options(build_args.quiet, build_args.progress);
     executor.cli_labels(cli_labels);
+    executor.cli_annotations(cli_annotations);
     executor.runtime_options(
         build_args.add_hosts.clone(),
         build_args.shm_size,
         build_args.ulimits.clone(),
+        build_args.network,
+        cgroup_parent,
     );
+    executor.no_cache_filter(no_cache_filters);
 
     executor.build_image()?;
 
     let image_digest = read_primary_image_digest(&image_output_dir, preferred_ref_name.as_deref())?;
     if let Some(iidfile) = build_args.iidfile.as_ref() {
         write_iidfile(iidfile, &image_digest)?;
+    }
+    if build_args.push {
+        for tag in &build_args.tags {
+            push_from_layout(tag, &image_output_dir, None)?;
+        }
+    }
+    if let Some(metadata_file) = &build_args.metadata_file {
+        let metadata = BuildMetadata {
+            tags: build_args.tags.clone(),
+            digest: image_digest.clone(),
+            id: image_digest,
+            build_args: metadata_build_args,
+            duration_ms: build_started_at.elapsed().as_millis(),
+        };
+        write_metadata_file(metadata_file, &metadata)?;
     }
 
     Ok(())
@@ -510,10 +588,13 @@ mod tests {
     use std::fs;
     use std::path::PathBuf;
 
+    use crate::image::build_runtime::BuildNetworkMode;
+
     use super::{
-        BuildArgs, BuildProgressMode, derive_output_name, has_explicit_tag, parse_add_host_option,
-        parse_dockerfile, parse_global_args, parse_key_value_options, parse_shm_size, parse_tags,
-        parse_ulimit_option, read_primary_image_digest, resolve_dockerfile_path, unique_ref_names,
+        BuildArgs, BuildProgressMode, derive_output_name, has_explicit_tag,
+        normalize_cgroup_parent_option, parse_add_host_option, parse_dockerfile, parse_global_args,
+        parse_key_value_options, parse_shm_size, parse_tags, parse_ulimit_option,
+        read_primary_image_digest, resolve_dockerfile_path, unique_ref_names,
     };
     use clap::Parser;
     use dockerfile_parser::{BreakableStringComponent, Dockerfile, Instruction, ShellOrExecExpr};
@@ -763,6 +844,17 @@ FROM ${BASE}
             "64m",
             "--ulimit",
             "nofile=1024:2048",
+            "--push",
+            "--metadata-file",
+            "/tmp/metadata.json",
+            "--annotation",
+            "org.opencontainers.image.source=https://example.com/repo",
+            "--network",
+            "host",
+            "--cgroup-parent",
+            "rkforge/build",
+            "--no-cache-filter",
+            "builder",
             ".",
         ]);
 
@@ -776,6 +868,18 @@ FROM ${BASE}
         assert_eq!(build_args.add_hosts.len(), 1);
         assert_eq!(build_args.shm_size, Some(64 * 1024 * 1024));
         assert_eq!(build_args.ulimits.len(), 1);
+        assert!(build_args.push);
+        assert_eq!(
+            build_args.metadata_file,
+            Some(PathBuf::from("/tmp/metadata.json"))
+        );
+        assert_eq!(
+            build_args.annotations,
+            vec!["org.opencontainers.image.source=https://example.com/repo".to_string()]
+        );
+        assert_eq!(build_args.network, BuildNetworkMode::Host);
+        assert_eq!(build_args.cgroup_parent, Some("rkforge/build".to_string()));
+        assert_eq!(build_args.no_cache_filter, vec!["builder".to_string()]);
     }
 
     #[test]
@@ -803,6 +907,43 @@ FROM ${BASE}
         assert!(parse_ulimit_option("nofile=2048:1024").is_err());
         assert!(parse_ulimit_option("foo=1:2").is_err());
         assert!(parse_ulimit_option("nofile=1").is_err());
+    }
+
+    #[test]
+    fn test_parse_no_cache_filter_option() {
+        let build_args = BuildArgs::parse_from(vec![
+            "rkforge",
+            "--no-cache-filter",
+            "builder",
+            "--no-cache-filter",
+            "1",
+            ".",
+        ]);
+        assert_eq!(
+            build_args.no_cache_filter,
+            vec!["builder".to_string(), "1".to_string()]
+        );
+    }
+
+    #[test]
+    fn test_parse_network_and_cgroup_parent() {
+        let build_args = BuildArgs::parse_from(vec![
+            "rkforge",
+            "--network",
+            "none",
+            "--cgroup-parent",
+            "rkforge/build",
+            ".",
+        ]);
+        assert_eq!(build_args.network, BuildNetworkMode::None);
+        assert_eq!(build_args.cgroup_parent, Some("rkforge/build".to_string()));
+    }
+
+    #[test]
+    fn test_normalize_cgroup_parent_option() {
+        let normalized = normalize_cgroup_parent_option(Some("./rkforge/build")).unwrap();
+        assert_eq!(normalized, Some("rkforge/build".to_string()));
+        assert!(normalize_cgroup_parent_option(Some("../rkforge")).is_err());
     }
 
     #[test]

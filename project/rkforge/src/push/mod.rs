@@ -41,18 +41,26 @@ pub struct PushArgs {
 }
 
 pub fn push(args: PushArgs) -> anyhow::Result<()> {
+    let path = args.path.unwrap_or(".".to_string());
+    push_from_layout(args.image_ref, path, args.url)
+}
+
+pub fn push_from_layout(
+    image_ref: impl Into<String>,
+    path: impl AsRef<Path>,
+    url: Option<String>,
+) -> anyhow::Result<()> {
+    let image_ref = image_ref.into();
+    let path = path.as_ref().to_path_buf();
     let auth_config = AuthConfig::load()?;
-    let requested_has_explicit_tag = has_explicit_tag(&args.image_ref);
-    let requested_repo = strip_explicit_tag(&args.image_ref).to_string();
+    let requested_has_explicit_tag = has_explicit_tag(&image_ref);
+    let requested_repo = strip_explicit_tag(&image_ref).to_string();
 
-    args.image_ref.parse::<Reference>().with_context(|| {
-        format!(
-            "invalid image reference for push: {}",
-            args.image_ref.as_str()
-        )
-    })?;
+    image_ref
+        .parse::<Reference>()
+        .with_context(|| format!("invalid image reference for push: {}", image_ref.as_str()))?;
 
-    let url = auth_config.resolve_url(args.url);
+    let url = auth_config.resolve_url(url);
 
     let auth_method = auth_config
         .find_entry_by_url(&url)
@@ -65,8 +73,7 @@ pub fn push(args: PushArgs) -> anyhow::Result<()> {
     };
     let client = Client::new(client_config);
 
-    let image_ref = parse_image_ref(url, args.image_ref, None::<String>)?;
-    let path = args.path.unwrap_or(".".to_string());
+    let image_ref = parse_image_ref(url, image_ref, None::<String>)?;
     let registry_url = image_ref.registry().to_string();
 
     block_on(async move {
@@ -74,7 +81,7 @@ pub fn push(args: PushArgs) -> anyhow::Result<()> {
             &client,
             &image_ref,
             &auth_method,
-            path,
+            &path,
             &registry_url,
             &requested_repo,
             requested_has_explicit_tag,
