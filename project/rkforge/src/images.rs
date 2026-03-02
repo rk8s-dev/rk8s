@@ -1,9 +1,9 @@
 use crate::compressor::tar_gz_compressor::TarGzCompressor;
 use crate::compressor::{LayerCompressionConfig, LayerCompressor};
 use crate::config::meta::Repositories;
-use crate::pull::media::{get_media_type, MediaType};
-use crate::storage::{full_image_ref, read_manifest, ultimate_blob_path, DigestExt};
-use anyhow::{anyhow, bail, Context, Result};
+use crate::pull::media::{MediaType, get_media_type};
+use crate::storage::{DigestExt, full_image_ref, read_manifest, ultimate_blob_path};
+use anyhow::{Context, Result, anyhow, bail};
 use chrono::{DateTime, Local};
 use clap::Parser;
 use oci_client::manifest::{OciImageManifest, OciManifest};
@@ -191,15 +191,15 @@ pub fn remove_image(args: RmiArgs) -> Result<()> {
 
     let still_referenced = repos.digests().iter().any(|d| **d == digest);
 
-    if !still_referenced {
-        if let Err(e) = cleanup_image_blobs(&digest, &repos) {
-            if args.force {
-                eprintln!("Warning: blob cleanup failed: {e}");
-            } else {
-                repos.add(&image_ref, &digest);
-                repos.store()?;
-                return Err(e.context("Failed to clean up blobs; tag restored"));
-            }
+    if !still_referenced
+        && let Err(e) = cleanup_image_blobs(&digest, &repos)
+    {
+        if args.force {
+            eprintln!("Warning: blob cleanup failed: {e}");
+        } else {
+            repos.add(&image_ref, &digest);
+            repos.store()?;
+            return Err(e.context("Failed to clean up blobs; tag restored"));
         }
     }
 
@@ -611,7 +611,7 @@ fn extract_oci_layout_archive(input_path: &Path, layout_dir: &Path) -> Result<()
     let mut entries = archive
         .entries()
         .context("Failed to read tar entries from archive")?;
-    while let Some(entry) = entries.next() {
+    for entry in entries {
         let mut entry = entry.context("Failed to read tar entry")?;
         let entry_path = entry.path().context("Invalid tar entry path")?.into_owned();
         validate_archive_entry_path(&entry_path)?;
@@ -815,12 +815,11 @@ fn format_size(bytes: u64) -> String {
 
 fn get_created_time(digest: &str) -> Result<String> {
     let manifest = read_manifest(digest)?;
-    if let OciManifest::Image(img) = &manifest {
-        if let Some(config) = read_image_config_value(&img.config.digest)? {
-            if let Some(created) = config.get("created").and_then(|v| v.as_str()) {
-                return Ok(created.to_string());
-            }
-        }
+    if let OciManifest::Image(img) = &manifest
+        && let Some(config) = read_image_config_value(&img.config.digest)?
+        && let Some(created) = config.get("created").and_then(|v| v.as_str())
+    {
+        return Ok(created.to_string());
     }
 
     let path = ultimate_blob_path(digest)?;
