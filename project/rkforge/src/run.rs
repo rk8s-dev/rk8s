@@ -1,7 +1,11 @@
-use crate::overlayfs::{bind_mount, do_exec, prepare_network, switch_namespace};
+use crate::image::build_runtime::{BuildHostEntry, BuildUlimit};
+use crate::overlayfs::{
+    bind_mount, do_exec, prepare_hosts, prepare_network, prepare_shm, switch_namespace,
+};
 use anyhow::{Context, Result, bail};
 use base64::{Engine, engine::general_purpose};
 use clap::Parser;
+use serde::de::DeserializeOwned;
 use std::{ffi::CString, path::Path};
 
 #[derive(Debug, Parser, Clone)]
@@ -20,6 +24,26 @@ pub struct ExecInternalArgs {
     /// User to run the command as. Format: "user", "uid", "user:group", "uid:gid", etc.
     #[arg(long)]
     pub user: Option<String>,
+    #[arg(long)]
+    pub add_hosts_base64: Option<String>,
+    #[arg(long)]
+    pub ulimits_base64: Option<String>,
+    #[arg(long)]
+    pub shm_size: Option<u64>,
+}
+
+fn decode_optional_base64_json<T>(value: Option<&str>, arg_name: &str) -> Result<T>
+where
+    T: DeserializeOwned + Default,
+{
+    let Some(value) = value else {
+        return Ok(T::default());
+    };
+
+    let data = general_purpose::STANDARD
+        .decode(value)
+        .with_context(|| format!("Failed to decode {arg_name} from base64"))?;
+    serde_json::from_slice(&data).with_context(|| format!("Failed to deserialize {arg_name}"))
 }
 
 pub fn exec_internal(args: ExecInternalArgs) -> Result<()> {
@@ -27,8 +51,15 @@ pub fn exec_internal(args: ExecInternalArgs) -> Result<()> {
     switch_namespace(mount_pid)?;
 
     let mountpoint = Path::new(&args.mountpoint);
-    prepare_network(mountpoint)?;
+    let add_hosts: Vec<BuildHostEntry> =
+        decode_optional_base64_json(args.add_hosts_base64.as_deref(), "add-hosts-base64")?;
+    let ulimits: Vec<BuildUlimit> =
+        decode_optional_base64_json(args.ulimits_base64.as_deref(), "ulimits-base64")?;
+
     bind_mount(mountpoint)?;
+    prepare_network(mountpoint)?;
+    prepare_hosts(mountpoint, &add_hosts)?;
+    prepare_shm(mountpoint, args.shm_size)?;
 
     let commands_json = general_purpose::STANDARD
         .decode(&args.commands_base64)
@@ -61,6 +92,7 @@ pub fn exec_internal(args: ExecInternalArgs) -> Result<()> {
         &envp,
         working_dir,
         args.user.as_deref(),
+        &ulimits,
     )?;
     unreachable!();
 }

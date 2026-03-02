@@ -15,3 +15,5 @@ mod rt;
 mod storage;
 mod task;
 mod utils;
+
+pub use image::build_runtime;

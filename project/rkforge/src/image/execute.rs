@@ -360,6 +360,9 @@ impl<P: AsRef<Path>> InstructionExt<P> for RunInstruction {
             working_dir: ctx.image_config.working_dir.clone(),
             user: ctx.image_config.user.clone(),
             quiet: ctx.quiet,
+            add_hosts: ctx.add_hosts.to_vec(),
+            shm_size: ctx.shm_size,
+            ulimits: ctx.ulimits.to_vec(),
         };
         task.execute(ctx.mount_config)
     }
@@ -576,6 +579,9 @@ ARG BASE=alpine
             no_cache: false,
             quiet: true,
             progress_mode: BuildProgressMode::Plain,
+            add_hosts: &[],
+            shm_size: None,
+            ulimits: &[],
         };
 
         arg_inst.execute(&mut ctx).unwrap();
@@ -617,6 +623,9 @@ ARG BASE=alpine
             no_cache: false,
             quiet: true,
             progress_mode: BuildProgressMode::Plain,
+            add_hosts: &[],
+            shm_size: None,
+            ulimits: &[],
         };
 
         arg_inst.execute(&mut ctx).unwrap();
@@ -654,6 +663,9 @@ ENV A=1 B=$A
             no_cache: false,
             quiet: true,
             progress_mode: BuildProgressMode::Plain,
+            add_hosts: &[],
+            shm_size: None,
+            ulimits: &[],
         };
 
         dockerfile

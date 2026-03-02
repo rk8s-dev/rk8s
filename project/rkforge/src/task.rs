@@ -1,3 +1,4 @@
+use crate::image::build_runtime::{BuildHostEntry, BuildUlimit};
 use crate::overlayfs::MountConfig;
 use anyhow::{Context, Result};
 use base64::{Engine, engine::general_purpose};
@@ -20,6 +21,12 @@ pub struct RunTask {
     pub user: Option<String>,
     /// Suppress stdout while keeping stderr visible.
     pub quiet: bool,
+    /// Additional host mappings injected into build-time /etc/hosts.
+    pub add_hosts: Vec<BuildHostEntry>,
+    /// Optional /dev/shm size in bytes for build-time RUN containers.
+    pub shm_size: Option<u64>,
+    /// Optional ulimit settings applied before command exec.
+    pub ulimits: Vec<BuildUlimit>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -76,10 +83,30 @@ impl TaskExec for RunTask {
         let envp_json =
             serde_json::to_string(&self.envp).context("Failed to serialize envp to json")?;
         let envp_base64 = general_purpose::STANDARD.encode(envp_json);
+        let add_hosts_base64 = if self.add_hosts.is_empty() {
+            None
+        } else {
+            let add_hosts_json = serde_json::to_string(&self.add_hosts)
+                .context("Failed to serialize add-host mappings to json")?;
+            Some(general_purpose::STANDARD.encode(add_hosts_json))
+        };
+        let ulimits_base64 = if self.ulimits.is_empty() {
+            None
+        } else {
+            let ulimits_json = serde_json::to_string(&self.ulimits)
+                .context("Failed to serialize ulimits to json")?;
+            Some(general_purpose::STANDARD.encode(ulimits_json))
+        };
 
         trace!(
-            "Run commands: {:?}, envp: {:?}, working_dir: {:?}, user: {:?}",
-            self.commands, self.envp, self.working_dir, self.user
+            "Run commands: {:?}, envp: {:?}, working_dir: {:?}, user: {:?}, add_hosts: {:?}, shm_size: {:?}, ulimits: {:?}",
+            self.commands,
+            self.envp,
+            self.working_dir,
+            self.user,
+            self.add_hosts,
+            self.shm_size,
+            self.ulimits
         );
         command
             .arg("--mountpoint")
@@ -89,6 +116,13 @@ impl TaskExec for RunTask {
             .arg("--commands-base64")
             .arg(commands_base64);
 
+        if let Some(add_hosts_base64) = &add_hosts_base64 {
+            command.arg("--add-hosts-base64").arg(add_hosts_base64);
+        }
+        if let Some(ulimits_base64) = &ulimits_base64 {
+            command.arg("--ulimits-base64").arg(ulimits_base64);
+        }
+
         // Add working directory if specified
         if let Some(ref working_dir) = self.working_dir {
             command.arg("--working-dir").arg(working_dir);
@@ -97,6 +131,10 @@ impl TaskExec for RunTask {
         // Add user if specified
         if let Some(ref user) = self.user {
             command.arg("--user").arg(user);
+        }
+
+        if let Some(shm_size) = self.shm_size {
+            command.arg("--shm-size").arg(shm_size.to_string());
         }
 
         if self.quiet {

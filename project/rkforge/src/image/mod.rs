@@ -1,3 +1,4 @@
+pub mod build_runtime;
 pub mod config;
 pub mod context;
 pub mod execute;
@@ -7,10 +8,14 @@ pub mod stage_executor;
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::Write;
+use std::net::IpAddr;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use crate::compressor::tar_gz_compressor::TarGzCompressor;
+use crate::image::build_runtime::{
+    BuildHostEntry, BuildUlimit, BuildUlimitResource, BuildUlimitValue,
+};
 use crate::image::executor::Executor;
 use anyhow::{Context, Result, bail};
 use clap::{Parser, ValueEnum};
@@ -78,9 +83,153 @@ pub struct BuildArgs {
     #[arg(long, value_enum, default_value = "auto")]
     pub progress: BuildProgressMode,
 
+    /// Add a custom host-to-IP mapping (format: HOST:IP), can be set multiple times
+    #[arg(long = "add-host", value_name = "HOST:IP", value_parser = parse_add_host_option)]
+    pub add_hosts: Vec<BuildHostEntry>,
+
+    /// Shared memory size for build containers (e.g. 64m, 1g)
+    #[arg(long = "shm-size", value_name = "SIZE", value_parser = parse_shm_size)]
+    pub shm_size: Option<u64>,
+
+    /// Ulimit options (format: NAME=SOFT:HARD), can be set multiple times
+    #[arg(long = "ulimit", value_name = "NAME=SOFT:HARD", value_parser = parse_ulimit_option)]
+    pub ulimits: Vec<BuildUlimit>,
+
     /// Build context. Defaults to the directory of the Dockerfile.
     #[arg(default_value = ".")]
     pub context: PathBuf,
+}
+
+fn parse_add_host_option(raw: &str) -> std::result::Result<BuildHostEntry, String> {
+    let (host, ip) = raw
+        .split_once(':')
+        .ok_or_else(|| format!("invalid --add-host value `{raw}`: expected format HOST:IP"))?;
+
+    let host = host.trim();
+    if host.is_empty() {
+        return Err(format!(
+            "invalid --add-host value `{raw}`: host must not be empty"
+        ));
+    }
+    if host.chars().any(char::is_whitespace) {
+        return Err(format!(
+            "invalid --add-host value `{raw}`: host must not contain spaces"
+        ));
+    }
+
+    let ip = ip.trim();
+    if ip.is_empty() {
+        return Err(format!(
+            "invalid --add-host value `{raw}`: IP must not be empty"
+        ));
+    }
+    let ip = ip
+        .parse::<IpAddr>()
+        .map_err(|e| format!("invalid --add-host value `{raw}`: invalid IP `{ip}`: {e}"))?;
+
+    Ok(BuildHostEntry {
+        host: host.to_string(),
+        ip,
+    })
+}
+
+fn parse_shm_size(raw: &str) -> std::result::Result<u64, String> {
+    let value = raw.trim().to_ascii_lowercase();
+    if value.is_empty() {
+        return Err("invalid --shm-size value: empty input".to_string());
+    }
+
+    let unit_start = value
+        .find(|c: char| !c.is_ascii_digit())
+        .unwrap_or(value.len());
+    let (num_part, unit_part) = value.split_at(unit_start);
+
+    if num_part.is_empty() {
+        return Err(format!(
+            "invalid --shm-size value `{raw}`: expected positive number with optional unit"
+        ));
+    }
+
+    let number = num_part.parse::<u64>().map_err(|e| {
+        format!("invalid --shm-size value `{raw}`: invalid number `{num_part}`: {e}")
+    })?;
+    let multiplier = match unit_part {
+        "" | "b" => 1_u64,
+        "k" | "kb" | "ki" | "kib" => 1024_u64,
+        "m" | "mb" | "mi" | "mib" => 1024_u64.pow(2),
+        "g" | "gb" | "gi" | "gib" => 1024_u64.pow(3),
+        "t" | "tb" | "ti" | "tib" => 1024_u64.pow(4),
+        "p" | "pb" | "pi" | "pib" => 1024_u64.pow(5),
+        _ => {
+            return Err(format!(
+                "invalid --shm-size value `{raw}`: unsupported unit `{unit_part}`"
+            ));
+        }
+    };
+
+    let size_bytes = number
+        .checked_mul(multiplier)
+        .ok_or_else(|| format!("invalid --shm-size value `{raw}`: value exceeds u64 range"))?;
+    if size_bytes == 0 {
+        return Err(format!(
+            "invalid --shm-size value `{raw}`: size must be greater than 0"
+        ));
+    }
+    Ok(size_bytes)
+}
+
+fn parse_ulimit_value(raw: &str, full_raw: &str) -> std::result::Result<BuildUlimitValue, String> {
+    let raw = raw.trim();
+    if raw.eq_ignore_ascii_case("unlimited") || raw.eq_ignore_ascii_case("infinity") {
+        return Ok(BuildUlimitValue::Unlimited);
+    }
+
+    let value = raw
+        .parse::<u64>()
+        .map_err(|e| format!("invalid --ulimit value `{full_raw}`: invalid limit `{raw}`: {e}"))?;
+    Ok(BuildUlimitValue::Value(value))
+}
+
+fn parse_ulimit_option(raw: &str) -> std::result::Result<BuildUlimit, String> {
+    let (name, limits) = raw
+        .split_once('=')
+        .ok_or_else(|| format!("invalid --ulimit value `{raw}`: expected format NAME=SOFT:HARD"))?;
+
+    let name = name.trim().to_ascii_lowercase();
+    if name.is_empty() {
+        return Err(format!(
+            "invalid --ulimit value `{raw}`: name must not be empty"
+        ));
+    }
+
+    let resource = BuildUlimitResource::from_name(&name)
+        .ok_or_else(|| format!("invalid --ulimit value `{raw}`: unsupported resource `{name}`"))?;
+
+    let (soft_raw, hard_raw) = limits
+        .split_once(':')
+        .ok_or_else(|| format!("invalid --ulimit value `{raw}`: expected format NAME=SOFT:HARD"))?;
+    let soft = parse_ulimit_value(soft_raw, raw)?;
+    let hard = parse_ulimit_value(hard_raw, raw)?;
+
+    match (soft, hard) {
+        (BuildUlimitValue::Unlimited, BuildUlimitValue::Value(_)) => {
+            return Err(format!(
+                "invalid --ulimit value `{raw}`: soft limit cannot be unlimited when hard limit is finite"
+            ));
+        }
+        (BuildUlimitValue::Value(soft), BuildUlimitValue::Value(hard)) if soft > hard => {
+            return Err(format!(
+                "invalid --ulimit value `{raw}`: soft limit must be <= hard limit"
+            ));
+        }
+        _ => {}
+    }
+
+    Ok(BuildUlimit {
+        resource,
+        soft,
+        hard,
+    })
 }
 
 fn parse_dockerfile<P: AsRef<Path>>(dockerfile_path: P) -> Result<Dockerfile> {
@@ -340,6 +489,11 @@ pub fn build_image(build_args: &BuildArgs) -> Result<()> {
     executor.target(build_args.target.clone());
     executor.output_options(build_args.quiet, build_args.progress);
     executor.cli_labels(cli_labels);
+    executor.runtime_options(
+        build_args.add_hosts.clone(),
+        build_args.shm_size,
+        build_args.ulimits.clone(),
+    );
 
     executor.build_image()?;
 
@@ -357,9 +511,9 @@ mod tests {
     use std::path::PathBuf;
 
     use super::{
-        BuildArgs, BuildProgressMode, derive_output_name, has_explicit_tag, parse_dockerfile,
-        parse_global_args, parse_key_value_options, parse_tags, read_primary_image_digest,
-        resolve_dockerfile_path, unique_ref_names,
+        BuildArgs, BuildProgressMode, derive_output_name, has_explicit_tag, parse_add_host_option,
+        parse_dockerfile, parse_global_args, parse_key_value_options, parse_shm_size, parse_tags,
+        parse_ulimit_option, read_primary_image_digest, resolve_dockerfile_path, unique_ref_names,
     };
     use clap::Parser;
     use dockerfile_parser::{BreakableStringComponent, Dockerfile, Instruction, ShellOrExecExpr};
@@ -603,6 +757,12 @@ FROM ${BASE}
             "a=b",
             "--progress",
             "plain",
+            "--add-host",
+            "mirror.local:10.0.0.2",
+            "--shm-size",
+            "64m",
+            "--ulimit",
+            "nofile=1024:2048",
             ".",
         ]);
 
@@ -613,6 +773,36 @@ FROM ${BASE}
         assert_eq!(build_args.iidfile, Some(PathBuf::from("/tmp/iid.txt")));
         assert_eq!(build_args.labels, vec!["a=b".to_string()]);
         assert_eq!(build_args.progress, BuildProgressMode::Plain);
+        assert_eq!(build_args.add_hosts.len(), 1);
+        assert_eq!(build_args.shm_size, Some(64 * 1024 * 1024));
+        assert_eq!(build_args.ulimits.len(), 1);
+    }
+
+    #[test]
+    fn test_parse_add_host_option() {
+        let host = parse_add_host_option("example.local:127.0.0.1").unwrap();
+        assert_eq!(host.host, "example.local");
+        assert_eq!(host.ip.to_string(), "127.0.0.1");
+        assert!(parse_add_host_option("missing-ip").is_err());
+        assert!(parse_add_host_option(":127.0.0.1").is_err());
+    }
+
+    #[test]
+    fn test_parse_shm_size() {
+        assert_eq!(parse_shm_size("64m").unwrap(), 64 * 1024 * 1024);
+        assert_eq!(parse_shm_size("1g").unwrap(), 1024 * 1024 * 1024);
+        assert_eq!(parse_shm_size("1024").unwrap(), 1024);
+        assert!(parse_shm_size("0").is_err());
+        assert!(parse_shm_size("10x").is_err());
+    }
+
+    #[test]
+    fn test_parse_ulimit_option() {
+        let parsed = parse_ulimit_option("nofile=1024:2048").unwrap();
+        assert_eq!(parsed.resource.as_name(), "nofile");
+        assert!(parse_ulimit_option("nofile=2048:1024").is_err());
+        assert!(parse_ulimit_option("foo=1:2").is_err());
+        assert!(parse_ulimit_option("nofile=1").is_err());
     }
 
     #[test]

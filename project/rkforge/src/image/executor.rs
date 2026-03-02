@@ -1,7 +1,10 @@
 use crate::{
     compressor::{LayerCompressionConfig, LayerCompressionResult, LayerCompressor},
     image::{
-        BLOBS, BuildProgressMode, config::ImageConfig, context::StageContext,
+        BLOBS, BuildProgressMode,
+        build_runtime::{BuildHostEntry, BuildUlimit},
+        config::ImageConfig,
+        context::StageContext,
         stage_executor::StageExecutor,
     },
     oci_spec::{
@@ -42,6 +45,9 @@ pub struct Executor {
     pub quiet: bool,
     pub progress_mode: BuildProgressMode,
     pub cli_labels: HashMap<String, String>,
+    pub add_hosts: Vec<BuildHostEntry>,
+    pub shm_size: Option<u64>,
+    pub ulimits: Vec<BuildUlimit>,
 
     pub compressor: Arc<dyn LayerCompressor + Send + Sync>,
 }
@@ -87,6 +93,9 @@ impl Executor {
             quiet: false,
             progress_mode: BuildProgressMode::Auto,
             cli_labels: HashMap::new(),
+            add_hosts: Vec::new(),
+            shm_size: None,
+            ulimits: Vec::new(),
             compressor,
         }
     }
@@ -110,6 +119,17 @@ impl Executor {
 
     pub fn cli_labels(&mut self, labels: HashMap<String, String>) {
         self.cli_labels = labels;
+    }
+
+    pub fn runtime_options(
+        &mut self,
+        add_hosts: Vec<BuildHostEntry>,
+        shm_size: Option<u64>,
+        ulimits: Vec<BuildUlimit>,
+    ) {
+        self.add_hosts = add_hosts;
+        self.shm_size = shm_size;
+        self.ulimits = ulimits;
     }
 
     pub fn build_image(&mut self) -> Result<()> {
@@ -173,6 +193,9 @@ impl Executor {
                     no_cache: self.no_cache,
                     quiet: self.quiet,
                     progress_mode,
+                    add_hosts: &self.add_hosts,
+                    shm_size: self.shm_size,
+                    ulimits: &self.ulimits,
                 };
                 let mut stage_executor = StageExecutor::new(ctx, stage);
                 stage_executor.execute()
