@@ -9,6 +9,18 @@ use axum::middleware::Next;
 use axum::response::IntoResponse;
 use std::sync::Arc;
 
+fn canonical_namespace(value: &str) -> String {
+    value.to_ascii_lowercase()
+}
+
+fn namespace_matches(namespace: &str, subject: &str) -> bool {
+    canonical_namespace(namespace) == canonical_namespace(subject)
+}
+
+fn is_anonymous_subject(subject: &str) -> bool {
+    canonical_namespace(subject) == "anonymous"
+}
+
 pub async fn require_authentication(
     State(state): State<Arc<AppState>>,
     auth: Option<AuthHeader>,
@@ -78,7 +90,7 @@ pub async fn authorize_repository_access(
             {
                 match claims {
                     Some(claims) => {
-                        if claims.sub != *namespace {
+                        if !namespace_matches(namespace, &claims.sub) {
                             return Err(OciError::Forbidden(
                                 "unable to read others' private repositories".to_string(),
                             )
@@ -97,7 +109,7 @@ pub async fn authorize_repository_access(
         }
         // for write, we cannot write others' all repos.
         Method::POST | Method::PUT | Method::PATCH | Method::DELETE => match claims {
-            Some(claims) if claims.sub == "anonymous" => {
+            Some(claims) if is_anonymous_subject(&claims.sub) => {
                 return Err(OciError::Unauthorized {
                     msg: "unauthorized".to_string(),
                     auth_url: Some(state.config.registry_url.clone()),
@@ -105,7 +117,7 @@ pub async fn authorize_repository_access(
                 .into());
             }
             Some(claims) => {
-                if *namespace != claims.sub {
+                if !namespace_matches(namespace, &claims.sub) {
                     return Err(OciError::Forbidden(
                         "unable to write others' repositories".to_string(),
                     )
@@ -146,5 +158,23 @@ fn extract_full_repo_name(url: &str) -> Option<String> {
         // tail: /{name}/visibility
         [name @ .., "visibility"] if !name.is_empty() => Some(name.join("/")),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{is_anonymous_subject, namespace_matches};
+
+    #[test]
+    fn namespace_match_is_case_insensitive() {
+        assert!(namespace_matches("lingbou", "LingBou"));
+        assert!(!namespace_matches("lingbou", "other"));
+    }
+
+    #[test]
+    fn anonymous_subject_match_is_case_insensitive() {
+        assert!(is_anonymous_subject("anonymous"));
+        assert!(is_anonymous_subject("Anonymous"));
+        assert!(!is_anonymous_subject("lingbou"));
     }
 }

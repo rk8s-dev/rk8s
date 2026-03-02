@@ -3,8 +3,9 @@ use std::time::Duration;
 use better_default::Default;
 use humantime::parse_duration;
 use serde::{Deserialize, Serialize};
+use tracing::info;
 
-use super::{PkiBackend, PkiBackendInner, util::DEFAULT_MAX_TTL};
+use super::{PkiBackend, PkiBackendInner, types, util::DEFAULT_MAX_TTL};
 use crate::{
     errors::RvError,
     logical::{Backend, Field, FieldType, Operation, Path, Request, Response, field::FieldTrait},
@@ -75,13 +76,34 @@ impl PkiBackend {
         let backend_delete = self.inner.clone();
 
         Path::builder()
-            .pattern(r"roles/(?P<name>\w[\w-]+\w)")
+            .pattern(r"roles/(?P<cert_type>tls|ssh)/(?P<name>\w[\w-]*)")
+            .field(
+                "cert_type",
+                Field::builder()
+                    .field_type(FieldType::Str)
+                    .required(true)
+                    .description("Certificate type: tls or ssh"),
+            )
             .field(
                 "name",
                 Field::builder()
                     .field_type(FieldType::Str)
                     .required(true)
                     .description("Name of the role."),
+            )
+            // SSH-specific fields
+            .field(
+                "cert_type_ssh",
+                Field::builder()
+                    .field_type(FieldType::Str)
+                    .default_value("user")
+                    .description("SSH certificate type: user or host"),
+            )
+            .field(
+                "allowed_users",
+                Field::builder()
+                    .field_type(FieldType::Str)
+                    .description("Comma-separated list of allowed users (SSH)"),
             )
             .field(
                 "ttl",
@@ -414,21 +436,21 @@ for "generate_lease"."#,
                 let handler = backend_read.clone();
                 move |backend, req| {
                     let handler = handler.clone();
-                    Box::pin(async move { handler.read_path_role(backend, req).await })
+                    Box::pin(async move { handler.dispatch_read_role(backend, req).await })
                 }
             })
             .operation(Operation::Write, {
                 let handler = backend_write.clone();
                 move |backend, req| {
                     let handler = handler.clone();
-                    Box::pin(async move { handler.create_path_role(backend, req).await })
+                    Box::pin(async move { handler.dispatch_write_role(backend, req).await })
                 }
             })
             .operation(Operation::Delete, {
                 let handler = backend_delete.clone();
                 move |backend, req| {
                     let handler = handler.clone();
-                    Box::pin(async move { handler.delete_path_role(backend, req).await })
+                    Box::pin(async move { handler.dispatch_delete_role(backend, req).await })
                 }
             })
             .help("This path lets you manage the roles that can be created with this backend.")
@@ -437,12 +459,57 @@ for "generate_lease"."#,
 }
 
 impl PkiBackendInner {
+    // ── Dispatch ──
+
+    pub async fn dispatch_read_role(
+        &self,
+        backend: &dyn Backend,
+        req: &mut Request,
+    ) -> Result<Option<Response>, RvError> {
+        let ct = req.get_data("cert_type")?;
+        let ct = ct.as_str().ok_or(RvError::ErrRequestFieldInvalid)?;
+        match ct {
+            "tls" => self.read_path_role(backend, req).await,
+            "ssh" => self.read_ssh_role(backend, req).await,
+            _ => Err(RvError::ErrRequestFieldInvalid),
+        }
+    }
+
+    pub async fn dispatch_write_role(
+        &self,
+        backend: &dyn Backend,
+        req: &mut Request,
+    ) -> Result<Option<Response>, RvError> {
+        let ct = req.get_data("cert_type")?;
+        let ct = ct.as_str().ok_or(RvError::ErrRequestFieldInvalid)?;
+        match ct {
+            "tls" => self.create_path_role(backend, req).await,
+            "ssh" => self.create_ssh_role(backend, req).await,
+            _ => Err(RvError::ErrRequestFieldInvalid),
+        }
+    }
+
+    pub async fn dispatch_delete_role(
+        &self,
+        backend: &dyn Backend,
+        req: &mut Request,
+    ) -> Result<Option<Response>, RvError> {
+        let ct = req.get_data("cert_type")?;
+        let ct = ct.as_str().ok_or(RvError::ErrRequestFieldInvalid)?;
+        match ct {
+            "tls" => self.delete_path_role(backend, req).await,
+            "ssh" => self.delete_ssh_role(backend, req).await,
+            _ => Err(RvError::ErrRequestFieldInvalid),
+        }
+    }
+
+    // ── TLS roles ──
     pub async fn get_role(
         &self,
         req: &mut Request,
         name: &str,
     ) -> Result<Option<RoleEntry>, RvError> {
-        let key = format!("role/{name}");
+        let key = format!("roles/tls/{name}");
         let storage_entry = req.storage_get(&key).await?;
         if storage_entry.is_none() {
             return Ok(None);
@@ -466,6 +533,10 @@ impl PkiBackendInner {
                     .ok_or(RvError::ErrRequestFieldInvalid)?,
             )
             .await?;
+        let role_entry = match role_entry {
+            Some(r) => r,
+            None => return Err(RvError::ErrPkiRoleNotFound),
+        };
         let data = serde_json::to_value(role_entry)?;
         Ok(Some(Response::data_response(Some(
             data.as_object().unwrap().clone(),
@@ -670,7 +741,7 @@ impl PkiBackendInner {
             ..Default::default()
         };
 
-        let entry = StorageEntry::new(format!("role/{name}").as_str(), &role_entry)?;
+        let entry = StorageEntry::new(format!("roles/tls/{name}").as_str(), &role_entry)?;
 
         req.storage_put(&entry).await?;
 
@@ -688,7 +759,141 @@ impl PkiBackendInner {
             return Err(RvError::ErrRequestNoDataField);
         }
 
-        req.storage_delete(format!("role/{name}").as_str()).await?;
+        req.storage_delete(format!("roles/tls/{name}").as_str())
+            .await?;
+        Ok(None)
+    }
+
+    // ── SSH roles ──
+
+    pub async fn get_ssh_role(
+        &self,
+        req: &mut Request,
+        name: &str,
+    ) -> Result<Option<types::SshRoleEntry>, RvError> {
+        let key = format!("roles/ssh/{name}");
+        let entry = req.storage_get(&key).await?;
+        if entry.is_none() {
+            return Ok(None);
+        }
+        let role: types::SshRoleEntry = serde_json::from_slice(entry.unwrap().value.as_slice())?;
+        Ok(Some(role))
+    }
+
+    pub async fn read_ssh_role(
+        &self,
+        _backend: &dyn Backend,
+        req: &mut Request,
+    ) -> Result<Option<Response>, RvError> {
+        let name_value = req.get_data("name")?;
+        let name = name_value.as_str().ok_or(RvError::ErrRequestFieldInvalid)?;
+        let role = match self.get_ssh_role(req, name).await? {
+            Some(r) => r,
+            None => return Err(RvError::ErrPkiSshRoleNotFound),
+        };
+        let data = serde_json::to_value(role)?;
+        Ok(Some(Response::data_response(Some(
+            data.as_object().unwrap().clone(),
+        ))))
+    }
+
+    pub async fn create_ssh_role(
+        &self,
+        _backend: &dyn Backend,
+        req: &mut Request,
+    ) -> Result<Option<Response>, RvError> {
+        let name_value = req.get_data("name")?;
+        let name = name_value.as_str().ok_or(RvError::ErrRequestFieldInvalid)?;
+
+        let cert_type = req
+            .get_data_or_default("cert_type_ssh")?
+            .as_str()
+            .ok_or(RvError::ErrRequestFieldInvalid)?
+            .to_string();
+        if cert_type != "user" && cert_type != "host" {
+            return Err(RvError::ErrPkiSshCertTypeInvalid);
+        }
+
+        let key_type = req
+            .get_data_or_default("key_type")?
+            .as_str()
+            .ok_or(RvError::ErrRequestFieldInvalid)?
+            .to_string();
+        match key_type.as_str() {
+            "rsa" | "ec" | "ed25519" => {}
+            _ => return Err(RvError::ErrPkiKeyTypeInvalid),
+        }
+
+        let key_bits = req
+            .get_data_or_default("key_bits")?
+            .as_u64()
+            .ok_or(RvError::ErrRequestFieldInvalid)? as u32;
+        match key_type.as_str() {
+            "rsa" => {
+                if key_bits != 0 && !(2048..=8192).contains(&key_bits) {
+                    return Err(RvError::ErrPkiKeyBitsInvalid);
+                }
+            }
+            "ec" => {
+                if !matches!(key_bits, 0 | 256 | 384 | 521) {
+                    return Err(RvError::ErrPkiKeyBitsInvalid);
+                }
+            }
+            "ed25519" => {}
+            _ => {}
+        }
+
+        let ttl_str = req
+            .get_data_or_default("ttl")?
+            .as_str()
+            .ok_or(RvError::ErrRequestFieldInvalid)?
+            .to_string();
+        let ttl = if ttl_str.is_empty() {
+            Duration::from_secs(3600)
+        } else {
+            parse_duration(&ttl_str)?
+        };
+
+        let mut allowed_users = Vec::new();
+        if let Ok(users_val) = req.get_data("allowed_users")
+            && let Some(users_str) = users_val.as_str()
+            && !users_str.is_empty()
+        {
+            allowed_users = users_str.split(',').map(|s| s.trim().to_string()).collect();
+        }
+
+        let role = types::SshRoleEntry {
+            cert_type,
+            key_type,
+            key_bits,
+            ttl,
+            allowed_users,
+            ..Default::default()
+        };
+
+        let entry = StorageEntry::new(format!("roles/ssh/{name}").as_str(), &role)?;
+        req.storage_put(&entry).await?;
+
+        info!(
+            role = %name,
+            cert_type = %role.cert_type,
+            key_type = %role.key_type,
+            key_bits = key_bits,
+            "SSH role created"
+        );
+
+        Ok(None)
+    }
+
+    pub async fn delete_ssh_role(
+        &self,
+        _backend: &dyn Backend,
+        req: &mut Request,
+    ) -> Result<Option<Response>, RvError> {
+        let name_value = req.get_data("name")?;
+        let name = name_value.as_str().ok_or(RvError::ErrRequestFieldInvalid)?;
+        req.storage_delete(format!("roles/ssh/{name}").as_str())
+            .await?;
         Ok(None)
     }
 }

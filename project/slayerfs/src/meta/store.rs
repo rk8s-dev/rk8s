@@ -63,6 +63,7 @@ pub struct SetAttrRequest {
 bitflags::bitflags! {
     /// Additional flags that control set-attribute semantics.
     #[allow(dead_code)]
+    #[derive(Debug)]
     pub struct SetAttrFlags: u32 {
         const CLEAR_SUID = 0b0001;
         const CLEAR_SGID = 0b0010;
@@ -74,6 +75,7 @@ bitflags::bitflags! {
 bitflags::bitflags! {
     /// POSIX-style open flags translated for the metadata store.
     #[allow(dead_code)]
+    #[derive(Debug)]
     pub struct OpenFlags: u32 {
         const RDONLY = 0b0001;
         const WRONLY = 0b0010;
@@ -206,9 +208,11 @@ pub struct LoadOption {
     pub allow_conflicts: bool,
 }
 
+#[derive(Debug)]
 pub enum LockName {
     CleanupSessionsLock,
 }
+
 impl fmt::Display for LockName {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
@@ -259,6 +263,9 @@ pub enum MetaError {
     #[error("Invalid path: {0}")]
     InvalidPath(String),
 
+    #[error("Invalid filename")]
+    InvalidFilename,
+
     #[error(
         "More than max_symlinks symbolic links were encountered during resolution of the path."
     )]
@@ -286,7 +293,7 @@ pub enum MetaError {
     Io(#[from] std::io::Error),
 
     #[error("Serialization error: {0}")]
-    Serialization(#[from] serde_json::Error),
+    Serialization(String),
 
     #[error("Config error: {0}")]
     Config(String),
@@ -390,6 +397,16 @@ pub trait MetaStore: Send + Sync {
         new_name: String,
     ) -> Result<(), MetaError>;
 
+    /// Atomically exchange two files (RENAME_EXCHANGE)
+    /// Both entries must exist
+    async fn rename_exchange(
+        &self,
+        old_parent: i64,
+        old_name: &str,
+        new_parent: i64,
+        new_name: &str,
+    ) -> Result<(), MetaError>;
+
     async fn set_file_size(&self, ino: i64, size: u64) -> Result<(), MetaError>;
     async fn extend_file_size(&self, ino: i64, size: u64) -> Result<(), MetaError> {
         self.set_file_size(ino, size).await
@@ -438,6 +455,14 @@ pub trait MetaStore: Send + Sync {
     async fn get_slices(&self, chunk_id: u64) -> Result<Vec<SliceDesc>, MetaError>;
 
     async fn append_slice(&self, chunk_id: u64, slice: SliceDesc) -> Result<(), MetaError>;
+
+    async fn write(
+        &self,
+        ino: i64,
+        chunk_id: u64,
+        slice: SliceDesc,
+        new_size: u64,
+    ) -> Result<(), MetaError>;
 
     async fn next_id(&self, key: &str) -> Result<i64, MetaError>;
     /// Allow downcasting to concrete types
@@ -696,6 +721,16 @@ pub trait MetaStore: Send + Sync {
         flags: u32,
     ) -> Result<(), MetaError> {
         let _ = (inode, name, value, flags);
+        Err(MetaError::NotImplemented)
+    }
+
+    async fn get_xattr(&self, inode: i64, name: &str) -> Result<Option<Vec<u8>>, MetaError> {
+        let _ = (inode, name);
+        Err(MetaError::NotImplemented)
+    }
+
+    async fn list_xattr(&self, inode: i64) -> Result<Vec<String>, MetaError> {
+        let _ = inode;
         Err(MetaError::NotImplemented)
     }
 

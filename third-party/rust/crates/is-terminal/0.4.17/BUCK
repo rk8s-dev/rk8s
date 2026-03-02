@@ -24,10 +24,5 @@ rust_library(
     crate_root = "vendor/src/lib.rs",
     edition = "2018",
     rustc_flags = ["@$(location :is-terminal-manifest[env_flags])"],
-    os_deps = {
-        "linux": ["//third-party/rust/crates/libc/0.2.178:libc"],
-        "macos": ["//third-party/rust/crates/libc/0.2.178:libc"],
-        "windows": ["//third-party/rust/crates/windows-sys/0.61.2:windows-sys"],
-    },
     visibility = ["PUBLIC"],
 )

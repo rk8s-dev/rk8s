@@ -219,7 +219,7 @@ sudo RKL_ADDRESS=127.0.0.1:50051 project/target/debug/rkl pod daemon # Monitors 
 ```
 
 **RKS:**
-For detail about building a cluster with RKS and RKL, please refer to [RKS–RKL usage](./project/rks/Readme.md).
+For detail about building a cluster with RKS and RKL, please refer to [RKS–RKL usage](./project/rks/README.md).
 
 ## Key Features
 - **CRI Compliance** - Full Container Runtime Interface implementation
@@ -232,7 +232,6 @@ For detail about building a cluster with RKS and RKL, please refer to [RKS–RKL
 - **Cluster Orchestration** - Distributed scheduling and state management
 
 ## License
-rk8s is licensed under this Licensed:
 
 - MIT LICENSE ( [LICENSE-MIT](LICENSE-MIT) or https://opensource.org/licenses/MIT)
 - Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE) or https://www.apache.org/licenses/LICENSE-2.0)
@@ -242,3 +241,7 @@ rk8s is licensed under this Licensed:
 The rk8s project relies on community contributions and aims to simplify getting started. Pick an issue, make changes, and submit a pull request for community review.
 
 More information on contributing to rk8s is available in the [Contributing Guide](docs/contributing.md).
+
+## Community
+
+Discord Channel: https://discord.gg/hKAypQUEzE 

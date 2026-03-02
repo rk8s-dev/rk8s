@@ -1,0 +1,47 @@
+[package]
+name = "libcsi"
+version = "0.1.0"
+edition = "2024"
+authors = ["rk8s-dev team"]
+description = "Simplified CSI (Container Storage Interface) over QUIC for RK8s"
+repository = "https://github.com/r2cn-dev/rk8s/tree/main/project/libcsi"
+
+[lib]
+name = "libcsi"
+path = "src/lib.rs"
+
+[dependencies]
+# Async runtime
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "fs", "process", "sync"] }
+async-trait = { workspace = true }
+
+# QUIC transport
+quinn = { workspace = true }
+rustls = { workspace = true }
+rcgen = { workspace = true }
+
+# Serialization
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+
+# Error handling
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+
+# Logging / tracing
+tracing = { workspace = true }
+
+# System operations
+nix = { workspace = true, features = ["fs", "mount"] }
+uuid = { workspace = true, features = ["v4", "serde"] }
+
+# Concurrent containers
+dashmap = { workspace = true }
+
+# Internal dependencies
+common = { workspace = true }
+slayerfs = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+tokio = { workspace = true, features = ["full", "test-util"] }

@@ -1,0 +1,28 @@
+[package]
+name = "curp-test-utils"
+version = "0.1.0"
+edition.workspace = true
+authors = ["DatenLord <dev@datenlord.io>"]
+repository = "https://github.com/xline-kv/Xline/tree/master/curp-test-utils"
+description = "Test utils for curp"
+categories = ["Test"]
+keywords = ["Test", "Utils"]
+license = "Apache-2.0"
+readme = "README.md"
+
+[dependencies]
+async-trait = { workspace = true }
+bincode = { workspace = true }
+curp-external-api = { path = "../curp-external-api" }
+engine = { path = "../engine" }
+itertools = { workspace = true }
+prost = { workspace = true }
+serde = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true, features = ["env-filter", "time"] }
+utils = { path = "../utils", version = "0.1.0" }
+
+[lints]
+workspace = true

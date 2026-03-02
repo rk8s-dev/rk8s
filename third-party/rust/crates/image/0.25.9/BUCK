@@ -26,9 +26,9 @@ rust_library(
     rustc_flags = ["@$(location :image-manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/bytemuck/1.24.0:bytemuck",
+        "//third-party/rust/crates/bytemuck/1.25.0:bytemuck",
         "//third-party/rust/crates/byteorder-lite/0.1.0:byteorder-lite",
-        "//third-party/rust/crates/moxcms/0.7.10:moxcms",
+        "//third-party/rust/crates/moxcms/0.7.11:moxcms",
         "//third-party/rust/crates/num-traits/0.2.19:num-traits",
     ],
 )

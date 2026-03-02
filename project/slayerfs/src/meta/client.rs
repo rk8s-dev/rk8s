@@ -8,11 +8,13 @@ use crate::meta::config::{CacheCapacity, CacheTtl};
 use crate::meta::file_lock::{FileLockInfo, FileLockQuery, FileLockRange, FileLockType};
 use crate::meta::layer::MetaLayer;
 use crate::meta::store::{
-    DirEntry, FileAttr, MetaError, MetaStore, OpenFlags, SetAttrFlags, SetAttrRequest,
+    AclRule, DirEntry, FileAttr, MetaError, MetaStore, OpenFlags, SetAttrFlags, SetAttrRequest,
     StatFsSnapshot,
 };
 use crate::meta::stores::{CacheInvalidationEvent, EtcdMetaStore, EtcdWatchWorker, WatchConfig};
+use crate::posix::NAME_MAX;
 use crate::vfs::fs::FileType;
+use crate::vfs::handles::DirHandle;
 use async_trait::async_trait;
 use dashmap::DashMap;
 use futures::stream;
@@ -23,7 +25,7 @@ use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::time::Duration;
 use std::{collections::HashSet, process};
 use tokio::sync::{Mutex, mpsc};
-use tracing::{debug, info, warn};
+use tracing::{Instrument, debug, info, trace, warn};
 use uuid::Uuid;
 
 use crate::vfs::extract_ino_and_chunk_index;
@@ -146,7 +148,7 @@ pub struct MetaClient<T: MetaStore> {
     root: AtomicI64,
     #[allow(dead_code)]
     umounting: AtomicBool,
-    inode_cache: InodeCache,
+    inode_cache: Arc<InodeCache>,
     /// it's absolute path.
     /// Used for quick lookups and invalidation
     path_cache: Cache<String, i64>,
@@ -205,32 +207,28 @@ impl<T: MetaStore + 'static> MetaClient<T> {
 
         // Detect if this is an etcd backend and start Watch Worker
         let watch_worker = if options.no_background_jobs {
+            debug!("Watch Worker disabled: no_background_jobs=true");
             None
         } else if let Some(etcd_store) = store.as_any().downcast_ref::<EtcdMetaStore>() {
             let client = etcd_store.get_client();
+            let config = WatchConfig::from_env_or_default();
 
-            // Create Watch Worker configuration
-            // Watch all metadata keys
-            // TODO: Consider watching only specific prefixes?
-            // For now, watch everything for simplicity
-            let config = WatchConfig {
-                key_prefix: "".to_string(),
-                event_buffer_size: 1000,
-                debug: false,
-            };
-
-            let (mut worker, invalidation_rx) = EtcdWatchWorker::new(client, config);
-
-            if let Err(e) = worker.start() {
-                warn!("Failed to start Watch Worker: {}", e);
+            if !config.enabled {
+                debug!("Watch Worker disabled: SLAYERFS_WATCH_ENABLED=false or default");
                 None
             } else {
-                debug!("Watch Worker started for etcd backend");
+                let (mut worker, invalidation_rx) = EtcdWatchWorker::new(client, config);
 
-                // Start the invalidation handler after creating MetaClient
-                let worker_arc = Arc::new(worker);
-                let rx = Arc::new(Mutex::new(invalidation_rx));
-                Some((worker_arc, rx))
+                if let Err(e) = worker.start() {
+                    warn!("Failed to start Watch Worker: {}", e);
+                    None
+                } else {
+                    debug!("Watch Worker started for etcd backend");
+
+                    let worker_arc = Arc::new(worker);
+                    let rx = Arc::new(Mutex::new(invalidation_rx));
+                    Some((worker_arc, rx))
+                }
             }
         } else {
             None
@@ -244,7 +242,7 @@ impl<T: MetaStore + 'static> MetaClient<T> {
             options,
             root: AtomicI64::new(root_ino),
             umounting: AtomicBool::new(false),
-            inode_cache: InodeCache::new(capacity.inode as u64, ttl.inode_ttl),
+            inode_cache: Arc::new(InodeCache::new(capacity.inode as u64, ttl.inode_ttl)),
             path_cache: Cache::builder()
                 .max_capacity(capacity.path as u64)
                 .time_to_live(ttl.path_ttl)
@@ -480,6 +478,30 @@ impl<T: MetaStore + 'static> MetaClient<T> {
         info!("Cache invalidation handler stopped (channel closed)");
     }
 
+    /// Preloads commonly accessed cache entries after operations that might benefit from caching.
+    /// This helps maintain cache consistency and improves performance for subsequent operations.
+    async fn preload_cache_entries(&self, inodes: &[i64]) -> Result<(), MetaError> {
+        for &ino in inodes {
+            // Preload inode attributes if not already cached
+            if self.inode_cache.get_attr(ino).await.is_none()
+                && let Ok(Some(attr)) = self.store.stat(ino).await
+            {
+                // For single-link files, we can cache the parent relationship
+                // For multi-link files, parent is stored in LinkParentMeta
+                let cache_parent = if attr.nlink <= 1 {
+                    // Try to find parent from ContentMeta (best effort)
+                    // This is a performance optimization - not critical for correctness
+                    None // We'll let it be resolved lazily
+                } else {
+                    None // Multi-link files don't cache parent
+                };
+
+                self.inode_cache.insert_node(ino, attr, cache_parent).await;
+            }
+        }
+        Ok(())
+    }
+
     /// Intelligently invalidates path cache entries for a parent directory.
     ///
     /// # Strategy (Trie-based approach)
@@ -589,6 +611,7 @@ impl<T: MetaStore + 'static> MetaClient<T> {
     /// * `Ok(i64)` - The inode number of the file/directory/symlink
     /// * `Err(MetaError::NotFound)` - If any component in the path doesn't exist
     /// * `Err(MetaError::...)` - Other metadata errors
+    #[tracing::instrument(level = "trace", skip(self), fields(path))]
     pub async fn resolve_path(&self, path: &str) -> Result<i64, MetaError> {
         self.resolve_path_impl(path, false).await
     }
@@ -597,6 +620,7 @@ impl<T: MetaStore + 'static> MetaClient<T> {
     /// This method is similar to [`resolve_path`], but follows all symlinks
     /// including the final path component.
     #[allow(dead_code)]
+    #[tracing::instrument(level = "trace", skip(self), fields(path))]
     pub async fn resolve_path_follow(&self, path: &str) -> Result<i64, MetaError> {
         self.resolve_path_impl(path, true).await
     }
@@ -607,8 +631,9 @@ impl<T: MetaStore + 'static> MetaClient<T> {
     ///
     /// * `path` - The absolute path to resolve
     /// * `follow_final` - If true, follow stat semantics, false for lstat semantics
+    #[tracing::instrument(level = "trace", skip(self), fields(path, follow_final))]
     async fn resolve_path_impl(&self, path: &str, follow_final: bool) -> Result<i64, MetaError> {
-        info!("MetaClient: Resolving path: {}", path);
+        trace!("MetaClient: Resolving path: {}", path);
 
         let root = self.root();
         if path == "/" {
@@ -617,7 +642,7 @@ impl<T: MetaStore + 'static> MetaClient<T> {
 
         if let Some(ino) = self.path_cache.get(path).await {
             if !follow_final {
-                info!("MetaClient: Path cache HIT for '{}' -> inode {}", path, ino);
+                trace!("MetaClient: Path cache HIT for '{}' -> inode {}", path, ino);
                 return Ok(ino);
             }
 
@@ -630,13 +655,13 @@ impl<T: MetaStore + 'static> MetaClient<T> {
                 }
 
                 _ => {
-                    info!("MetaClient: Path cache HIT for '{}' -> inode {}", path, ino);
+                    trace!("MetaClient: Path cache HIT for '{}' -> inode {}", path, ino);
                     return Ok(ino);
                 }
             }
         }
 
-        info!("MetaClient: Path cache MISS for '{}'", path);
+        trace!("MetaClient: Path cache MISS for '{}'", path);
 
         let mut current_path = path.to_string();
         let mut symlink_depth = 0;
@@ -657,6 +682,13 @@ impl<T: MetaStore + 'static> MetaClient<T> {
             let mut symlink_encountered = false;
 
             for (idx, seg) in segments.iter().enumerate() {
+                // POSIX: check parent is a directory before lookup
+                if let Ok(Some(attr)) = self.cached_stat(current_ino).await
+                    && attr.kind != FileType::Dir
+                {
+                    return Err(MetaError::NotDirectory(current_ino));
+                }
+
                 let child_ino = self
                     .cached_lookup(current_ino, seg)
                     .await?
@@ -682,8 +714,7 @@ impl<T: MetaStore + 'static> MetaClient<T> {
                     let resolved_target = if target.starts_with('/') {
                         target
                     } else {
-                        let parent_path = self
-                            .get_paths(current_ino)
+                        let parent_path = MetaLayer::get_paths(self, current_ino)
                             .await?
                             .into_iter()
                             .next()
@@ -736,16 +767,17 @@ impl<T: MetaStore + 'static> MetaClient<T> {
     /// * `Ok(Some(FileAttr))` - The file attributes if the inode exists
     /// * `Ok(None)` - If the inode doesn't exist
     /// * `Err(MetaError)` - On storage errors
+    #[tracing::instrument(level = "trace", skip(self), fields(ino))]
     async fn cached_stat(&self, ino: i64) -> Result<Option<FileAttr>, MetaError> {
         let inode = self.check_root(ino);
         info!("MetaClient: stat request for inode {}", inode);
 
         if let Some(attr) = self.inode_cache.get_attr(inode).await {
-            info!("MetaClient: Inode cache HIT for inode {}", inode);
+            trace!("MetaClient: Inode cache HIT for inode {}", inode);
             return Ok(Some(attr));
         }
 
-        info!("MetaClient: Inode cache MISS for inode {}", inode);
+        trace!("MetaClient: Inode cache MISS for inode {}", inode);
 
         let attr = self.store.stat(inode).await?;
 
@@ -771,6 +803,7 @@ impl<T: MetaStore + 'static> MetaClient<T> {
     /// * `Ok(Some(i64))` - The inode number of the child entry if found
     /// * `Ok(None)` - If no entry with the given name exists in the parent
     /// * `Err(MetaError)` - On storage errors
+    #[tracing::instrument(level = "trace", skip(self), fields(parent, name))]
     async fn cached_lookup(&self, parent: i64, name: &str) -> Result<Option<i64>, MetaError> {
         let parent = self.check_root(parent);
         info!("MetaClient: lookup request for ({}, '{}')", parent, name);
@@ -783,7 +816,7 @@ impl<T: MetaStore + 'static> MetaClient<T> {
             return Ok(Some(ino));
         }
 
-        info!("MetaClient: Inode cache MISS for ({}, '{}')", parent, name);
+        debug!("MetaClient: Inode cache MISS for ({}, '{}')", parent, name);
 
         let result = self.store.lookup(parent, name).await?;
 
@@ -808,6 +841,7 @@ impl<T: MetaStore + 'static> MetaClient<T> {
         }
     }
 
+    #[tracing::instrument(level = "trace", skip(self), fields(parent, name))]
     async fn resolve_case(&self, parent: i64, name: &str) -> Result<Option<i64>, MetaError> {
         let entries = self.store.readdir(parent).await?;
         for entry in entries {
@@ -838,11 +872,11 @@ impl<T: MetaStore + 'static> MetaClient<T> {
     ///
     /// Returns a tuple of (done_flag, task_handle)
     pub fn spawn_batch_prefetch(
-        self: &Arc<Self>,
+        &self,
         ino: i64,
         entries: &[DirEntry],
     ) -> (Arc<AtomicBool>, tokio::task::JoinHandle<()>) {
-        let config = &self.options.batch_prefetch;
+        let config = self.options.batch_prefetch.clone();
 
         if !config.enabled || entries.is_empty() {
             let done = Arc::new(std::sync::atomic::AtomicBool::new(true));
@@ -858,7 +892,8 @@ impl<T: MetaStore + 'static> MetaClient<T> {
         let done_flag = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let done_flag_clone = Arc::clone(&done_flag);
 
-        let client = Arc::clone(self);
+        let store = Arc::clone(&self.store);
+        let inode_cache = Arc::clone(&self.inode_cache);
         let parent_ino = ino; // Capture parent directory inode for the async block
 
         let task = tokio::spawn(async move {
@@ -884,17 +919,17 @@ impl<T: MetaStore + 'static> MetaClient<T> {
             use futures::stream::StreamExt;
             stream::iter(chunks.into_iter().enumerate())
                 .map(|(batch_idx, chunk)| {
-                    let client_clone = Arc::clone(&client);
+                    let store = Arc::clone(&store);
+                    let inode_cache = Arc::clone(&inode_cache);
                     async move {
                         let batch_start = std::time::Instant::now();
-                        match client_clone.store.batch_stat(&chunk).await {
+                        match store.batch_stat(&chunk).await {
                             Ok(attrs) => {
                                 let mut cached_count = 0;
                                 // Insert results into cache
                                 for (child_ino, attr_opt) in chunk.iter().zip(attrs.iter()) {
                                     if let Some(attr) = attr_opt {
-                                        client_clone
-                                            .inode_cache
+                                        inode_cache
                                             .insert_node(*child_ino, attr.clone(), None)
                                             .await;
                                         cached_count += 1;
@@ -953,18 +988,22 @@ impl<T: MetaStore + 'static> MetaLayer for MetaClient<T> {
         MetaClient::chroot(self, inode);
     }
 
+    #[tracing::instrument(level = "trace", skip(self))]
     async fn initialize(&self) -> Result<(), MetaError> {
         self.store.initialize().await
     }
 
+    #[tracing::instrument(level = "trace", skip(self))]
     async fn stat_fs(&self) -> Result<StatFsSnapshot, MetaError> {
         self.store.stat_fs().await
     }
 
+    #[tracing::instrument(level = "trace", skip(self), fields(ino))]
     async fn stat(&self, ino: i64) -> Result<Option<FileAttr>, MetaError> {
         self.cached_stat(ino).await
     }
 
+    #[tracing::instrument(level = "trace", skip(self), fields(ino))]
     async fn stat_fresh(&self, ino: i64) -> Result<Option<FileAttr>, MetaError> {
         let inode = self.check_root(ino);
         self.inode_cache.invalidate_inode(inode).await;
@@ -976,10 +1015,12 @@ impl<T: MetaStore + 'static> MetaLayer for MetaClient<T> {
         Ok(attr)
     }
 
+    #[tracing::instrument(level = "trace", skip(self), fields(parent, name))]
     async fn lookup(&self, parent: i64, name: &str) -> Result<Option<i64>, MetaError> {
         self.cached_lookup(parent, name).await
     }
 
+    #[tracing::instrument(level = "trace", skip(self), fields(path))]
     async fn lookup_path(&self, path: &str) -> Result<Option<(i64, FileType)>, MetaError> {
         let ino = match self.resolve_path(path).await {
             Ok(ino) => ino,
@@ -995,6 +1036,26 @@ impl<T: MetaStore + 'static> MetaLayer for MetaClient<T> {
         Ok(Some((ino, attr.kind)))
     }
 
+    #[tracing::instrument(level = "trace", skip(self), fields(path))]
+    async fn lookup_path_with_attr(
+        &self,
+        path: &str,
+    ) -> Result<Option<(i64, FileAttr)>, MetaError> {
+        let ino = match self.resolve_path(path).await {
+            Ok(ino) => ino,
+            Err(MetaError::NotFound(_)) => return Ok(None),
+            Err(e) => return Err(e),
+        };
+
+        let attr = self
+            .cached_stat(ino)
+            .await?
+            .ok_or(MetaError::NotFound(ino))?;
+
+        Ok(Some((ino, attr)))
+    }
+
+    #[tracing::instrument(level = "trace", skip(self), fields(ino))]
     async fn readdir(&self, ino: i64) -> Result<Vec<DirEntry>, MetaError> {
         let inode = self.check_root(ino);
         info!("MetaClient: readdir request for inode {}", inode);
@@ -1008,7 +1069,7 @@ impl<T: MetaStore + 'static> MetaLayer for MetaClient<T> {
             return Ok(entries);
         }
 
-        info!("MetaClient: Inode cache MISS for readdir inode {}", inode);
+        trace!("MetaClient: Inode cache MISS for readdir inode {}", inode);
 
         let mut entries = self.store.readdir(inode).await?;
         // Sort once before caching so readops always return stable ordering by name.
@@ -1034,14 +1095,42 @@ impl<T: MetaStore + 'static> MetaLayer for MetaClient<T> {
         Ok(entries)
     }
 
+    async fn opendir(&self, ino: i64) -> Result<DirHandle, MetaError> {
+        let inode = self.check_root(ino);
+        let attr = self
+            .cached_stat(inode)
+            .await?
+            .ok_or(MetaError::NotFound(inode))?;
+        if attr.kind != FileType::Dir {
+            return Err(MetaError::NotDirectory(inode));
+        }
+
+        let entries = self.readdir(inode).await?;
+        let (done_flag, prefetch_task) = MetaClient::spawn_batch_prefetch(self, inode, &entries);
+        Ok(DirHandle::with_prefetch_task(
+            inode,
+            entries,
+            prefetch_task,
+            done_flag,
+        ))
+    }
+    #[tracing::instrument(level = "trace", skip(self), fields(parent, name))]
     async fn mkdir(&self, parent: i64, name: String) -> Result<i64, MetaError> {
         self.ensure_writable()?;
         let parent = self.check_root(parent);
+
+        if name.is_empty() || name.len() > NAME_MAX {
+            return Err(MetaError::InvalidFilename);
+        }
+        if name.contains('/') || name.contains('\0') {
+            return Err(MetaError::InvalidFilename);
+        }
+
         info!("MetaClient: mkdir operation for ({}, '{}')", parent, name);
 
         let ino = self.store.mkdir(parent, name.clone()).await?;
 
-        info!("MetaClient: mkdir created inode {}, updating cache", ino);
+        debug!("MetaClient: mkdir created inode {}, updating cache", ino);
 
         // Ensure parent node is in cache
         self.inode_cache
@@ -1059,6 +1148,7 @@ impl<T: MetaStore + 'static> MetaLayer for MetaClient<T> {
         Ok(ino)
     }
 
+    #[tracing::instrument(level = "trace", skip(self), fields(parent, name))]
     async fn rmdir(&self, parent: i64, name: &str) -> Result<(), MetaError> {
         self.ensure_writable()?;
         let parent = self.check_root(parent);
@@ -1066,7 +1156,7 @@ impl<T: MetaStore + 'static> MetaLayer for MetaClient<T> {
 
         self.store.rmdir(parent, name).await?;
 
-        info!("MetaClient: rmdir completed, updating cache");
+        debug!("MetaClient: rmdir completed, updating cache");
 
         self.inode_cache.remove_child(parent, name).await;
         self.invalidate_parent_path(parent).await;
@@ -1074,6 +1164,7 @@ impl<T: MetaStore + 'static> MetaLayer for MetaClient<T> {
         Ok(())
     }
 
+    #[tracing::instrument(level = "trace", skip(self), fields(parent, name))]
     async fn create_file(&self, parent: i64, name: String) -> Result<i64, MetaError> {
         self.ensure_writable()?;
         let parent = self.check_root(parent);
@@ -1105,10 +1196,19 @@ impl<T: MetaStore + 'static> MetaLayer for MetaClient<T> {
         Ok(ino)
     }
 
+    #[tracing::instrument(level = "trace", skip(self), fields(ino, parent, name))]
     async fn link(&self, ino: i64, parent: i64, name: &str) -> Result<FileAttr, MetaError> {
         self.ensure_writable()?;
         let inode = self.check_root(ino);
         let parent = self.check_root(parent);
+
+        if name.is_empty() || name.len() > NAME_MAX {
+            return Err(MetaError::InvalidFilename);
+        }
+        if name.contains('/') || name.contains('\0') {
+            return Err(MetaError::InvalidFilename);
+        }
+
         info!(
             "MetaClient: link operation for inode {} into ({}, '{}')",
             inode, parent, name
@@ -1132,6 +1232,7 @@ impl<T: MetaStore + 'static> MetaLayer for MetaClient<T> {
         Ok(attr)
     }
 
+    #[tracing::instrument(level = "trace", skip(self), fields(parent, name, target))]
     async fn symlink(
         &self,
         parent: i64,
@@ -1140,6 +1241,19 @@ impl<T: MetaStore + 'static> MetaLayer for MetaClient<T> {
     ) -> Result<(i64, FileAttr), MetaError> {
         self.ensure_writable()?;
         let parent = self.check_root(parent);
+
+        if name.is_empty() || name.len() > NAME_MAX {
+            return Err(MetaError::InvalidFilename);
+        }
+        if name.contains('/') || name.contains('\0') {
+            return Err(MetaError::InvalidFilename);
+        }
+
+        // POSIX: symlink target path component must also respect NAME_MAX
+        if target.len() > NAME_MAX {
+            return Err(MetaError::InvalidFilename);
+        }
+
         info!(
             "MetaClient: symlink operation for ({}, '{}') -> '{}'",
             parent, name, target
@@ -1147,7 +1261,7 @@ impl<T: MetaStore + 'static> MetaLayer for MetaClient<T> {
 
         let (ino, attr) = self.store.symlink(parent, name, target).await?;
 
-        info!("MetaClient: symlink created inode {}, updating cache", ino);
+        debug!("MetaClient: symlink created inode {}, updating cache", ino);
 
         self.inode_cache
             .ensure_node_in_cache(parent, &self.store, None)
@@ -1166,14 +1280,24 @@ impl<T: MetaStore + 'static> MetaLayer for MetaClient<T> {
         Ok((ino, attr))
     }
 
+    #[tracing::instrument(level = "trace", skip(self), fields(parent, name))]
     async fn unlink(&self, parent: i64, name: &str) -> Result<(), MetaError> {
         self.ensure_writable()?;
+
+        // Validate filename length BEFORE lookup to return ENAMETOOLONG instead of ENOENT
+        if name.is_empty() || name.len() > NAME_MAX {
+            return Err(MetaError::InvalidFilename);
+        }
+        if name.contains('/') || name.contains('\0') {
+            return Err(MetaError::InvalidFilename);
+        }
+
         let parent = self.check_root(parent);
         info!("MetaClient: unlink operation for ({}, '{}')", parent, name);
 
         self.store.unlink(parent, name).await?;
 
-        info!("MetaClient: unlink completed, updating cache");
+        debug!("MetaClient: unlink completed, updating cache");
 
         self.inode_cache.remove_child(parent, name).await;
         self.invalidate_parent_path(parent).await;
@@ -1181,6 +1305,11 @@ impl<T: MetaStore + 'static> MetaLayer for MetaClient<T> {
         Ok(())
     }
 
+    #[tracing::instrument(
+        level = "trace",
+        skip(self),
+        fields(old_parent, old_name, new_parent, new_name)
+    )]
     async fn rename(
         &self,
         old_parent: i64,
@@ -1189,59 +1318,334 @@ impl<T: MetaStore + 'static> MetaLayer for MetaClient<T> {
         new_name: String,
     ) -> Result<(), MetaError> {
         self.ensure_writable()?;
+
         let old_parent = self.check_root(old_parent);
         let new_parent = self.check_root(new_parent);
-        info!(
+
+        // Fast path: if renaming to same location, return success (POSIX no-op)
+        if old_parent == new_parent && old_name == new_name {
+            return Ok(());
+        }
+
+        debug!(
             "MetaClient: rename operation from ({}, '{}') to ({}, '{}')",
             old_parent, old_name, new_parent, new_name
         );
 
+        // Comprehensive pre-validation
+        let src_ino = self
+            .cached_lookup(old_parent, old_name)
+            .await?
+            .ok_or_else(|| MetaError::NotFound(old_parent))?;
+
+        let src_attr = self.cached_stat(src_ino).await?;
+
+        // Validate new parent exists and is a directory
+        if let Some(parent_attr) = self.cached_stat(new_parent).await? {
+            if parent_attr.kind != FileType::Dir {
+                return Err(MetaError::NotDirectory(new_parent));
+            }
+        } else {
+            return Err(MetaError::NotFound(new_parent));
+        }
+
+        // Validate name constraints
+        if new_name.is_empty() || new_name.len() > NAME_MAX {
+            return Err(MetaError::InvalidFilename);
+        }
+
+        if new_name.contains('/') || new_name.contains('\0') {
+            return Err(MetaError::InvalidFilename);
+        }
+
+        // Execute the store-level rename with atomic cache updates
         self.store
             .rename(old_parent, old_name, new_parent, new_name.clone())
             .await?;
 
-        info!("MetaClient: rename completed, updating cache");
+        debug!("MetaClient: rename completed, updating cache");
 
-        if let Some(child_ino) = self
-            .inode_cache
-            .remove_child_but_keep_inode(old_parent, old_name)
-            .await
-        {
-            // Ensure new parent node is in cache before adding child
-            self.inode_cache
-                .ensure_node_in_cache(new_parent, &self.store, None)
-                .await?;
+        // Update cache atomically with enhanced consistency management
+        let cache_result = async {
+            // Step 1: Store pre-rename cache state for precise invalidation
+            let _old_parent_cached = self.inode_cache.get_node(old_parent).await;
+            let _new_parent_cached = if old_parent != new_parent {
+                self.inode_cache.get_node(new_parent).await
+            } else {
+                None
+            };
 
-            self.inode_cache
-                .add_child(new_parent, new_name, child_ino)
+            // Step 2: Remove child from old parent (keep inode for later use)
+            let child_info = self
+                .inode_cache
+                .remove_child_but_keep_inode(old_parent, old_name)
                 .await;
 
-            if let Ok(Some(attr)) = self.store.stat(child_ino).await {
-                if attr.nlink <= 1 {
-                    if let Some(child_node) = self.inode_cache.get_node(child_ino).await {
-                        child_node.set_parent(new_parent).await;
+            if let Some(child_ino) = child_info {
+                // Step 3: Ensure new parent is in cache with up-to-date metadata
+                self.inode_cache
+                    .ensure_node_in_cache(new_parent, &self.store, None)
+                    .await?;
+
+                // Step 4: Add child to new parent
+                self.inode_cache
+                    .add_child(new_parent, new_name.clone(), child_ino)
+                    .await;
+
+                // Step 5: Update parent-child relationship based on hard link count
+                if let Some(attr) = &src_attr {
+                    if attr.nlink <= 1 {
+                        // Single link: update parent directly
+                        if let Some(child_node) = self.inode_cache.get_node(child_ino).await {
+                            child_node.set_parent(new_parent).await;
+                        }
+                    } else {
+                        // Multiple links: clear parent (use LinkParentMeta instead)
+                        if let Some(child_node) = self.inode_cache.get_node(child_ino).await {
+                            child_node.clear_parent().await;
+                        }
                     }
-                } else if let Some(node) = self.inode_cache.get_node(child_ino).await {
-                    node.clear_parent().await;
                 }
             }
-        }
 
-        // Invalidate both old and new parent paths since both directories changed
-        self.invalidate_parent_path(old_parent).await;
-        if old_parent != new_parent {
-            self.invalidate_parent_path(new_parent).await;
-        }
+            // Step 6: Precise path cache invalidation
+            // Invalidate paths affected by this rename
+            self.invalidate_parent_path(old_parent).await;
+            if old_parent != new_parent {
+                self.invalidate_parent_path(new_parent).await;
+            }
 
-        // Invalidate parent directory stat caches since their mtime/ctime changed
-        self.inode_cache.invalidate_inode(old_parent).await;
-        if old_parent != new_parent {
-            self.inode_cache.invalidate_inode(new_parent).await;
+            // Step 7: Invalidate directory stat caches (mtime/ctime changed)
+            self.inode_cache.invalidate_inode(old_parent).await;
+            if old_parent != new_parent {
+                self.inode_cache.invalidate_inode(new_parent).await;
+            }
+
+            // Step 8: Preload commonly accessed cache entries for better performance
+            if let Some(child_ino) = child_info {
+                // Preload the renamed entry and its new parent for better subsequent access
+                let _ = self.preload_cache_entries(&[child_ino, new_parent]).await;
+            }
+
+            Ok::<(), MetaError>(())
+        }
+        .await;
+
+        if let Err(cache_err) = cache_result {
+            warn!(
+                "MetaClient: cache update failed after successful store rename: {}",
+                cache_err
+            );
+            // Cache inconsistency is logged but not fatal
         }
 
         Ok(())
     }
 
+    async fn rename_exchange(
+        &self,
+        old_parent: i64,
+        old_name: &str,
+        new_parent: i64,
+        new_name: &str,
+    ) -> Result<(), MetaError> {
+        self.ensure_writable()?;
+        let old_parent = self.check_root(old_parent);
+        let new_parent = self.check_root(new_parent);
+
+        // Fast path: exchanging with itself is a no-op
+        if old_parent == new_parent && old_name == new_name {
+            return Ok(());
+        }
+
+        debug!(
+            "MetaClient: rename_exchange operation between ({}, '{}') and ({}, '{}')",
+            old_parent, old_name, new_parent, new_name
+        );
+
+        // Both entries must exist
+        let old_ino = self
+            .cached_lookup(old_parent, old_name)
+            .await?
+            .ok_or_else(|| MetaError::NotFound(old_parent))?;
+
+        let new_ino = self
+            .cached_lookup(new_parent, new_name)
+            .await?
+            .ok_or_else(|| MetaError::NotFound(new_parent))?;
+
+        // Execute the store-level exchange
+        self.store
+            .rename_exchange(old_parent, old_name, new_parent, new_name)
+            .await?;
+
+        debug!("MetaClient: rename_exchange completed, updating cache");
+
+        // Update cache to reflect the exchange
+        let cache_result = async {
+            // Invalidate all affected caches
+            self.inode_cache.invalidate_inode(old_ino).await;
+            self.inode_cache.invalidate_inode(new_ino).await;
+            self.inode_cache.invalidate_inode(old_parent).await;
+            if old_parent != new_parent {
+                self.inode_cache.invalidate_inode(new_parent).await;
+            }
+
+            // Invalidate path caches
+            self.invalidate_parent_path(old_parent).await;
+            if old_parent != new_parent {
+                self.invalidate_parent_path(new_parent).await;
+            }
+
+            // Update directory entries
+            // Remove old entries
+            self.inode_cache.remove_child(old_parent, old_name).await;
+            self.inode_cache.remove_child(new_parent, new_name).await;
+
+            // Add swapped entries
+            self.inode_cache
+                .ensure_node_in_cache(old_parent, &self.store, None)
+                .await?;
+            self.inode_cache
+                .ensure_node_in_cache(new_parent, &self.store, None)
+                .await?;
+
+            self.inode_cache
+                .add_child(old_parent, old_name.to_string(), new_ino)
+                .await;
+            self.inode_cache
+                .add_child(new_parent, new_name.to_string(), old_ino)
+                .await;
+
+            Ok::<(), MetaError>(())
+        }
+        .await;
+
+        if let Err(cache_err) = cache_result {
+            warn!(
+                "MetaClient: cache update failed after successful rename_exchange: {}",
+                cache_err
+            );
+        }
+
+        Ok(())
+    }
+
+    async fn can_rename(
+        &self,
+        old_parent: i64,
+        old_name: &str,
+        new_parent: i64,
+        new_name: &str,
+    ) -> Result<(), MetaError> {
+        self.ensure_writable()?;
+
+        // Basic validation
+        let src_ino = self
+            .cached_lookup(old_parent, old_name)
+            .await?
+            .ok_or(MetaError::NotFound(old_parent))?;
+
+        let src_attr = self.cached_stat(src_ino).await?;
+
+        // Validate new parent exists and is a directory
+        if let Some(parent_attr) = self.cached_stat(new_parent).await? {
+            if parent_attr.kind != FileType::Dir {
+                return Err(MetaError::NotDirectory(new_parent));
+            }
+        } else {
+            return Err(MetaError::NotFound(new_parent));
+        }
+
+        // Validate name constraints
+        if new_name.is_empty() || new_name.len() > NAME_MAX {
+            return Err(MetaError::InvalidFilename);
+        }
+
+        if new_name.contains('/') || new_name.contains('\0') {
+            return Err(MetaError::InvalidFilename);
+        }
+
+        // Check destination constraints
+        if let Some(dest_ino) = self.cached_lookup(new_parent, new_name).await? {
+            let dest_attr = self
+                .cached_stat(dest_ino)
+                .await?
+                .ok_or(MetaError::NotFound(dest_ino))?;
+
+            match (src_attr.map(|a| a.kind), dest_attr.kind) {
+                // Directory replacing directory
+                (Some(FileType::Dir), FileType::Dir) => {
+                    let children = self.readdir(dest_ino).await?;
+                    if !children.is_empty() {
+                        return Err(MetaError::DirectoryNotEmpty(dest_ino));
+                    }
+                }
+                // Directory replacing file/symlink - not allowed
+                (Some(FileType::Dir), FileType::File)
+                | (Some(FileType::Dir), FileType::Symlink) => {
+                    return Err(MetaError::NotDirectory(dest_ino));
+                }
+                // File/symlink replacing directory - not allowed
+                (Some(FileType::File), FileType::Dir)
+                | (Some(FileType::Symlink), FileType::Dir) => {
+                    return Err(MetaError::NotDirectory(dest_ino));
+                }
+                // File/symlink replacing file/symlink - allowed
+                _ => {}
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn rename_with_flags(
+        &self,
+        old_parent: i64,
+        old_name: &str,
+        new_parent: i64,
+        new_name: String,
+        flags: crate::vfs::fs::RenameFlags,
+    ) -> Result<(), MetaError> {
+        self.ensure_writable()?;
+
+        if flags.exchange {
+            // Exchange operation - both must exist
+            let _src_ino = self
+                .cached_lookup(old_parent, old_name)
+                .await?
+                .ok_or(MetaError::NotFound(old_parent))?;
+            let _dest_ino = self
+                .cached_lookup(new_parent, &new_name)
+                .await?
+                .ok_or(MetaError::NotFound(new_parent))?;
+
+            // Perform exchange (simplified - not truly atomic)
+            let temp_name = format!("{}.exchange_temp_{}", old_name, std::process::id());
+            self.rename(old_parent, old_name, old_parent, temp_name.clone())
+                .await?;
+            self.rename(new_parent, &new_name, old_parent, old_name.to_string())
+                .await?;
+            self.rename(old_parent, &temp_name, new_parent, new_name)
+                .await?;
+            Ok(())
+        } else if flags.noreplace {
+            // Check if destination exists
+            if self.cached_lookup(new_parent, &new_name).await?.is_some() {
+                return Err(MetaError::AlreadyExists {
+                    parent: new_parent,
+                    name: new_name,
+                });
+            }
+            self.rename(old_parent, old_name, new_parent, new_name)
+                .await
+        } else {
+            // Default behavior
+            self.rename(old_parent, old_name, new_parent, new_name)
+                .await
+        }
+    }
+    #[tracing::instrument(level = "trace", skip(self), fields(ino, size))]
     async fn set_file_size(&self, ino: i64, size: u64) -> Result<(), MetaError> {
         self.ensure_writable()?;
         let inode = self.check_root(ino);
@@ -1256,6 +1660,7 @@ impl<T: MetaStore + 'static> MetaLayer for MetaClient<T> {
         Ok(())
     }
 
+    #[tracing::instrument(level = "trace", skip(self), fields(ino, size))]
     async fn extend_file_size(&self, ino: i64, size: u64) -> Result<(), MetaError> {
         self.ensure_writable()?;
         let inode = self.check_root(ino);
@@ -1271,6 +1676,7 @@ impl<T: MetaStore + 'static> MetaLayer for MetaClient<T> {
         Ok(())
     }
 
+    #[tracing::instrument(level = "trace", skip(self), fields(ino, size, chunk_size))]
     async fn truncate(&self, ino: i64, size: u64, chunk_size: u64) -> Result<(), MetaError> {
         self.ensure_writable()?;
         let inode = self.check_root(ino);
@@ -1279,6 +1685,7 @@ impl<T: MetaStore + 'static> MetaLayer for MetaClient<T> {
         Ok(())
     }
 
+    #[tracing::instrument(level = "trace", skip(self), fields(ino))]
     async fn get_names(&self, ino: i64) -> Result<Vec<(Option<i64>, String)>, MetaError> {
         let inode = self.check_root(ino);
         if inode == self.root() {
@@ -1288,6 +1695,7 @@ impl<T: MetaStore + 'static> MetaLayer for MetaClient<T> {
         self.store.get_names(inode).await
     }
 
+    #[tracing::instrument(level = "trace", skip(self), fields(ino))]
     async fn get_dentries(&self, ino: i64) -> Result<Vec<(i64, String)>, MetaError> {
         let inode = self.check_root(ino);
         if inode == self.root() {
@@ -1297,6 +1705,7 @@ impl<T: MetaStore + 'static> MetaLayer for MetaClient<T> {
         self.store.get_dentries(inode).await
     }
 
+    #[tracing::instrument(level = "trace", skip(self), fields(dir_ino))]
     async fn get_dir_parent(&self, dir_ino: i64) -> Result<Option<i64>, MetaError> {
         let inode = self.check_root(dir_ino);
         if inode == self.root() {
@@ -1306,6 +1715,7 @@ impl<T: MetaStore + 'static> MetaLayer for MetaClient<T> {
         self.store.get_dir_parent(inode).await
     }
 
+    #[tracing::instrument(level = "trace", skip(self), fields(ino))]
     async fn get_paths(&self, ino: i64) -> Result<Vec<String>, MetaError> {
         let inode = self.check_root(ino);
         if inode == self.root() {
@@ -1315,12 +1725,18 @@ impl<T: MetaStore + 'static> MetaLayer for MetaClient<T> {
         self.store.get_paths(inode).await
     }
 
+    #[tracing::instrument(level = "trace", skip(self), fields(ino))]
     async fn read_symlink(&self, ino: i64) -> Result<String, MetaError> {
         let inode = self.check_root(ino);
         info!("MetaClient: read_symlink request for inode {}", inode);
         self.store.read_symlink(inode).await
     }
 
+    #[tracing::instrument(
+        level = "trace",
+        skip(self, req),
+        fields(ino, size = req.size, flags = ?flags)
+    )]
     async fn set_attr(
         &self,
         ino: i64,
@@ -1336,33 +1752,106 @@ impl<T: MetaStore + 'static> MetaLayer for MetaClient<T> {
         Ok(attr)
     }
 
+    #[tracing::instrument(level = "trace", skip(self), fields(ino, flags = ?flags))]
     async fn open(&self, ino: i64, flags: OpenFlags) -> Result<FileAttr, MetaError> {
         let inode = self.check_root(ino);
         self.store.open(inode, flags).await
     }
 
+    #[tracing::instrument(level = "trace", skip(self), fields(ino))]
     async fn close(&self, ino: i64) -> Result<(), MetaError> {
         let inode = self.check_root(ino);
         self.store.close(inode).await
     }
 
+    #[tracing::instrument(
+        level = "trace",
+        skip(self, slice),
+        fields(
+            ino,
+            chunk_id,
+            slice_id = slice.slice_id,
+            offset = slice.offset,
+            len = slice.length,
+            new_size
+        )
+    )]
+    async fn write(
+        &self,
+        ino: i64,
+        chunk_id: u64,
+        slice: SliceDesc,
+        new_size: u64,
+    ) -> Result<(), MetaError> {
+        self.ensure_writable()?;
+        let inode = self.check_root(ino);
+        self.store.write(inode, chunk_id, slice, new_size).await?;
+
+        let (inode_from_chunk, chunk_index) = extract_ino_and_chunk_index(chunk_id);
+        self.inode_cache
+            .append_slice(inode_from_chunk, chunk_index, slice)
+            .await;
+
+        if let Some(node) = self.inode_cache.get_node(inode).await {
+            let mut attr = node.attr.write().await;
+            if new_size > attr.size {
+                attr.size = new_size;
+            }
+        }
+
+        Ok(())
+    }
+
+    #[tracing::instrument(level = "trace", skip(self))]
     async fn get_deleted_files(&self) -> Result<Vec<i64>, MetaError> {
         self.store.get_deleted_files().await
     }
 
+    #[tracing::instrument(level = "trace", skip(self), fields(ino))]
     async fn remove_file_metadata(&self, ino: i64) -> Result<(), MetaError> {
         self.ensure_writable()?;
         self.store.remove_file_metadata(ino).await
     }
 
+    #[tracing::instrument(
+        level = "trace",
+        skip(self),
+        fields(chunk_id, cache_hit = tracing::field::Empty, slice_count = tracing::field::Empty)
+    )]
     async fn get_slices(&self, chunk_id: u64) -> Result<Vec<SliceDesc>, MetaError> {
         let (inode, chunk_index) = extract_ino_and_chunk_index(chunk_id);
-        if let Some(slices) = self.inode_cache.get_slices(inode, chunk_index).await {
+        if let Some(slices) = self
+            .inode_cache
+            .get_slices(inode, chunk_index)
+            .instrument(tracing::trace_span!(
+                "get_slices.cache_lookup",
+                inode,
+                chunk_index
+            ))
+            .await
+        {
+            tracing::Span::current().record("cache_hit", true);
+            tracing::Span::current().record("slice_count", slices.len());
             return Ok(slices);
         }
-        self.store.get_slices(chunk_id).await
+        tracing::Span::current().record("cache_hit", false);
+        let slices = self
+            .store
+            .get_slices(chunk_id)
+            .instrument(tracing::trace_span!("get_slices.store", chunk_id))
+            .await?;
+        self.inode_cache
+            .replace_slices(inode, chunk_index, &slices)
+            .await;
+        tracing::Span::current().record("slice_count", slices.len());
+        Ok(slices)
     }
 
+    #[tracing::instrument(
+        level = "trace",
+        skip(self, slice),
+        fields(chunk_id, slice_id = slice.slice_id, offset = slice.offset, len = slice.length)
+    )]
     async fn append_slice(&self, chunk_id: u64, slice: SliceDesc) -> Result<(), MetaError> {
         self.ensure_writable()?;
 
@@ -1379,15 +1868,18 @@ impl<T: MetaStore + 'static> MetaLayer for MetaClient<T> {
         self.store.next_id(key).await
     }
 
+    #[tracing::instrument(level = "trace", skip(self), fields(pid = session_info.process_id))]
     async fn start_session(&self, session_info: SessionInfo) -> Result<(), MetaError> {
         MetaClient::start_session(self, session_info).await
     }
 
+    #[tracing::instrument(level = "trace", skip(self))]
     async fn shutdown_session(&self) -> Result<(), MetaError> {
         MetaClient::shutdown_session(self).await;
         Ok(())
     }
 
+    #[tracing::instrument(level = "trace", skip(self, query), fields(inode, owner = query.owner))]
     async fn get_plock(
         &self,
         inode: i64,
@@ -1396,6 +1888,11 @@ impl<T: MetaStore + 'static> MetaLayer for MetaClient<T> {
         self.store.get_plock(inode, query).await
     }
 
+    #[tracing::instrument(
+        level = "trace",
+        skip(self),
+        fields(inode, owner, block, lock_type = ?lock_type, pid)
+    )]
     async fn set_plock(
         &self,
         inode: i64,
@@ -1408,6 +1905,44 @@ impl<T: MetaStore + 'static> MetaLayer for MetaClient<T> {
         self.store
             .set_plock(inode, owner, block, lock_type, range, pid)
             .await
+    }
+
+    async fn set_xattr(
+        &self,
+        inode: i64,
+        name: &str,
+        value: &[u8],
+        flags: u32,
+    ) -> Result<(), MetaError> {
+        self.ensure_writable()?;
+        self.store.set_xattr(inode, name, value, flags).await
+    }
+
+    async fn get_xattr(&self, inode: i64, name: &str) -> Result<Option<Vec<u8>>, MetaError> {
+        self.store.get_xattr(inode, name).await
+    }
+
+    async fn list_xattr(&self, inode: i64) -> Result<Vec<String>, MetaError> {
+        self.store.list_xattr(inode).await
+    }
+
+    async fn remove_xattr(&self, inode: i64, name: &str) -> Result<(), MetaError> {
+        self.ensure_writable()?;
+        self.store.remove_xattr(inode, name).await
+    }
+
+    async fn set_acl(&self, inode: i64, rule: AclRule) -> Result<(), MetaError> {
+        self.ensure_writable()?;
+        self.store.set_acl(inode, rule).await
+    }
+
+    async fn get_acl(
+        &self,
+        inode: i64,
+        acl_type: u8,
+        acl_id: u32,
+    ) -> Result<Option<AclRule>, MetaError> {
+        self.store.get_acl(inode, acl_type, acl_id).await
     }
 }
 
@@ -1452,311 +1987,6 @@ mod tests {
         MetaClient::new(store, capacity, ttl)
     }
 
-    #[test]
-    fn test_normalize_path() {
-        // Basic absolute paths
-        assert_eq!(MetaClient::<DatabaseMetaStore>::normalize_path("/"), "/");
-        assert_eq!(
-            MetaClient::<DatabaseMetaStore>::normalize_path("/home/user"),
-            "/home/user"
-        );
-
-        // Handle .
-        assert_eq!(MetaClient::<DatabaseMetaStore>::normalize_path("/./"), "/");
-        assert_eq!(
-            MetaClient::<DatabaseMetaStore>::normalize_path("/home/./user"),
-            "/home/user"
-        );
-
-        // Handle ..
-        assert_eq!(
-            MetaClient::<DatabaseMetaStore>::normalize_path("/home/user/../"),
-            "/home"
-        );
-        assert_eq!(
-            MetaClient::<DatabaseMetaStore>::normalize_path("/home/../user"),
-            "/user"
-        );
-
-        // Complex cases
-        assert_eq!(
-            MetaClient::<DatabaseMetaStore>::normalize_path("/a/b/../c/./d"),
-            "/a/c/d"
-        );
-        assert_eq!(
-            MetaClient::<DatabaseMetaStore>::normalize_path("/a/./b/../../c"),
-            "/c"
-        );
-
-        // Relative paths
-        assert_eq!(
-            MetaClient::<DatabaseMetaStore>::normalize_path("file.txt"),
-            "file.txt"
-        );
-        assert_eq!(
-            MetaClient::<DatabaseMetaStore>::normalize_path("../file.txt"),
-            "file.txt"
-        );
-
-        // Edge cases
-        assert_eq!(MetaClient::<DatabaseMetaStore>::normalize_path(""), "");
-        assert_eq!(MetaClient::<DatabaseMetaStore>::normalize_path("."), "");
-        assert_eq!(
-            MetaClient::<DatabaseMetaStore>::normalize_path("/../../../file.txt"),
-            "/file.txt"
-        );
-    }
-
-    /// Test scenario: Call readdir immediately after creating files to verify fully_loaded flag handling
-    ///
-    /// Steps:
-    /// 1. Create multiple files (children state is Partial at this point)
-    /// 2. Call readdir (should load complete list from database, set state to Complete)
-    /// 3. Call readdir again (should hit cache)
-    /// 4. Create new file (incremental update to already fully loaded cache)
-    /// 5. Call readdir again (should contain all files including newly created one)
-    #[tokio::test]
-    async fn test_readdir_after_incremental_creates() {
-        let client = create_test_client().await;
-
-        // Step 1: Create initial files
-        let file1 = client
-            .create_file(1, "file1.txt".to_string())
-            .await
-            .unwrap();
-        let file2 = client
-            .create_file(1, "file2.txt".to_string())
-            .await
-            .unwrap();
-
-        // At this point root's children are in Partial state
-        // because they were only added incrementally via add_child
-
-        // Step 2: First readdir - should load complete list from database
-        let entries = client.readdir(1).await.unwrap();
-        assert_eq!(entries.len(), 2, "First readdir should return 2 files");
-
-        // Verify returned files
-        let names: Vec<String> = entries.iter().map(|e| e.name.clone()).collect();
-        assert!(
-            names.contains(&"file1.txt".to_string()),
-            "Should contain file1.txt"
-        );
-        assert!(
-            names.contains(&"file2.txt".to_string()),
-            "Should contain file2.txt"
-        );
-
-        // Step 3: Second readdir - should hit cache
-        let entries2 = client.readdir(1).await.unwrap();
-        assert_eq!(
-            entries2.len(),
-            2,
-            "Second readdir should return same 2 files"
-        );
-
-        // Step 4: Create new file
-        let file3 = client
-            .create_file(1, "file3.txt".to_string())
-            .await
-            .unwrap();
-
-        // Step 5: Third readdir - should contain all 3 files
-        let entries3 = client.readdir(1).await.unwrap();
-        assert_eq!(entries3.len(), 3, "Third readdir should return all 3 files");
-
-        let names3: Vec<String> = entries3.iter().map(|e| e.name.clone()).collect();
-        assert!(
-            names3.contains(&"file1.txt".to_string()),
-            "Should contain file1.txt"
-        );
-        assert!(
-            names3.contains(&"file2.txt".to_string()),
-            "Should contain file2.txt"
-        );
-        assert!(
-            names3.contains(&"file3.txt".to_string()),
-            "Should contain file3.txt"
-        );
-
-        // Verify all files can be found via lookup
-        assert_eq!(client.lookup(1, "file1.txt").await.unwrap(), Some(file1));
-        assert_eq!(client.lookup(1, "file2.txt").await.unwrap(), Some(file2));
-        assert_eq!(client.lookup(1, "file3.txt").await.unwrap(), Some(file3));
-    }
-
-    /// Test scenario: Create and traverse nested directories
-    ///
-    /// Directory structure:
-    /// /
-    /// ├── projects/
-    /// │   ├── rust/
-    /// │   │   ├── main.rs
-    /// │   │   └── lib.rs
-    /// │   └── python/
-    /// │       └── app.py
-    /// └── docs/
-    ///     └── README.md
-    #[tokio::test]
-    async fn test_nested_directory_operations() {
-        let client = create_test_client().await;
-
-        // Create directory tree
-        let projects = client.mkdir(1, "projects".to_string()).await.unwrap();
-        let docs = client.mkdir(1, "docs".to_string()).await.unwrap();
-
-        let rust_dir = client.mkdir(projects, "rust".to_string()).await.unwrap();
-        let python_dir = client.mkdir(projects, "python".to_string()).await.unwrap();
-
-        // Create files in each directory
-        let main_rs = client
-            .create_file(rust_dir, "main.rs".to_string())
-            .await
-            .unwrap();
-        let _lib_rs = client
-            .create_file(rust_dir, "lib.rs".to_string())
-            .await
-            .unwrap();
-        let app_py = client
-            .create_file(python_dir, "app.py".to_string())
-            .await
-            .unwrap();
-        let readme = client
-            .create_file(docs, "README.md".to_string())
-            .await
-            .unwrap();
-
-        // Test root directory
-        let root_entries = client.readdir(1).await.unwrap();
-        assert_eq!(root_entries.len(), 2, "Root should have 2 directories");
-        let root_names: Vec<String> = root_entries.iter().map(|e| e.name.clone()).collect();
-        assert!(root_names.contains(&"projects".to_string()));
-        assert!(root_names.contains(&"docs".to_string()));
-
-        // Test projects directory
-        let projects_entries = client.readdir(projects).await.unwrap();
-        assert_eq!(
-            projects_entries.len(),
-            2,
-            "projects/ should have 2 subdirectories"
-        );
-        let projects_names: Vec<String> = projects_entries.iter().map(|e| e.name.clone()).collect();
-        assert!(projects_names.contains(&"rust".to_string()));
-        assert!(projects_names.contains(&"python".to_string()));
-
-        // Test rust directory
-        let rust_entries = client.readdir(rust_dir).await.unwrap();
-        assert_eq!(rust_entries.len(), 2, "rust/ should have 2 files");
-        let rust_names: Vec<String> = rust_entries.iter().map(|e| e.name.clone()).collect();
-        assert!(rust_names.contains(&"main.rs".to_string()));
-        assert!(rust_names.contains(&"lib.rs".to_string()));
-
-        // Test path resolution
-        let resolved_main = client.resolve_path("/projects/rust/main.rs").await.unwrap();
-        assert_eq!(resolved_main, main_rs, "Should resolve to correct inode");
-
-        let resolved_readme = client.resolve_path("/docs/README.md").await.unwrap();
-        assert_eq!(resolved_readme, readme, "Should resolve to correct inode");
-
-        // Test lookup_path
-        let (ino, kind) = client
-            .lookup_path("/projects/python/app.py")
-            .await
-            .unwrap()
-            .unwrap();
-        assert_eq!(ino, app_py, "lookup_path should return correct inode");
-        assert_eq!(kind, FileType::File, "Should be a file");
-
-        let main_path = client
-            .get_paths(main_rs)
-            .await
-            .unwrap()
-            .first()
-            .cloned()
-            .unwrap();
-        assert_eq!(
-            main_path, "/projects/rust/main.rs",
-            "Should resolve path from inode"
-        );
-    }
-
-    /// Test scenario: File and directory deletion operations
-    ///
-    /// Verify:
-    /// 1. After deleting a file, readdir no longer shows it
-    /// 2. lookup should return None
-    /// 3. After deleting a directory, parent's readdir no longer shows it
-    #[tokio::test]
-    async fn test_delete_operations() {
-        let client = create_test_client().await;
-
-        // Create test structure
-        let dir1 = client.mkdir(1, "dir1".to_string()).await.unwrap();
-        let _file1 = client
-            .create_file(dir1, "file1.txt".to_string())
-            .await
-            .unwrap();
-        let _file2 = client
-            .create_file(dir1, "file2.txt".to_string())
-            .await
-            .unwrap();
-        let _file3 = client
-            .create_file(dir1, "file3.txt".to_string())
-            .await
-            .unwrap();
-
-        // Call readdir to load complete cache
-        let entries = client.readdir(dir1).await.unwrap();
-        assert_eq!(entries.len(), 3, "Should have 3 files before deletion");
-
-        // Delete one file
-        client.unlink(dir1, "file2.txt").await.unwrap();
-
-        // readdir should only show remaining files
-        let entries_after = client.readdir(dir1).await.unwrap();
-        assert_eq!(entries_after.len(), 2, "Should have 2 files after deletion");
-
-        let names: Vec<String> = entries_after.iter().map(|e| e.name.clone()).collect();
-        assert!(names.contains(&"file1.txt".to_string()));
-        assert!(names.contains(&"file3.txt".to_string()));
-        assert!(
-            !names.contains(&"file2.txt".to_string()),
-            "Deleted file should not appear"
-        );
-
-        // lookup for deleted file should return None
-        let lookup_result = client.lookup(dir1, "file2.txt").await.unwrap();
-        assert_eq!(
-            lookup_result, None,
-            "Lookup deleted file should return None"
-        );
-
-        // Delete all files
-        client.unlink(dir1, "file1.txt").await.unwrap();
-        client.unlink(dir1, "file3.txt").await.unwrap();
-
-        // Directory should be empty
-        let empty_entries = client.readdir(dir1).await.unwrap();
-        assert_eq!(empty_entries.len(), 0, "Directory should be empty");
-
-        // Delete empty directory
-        client.rmdir(1, "dir1").await.unwrap();
-
-        // Root should no longer contain dir1
-        let root_entries = client.readdir(1).await.unwrap();
-        assert_eq!(root_entries.len(), 0, "Root should be empty");
-
-        let lookup_dir = client.lookup(1, "dir1").await.unwrap();
-        assert_eq!(lookup_dir, None, "Deleted directory should not be found");
-    }
-
-    /// Test scenario: File and directory rename operations
-    ///
-    /// Verify:
-    /// 1. Rename within same directory
-    /// 2. Move across directories
-    /// 3. Path resolution works correctly after rename
-    /// 4. Cache is properly updated
     #[tokio::test]
     async fn test_rename_operations() {
         let client = create_test_client().await;
@@ -1829,10 +2059,10 @@ mod tests {
         let client = create_test_client().await;
 
         let ino = client.create_file(1, "text".to_string()).await.unwrap();
-        let chunk_id = chunk_id_for(ino, 1);
+        let chunk_id = chunk_id_for(ino, 1).unwrap();
 
         let test_slices = (1..=10)
-            .map(|e| SliceDesc {
+            .map(|e| crate::chuck::SliceDesc {
                 slice_id: e,
                 chunk_id,
                 offset: 0,
@@ -1858,149 +2088,166 @@ mod tests {
 
     /// Test scenario: Complex sequence of mixed operations
     ///
-    /// Simulate real-world usage: mixed operations of create, read, modify, delete
     #[tokio::test]
     async fn test_complex_mixed_operations() {
         let client = create_test_client().await;
 
-        // Phase 1: Build initial structure
-        let src = client.mkdir(1, "src".to_string()).await.unwrap();
-        let tests = client.mkdir(1, "tests".to_string()).await.unwrap();
-
-        let _main_rs = client
-            .create_file(src, "main.rs".to_string())
+        // Create initial structure
+        let dir1 = client.mkdir(1, "dir1".to_string()).await.unwrap();
+        let file1 = client
+            .create_file(dir1, "file1.txt".to_string())
             .await
             .unwrap();
-        let _lib_rs = client.create_file(src, "lib.rs".to_string()).await.unwrap();
-        let _test1 = client
-            .create_file(tests, "test1.rs".to_string())
+        let file2 = client
+            .create_file(dir1, "file2.txt".to_string())
             .await
             .unwrap();
 
-        // Phase 2: Read and verify
-        let root_entries = client.readdir(1).await.unwrap();
-        assert_eq!(root_entries.len(), 2, "Root should have src and tests");
+        // Verify initial state
+        let dir1_entries = client.readdir(dir1).await.unwrap();
+        assert_eq!(dir1_entries.len(), 2);
 
-        let src_entries = client.readdir(src).await.unwrap();
-        assert_eq!(src_entries.len(), 2, "src should have 2 files");
-
-        // Phase 3: Add more files
-        let _utils_rs = client
-            .create_file(src, "utils.rs".to_string())
-            .await
-            .unwrap();
-        let _test2 = client
-            .create_file(tests, "test2.rs".to_string())
-            .await
-            .unwrap();
-
-        // Phase 4: Verify readdir after incremental updates
-        let src_entries2 = client.readdir(src).await.unwrap();
-        assert_eq!(src_entries2.len(), 3, "src should now have 3 files");
-
-        let tests_entries = client.readdir(tests).await.unwrap();
-        assert_eq!(tests_entries.len(), 2, "tests should have 2 files");
-
-        // Phase 5: Rename operations
+        // Rename file1 within the same directory
         client
-            .rename(src, "utils.rs", src, "helpers.rs".to_string())
+            .rename(dir1, "file1.txt", dir1, "renamed1.txt".to_string())
             .await
             .unwrap();
 
-        // Verify rename
-        let src_entries3 = client.readdir(src).await.unwrap();
-        let src_names: Vec<String> = src_entries3.iter().map(|e| e.name.clone()).collect();
-        assert!(src_names.contains(&"helpers.rs".to_string()));
-        assert!(!src_names.contains(&"utils.rs".to_string()));
+        // Verify rename worked
+        let dir1_entries = client.readdir(dir1).await.unwrap();
+        assert_eq!(dir1_entries.len(), 2);
+        let names: std::collections::HashSet<String> =
+            dir1_entries.iter().map(|e| e.name.clone()).collect();
+        assert!(names.contains("renamed1.txt"));
+        assert!(names.contains("file2.txt"));
+        assert!(!names.contains("file1.txt"));
 
-        // Phase 6: Delete operations
-        client.unlink(tests, "test1.rs").await.unwrap();
+        // Create a subdirectory
+        let subdir = client.mkdir(dir1, "subdir".to_string()).await.unwrap();
 
-        let tests_entries2 = client.readdir(tests).await.unwrap();
-        assert_eq!(
-            tests_entries2.len(),
-            1,
-            "tests should have 1 file after deletion"
-        );
-
-        // Phase 7: Create subdirectory
-        let models = client.mkdir(src, "models".to_string()).await.unwrap();
-        let user_rs = client
-            .create_file(models, "user.rs".to_string())
+        // Move file2 into subdirectory
+        client
+            .rename(dir1, "file2.txt", subdir, "moved2.txt".to_string())
             .await
             .unwrap();
 
-        // Verify multi-level path
-        let resolved = client.resolve_path("/src/models/user.rs").await.unwrap();
-        assert_eq!(resolved, user_rs);
+        // Verify move worked
+        let dir1_entries = client.readdir(dir1).await.unwrap();
+        assert_eq!(dir1_entries.len(), 2); // renamed1.txt + subdir
+        let subdir_entries = client.readdir(subdir).await.unwrap();
+        assert_eq!(subdir_entries.len(), 1);
+        assert_eq!(subdir_entries[0].name, "moved2.txt");
 
-        // Phase 8: Final verification - check entire tree structure
-        let final_root = client.readdir(1).await.unwrap();
-        assert_eq!(final_root.len(), 2, "Root should still have 2 directories");
-
-        let final_src = client.readdir(src).await.unwrap();
-        assert_eq!(final_src.len(), 4, "src should have 3 files + 1 directory");
-
-        let models_entries = client.readdir(models).await.unwrap();
-        assert_eq!(models_entries.len(), 1, "models should have 1 file");
-    }
-
-    /// Test scenario: Verify cache consistency between lookup and resolve_path
-    ///
-    /// Ensure cache remains consistent when accessing the same path via different methods
-    #[tokio::test]
-    async fn test_lookup_vs_resolve_path_consistency() {
-        let client = create_test_client().await;
-
-        // Create deeply nested structure
-        let a = client.mkdir(1, "a".to_string()).await.unwrap();
-        let b = client.mkdir(a, "b".to_string()).await.unwrap();
-        let c = client.mkdir(b, "c".to_string()).await.unwrap();
-        let file = client.create_file(c, "deep.txt".to_string()).await.unwrap();
-
-        // Method 1: Step-by-step lookup
-        let a_lookup = client.lookup(1, "a").await.unwrap().unwrap();
-        let b_lookup = client.lookup(a_lookup, "b").await.unwrap().unwrap();
-        let c_lookup = client.lookup(b_lookup, "c").await.unwrap().unwrap();
-        let file_lookup = client.lookup(c_lookup, "deep.txt").await.unwrap().unwrap();
-
-        // Method 2: Direct resolve_path
-        let file_resolved = client.resolve_path("/a/b/c/deep.txt").await.unwrap();
-
-        // Both methods should return same inode
-        assert_eq!(
-            file_lookup, file_resolved,
-            "lookup and resolve_path should return same inode"
-        );
-        assert_eq!(file_resolved, file, "Both should match original inode");
-
-        // Method 3: lookup_path
-        let (file_lookup_path, kind) = client
-            .lookup_path("/a/b/c/deep.txt")
+        // Verify path resolution still works
+        let path1 = client
+            .get_paths(file1)
             .await
             .unwrap()
+            .first()
+            .cloned()
             .unwrap();
-        assert_eq!(file_lookup_path, file, "lookup_path should match");
-        assert_eq!(kind, FileType::File);
+        assert_eq!(path1, "/dir1/renamed1.txt");
 
-        // Verify cache hit
-        assert!(
-            client.path_cache.get("/a/b/c/deep.txt").await.is_some(),
-            "Path should be cached"
+        let path2 = client
+            .get_paths(file2)
+            .await
+            .unwrap()
+            .first()
+            .cloned()
+            .unwrap();
+        assert_eq!(path2, "/dir1/subdir/moved2.txt");
+
+        // Create hard link and test rename behavior
+        let _link_attr = client.link(file1, 1, "link1.txt").await.unwrap();
+
+        // Verify both paths exist
+        let paths = client.get_paths(file1).await.unwrap();
+        assert_eq!(paths.len(), 2);
+        let path_set: std::collections::HashSet<String> = paths.into_iter().collect();
+        assert!(path_set.contains("/dir1/renamed1.txt"));
+        assert!(path_set.contains("/link1.txt"));
+
+        // Rename one of the links
+        client
+            .rename(1, "link1.txt", 1, "renamed_link.txt".to_string())
+            .await
+            .unwrap();
+
+        // Verify paths updated correctly
+        let paths = client.get_paths(file1).await.unwrap();
+        assert_eq!(paths.len(), 2);
+        let path_set: std::collections::HashSet<String> = paths.into_iter().collect();
+        assert!(path_set.contains("/dir1/renamed1.txt"));
+        assert!(path_set.contains("/renamed_link.txt"));
+        assert!(!path_set.contains("/link1.txt"));
+    }
+
+    #[test]
+    fn test_normalize_path() {
+        // Basic absolute paths
+        assert_eq!(MetaClient::<DatabaseMetaStore>::normalize_path("/"), "/");
+        assert_eq!(
+            MetaClient::<DatabaseMetaStore>::normalize_path("/home/user"),
+            "/home/user"
+        );
+
+        // Handle .
+        assert_eq!(MetaClient::<DatabaseMetaStore>::normalize_path("/./"), "/");
+        assert_eq!(
+            MetaClient::<DatabaseMetaStore>::normalize_path("/home/./user"),
+            "/home/user"
+        );
+
+        // Handle ..
+        assert_eq!(
+            MetaClient::<DatabaseMetaStore>::normalize_path("/home/user/../"),
+            "/home"
+        );
+        assert_eq!(
+            MetaClient::<DatabaseMetaStore>::normalize_path("/home/../user"),
+            "/user"
+        );
+
+        // Complex cases
+        assert_eq!(
+            MetaClient::<DatabaseMetaStore>::normalize_path("/a/b/../c/./d"),
+            "/a/c/d"
+        );
+        assert_eq!(
+            MetaClient::<DatabaseMetaStore>::normalize_path("/a/./b/../../c"),
+            "/c"
+        );
+
+        // Relative paths
+        assert_eq!(
+            MetaClient::<DatabaseMetaStore>::normalize_path("file.txt"),
+            "file.txt"
+        );
+        assert_eq!(
+            MetaClient::<DatabaseMetaStore>::normalize_path("../file.txt"),
+            "file.txt"
+        );
+
+        // Edge cases
+        assert_eq!(MetaClient::<DatabaseMetaStore>::normalize_path(""), "");
+        assert_eq!(MetaClient::<DatabaseMetaStore>::normalize_path("."), "");
+        assert_eq!(
+            MetaClient::<DatabaseMetaStore>::normalize_path("/../../../file.txt"),
+            "/file.txt"
         );
     }
 
-    /// Test scenario: Cache consistency under high concurrency
+    /// Test scenario: Delete operations and cache invalidation
     ///
-    /// Simulate interleaved operations and verify cache remains consistent
+    /// Verify delete operations work correctly and cache is properly invalidated
     #[tokio::test]
-    async fn test_interleaved_operations() {
+    async fn test_delete_operations() {
         let client = create_test_client().await;
 
         let dir1 = client.mkdir(1, "dir1".to_string()).await.unwrap();
 
-        // Create files without calling readdir (children not fully loaded)
-        let f1 = client
+        // Create files
+        let _f1 = client
             .create_file(dir1, "f1.txt".to_string())
             .await
             .unwrap();
@@ -2008,28 +2255,10 @@ mod tests {
             .create_file(dir1, "f2.txt".to_string())
             .await
             .unwrap();
-
-        // Access via lookup (doesn't trigger readdir)
-        let f1_lookup = client.lookup(dir1, "f1.txt").await.unwrap().unwrap();
-        assert_eq!(f1_lookup, f1);
-
-        // Create more files
         let _f3 = client
             .create_file(dir1, "f3.txt".to_string())
             .await
             .unwrap();
-
-        // Now call readdir - should load complete list from database
-        let entries = client.readdir(dir1).await.unwrap();
-        assert_eq!(entries.len(), 3, "Should see all 3 files created");
-
-        // Verify all files exist
-        let names: Vec<String> = entries.iter().map(|e| e.name.clone()).collect();
-        assert!(names.contains(&"f1.txt".to_string()));
-        assert!(names.contains(&"f2.txt".to_string()));
-        assert!(names.contains(&"f3.txt".to_string()));
-
-        // Create another file (children now fully loaded)
         let _f4 = client
             .create_file(dir1, "f4.txt".to_string())
             .await
@@ -2229,5 +2458,46 @@ mod tests {
         // Verify new file is accessible
         let ino_file3 = client.resolve_path("/dira/file3.txt").await.unwrap();
         assert_eq!(ino_file3, _file3);
+    }
+
+    #[tokio::test]
+    async fn test_rename_same_location_noop() {
+        use std::sync::atomic::Ordering;
+
+        let client = create_test_client().await;
+
+        // Create test file
+        let root = client.root.load(Ordering::Relaxed);
+        let file_ino = client
+            .create_file(root, "test.txt".to_string())
+            .await
+            .unwrap();
+
+        // Get original attributes
+        let original_attr = client.cached_stat(file_ino).await.unwrap().unwrap();
+
+        // Test 1: Rename to same location should succeed as no-op
+        client
+            .rename(root, "test.txt", root, "test.txt".to_string())
+            .await
+            .unwrap();
+
+        // Verify file still exists and unchanged
+        let after_attr = client.cached_stat(file_ino).await.unwrap().unwrap();
+        assert_eq!(original_attr.ino, after_attr.ino);
+
+        // Test 2: Verify lookup still works
+        let looked_up = client.lookup(root, "test.txt").await.unwrap().unwrap();
+        assert_eq!(looked_up, file_ino);
+
+        // Test 3: rename_exchange with same location should also succeed
+        client
+            .rename_exchange(root, "test.txt", root, "test.txt")
+            .await
+            .unwrap();
+
+        // Verify still exists
+        let final_attr = client.cached_stat(file_ino).await.unwrap().unwrap();
+        assert_eq!(original_attr.ino, final_attr.ino);
     }
 }

@@ -72,9 +72,7 @@ impl MinimalFileSystem {
 impl Filesystem for MinimalFileSystem {
     async fn init(&self, _req: Request) -> Result<ReplyInit> {
         info!("Filesystem initialization");
-        Ok(ReplyInit {
-            max_write: std::num::NonZeroU32::new(4096).unwrap(),
-        })
+        Ok(ReplyInit)
     }
 
     async fn destroy(&self, _req: Request) {

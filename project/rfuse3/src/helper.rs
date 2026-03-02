@@ -1,9 +1,24 @@
 use std::mem;
+use std::sync::OnceLock;
 
+use bincode::config::{
+    AllowTrailing, FixintEncoding, LittleEndian, WithOtherEndian, WithOtherIntEncoding,
+    WithOtherTrailing,
+};
 use bincode::{DefaultOptions, Options};
 use nix::sys::stat::mode_t;
 
 use crate::FileType;
+
+/// Cached bincode configuration type for better performance.
+/// Avoids creating new configuration objects on every call.
+type BincodeConfigType = WithOtherIntEncoding<
+    WithOtherTrailing<WithOtherEndian<DefaultOptions, LittleEndian>, AllowTrailing>,
+    FixintEncoding,
+>;
+
+static BINCODE_CONFIG: OnceLock<BincodeConfigType> = OnceLock::new();
+
 pub trait Apply: Sized {
     fn apply<F>(mut self, f: F) -> Self
     where
@@ -56,9 +71,14 @@ pub const fn get_padding_size(dir_entry_size: usize) -> usize {
     entry_size - dir_entry_size
 }
 
-pub fn get_bincode_config() -> impl Options {
-    DefaultOptions::new()
-        .with_little_endian()
-        .allow_trailing_bytes()
-        .with_fixint_encoding()
+/// Returns a cached bincode configuration for FUSE ABI serialization.
+/// Uses LazyLock to avoid creating new configuration objects on every call.
+#[inline]
+pub fn get_bincode_config() -> &'static BincodeConfigType {
+    BINCODE_CONFIG.get_or_init(|| {
+        DefaultOptions::new()
+            .with_little_endian()
+            .allow_trailing_bytes()
+            .with_fixint_encoding()
+    })
 }

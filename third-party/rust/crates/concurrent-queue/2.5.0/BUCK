@@ -32,6 +32,6 @@ rust_library(
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/crossbeam-utils/0.8.21:crossbeam-utils",
-        "//third-party/rust/crates/portable-atomic/1.11.1:portable-atomic",
+        "//third-party/rust/crates/portable-atomic/1.13.1:portable-atomic",
     ],
 )

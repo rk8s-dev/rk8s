@@ -28,6 +28,10 @@ pub struct EtcdEntryInfo {
 
 /// Etcd forward index entry ((parent_id, name) -> inode)
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "rkyv-serialization",
+    derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)
+)]
 pub struct EtcdForwardEntry {
     pub parent_inode: i64,
     pub name: String,
@@ -39,6 +43,10 @@ pub struct EtcdForwardEntry {
 
 /// Etcd directory children collection (dir_id -> name to inode mapping)
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "rkyv-serialization",
+    derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)
+)]
 pub struct EtcdDirChildren {
     pub inode: i64,
     pub children: HashMap<String, i64>,
@@ -133,6 +141,10 @@ pub struct EtcdPlock {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "rkyv-serialization",
+    derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)
+)]
 pub struct EtcdLinkParent {
     pub parent_inode: i64,
     pub entry_name: String,

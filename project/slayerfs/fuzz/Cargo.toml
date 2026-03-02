@@ -1,0 +1,27 @@
+[package]
+name = "slayerfs-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+libc = "0.2"
+slayerfs = { path = ".." }
+tempfile = "3"
+tokio = { version = "1", features = ["rt"] }
+etcd-client = "0.17"
+
+# Use independent workspace for fuzzers
+[workspace]
+members = ["."]
+
+[[bin]]
+name = "fs_ops"
+path = "fuzz_targets/fs_ops.rs"
+test = false
+doc = false
+bench = false

@@ -125,7 +125,11 @@ impl VolumeManager {
                 PatternType::Anonymous => {
                     let name = generate_anonymous_volume_name();
                     let resp = self.create_(name.clone(), None, HashMap::new())?;
-                    mount.host_path = resp.mountpoint.to_str().unwrap().to_string();
+                    mount.host_path = resp
+                        .mountpoint
+                        .to_str()
+                        .ok_or_else(|| anyhow!("invalid mountpoint path"))?
+                        .to_string();
                     volume_name = name;
                 }
                 PatternType::BindMount => {
@@ -155,16 +159,16 @@ impl VolumeManager {
     }
 
     pub fn get_mountpoint_from_name(&self, name: &str) -> Result<String> {
-        // TODO: handle does not exist situation
-        // Ok(self.volumes.get(name).ok_or_else(|| format!("the volume name does not exist"))?.mountpoint.to_str().unwrap().to_string())
-        Ok(self
+        let volume = self
             .volumes
             .get(name)
-            .unwrap()
+            .ok_or_else(|| anyhow!("volume {} does not exist", name))?;
+
+        volume
             .mountpoint
             .to_str()
-            .unwrap()
-            .to_string())
+            .ok_or_else(|| anyhow!("invalid mountpoint path for volume {}", name))
+            .map(|s| s.to_string())
     }
 
     pub fn create_(
@@ -212,7 +216,11 @@ impl VolumeManager {
 
         println!("{}", name);
 
-        fs::remove_dir_all(volume.mountpoint.parent().unwrap())?;
+        let parent_path = volume
+            .mountpoint
+            .parent()
+            .ok_or_else(|| anyhow!("invalid mountpoint path for volume {}", name))?;
+        fs::remove_dir_all(parent_path)?;
         self.volumes.remove(name);
         self.save_metadata()?;
 
@@ -246,33 +254,51 @@ impl VolumeManager {
 
     /// scan all the container's state json
     /// check if there is container refer this volume
-    fn is_volume_in_use(&self, _name: &str) -> Result<bool> {
+    fn is_volume_in_use(&self, name: &str) -> Result<bool> {
         let root_path = PathBuf::from_str("/run/youki")?;
-        for entry in fs::read_dir(root_path)? {
+        if !root_path.exists() {
+            return Ok(false);
+        }
+
+        for entry in fs::read_dir(&root_path)? {
             let entry = entry?;
             let metadata = entry.metadata()?;
             if metadata.is_dir() {
-                // TODO: Hard code "compose", which means there is no container can be named as "compose"
-                if entry.file_name().to_str().unwrap() != "compose" {
-                    let _content = fs::read_to_string(entry.path().join("state.json"))?;
+                let file_name = entry.file_name();
+                let name_str = file_name
+                    .to_str()
+                    .ok_or_else(|| anyhow!("invalid directory name"))?;
+
+                // Skip compose directory as it's handled separately
+                if name_str != "compose" {
+                    let state_file = entry.path().join("state.json");
+                    if state_file.exists() {
+                        // Check if this container uses the volume
+                        if let Ok(content) = fs::read_to_string(&state_file) {
+                            // Simple check: see if volume name appears in state
+                            if content.contains(name) {
+                                return Ok(true);
+                            }
+                        }
+                    }
                 }
             }
         }
 
-        // Compose
-        let root_path = PathBuf::from_str("/run/youki/compose")?;
-        if root_path.exists() {
-            for dir_entry in fs::read_dir(root_path)? {
+        // Check compose containers
+        let compose_root = PathBuf::from_str("/run/youki/compose")?;
+        if compose_root.exists() {
+            for dir_entry in fs::read_dir(&compose_root)? {
                 let dir_entry = dir_entry?;
-                if dir_entry.metadata().unwrap().is_dir() {
-                    let path = dir_entry.path().join("metadata.json");
-                    if path.exists() {
-                        // TODO: Implement ComposeMetadata check properly or import it
-                        // let content = fs::read_to_string(path)?;
-                        // let metadata: ComposeMetadata = serde_json::from_str(&content)?;
-                        // if metadata.volumes.contains(&name.to_string()) {
-                        //     return Ok(true);
-                        // }
+                if dir_entry.metadata()?.is_dir() {
+                    let metadata_file = dir_entry.path().join("metadata.json");
+                    if metadata_file.exists()
+                        && let Ok(content) = fs::read_to_string(&metadata_file)
+                    {
+                        // Simple check: see if volume name appears in metadata
+                        if content.contains(name) {
+                            return Ok(true);
+                        }
                     }
                 }
             }

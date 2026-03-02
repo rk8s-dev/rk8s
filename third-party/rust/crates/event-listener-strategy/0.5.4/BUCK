@@ -23,7 +23,10 @@ rust_library(
     crate = "event_listener_strategy",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
-    features = ["std"],
+    features = [
+        "default",
+        "std",
+    ],
     rustc_flags = ["@$(location :event-listener-strategy-manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [

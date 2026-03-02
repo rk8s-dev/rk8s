@@ -6,6 +6,7 @@
 use crate::meta::entities::etcd::{EtcdDirChildren, EtcdEntryInfo, EtcdForwardEntry};
 use crate::meta::store::MetaError;
 use etcd_client::{Client as EtcdClient, EventType, WatchOptions};
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
@@ -47,24 +48,69 @@ pub enum CacheInvalidationEvent {
 }
 
 /// Etcd watch worker configuration
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WatchConfig {
-    /// Watch key prefix (default: all metadata keys)
-    pub key_prefix: String,
+    /// Enable watch worker (default: false for backward compatibility)
+    #[serde(default)]
+    pub enabled: bool,
+
+    /// Watch key prefixes (default: empty = watch all keys)
+    #[serde(default)]
+    pub prefixes: Vec<String>,
 
     /// Buffer size for event channel
+    #[serde(default = "default_buffer_size")]
     pub event_buffer_size: usize,
 
     /// Enable debug logging
+    #[serde(default)]
     pub debug: bool,
+}
+
+fn default_buffer_size() -> usize {
+    1000
 }
 
 impl Default for WatchConfig {
     fn default() -> Self {
         Self {
-            key_prefix: "".to_string(), // Watch all keys
+            enabled: false,
+            prefixes: vec![],
             event_buffer_size: 1000,
             debug: false,
+        }
+    }
+}
+
+impl WatchConfig {
+    pub fn effective_prefixes(&self) -> Vec<String> {
+        if self.prefixes.is_empty() {
+            vec!["".to_string()] // Default: watch all keys
+        } else {
+            self.prefixes.clone()
+        }
+    }
+
+    pub fn from_env_or_default() -> Self {
+        Self {
+            enabled: std::env::var("SLAYERFS_WATCH_ENABLED")
+                .map(|v| v.to_lowercase() == "true")
+                .unwrap_or(false),
+            prefixes: std::env::var("SLAYERFS_WATCH_PREFIXES")
+                .map(|v| {
+                    v.split(',')
+                        .map(|s| s.trim().to_string())
+                        .filter(|s| !s.is_empty())
+                        .collect()
+                })
+                .unwrap_or_default(),
+            event_buffer_size: std::env::var("SLAYERFS_WATCH_BUFFER_SIZE")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(1000),
+            debug: std::env::var("SLAYERFS_WATCH_DEBUG")
+                .map(|v| v.to_lowercase() == "true")
+                .unwrap_or(false),
         }
     }
 }
@@ -97,7 +143,8 @@ pub struct EtcdWatchWorker {
     client: EtcdClient,
     config: WatchConfig,
     event_tx: mpsc::Sender<CacheInvalidationEvent>,
-    worker_handle: Option<JoinHandle<()>>,
+    /// One JoinHandle per prefix watch task (empty prefix = watch all)
+    worker_handles: Vec<JoinHandle<()>>,
 }
 
 impl EtcdWatchWorker {
@@ -111,88 +158,99 @@ impl EtcdWatchWorker {
             client,
             config,
             event_tx,
-            worker_handle: None,
+            worker_handles: Vec::new(),
         };
 
         (worker, event_rx)
     }
 
-    /// Start watch worker in background
+    /// Start watch worker(s) in background
     pub fn start(&mut self) -> Result<(), MetaError> {
-        let client = self.client.clone();
-        let config = self.config.clone();
-        let event_tx = self.event_tx.clone();
+        self.stop();
 
-        let handle = tokio::spawn(async move {
-            if let Err(e) = Self::watch_loop(client, config, event_tx).await {
-                error!("Watch worker fatal error: {}", e);
-            }
-        });
+        let prefixes = self.config.effective_prefixes();
 
-        self.worker_handle = Some(handle);
-        info!("Etcd watch worker started");
+        for prefix in prefixes {
+            let client = self.client.clone();
+            let config = self.config.clone();
+            let event_tx = self.event_tx.clone();
+            let prefix_clone = prefix.clone();
+
+            let handle = tokio::spawn(async move {
+                if let Err(e) =
+                    Self::watch_loop_for_prefix(client, prefix_clone.clone(), config, event_tx)
+                        .await
+                {
+                    error!(prefix = %prefix_clone, "Watch worker fatal error: {}", e);
+                }
+            });
+
+            self.worker_handles.push(handle);
+            info!(prefix = %prefix, "Etcd watch worker started for prefix");
+        }
+
+        info!(
+            count = self.worker_handles.len(),
+            "All etcd watch workers started"
+        );
         Ok(())
     }
 
     /// Stop watch worker
     #[allow(dead_code)]
     pub fn stop(&mut self) {
-        if let Some(handle) = self.worker_handle.take() {
+        let count = self.worker_handles.len();
+        for handle in self.worker_handles.drain(..) {
             handle.abort();
-            info!("Etcd watch worker stopped");
+        }
+        if count > 0 {
+            info!(count = count, "Etcd watch workers stopped");
         }
     }
 
-    /// Main watch loop (runs in background task)
-    async fn watch_loop(
+    async fn watch_loop_for_prefix(
         mut client: EtcdClient,
+        prefix: String,
         config: WatchConfig,
         event_tx: mpsc::Sender<CacheInvalidationEvent>,
     ) -> Result<(), MetaError> {
-        info!(
-            "Starting etcd watch loop with prefix: '{}'",
-            config.key_prefix
-        );
+        info!(prefix = %prefix, "Starting etcd watch loop for prefix");
 
         loop {
-            // Create watch stream with prefix
             let options = WatchOptions::new().with_prefix();
-            let (_watcher, mut stream) =
-                match client.watch(config.key_prefix.clone(), Some(options)).await {
-                    Ok((w, s)) => (w, s),
-                    Err(e) => {
-                        error!("Failed to create watch stream: {}", e);
-                        time::sleep(Duration::from_secs(1)).await;
-                        continue;
-                    }
-                };
+            let (_watcher, mut stream) = match client.watch(prefix.clone(), Some(options)).await {
+                Ok((w, s)) => (w, s),
+                Err(e) => {
+                    error!(prefix = %prefix, "Failed to create watch stream: {}", e);
+                    time::sleep(Duration::from_secs(1)).await;
+                    continue;
+                }
+            };
 
-            info!("Watch stream established");
+            info!(prefix = %prefix, "Watch stream established");
 
-            // Process watch events
             while let Some(resp) = stream.message().await.transpose() {
                 match resp {
                     Ok(resp) => {
                         if resp.canceled() {
-                            warn!("Watch canceled, reconnecting...");
+                            warn!(prefix = %prefix, "Watch canceled, reconnecting...");
                             break;
                         }
 
                         for event in resp.events() {
                             if let Err(e) = Self::handle_watch_event(event, &event_tx, &config) {
-                                error!("Failed to handle watch event: {}", e);
+                                error!(prefix = %prefix, "Failed to handle watch event: {}", e);
                             }
                         }
                     }
                     Err(e) => {
-                        error!("Watch stream error: {}", e);
+                        error!(prefix = %prefix, "Watch stream error: {}", e);
                         break;
                     }
                 }
             }
 
-            // Reconnect on stream close
-            warn!("Watch stream closed, reconnecting in 1s...");
+            warn!(prefix = %prefix, "Watch stream closed, reconnecting in 1s...");
             time::sleep(Duration::from_secs(1)).await;
         }
     }
@@ -273,25 +331,22 @@ impl EtcdWatchWorker {
 
                     match event_type {
                         EventType::Put => {
-                            // Try to extract child_ino from EtcdForwardEntry JSON
-                            // Value format: {"parent_inode":1,"name":"file","inode":123,"is_file":true}
-                            if let Ok(value_str) = std::str::from_utf8(value) {
-                                // Parse as EtcdForwardEntry
-                                if let Ok(forward_entry) =
-                                    serde_json::from_str::<EtcdForwardEntry>(value_str)
-                                {
-                                    events.push(CacheInvalidationEvent::AddChild {
-                                        parent_ino,
-                                        name,
-                                        child_ino: forward_entry.inode,
-                                    });
-                                    return events;
-                                }
+                            // Parse EtcdForwardEntry using deserialize_meta (binary-safe)
+                            if let Ok(forward_entry) = crate::meta::serialization::deserialize_meta::<
+                                EtcdForwardEntry,
+                            >(value)
+                            {
+                                events.push(CacheInvalidationEvent::AddChild {
+                                    parent_ino,
+                                    name,
+                                    child_ino: forward_entry.inode,
+                                });
+                                return events;
                             }
 
                             // Fallback: value parse failed
                             warn!(
-                                "Failed to parse EtcdForwardEntry JSON from f: key PUT, using coarse-grained invalidation"
+                                "Failed to parse EtcdForwardEntry from f: key PUT, using coarse-grained invalidation"
                             );
                             events
                                 .push(CacheInvalidationEvent::InvalidateParentChildren(parent_ino));
@@ -307,7 +362,7 @@ impl EtcdWatchWorker {
                 if let Ok(inode) = parts[1].parse::<i64>() {
                     match event_type {
                         EventType::Put => {
-                            // Try to parse EtcdEntryInfo JSON from value
+                            // Parse EtcdEntryInfo using serde_json (EtcdEntryInfo NOT migrated - has bitflags)
                             if let Ok(value_str) = std::str::from_utf8(value)
                                 && let Ok(metadata) =
                                     serde_json::from_str::<EtcdEntryInfo>(value_str)
@@ -338,10 +393,10 @@ impl EtcdWatchWorker {
                 if let Ok(parent_ino) = parts[1].parse::<i64>() {
                     match event_type {
                         EventType::Put => {
-                            // Parse EtcdDirChildren from JSON and extract children HashMap
-                            if let Ok(value_str) = std::str::from_utf8(value)
-                                && let Ok(dir_children) =
-                                    serde_json::from_str::<EtcdDirChildren>(value_str)
+                            // Parse EtcdDirChildren using deserialize_meta (binary-safe)
+                            if let Ok(dir_children) = crate::meta::serialization::deserialize_meta::<
+                                EtcdDirChildren,
+                            >(value)
                             {
                                 events.push(CacheInvalidationEvent::UpdateChildren {
                                     parent_ino,
@@ -350,9 +405,9 @@ impl EtcdWatchWorker {
                                 return events;
                             }
 
-                            // Fallback: JSON parse failed
+                            // Fallback: parse failed
                             warn!(
-                                "Failed to parse EtcdDirChildren JSON from c: key PUT, using invalidate"
+                                "Failed to parse EtcdDirChildren from c: key PUT, using invalidate"
                             );
                             events
                                 .push(CacheInvalidationEvent::InvalidateParentChildren(parent_ino));
@@ -377,7 +432,7 @@ impl EtcdWatchWorker {
 
 impl Drop for EtcdWatchWorker {
     fn drop(&mut self) {
-        if let Some(handle) = self.worker_handle.take() {
+        for handle in self.worker_handles.drain(..) {
             handle.abort();
         }
     }
@@ -388,8 +443,49 @@ mod tests {
     use super::*;
 
     #[test]
+    fn test_watch_config_effective_prefixes() {
+        let config = WatchConfig {
+            enabled: true,
+            prefixes: vec!["f:".into(), "r:".into()],
+            ..Default::default()
+        };
+        assert_eq!(config.effective_prefixes(), vec!["f:", "r:"]);
+    }
+
+    #[test]
+    fn test_watch_config_effective_prefixes_empty() {
+        let config = WatchConfig {
+            enabled: true,
+            prefixes: vec![],
+            ..Default::default()
+        };
+        assert_eq!(config.effective_prefixes(), vec![""]);
+    }
+
+    #[test]
+    fn test_watch_config_default() {
+        let config = WatchConfig::default();
+        assert!(!config.enabled);
+        assert_eq!(config.effective_prefixes(), vec![""]);
+    }
+
+    #[test]
+    fn test_watch_config_from_env() {
+        unsafe {
+            std::env::set_var("SLAYERFS_WATCH_ENABLED", "true");
+            std::env::set_var("SLAYERFS_WATCH_PREFIXES", "f:, r: , c:");
+        }
+        let config = WatchConfig::from_env_or_default();
+        assert!(config.enabled);
+        assert_eq!(config.prefixes, vec!["f:", "r:", "c:"]);
+        unsafe {
+            std::env::remove_var("SLAYERFS_WATCH_ENABLED");
+            std::env::remove_var("SLAYERFS_WATCH_PREFIXES");
+        }
+    }
+
+    #[test]
     fn test_parse_forward_key_put() {
-        // PUT event with child_ino in value
         let json = br#"{"parent_inode":10,"name":"file.txt","inode":100,"is_file":true}"#;
         let events = EtcdWatchWorker::parse_key_to_events("f:10:file.txt", EventType::Put, json);
         assert_eq!(events.len(), 1);
@@ -409,7 +505,6 @@ mod tests {
 
     #[test]
     fn test_parse_forward_key_delete() {
-        // DELETE event generates RemoveChild
         let events = EtcdWatchWorker::parse_key_to_events("f:10:file.txt", EventType::Delete, b"");
         assert_eq!(events.len(), 1);
         match &events[0] {
@@ -423,7 +518,6 @@ mod tests {
 
     #[test]
     fn test_parse_forward_key_invalid_value() {
-        // PUT with invalid value falls back to coarse-grained
         let events =
             EtcdWatchWorker::parse_key_to_events("f:10:file.txt", EventType::Put, b"invalid");
         assert_eq!(events.len(), 1);
@@ -445,7 +539,6 @@ mod tests {
 
     #[test]
     fn test_parse_children_key_put() {
-        // PUT event with HashMap<String, i64> generates UpdateChildren
         let json = r#"{"inode":50,"children":{"file.txt":100,"dir":200}}"#;
         let events = EtcdWatchWorker::parse_key_to_events("c:50", EventType::Put, json.as_bytes());
         assert_eq!(events.len(), 1);
@@ -475,7 +568,6 @@ mod tests {
 
     #[test]
     fn test_parse_children_key_invalid_json() {
-        // PUT with invalid JSON falls back to coarse-grained
         let events = EtcdWatchWorker::parse_key_to_events("c:50", EventType::Put, b"invalid json");
         assert_eq!(events.len(), 1);
         assert!(matches!(

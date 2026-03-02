@@ -15,8 +15,10 @@ use common::ContainerSpec;
 const RKL_IMAGE_REGISTRY: &str = "/var/lib/rkl/registry";
 const RKL_BUNDLE_STORE: &str = "/var/lib/rkl/bundle";
 
+#[async_trait::async_trait]
 pub trait ImagePuller {
-    fn pull_or_get_image(&self, image_ref: &str) -> Result<(PathBuf, Vec<PathBuf>)>;
+    async fn pull_or_get_image(&self, image_ref: &str) -> Result<(PathBuf, Vec<PathBuf>)>;
+    fn sync_pull_or_get_image(&self, image_ref: &str) -> Result<(PathBuf, Vec<PathBuf>)>;
 }
 
 pub enum ImageType {
@@ -36,7 +38,7 @@ pub fn get_manifest_from_image_ref(
     image_ref: impl AsRef<str>,
 ) -> Result<String> {
     let (manifest_path, _) = puller
-        .pull_or_get_image(image_ref.as_ref())
+        .sync_pull_or_get_image(image_ref.as_ref())
         .map_err(|e| anyhow!("failed to pull image: {e}"))?;
 
     manifest_path
@@ -81,13 +83,13 @@ fn generate_unique_bundle_path() -> String {
 }
 
 /// pull image using the provided puller
-pub fn handle_oci_image(
+pub fn sync_handle_oci_image(
     puller: &impl ImagePuller,
     image_ref: impl AsRef<str>,
     _name: String,
 ) -> Result<(ImageConfiguration, String)> {
     let (manifest_path, layers) = puller
-        .pull_or_get_image(image_ref.as_ref())
+        .sync_pull_or_get_image(image_ref.as_ref())
         .map_err(|e| anyhow!("failed to pull image: {e}"))?;
 
     debug!("get manifest_path: {manifest_path:?}");
@@ -107,6 +109,32 @@ pub fn handle_oci_image(
     Ok((config, bundle_path))
 }
 
+/// pull image using the provided puller
+pub async fn handle_oci_image(
+    puller: &impl ImagePuller,
+    image_ref: impl AsRef<str>,
+    _name: String,
+) -> Result<(ImageConfiguration, String)> {
+    let (manifest_path, layers) = puller
+        .pull_or_get_image(image_ref.as_ref())
+        .await
+        .map_err(|e| anyhow!("failed to pull image: {e}"))?;
+
+    debug!("get manifest_path: {manifest_path:?}");
+    debug!("layers: {layers:?}");
+
+    let bundle_path = generate_unique_bundle_path();
+
+    let config = get_image_config(&manifest_path)?;
+
+    if PathBuf::from(&bundle_path).exists() {
+        return Ok((config, "".to_string()));
+    }
+
+    bundle::mount_and_copy_bundle(bundle_path.clone(), &layers).await?;
+    Ok((config, bundle_path))
+}
+
 pub fn get_image_config(manifest_path: impl AsRef<Path>) -> Result<ImageConfiguration> {
     let digest = ImageManifest::from_file(manifest_path.as_ref())?
         .config()
@@ -118,10 +146,30 @@ pub fn get_image_config(manifest_path: impl AsRef<Path>) -> Result<ImageConfigur
     ImageConfiguration::from_file(dir).map_err(|e| anyhow!("failed to get image config: {e}"))
 }
 
+/// Classify image spec as either a local bundle path or a registry image reference.
+/// Paths starting with `/`, `./` or `../` are always treated as bundle paths:
+/// - if the path exists → Bundle (use local dir)
+/// - if not (e.g. when running under sudo with a user home path) → error, do not try to pull
+///   This avoids mis-treating a path like `/home/user/bundle` as an image name and pulling from default registry.
 pub fn determine_image(target: impl AsRef<str>) -> Result<ImageType> {
-    match PathBuf::from(target.as_ref()).exists() {
-        true => Ok(ImageType::Bundle),
-        false => Ok(ImageType::OCIImage),
+    let s = target.as_ref();
+    let is_path_like = s.starts_with('/') || s.starts_with("./") || s.starts_with("../");
+    let path_exists = PathBuf::from(s).exists();
+
+    if is_path_like {
+        if path_exists {
+            Ok(ImageType::Bundle)
+        } else {
+            bail!(
+                "Bundle path does not exist or is not accessible (e.g. under sudo): {}",
+                s
+            )
+        }
+    } else {
+        match path_exists {
+            true => Ok(ImageType::Bundle),
+            false => Ok(ImageType::OCIImage),
+        }
     }
 }
 
@@ -148,14 +196,62 @@ pub fn determine_image_path<P: AsRef<Path>>(target: P) -> Result<ImageType> {
     Err(UtilsError::InvalidImagePath.into())
 }
 
+/// Only pull the image and return the configuration, bundle path, and layer paths, without executing mount+cp.
+/// Used for persistent overlay rootfs mounts.
+pub fn sync_handle_oci_image_no_copy(
+    puller: &impl ImagePuller,
+    image_ref: impl AsRef<str>,
+) -> Result<(ImageConfiguration, String, Vec<PathBuf>)> {
+    let (manifest_path, layers) = puller
+        .sync_pull_or_get_image(image_ref.as_ref())
+        .map_err(|e| anyhow!("failed to pull image: {e}"))?;
+
+    debug!("get manifest_path: {manifest_path:?}");
+    debug!("layers: {layers:?}");
+
+    let bundle_path = generate_unique_bundle_path();
+    let config = get_image_config(&manifest_path)?;
+
+    // Create bundle directory
+    std::fs::create_dir_all(&bundle_path)
+        .with_context(|| format!("Failed to create bundle directory: {bundle_path}"))?;
+
+    Ok((config, bundle_path, layers))
+}
+
 // Helper to handle image type and pulling
-pub fn handle_image_typ(
+pub async fn handle_image_typ(
     puller: &impl ImagePuller,
     container_spec: &ContainerSpec,
 ) -> Result<(Option<ContainerConfigBuilder>, String)> {
     if let ImageType::OCIImage = determine_image(&container_spec.image)? {
         let (image_config, bundle_path) =
-            handle_oci_image(puller, &container_spec.image, container_spec.name.clone())?;
+            handle_oci_image(puller, &container_spec.image, container_spec.name.clone()).await?;
+        // handle image_config
+        debug!("successfully pull image");
+        let mut builder = ContainerConfigBuilder::default();
+        if let Some(config) = image_config.config() {
+            // add cmd to config
+            builder.args_from_image_config(config.entrypoint(), config.cmd());
+            // extend env
+            builder.envs_from_image_config(config.env());
+            // set work_dir
+            builder.work_dir(config.working_dir());
+            // builder.users(config.user());
+        }
+        return Ok((Some(builder), bundle_path));
+    }
+    Ok((None, "".to_string()))
+}
+
+// Helper to handle image type and pulling
+pub fn sync_handle_image_typ(
+    puller: &impl ImagePuller,
+    container_spec: &ContainerSpec,
+) -> Result<(Option<ContainerConfigBuilder>, String)> {
+    if let ImageType::OCIImage = determine_image(&container_spec.image)? {
+        let (image_config, bundle_path) =
+            sync_handle_oci_image(puller, &container_spec.image, container_spec.name.clone())?;
         // handle image_config
         let mut builder = ContainerConfigBuilder::default();
         if let Some(config) = image_config.config() {

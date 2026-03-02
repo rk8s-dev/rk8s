@@ -9,8 +9,8 @@ pub struct Model {
     pub id: i64,
     pub slice_id: i64,
     pub chunk_id: i64,
-    pub offset: i32,
-    pub length: i32,
+    pub offset: i64,
+    pub length: i64,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
@@ -23,8 +23,8 @@ impl From<Model> for SliceDesc {
         Self {
             slice_id: model.slice_id as u64,
             chunk_id: model.chunk_id as u64,
-            offset: model.offset as u32,
-            length: model.length as u32,
+            offset: model.offset as u64,
+            length: model.length as u64,
         }
     }
 }

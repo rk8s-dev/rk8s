@@ -224,6 +224,10 @@ impl PlockRecord {
 }
 
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, Eq, PartialEq, Hash)]
+#[cfg_attr(
+    feature = "rkyv-serialization",
+    derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)
+)]
 pub struct FileLockRange {
     pub start: u64,
     pub end: u64,

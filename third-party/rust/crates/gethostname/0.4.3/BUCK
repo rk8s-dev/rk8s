@@ -24,10 +24,5 @@ rust_library(
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
     rustc_flags = ["@$(location :gethostname-manifest[env_flags])"],
-    os_deps = {
-        "linux": ["//third-party/rust/crates/libc/0.2.178:libc"],
-        "macos": ["//third-party/rust/crates/libc/0.2.178:libc"],
-        "windows": ["//third-party/rust/crates/windows-targets/0.48.5:windows-targets"],
-    },
     visibility = ["PUBLIC"],
 )

@@ -27,6 +27,7 @@ rust_library(
         "const_generics",
         "const_new",
         "serde",
+        "write",
     ],
     rustc_flags = ["@$(location :smallvec-manifest[env_flags])"],
     visibility = ["PUBLIC"],

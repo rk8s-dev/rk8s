@@ -34,11 +34,11 @@ const SLASH_ASCII: char = '/';
 use futures::future::join_all;
 use futures::stream::iter;
 
-use crate::passthrough::newlogfs::LoggingFileSystem;
 use crate::passthrough::{PassthroughArgs, PassthroughFs, new_passthroughfs_layer};
 use crate::util::convert_stat64_to_file_attr;
 use inode_store::InodeStore;
 use layer::Layer;
+use rfuse3::raw::logfs::LoggingFileSystem;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use tokio::sync::{Mutex, RwLock};
@@ -2810,8 +2810,10 @@ where
     let gid = unsafe { libc::getgid() };
 
     let mut mount_options = MountOptions::default();
+    #[cfg(target_os = "linux")]
+    mount_options.force_readdir_plus(true);
+
     mount_options
-        .force_readdir_plus(true)
         .uid(uid)
         .gid(gid)
         .allow_other(args.allow_other);

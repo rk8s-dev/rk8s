@@ -2,6 +2,7 @@
 pub enum GraphError {
     GraphLoopDetected,
     GraphNotActive,
+    NodeIdError(usize),
     ExecutionFailed {
         node_name: String,
         node_id: usize,
@@ -14,6 +15,10 @@ pub enum GraphError {
     MultipleErrors(Vec<GraphError>),
     /// Contains the original error message when runtime creation failed
     RuntimeCreationFailed(String),
+    /// Max loop limit exceeded
+    LoopLimitExceeded(usize),
+    /// Checkpoint operation failed
+    CheckpointError(String),
 }
 
 impl std::fmt::Display for GraphError {
@@ -21,3 +26,5 @@ impl std::fmt::Display for GraphError {
         write!(f, "{:?}", self)
     }
 }
+
+impl std::error::Error for GraphError {}

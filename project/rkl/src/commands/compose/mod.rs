@@ -61,7 +61,7 @@ pub struct DownArgs {
 
 #[derive(Args)]
 pub struct UpArgs {
-    #[arg(value_name = "COMPOSE_YAML")]
+    #[arg(short = 'f', value_name = "COMPOSE_YAML")]
     pub compose_yaml: Option<String>,
 
     #[arg(long = "project-name", value_name = "PROJECT_NAME")]

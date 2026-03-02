@@ -6,6 +6,7 @@ use crate::{
     errors::RvError,
     logical::{Backend, LogicalBackend, Request, Response, SecretBuilder},
     modules::Module,
+    storage::StorageEntry,
 };
 use anyhow::Context;
 use async_trait::async_trait;
@@ -23,6 +24,121 @@ use x509_parser::nom::AsBytes;
 use x509_parser::prelude::{FromDer, X509Certificate};
 use x509_parser::time::ASN1Time;
 
+use openssl::x509::X509;
+
+#[async_trait]
+pub trait CertBackend: Send + Sync {
+    type CertType: Send;
+
+    fn storage_prefix(&self) -> &str;
+
+    async fn store_cert(
+        &self,
+        req: &Request,
+        id: &str,
+        cert: &Self::CertType,
+    ) -> Result<(), RvError>;
+    async fn fetch_cert(&self, req: &Request, id: &str) -> Result<Self::CertType, RvError>;
+    async fn delete_cert(&self, req: &Request, id: &str) -> Result<(), RvError>;
+}
+
+pub struct TlsCertBackend;
+pub struct SshCertBackend;
+pub struct PgpCertBackend;
+
+#[async_trait]
+impl CertBackend for TlsCertBackend {
+    type CertType = X509;
+
+    fn storage_prefix(&self) -> &str {
+        "certs/tls/"
+    }
+
+    async fn store_cert(&self, req: &Request, id: &str, cert: &X509) -> Result<(), RvError> {
+        let value = cert.to_der()?;
+        let entry = StorageEntry {
+            key: format!("{}{}", self.storage_prefix(), id),
+            value,
+        };
+        req.storage_put(&entry).await
+    }
+
+    async fn fetch_cert(&self, req: &Request, id: &str) -> Result<X509, RvError> {
+        let entry = req
+            .storage_get(&format!("{}{}", self.storage_prefix(), id))
+            .await?;
+        let entry = entry.ok_or(RvError::ErrPkiCertNotFound)?;
+        Ok(X509::from_der(&entry.value)?)
+    }
+
+    async fn delete_cert(&self, req: &Request, id: &str) -> Result<(), RvError> {
+        req.storage_delete(&format!("{}{}", self.storage_prefix(), id))
+            .await
+    }
+}
+
+#[async_trait]
+impl CertBackend for SshCertBackend {
+    type CertType = String;
+
+    fn storage_prefix(&self) -> &str {
+        "certs/ssh/"
+    }
+
+    async fn store_cert(&self, req: &Request, id: &str, cert: &String) -> Result<(), RvError> {
+        let entry = StorageEntry {
+            key: format!("{}{}", self.storage_prefix(), id),
+            value: cert.as_bytes().to_vec(),
+        };
+        req.storage_put(&entry).await
+    }
+
+    async fn fetch_cert(&self, req: &Request, id: &str) -> Result<String, RvError> {
+        let entry = req
+            .storage_get(&format!("{}{}", self.storage_prefix(), id))
+            .await?;
+        let entry = entry.ok_or(RvError::ErrPkiCertNotFound)?;
+        String::from_utf8(entry.value).map_err(|_| RvError::ErrPkiCertNotFound)
+    }
+
+    async fn delete_cert(&self, req: &Request, id: &str) -> Result<(), RvError> {
+        req.storage_delete(&format!("{}{}", self.storage_prefix(), id))
+            .await
+    }
+}
+
+#[async_trait]
+impl CertBackend for PgpCertBackend {
+    type CertType = types::PgpKeyBundle;
+
+    fn storage_prefix(&self) -> &str {
+        "certs/pgp/"
+    }
+
+    async fn store_cert(
+        &self,
+        req: &Request,
+        id: &str,
+        cert: &types::PgpKeyBundle,
+    ) -> Result<(), RvError> {
+        let entry = StorageEntry::new(&format!("{}{}", self.storage_prefix(), id), cert)?;
+        req.storage_put(&entry).await
+    }
+
+    async fn fetch_cert(&self, req: &Request, id: &str) -> Result<types::PgpKeyBundle, RvError> {
+        let entry = req
+            .storage_get(&format!("{}{}", self.storage_prefix(), id))
+            .await?;
+        let entry = entry.ok_or(RvError::ErrPkiPgpKeyNotFound)?;
+        Ok(serde_json::from_slice(&entry.value)?)
+    }
+
+    async fn delete_cert(&self, req: &Request, id: &str) -> Result<(), RvError> {
+        req.storage_delete(&format!("{}{}", self.storage_prefix(), id))
+            .await
+    }
+}
+
 pub mod field;
 pub mod path_config_ca;
 pub mod path_config_crl;
@@ -32,6 +148,7 @@ pub mod path_keys;
 pub mod path_revoke;
 pub mod path_roles;
 pub mod path_root;
+pub mod ssh_util;
 pub mod types;
 pub mod util;
 
@@ -74,10 +191,20 @@ impl PkiBackend {
     pub fn new_backend(&self) -> LogicalBackend {
         let builder = LogicalBackend::builder()
             .help(PKI_BACKEND_HELP)
-            .root_paths(["config/*", "revoke/*", "crl/rotate"])
-            .unauth_paths(["cert/*", "ca/pem", "ca", "crl", "crl/pem"])
+            .root_paths([
+                "config/*",
+                "revoke/*",
+                "crl/rotate",
+                "krl/rotate",
+                "root/*",
+                "roles/*",
+                "keys/generate/*",
+                "keys/import",
+            ])
+            .unauth_paths(["cert/*", "ca/*", "crl", "crl/pem", "krl", "keys/verify"])
             .path(self.roles_path())
             .path(self.config_ca_path())
+            .path(self.config_crl_path())
             .path(self.root_generate_path())
             .path(self.root_delete_path())
             .path(self.fetch_ca_path())
@@ -85,6 +212,7 @@ impl PkiBackend {
             .path(self.fetch_cert_path())
             .path(self.fetch_cert_crl_path())
             .path(self.issue_path())
+            .path(self.sign_path())
             .path(self.revoke_path())
             .path(self.crl_rotate_path())
             .path(self.keys_generate_path())
@@ -92,7 +220,8 @@ impl PkiBackend {
             .path(self.keys_sign_path())
             .path(self.keys_verify_path())
             .path(self.keys_encrypt_path())
-            .path(self.keys_decrypt_path());
+            .path(self.keys_decrypt_path())
+            .path(self.list_certs_path());
 
         let secret = SecretBuilder::new()
             .secret_type("pki")

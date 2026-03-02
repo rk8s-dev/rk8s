@@ -28,6 +28,6 @@ rust_library(
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/ppv-lite86/0.2.21:ppv-lite86",
-        "//third-party/rust/crates/rand_core/0.9.3:rand_core",
+        "//third-party/rust/crates/rand_core/0.9.5:rand_core",
     ],
 )

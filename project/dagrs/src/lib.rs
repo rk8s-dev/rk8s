@@ -13,6 +13,10 @@ pub use node::*;
 pub use async_trait;
 pub use graph::*;
 pub use tokio;
+pub use utils::checkpoint::{
+    Checkpoint, CheckpointConfig, CheckpointError, CheckpointId, CheckpointStore,
+    FileCheckpointStore, MemoryCheckpointStore, NodeState,
+};
 pub use utils::{env::EnvVar, output::Output};
 
 #[cfg(feature = "derive")]

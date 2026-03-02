@@ -58,6 +58,7 @@ mod tests {
         let mut state = CycleState::default();
 
         let pod = PodInfo {
+            labels: std::collections::HashMap::new(),
             name: "test-pod".to_string(),
             spec: PodSpec {
                 node_name: None,
@@ -83,6 +84,7 @@ mod tests {
         let mut state = CycleState::default();
 
         let pod = PodInfo {
+            labels: std::collections::HashMap::new(),
             name: "test-pod".to_string(),
             spec: PodSpec {
                 node_name: Some("specific-node".to_string()),
@@ -108,6 +110,7 @@ mod tests {
         let mut state = CycleState::default();
 
         let pod = PodInfo {
+            labels: std::collections::HashMap::new(),
             name: "test-pod".to_string(),
             spec: PodSpec {
                 node_name: Some("specific-node".to_string()),

@@ -3,10 +3,9 @@
 // Simple passthrough filesystem example for integration tests.
 
 use clap::Parser;
-use libfuse_fs::passthrough::{
-    PassthroughArgs, new_passthroughfs_layer, newlogfs::LoggingFileSystem,
-};
+use libfuse_fs::passthrough::{PassthroughArgs, new_passthroughfs_layer};
 use libfuse_fs::util::bind_mount::{BindMount, BindMountManager};
+use rfuse3::raw::logfs::LoggingFileSystem;
 use rfuse3::{MountOptions, raw::Session};
 use std::ffi::OsString;
 use tokio::signal;
@@ -83,8 +82,10 @@ async fn main() {
     let gid = unsafe { libc::getgid() };
 
     let mut mount_options = MountOptions::default();
+    #[cfg(target_os = "linux")]
+    mount_options.force_readdir_plus(true);
+
     mount_options
-        .force_readdir_plus(true)
         .uid(uid)
         .gid(gid)
         .allow_other(args.allow_other);

@@ -26,7 +26,7 @@ rust_library(
     rustc_flags = ["@$(location :serde_path_to_error-manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/itoa/1.0.15:itoa",
+        "//third-party/rust/crates/itoa/1.0.17:itoa",
         "//third-party/rust/crates/serde_core/1.0.228:serde_core",
     ],
 )

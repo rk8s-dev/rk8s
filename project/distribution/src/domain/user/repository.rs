@@ -28,7 +28,9 @@ impl PgUserRepository {
 #[async_trait::async_trait]
 impl UserRepository for PgUserRepository {
     async fn query_user_by_name(&self, name: &str) -> Result<User> {
-        sqlx::query_as::<_, User>("select * from users where username = $1")
+        sqlx::query_as::<_, User>(
+            "SELECT * FROM users WHERE lower(username) = lower($1) ORDER BY (username = $1) DESC LIMIT 1",
+        )
             .bind(name)
             .fetch_optional(self.pool.as_ref())
             .await

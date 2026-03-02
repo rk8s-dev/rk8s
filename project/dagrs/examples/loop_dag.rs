@@ -111,7 +111,9 @@ impl Action for ProcAction {
 }
 
 fn main() {
-    env::set_var("RUST_LOG", "info");
+    unsafe {
+        env::set_var("RUST_LOG", "info");
+    }
     env_logger::init();
 
     let mut node_table = NodeTable::default();

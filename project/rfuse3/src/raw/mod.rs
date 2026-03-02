@@ -17,9 +17,11 @@ pub use session::{MountHandle, Session};
 pub(crate) type FuseData = Either<Vec<u8>, (Vec<u8>, Bytes)>;
 
 pub(crate) mod abi;
+pub(crate) mod buffer_pool;
 mod connection;
 mod filesystem;
 pub mod flags;
+pub mod logfs;
 mod object_safe_filesystem;
 pub mod reply;
 mod request;

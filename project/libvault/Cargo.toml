@@ -61,10 +61,13 @@ tracing = { workspace = true }
 builder-pattern = { workspace = true }
 x509-parser = { workspace = true }
 rustls-webpki = { workspace = true }
+pgp = { workspace = true }
+ssh-key = { workspace = true }
+smallvec = { workspace = true }
+rand_chacha = { workspace = true }
 tonic = { workspace = true }
 openssl = { workspace = true, optional = true }
 openssl-sys = { workspace = true, optional = true }
-sqlx = { workspace = true, optional = true}
 
 [build-dependencies]
 toml = { workspace = true }
@@ -81,7 +84,7 @@ crypto_adaptor_tongsuo = ["dep:openssl", "dep:openssl-sys"]
 daemonize = { workspace = true }
 
 [dependencies.foreign-types]
-version = "0.3.1"
+version = "0.3.2"
 
 [dependencies.libc]
 version = "0.2"
@@ -95,7 +98,6 @@ new_without_default = "allow"
 field_reassign_with_default = "allow"
 await_holding_lock = "allow"
 too_many_arguments = "allow"
-unnecessary_unwrap = "allow"
 collapsible_match = "allow"
 large_enum_variant = "allow"
 unnecessary_map_or = "allow"

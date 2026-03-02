@@ -95,7 +95,7 @@ impl InodeCache {
 
         let ttl_manager = Cache::builder()
             .max_capacity(capacity)
-            .time_to_live(ttl)
+            .time_to_idle(ttl)
             .eviction_listener(
                 move |key: Arc<i64>, _value: Arc<InodeEntry>, cause: RemovalCause| {
                     info!("InodeCache: Evicting inode {} (cause: {:?})", key, cause);
@@ -276,6 +276,15 @@ impl InodeCache {
                 .entry(chunk_index)
                 .and_modify(|slices| slices.push(desc))
                 .or_insert_with(|| vec![desc]);
+        }
+    }
+
+    pub(crate) async fn replace_slices(&self, inode: i64, chunk_index: u64, desc: &[SliceDesc]) {
+        if let Some(node) = self.ttl_manager.get(&inode).await {
+            node.slices
+                .entry(chunk_index)
+                .and_modify(|slices| *slices = desc.to_owned())
+                .or_insert_with(|| desc.to_owned());
         }
     }
 

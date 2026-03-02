@@ -1,0 +1,23 @@
+[package]
+name = "xline-test-utils"
+version = "0.1.0"
+edition.workspace = true
+authors = ["DatenLord <dev@datenlord.io>"]
+repository = "https://github.com/xline-kv/Xline/tree/master/xline-test-utils"
+description = "Test utils for Xline"
+categories = ["Test"]
+keywords = ["Test", "Utils"]
+license = "Apache-2.0"
+readme = "README.md"
+
+[dependencies]
+futures = { workspace = true }
+rand = { workspace = true }
+tokio = { workspace = true }
+tonic = { workspace = true }
+utils = { path = "../utils" }
+xline = { path = "../xline" }
+xline-client = { path = "../xline-client" }
+
+[lints]
+workspace = true

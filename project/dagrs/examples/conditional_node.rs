@@ -80,7 +80,9 @@ impl Condition for VerifyGT {
 
 fn main() {
     // Initialization log.
-    env::set_var("RUST_LOG", "debug");
+    unsafe {
+        env::set_var("RUST_LOG", "debug");
+    }
     env_logger::init();
 
     // Create a new `NodeTable`.

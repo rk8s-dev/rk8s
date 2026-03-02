@@ -1,4 +1,5 @@
 use std::ffi::OsString;
+use std::num::NonZeroU32;
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 use std::os::unix::io::RawFd;
 
@@ -7,8 +8,11 @@ use nix::mount::Nmount;
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 use nix::unistd;
 
+/// Default max write size (128KB)
+pub const DEFAULT_MAX_WRITE: u32 = 128 * 1024;
+
 /// mount options.
-#[derive(Debug, Clone, Default, Eq, PartialEq)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub struct MountOptions {
     // Options implemented within rfuse3
     pub(crate) nonempty: bool,
@@ -43,11 +47,58 @@ pub struct MountOptions {
     pub(crate) no_open_dir_support: bool,
     pub(crate) handle_killpriv: bool,
     pub(crate) write_back: bool,
+    pub(crate) direct_io: bool,
     pub(crate) force_readdir_plus: bool,
+
+    // FUSE transfer size options
+    /// Maximum size of write requests. Default is 128KB.
+    pub(crate) max_write: NonZeroU32,
+    /// Maximum readahead size. If None, uses kernel's default.
+    pub(crate) max_readahead: Option<u32>,
 
     // Other FUSE mount options
     // default 40000
     pub(crate) rootmode: Option<u32>,
+}
+
+impl Default for MountOptions {
+    fn default() -> Self {
+        Self {
+            nonempty: false,
+            allow_other: false,
+            allow_root: false,
+            custom_options: None,
+            #[cfg(target_os = "linux")]
+            dirsync: false,
+            default_permissions: false,
+            fs_name: None,
+            gid: None,
+            #[cfg(any(target_os = "macos", target_os = "freebsd"))]
+            intr: false,
+            #[cfg(target_os = "linux")]
+            nodiratime: false,
+            noatime: false,
+            #[cfg(target_os = "linux")]
+            nodev: false,
+            noexec: false,
+            nosuid: false,
+            read_only: false,
+            #[cfg(target_os = "freebsd")]
+            suiddir: false,
+            sync: false,
+            uid: None,
+            dont_mask: false,
+            no_open_support: false,
+            no_open_dir_support: false,
+            handle_killpriv: false,
+            write_back: false,
+            direct_io: false,
+            force_readdir_plus: false,
+            max_write: NonZeroU32::new(DEFAULT_MAX_WRITE).unwrap(),
+            max_readahead: None,
+            rootmode: None,
+        }
+    }
 }
 
 impl MountOptions {
@@ -160,6 +211,15 @@ impl MountOptions {
         self
     }
 
+    /// Force direct I/O for all file opens, similar to libfuse `-o direct_io`.
+    ///
+    /// This maps to setting `FOPEN_DIRECT_IO` on `open`/`create` replies.
+    pub fn direct_io(&mut self, direct_io: bool) -> &mut Self {
+        self.direct_io = direct_io;
+
+        self
+    }
+
     /// force filesystem use readdirplus only, when kernel use readdir will return `ENOSYS`,
     /// default is disable.
     ///
@@ -174,6 +234,39 @@ impl MountOptions {
     /// set custom options for fuse filesystem, the custom options will be used in mount
     pub fn custom_options(&mut self, custom_options: impl Into<OsString>) -> &mut Self {
         self.custom_options = Some(custom_options.into());
+
+        self
+    }
+
+    /// Set the maximum size of write requests sent by the kernel.
+    /// Default is 128KB. Larger values can improve performance for large writes.
+    ///
+    /// # Example
+    /// ```
+    /// use std::num::NonZeroU32;
+    /// use rfuse3::MountOptions;
+    ///
+    /// let mut options = MountOptions::default();
+    /// options.max_write(NonZeroU32::new(1024 * 1024).unwrap()); // 1MB
+    /// ```
+    pub fn max_write(&mut self, max_write: NonZeroU32) -> &mut Self {
+        self.max_write = max_write;
+
+        self
+    }
+
+    /// Set the maximum readahead size. If not set, uses the kernel's default value.
+    /// Larger values can improve sequential read performance.
+    ///
+    /// # Example
+    /// ```
+    /// use rfuse3::MountOptions;
+    ///
+    /// let mut options = MountOptions::default();
+    /// options.max_readahead(Some(256 * 1024)); // 256KB
+    /// ```
+    pub fn max_readahead(&mut self, max_readahead: Option<u32>) -> &mut Self {
+        self.max_readahead = max_readahead;
 
         self
     }

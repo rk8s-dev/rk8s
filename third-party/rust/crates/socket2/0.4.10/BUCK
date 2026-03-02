@@ -25,10 +25,5 @@ rust_library(
     edition = "2018",
     features = ["all"],
     rustc_flags = ["@$(location :socket2-manifest[env_flags])"],
-    os_deps = {
-        "linux": ["//third-party/rust/crates/libc/0.2.178:libc"],
-        "macos": ["//third-party/rust/crates/libc/0.2.178:libc"],
-        "windows": ["//third-party/rust/crates/winapi/0.3.9:winapi"],
-    },
     visibility = ["PUBLIC"],
 )

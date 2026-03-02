@@ -25,8 +25,12 @@ rust_library(
     edition = "2018",
     features = [
         "async",
+        "default",
+        "eventual-fairness",
         "futures-core",
         "futures-sink",
+        "nanorand",
+        "select",
     ],
     rustc_flags = ["@$(location :flume-manifest[env_flags])"],
     named_deps = {
@@ -36,5 +40,6 @@ rust_library(
     deps = [
         "//third-party/rust/crates/futures-core/0.3.31:futures-core",
         "//third-party/rust/crates/futures-sink/0.3.31:futures-sink",
+        "//third-party/rust/crates/nanorand/0.7.0:nanorand",
     ],
 )

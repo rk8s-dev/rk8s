@@ -1,0 +1,670 @@
+use anyhow::{Result, bail};
+use dockerfile_parser::{
+    ArgInstruction, BreakableString, BreakableStringComponent, CmdInstruction, CopyInstruction,
+    EntrypointInstruction, EnvInstruction, FromInstruction, Instruction, LabelInstruction,
+    RunInstruction, ShellOrExecExpr,
+};
+use serde_json;
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+
+use crate::{
+    image::{config::normalize_path, context::StageContext as Context},
+    pull::sync_pull_or_get_image_with_policy_and_output,
+    storage::full_image_ref,
+    task::{CopyTask, RunTask, TaskExec},
+};
+
+/// Extract the argument string from a BreakableString (used for Misc instructions like WORKDIR, USER).
+fn extract_misc_argument(args: &BreakableString) -> String {
+    let mut result = String::new();
+    for component in args.components.iter() {
+        match component {
+            BreakableStringComponent::Comment(_) => {}
+            BreakableStringComponent::String(spanned_string) => {
+                result.push_str(&spanned_string.content);
+            }
+        }
+    }
+    result.trim().to_string()
+}
+
+fn expand_env_value(value: &str, envp: &HashMap<String, String>) -> String {
+    fn is_var_start(ch: char) -> bool {
+        ch == '_' || ch.is_ascii_alphabetic()
+    }
+
+    fn is_var_char(ch: char) -> bool {
+        ch == '_' || ch.is_ascii_alphanumeric()
+    }
+
+    let mut out = String::with_capacity(value.len());
+    let chars: Vec<char> = value.chars().collect();
+    let mut i = 0;
+    while i < chars.len() {
+        let ch = chars[i];
+
+        if ch == '\\' && i + 1 < chars.len() && chars[i + 1] == '$' {
+            out.push('$');
+            i += 2;
+            continue;
+        }
+
+        if ch != '$' {
+            out.push(ch);
+            i += 1;
+            continue;
+        }
+
+        if i + 1 >= chars.len() {
+            out.push('$');
+            i += 1;
+            continue;
+        }
+
+        if chars[i + 1] == '{' {
+            let start = i + 2;
+            let mut end = start;
+            while end < chars.len() && chars[end] != '}' {
+                end += 1;
+            }
+            if end >= chars.len() {
+                out.push('$');
+                i += 1;
+                continue;
+            }
+
+            let var_name: String = chars[start..end].iter().collect();
+            if !var_name.is_empty()
+                && is_var_start(var_name.chars().next().unwrap_or_default())
+                && var_name.chars().all(is_var_char)
+            {
+                if let Some(val) = envp.get(&var_name) {
+                    out.push_str(val);
+                }
+                i = end + 1;
+                continue;
+            }
+
+            out.push_str("${");
+            out.push_str(&var_name);
+            out.push('}');
+            i = end + 1;
+            continue;
+        }
+
+        let next = chars[i + 1];
+        if !is_var_start(next) {
+            out.push('$');
+            i += 1;
+            continue;
+        }
+
+        let start = i + 1;
+        let mut end = start + 1;
+        while end < chars.len() && is_var_char(chars[end]) {
+            end += 1;
+        }
+        let var_name: String = chars[start..end].iter().collect();
+        if let Some(val) = envp.get(&var_name) {
+            out.push_str(val);
+        }
+        i = end;
+    }
+
+    out
+}
+
+/// An extension trait to execute dockerfile instructions.
+pub trait InstructionExt<P: AsRef<Path>> {
+    fn execute(&self, ctx: &mut Context<P>) -> Result<()>;
+}
+
+impl<P: AsRef<Path>> InstructionExt<P> for Instruction {
+    fn execute(&self, ctx: &mut Context<P>) -> Result<()> {
+        match self {
+            Instruction::From(inst) => inst.execute(ctx),
+            Instruction::Arg(inst) => inst.execute(ctx),
+            Instruction::Label(inst) => inst.execute(ctx),
+            Instruction::Run(inst) => inst.execute(ctx),
+            Instruction::Entrypoint(inst) => inst.execute(ctx),
+            Instruction::Cmd(inst) => inst.execute(ctx),
+            Instruction::Copy(inst) => inst.execute(ctx),
+            Instruction::Env(inst) => inst.execute(ctx),
+            // Handle miscellaneous instructions
+            Instruction::Misc(misc) => {
+                let instr_name = misc.instruction.content.to_uppercase();
+                match instr_name.as_str() {
+                    "WORKDIR" => {
+                        let workdir = extract_misc_argument(&misc.arguments);
+                        if workdir.is_empty() {
+                            bail!("WORKDIR requires a path argument");
+                        }
+                        tracing::debug!("Setting WORKDIR to: {}", workdir);
+                        ctx.image_config.set_working_dir(workdir);
+                        Ok(())
+                    }
+                    "USER" => {
+                        let user = extract_misc_argument(&misc.arguments);
+                        if user.is_empty() {
+                            bail!("USER requires a user argument");
+                        }
+                        tracing::debug!("Setting USER to: {}", user);
+                        ctx.image_config.set_user(user);
+                        Ok(())
+                    }
+                    "VOLUME" => {
+                        // Extract volume paths from arguments
+                        // VOLUME supports multiple formats:
+                        // - VOLUME /data
+                        // - VOLUME /data /logs
+                        // - VOLUME ["/data", "/logs"]
+                        let volume_arg = extract_misc_argument(&misc.arguments);
+                        if volume_arg.is_empty() {
+                            bail!("VOLUME requires at least one path argument");
+                        }
+
+                        let volumes: Vec<String> = if volume_arg.starts_with('[') {
+                            // JSON-array form: must be valid JSON, otherwise fail the build
+                            match serde_json::from_str::<Vec<String>>(&volume_arg) {
+                                Ok(v) => v,
+                                Err(err) => {
+                                    bail!("Invalid JSON array syntax in VOLUME instruction: {err}");
+                                }
+                            }
+                        } else {
+                            volume_arg
+                                .split_whitespace()
+                                .map(|s| s.to_string())
+                                .collect()
+                        };
+
+                        for vol in volumes {
+                            let vol = vol.trim().to_string();
+                            if !vol.is_empty() {
+                                tracing::debug!("Adding VOLUME: {}", vol);
+                                ctx.image_config.add_volume(vol);
+                            }
+                        }
+                        Ok(())
+                    }
+                    "STOPSIGNAL" => {
+                        let signal = extract_misc_argument(&misc.arguments);
+                        if signal.is_empty() {
+                            bail!("STOPSIGNAL requires a signal argument");
+                        }
+                        tracing::debug!("Setting STOPSIGNAL to: {}", signal);
+                        ctx.image_config.set_stop_signal(signal);
+                        Ok(())
+                    }
+                    "EXPOSE" => {
+                        // Extract exposed ports from arguments
+                        // EXPOSE supports multiple formats:
+                        // - EXPOSE 80
+                        // - EXPOSE 80/tcp
+                        // - EXPOSE 80/udp
+                        // - EXPOSE 80 443 (multiple ports)
+                        // - EXPOSE 80/tcp 443/tcp
+                        let expose_arg = extract_misc_argument(&misc.arguments);
+                        if expose_arg.is_empty() {
+                            bail!("EXPOSE requires at least one port argument");
+                        }
+
+                        for port in expose_arg.split_whitespace() {
+                            let port = port.trim().to_string();
+                            if !port.is_empty() {
+                                tracing::debug!("Adding EXPOSE: {}", port);
+                                ctx.image_config.add_exposed_port(port);
+                            }
+                        }
+                        Ok(())
+                    }
+                    "SHELL" => {
+                        let shell_arg = extract_misc_argument(&misc.arguments);
+                        if shell_arg.is_empty() {
+                            bail!("SHELL requires a JSON array argument");
+                        }
+
+                        let shell: Vec<String> = match serde_json::from_str(&shell_arg) {
+                            Ok(v) => v,
+                            Err(e) => {
+                                bail!("SHELL requires a valid JSON array: {}", e);
+                            }
+                        };
+
+                        if shell.is_empty() {
+                            bail!("SHELL array cannot be empty");
+                        }
+
+                        tracing::debug!("Setting SHELL to: {:?}", shell);
+                        ctx.image_config.set_shell(shell);
+                        Ok(())
+                    }
+                    // TODO: These instructions are currently ignored but should be properly
+                    // recorded in the image config for OCI compliance
+                    "HEALTHCHECK" | "ONBUILD" => {
+                        tracing::warn!(
+                            "Instruction {} is ignored (not yet implemented)",
+                            instr_name
+                        );
+                        Ok(())
+                    }
+                    _ => {
+                        bail!("Instruction {:?} is not supported", self);
+                    }
+                }
+            }
+        }
+    }
+}
+
+impl<P: AsRef<Path>> InstructionExt<P> for FromInstruction {
+    fn execute(&self, ctx: &mut Context<P>) -> Result<()> {
+        let (_from_flags, image_parsed) = (&self.flags, &self.image_parsed);
+
+        let img_ref = full_image_ref(&image_parsed.image, image_parsed.tag.as_deref());
+
+        let (_, layers) = sync_pull_or_get_image_with_policy_and_output(
+            &img_ref,
+            None::<String>,
+            ctx.no_cache,
+            ctx.quiet,
+        )?;
+
+        // add image alias mapping
+        if let Some(alias) = &self.alias {
+            ctx.image_aliases
+                .insert(alias.content.clone(), img_ref.clone());
+        }
+
+        for layer in layers.iter() {
+            ctx.mount_config.lower_dir.push(layer.clone());
+        }
+
+        // mount config should be unintialized
+        ctx.mount_config.init()
+    }
+}
+
+impl<P: AsRef<Path>> InstructionExt<P> for ArgInstruction {
+    fn execute(&self, ctx: &mut Context<P>) -> Result<()> {
+        let key = self.name.content.clone();
+        let val = ctx
+            .cli_build_args
+            .get(&key)
+            .cloned()
+            .or_else(|| self.value.as_ref().map(|val| val.content.clone()))
+            .or_else(|| ctx.args.get(&key).cloned().flatten())
+            .or_else(|| ctx.global_args.get(key.as_str()).cloned().flatten());
+        ctx.args.insert(key, val);
+        Ok(())
+    }
+}
+
+impl<P: AsRef<Path>> InstructionExt<P> for LabelInstruction {
+    fn execute(&self, ctx: &mut Context<P>) -> Result<()> {
+        for label in self.labels.iter() {
+            ctx.image_config
+                .add_label(label.name.content.clone(), label.value.content.clone());
+        }
+        Ok(())
+    }
+}
+
+impl<P: AsRef<Path>> InstructionExt<P> for RunInstruction {
+    fn execute(&self, ctx: &mut Context<P>) -> Result<()> {
+        let mut command_args = vec![];
+        match &self.expr {
+            ShellOrExecExpr::Exec(exec_expr) => {
+                command_args = exec_expr
+                    .as_str_vec()
+                    .iter()
+                    .map(|s| s.to_string())
+                    .collect();
+            }
+            ShellOrExecExpr::Shell(shell_expr) => {
+                // Use custom shell if set, otherwise default to ["/bin/sh", "-c"]
+                let shell = ctx.image_config.get_shell();
+                command_args.extend(shell);
+                let mut script = String::new();
+                for component in shell_expr.components.iter() {
+                    match component {
+                        BreakableStringComponent::Comment(_) => {}
+                        BreakableStringComponent::String(spanned_string) => {
+                            script.push_str(&spanned_string.content);
+                        }
+                    }
+                }
+                command_args.push(script);
+            }
+        }
+        // println!("Executing RUN command: {:?}", command_args);
+
+        let mut merged_envp = ctx.image_config.envp.clone();
+        for (key, value) in &ctx.args {
+            if merged_envp.contains_key(key) {
+                continue;
+            }
+            if let Some(value) = value {
+                merged_envp.insert(key.clone(), value.clone());
+            }
+        }
+        let envp: Vec<String> = merged_envp
+            .iter()
+            .map(|(k, v)| format!("{k}={v}"))
+            .collect();
+
+        let task = RunTask {
+            commands: command_args,
+            envp,
+            working_dir: ctx.image_config.working_dir.clone(),
+            user: ctx.image_config.user.clone(),
+            quiet: ctx.quiet,
+        };
+        task.execute(ctx.mount_config)
+    }
+}
+
+impl<P: AsRef<Path>> InstructionExt<P> for EntrypointInstruction {
+    fn execute(&self, ctx: &mut Context<P>) -> Result<()> {
+        match &self.expr {
+            ShellOrExecExpr::Exec(exec_expr) => {
+                ctx.image_config.entrypoint = Some(
+                    exec_expr
+                        .as_str_vec()
+                        .iter()
+                        .map(|s| s.to_string())
+                        .collect(),
+                );
+            }
+            ShellOrExecExpr::Shell(shell_expr) => {
+                let mut entrypoint = vec![];
+                for component in shell_expr.components.iter() {
+                    match component {
+                        BreakableStringComponent::Comment(spanned_comment) => {
+                            entrypoint.push(spanned_comment.content.clone());
+                        }
+                        BreakableStringComponent::String(spanned_string) => {
+                            entrypoint.push(spanned_string.content.clone());
+                        }
+                    }
+                }
+                ctx.image_config.entrypoint = Some(entrypoint);
+            }
+        }
+        Ok(())
+    }
+}
+
+impl<P: AsRef<Path>> InstructionExt<P> for CmdInstruction {
+    fn execute(&self, ctx: &mut Context<P>) -> Result<()> {
+        match &self.expr {
+            ShellOrExecExpr::Exec(exec_expr) => {
+                ctx.image_config.cmd = Some(
+                    exec_expr
+                        .as_str_vec()
+                        .iter()
+                        .map(|s| s.to_string())
+                        .collect(),
+                );
+            }
+            ShellOrExecExpr::Shell(shell_expr) => {
+                let mut cmd = vec![];
+                for component in shell_expr.components.iter() {
+                    match component {
+                        BreakableStringComponent::Comment(spanned_comment) => {
+                            cmd.push(spanned_comment.content.clone());
+                        }
+                        BreakableStringComponent::String(spanned_string) => {
+                            cmd.push(spanned_string.content.clone());
+                        }
+                    }
+                }
+                ctx.image_config.cmd = Some(cmd);
+            }
+        }
+        Ok(())
+    }
+}
+
+impl<P: AsRef<Path>> InstructionExt<P> for CopyInstruction {
+    fn execute(&self, ctx: &mut Context<P>) -> Result<()> {
+        let flags = &self.flags;
+        // TODO: Add flags support
+        if !flags.is_empty() {
+            bail!("Flags are not supported in COPY instruction");
+        }
+
+        let dest = self.destination.content.clone();
+        let dest = if dest.starts_with('/') {
+            // Absolute path - normalize to resolve `.` and `..` components
+            let normalized = normalize_path(&dest);
+            ctx.mount_config
+                .mountpoint
+                .join(normalized.trim_start_matches('/'))
+        } else {
+            // Relative path - resolve based on working directory, then normalize
+            let working_dir = ctx.image_config.get_working_dir();
+            let abs_dest = if working_dir == "/" {
+                format!("/{}", dest)
+            } else {
+                format!("{}/{}", working_dir, dest)
+            };
+            // Normalize to resolve `..` segments and prevent path traversal
+            let normalized = normalize_path(&abs_dest);
+            ctx.mount_config
+                .mountpoint
+                .join(normalized.trim_start_matches('/'))
+        };
+
+        let build_ctx = ctx.build_context.as_ref().canonicalize()?;
+        let src: Vec<PathBuf> = self
+            .sources
+            .iter()
+            .map(|s| build_ctx.join(&s.content))
+            .collect();
+
+        let task = CopyTask {
+            src,
+            dest,
+            quiet: ctx.quiet,
+        };
+        task.execute(ctx.mount_config)
+    }
+}
+
+impl<P: AsRef<Path>> InstructionExt<P> for EnvInstruction {
+    fn execute(&self, ctx: &mut Context<P>) -> Result<()> {
+        let mut expand_scope = HashMap::new();
+        for (key, value) in &ctx.args {
+            if let Some(value) = value {
+                expand_scope.insert(key.clone(), value.clone());
+            }
+        }
+        // ENV has higher precedence for future expansion.
+        expand_scope.extend(ctx.image_config.envp.clone());
+
+        for var in self.vars.iter() {
+            let mut val = Vec::new();
+            for component in var.value.components.iter() {
+                match component {
+                    BreakableStringComponent::Comment(spanned_comment) => {
+                        val.push(spanned_comment.content.clone());
+                    }
+                    BreakableStringComponent::String(spanned_string) => {
+                        val.push(spanned_string.content.clone());
+                    }
+                }
+            }
+            let raw_val = val.join(" ");
+            let expanded_val = expand_env_value(&raw_val, &expand_scope);
+            ctx.image_config
+                .add_envp(var.key.content.clone(), expanded_val);
+        }
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{collections::HashMap, path::PathBuf};
+
+    use dockerfile_parser::{Dockerfile, Instruction};
+
+    use crate::{
+        image::{
+            BuildProgressMode,
+            config::{DEFAULT_ENV, ImageConfig},
+            context::StageContext,
+        },
+        overlayfs::MountConfig,
+    };
+
+    use super::{InstructionExt, expand_env_value};
+
+    #[test]
+    fn test_expand_env_value_path_and_braced_vars() {
+        let mut envp = HashMap::new();
+        envp.insert("PATH".to_string(), DEFAULT_ENV.to_string());
+        envp.insert("PG_MAJOR".to_string(), "18".to_string());
+
+        let expanded = expand_env_value("$PATH:/usr/lib/postgresql/${PG_MAJOR}/bin", &envp);
+        assert_eq!(
+            expanded,
+            format!("{DEFAULT_ENV}:/usr/lib/postgresql/18/bin")
+        );
+    }
+
+    #[test]
+    fn test_expand_env_value_unknown_and_escaped_vars() {
+        let mut envp = HashMap::new();
+        envp.insert("FOO".to_string(), "bar".to_string());
+
+        let expanded = expand_env_value(r"\$FOO:$FOO:$UNKNOWN", &envp);
+        assert_eq!(expanded, "$FOO:bar:");
+    }
+
+    #[test]
+    fn test_arg_instruction_stage_default_overrides_global_default_without_cli() {
+        let dockerfile = Dockerfile::parse(
+            r#"
+FROM scratch
+ARG BASE=alpine
+"#,
+        )
+        .unwrap();
+        let arg_inst = dockerfile
+            .instructions
+            .iter()
+            .find(|inst| matches!(inst, Instruction::Arg(_)))
+            .unwrap();
+
+        let mut mount_config = MountConfig::default();
+        let mut image_config = ImageConfig::default();
+        let mut image_aliases = HashMap::new();
+        let cli_build_args = HashMap::new();
+        let global_args = HashMap::from([("BASE".to_string(), Some("ubuntu".to_string()))]);
+
+        let mut ctx = StageContext {
+            mount_config: &mut mount_config,
+            image_config: &mut image_config,
+            image_aliases: &mut image_aliases,
+            args: HashMap::new(),
+            cli_build_args: &cli_build_args,
+            global_args: &global_args,
+            build_context: PathBuf::from("."),
+            no_cache: false,
+            quiet: true,
+            progress_mode: BuildProgressMode::Plain,
+        };
+
+        arg_inst.execute(&mut ctx).unwrap();
+        assert_eq!(
+            ctx.args.get("BASE").and_then(|value| value.as_deref()),
+            Some("alpine")
+        );
+    }
+
+    #[test]
+    fn test_arg_instruction_cli_overrides_stage_and_global_defaults() {
+        let dockerfile = Dockerfile::parse(
+            r#"
+FROM scratch
+ARG BASE=alpine
+"#,
+        )
+        .unwrap();
+        let arg_inst = dockerfile
+            .instructions
+            .iter()
+            .find(|inst| matches!(inst, Instruction::Arg(_)))
+            .unwrap();
+
+        let mut mount_config = MountConfig::default();
+        let mut image_config = ImageConfig::default();
+        let mut image_aliases = HashMap::new();
+        let cli_build_args = HashMap::from([("BASE".to_string(), "debian".to_string())]);
+        let global_args = HashMap::from([("BASE".to_string(), Some("ubuntu".to_string()))]);
+
+        let mut ctx = StageContext {
+            mount_config: &mut mount_config,
+            image_config: &mut image_config,
+            image_aliases: &mut image_aliases,
+            args: HashMap::new(),
+            cli_build_args: &cli_build_args,
+            global_args: &global_args,
+            build_context: PathBuf::from("."),
+            no_cache: false,
+            quiet: true,
+            progress_mode: BuildProgressMode::Plain,
+        };
+
+        arg_inst.execute(&mut ctx).unwrap();
+        assert_eq!(
+            ctx.args.get("BASE").and_then(|value| value.as_deref()),
+            Some("debian")
+        );
+    }
+
+    #[test]
+    fn test_env_instruction_uses_previous_scope_within_same_instruction() {
+        let dockerfile = Dockerfile::parse(
+            r#"
+FROM scratch
+ENV A=hello
+ENV A=1 B=$A
+"#,
+        )
+        .unwrap();
+
+        let mut mount_config = MountConfig::default();
+        let mut image_config = ImageConfig::default();
+        let mut image_aliases = HashMap::new();
+        let cli_build_args = HashMap::new();
+        let global_args = HashMap::new();
+
+        let mut ctx = StageContext {
+            mount_config: &mut mount_config,
+            image_config: &mut image_config,
+            image_aliases: &mut image_aliases,
+            args: HashMap::new(),
+            cli_build_args: &cli_build_args,
+            global_args: &global_args,
+            build_context: PathBuf::from("."),
+            no_cache: false,
+            quiet: true,
+            progress_mode: BuildProgressMode::Plain,
+        };
+
+        dockerfile
+            .instructions
+            .iter()
+            .filter(|inst| matches!(inst, Instruction::Env(_)))
+            .for_each(|inst| {
+                inst.execute(&mut ctx).unwrap();
+            });
+
+        assert_eq!(ctx.image_config.envp.get("A"), Some(&"1".to_string()));
+        assert_eq!(ctx.image_config.envp.get("B"), Some(&"hello".to_string()));
+    }
+}

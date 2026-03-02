@@ -1,0 +1,40 @@
+[package]
+name = "xline-client"
+version = "0.1.0"
+edition.workspace = true
+authors = ["DatenLord <dev@datenlord.io>"]
+description = "Client for Xline"
+license = "Apache-2.0"
+readme = "README.md"
+repository = "https://github.com/xline-kv/Xline/tree/master/xline-client"
+categories = ["Client"]
+keywords = ["Client", "Xline", "RPC"]
+
+[dependencies]
+anyhow = { workspace = true }
+async-dropper = { version = "0.3.1", features = ["tokio", "simple"] }
+async-trait = { workspace = true }
+clippy-utilities = { workspace = true }
+curp = { path = "../curp" }
+futures = { workspace = true }
+getrandom = "0.2"
+http = "1.0"
+prost = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tonic = { workspace = true }
+tower = { version = "0.4", features = ["discover"] }
+utils = { path = "../utils" }
+xlineapi = { path = "../xlineapi" }
+xlinerpc = { path = "../xlinerpc"}
+
+[dev-dependencies]
+rand = "0.8.5"
+test-macros = { path = "../test-macros" }
+xline-test-utils = { path = "../xline-test-utils" }
+
+[build-dependencies]
+tonic-build = { workspace = true }
+
+[lints]
+workspace = true

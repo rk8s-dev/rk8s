@@ -56,14 +56,32 @@ build_examples() {
 	(cd "$CRATE_DIR" && cargo build --examples --quiet)
 }
 
+check_mount() {
+    local mnt=$1
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+        mount | grep -q "$mnt"
+    else
+        mountpoint -q "$mnt"
+    fi
+}
+
+unmount_fs() {
+    local mnt=$1
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+        umount "$mnt" 2>/dev/null || sudo umount "$mnt" 2>/dev/null || true
+    else
+        fusermount3 -u "$mnt" 2>/dev/null || sudo fusermount3 -u "$mnt" 2>/dev/null || true
+    fi
+}
+
 start_overlay() {
 	info "Starting overlay example"
 	local run_log="$LOG_DIR/overlay.run.log"
 	"$REPO_ROOT/project/target/debug/examples/overlayfs_example" \
 		--mountpoint "$OVL_MNT" --upperdir "$OVL_UP" --lowerdir "$OVL_L1" --lowerdir "$OVL_L2" \
 		>"$run_log" 2>&1 & echo $! >"$WORK_DIR/overlay.pid"
-	sleep 2
-	if mountpoint -q "$OVL_MNT"; then
+	sleep 5
+	if check_mount "$OVL_MNT"; then
 		info "Overlay mounted"
 	else
 		warn "Overlay mount failed (see $run_log)"
@@ -77,8 +95,8 @@ start_passthrough() {
 	"$REPO_ROOT/project/target/debug/examples/passthrough" \
 		--mountpoint "$PT_MNT" --rootdir "$PT_SRC" \
 		>"$run_log" 2>&1 & echo $! >"$WORK_DIR/passthrough.pid"
-	sleep 2
-	if mountpoint -q "$PT_MNT"; then
+	sleep 5
+	if check_mount "$PT_MNT"; then
 		info "Passthrough mounted"
 	else
 		warn "Passthrough mount failed (see $run_log)"
@@ -113,8 +131,8 @@ kill_and_unmount() {
 		kill "$pid" 2>/dev/null || true
 		sleep 1
 	fi
-	if mountpoint -q "$mnt"; then
-		fusermount3 -u "$mnt" 2>/dev/null || sudo fusermount3 -u "$mnt" 2>/dev/null || true
+	if check_mount "$mnt"; then
+		unmount_fs "$mnt"
 	fi
 }
 
@@ -125,13 +143,13 @@ main() {
 	build_examples
 
 	start_overlay || info "Skip overlay workloads"
-	if mountpoint -q "$OVL_MNT"; then
+	if check_mount "$OVL_MNT"; then
 		run_ior "$OVL_MNT" overlay
 		run_fio "$OVL_MNT" overlay
 	fi
 
 	start_passthrough || info "Skip passthrough workloads"
-	if mountpoint -q "$PT_MNT"; then
+	if check_mount "$PT_MNT"; then
 		run_ior "$PT_MNT" passthrough
 		run_fio "$PT_MNT" passthrough
 	fi

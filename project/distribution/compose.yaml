@@ -1,8 +1,12 @@
+# docker compose --env-file .env build distribution
+# docker compose --env-file .env up -d
+# docker compose logs -f distribution
+
 services:
   distribution:
     build:
-      context: .
-      dockerfile: Dockerfile
+      context: ..
+      dockerfile: distribution/Dockerfile
       args:
         PROFILE: ${PROFILE:-debug}
         OCI_REGISTRY_PORT: ${OCI_REGISTRY_PORT}
@@ -15,7 +19,7 @@ services:
     environment:
       PROFILE: ${PROFILE}
 
-      DATABASE_URL: "postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}"
+      DATABASE_URL: "postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}"
 
       OCI_REGISTRY_URL: ${OCI_REGISTRY_URL}
       OCI_REGISTRY_PORT: ${OCI_REGISTRY_PORT}
@@ -30,7 +34,8 @@ services:
       GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID}
       GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET}
     depends_on:
-      - db
+      db:
+        condition: service_healthy
 
   db:
     image: postgres:15
@@ -39,6 +44,12 @@ services:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
     volumes:
       - db_data:/var/lib/postgresql/data
     ports:

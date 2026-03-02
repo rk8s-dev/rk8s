@@ -6,15 +6,15 @@ metadata:
   labels:
     app: nginx
 spec:
-  replicas: 3
+  replicas: 2
   selector:
     matchLabels:
       app: nginx
       tier: frontend
   strategy:
     type: RollingUpdate
-    maxSurge: 25%
-    maxUnavailable: 25%
+    maxSurge: 0
+    maxUnavailable: 1
   progressDeadlineSeconds: 600
   revisionHistoryLimit: 10
   template:
@@ -22,16 +22,17 @@ spec:
       labels:
         app: nginx
         tier: frontend
-        bundle: ./rk8s/project/test/bundles/pause
     spec:
       containers:
-        - name: nginx
-          image: ./rk8s/project/test/bundles/busybox
-          args:
-            - "sleep"
-            - "3600"
+        - name: 
+          image: nginx:latest
           ports:
             - containerPort: 80
+          args:
+            - /docker-entrypoint.sh
+            - nginx
+            - -g
+            - 'daemon off;'
           resources:
             limits:
               cpu: "500m"

@@ -34,12 +34,26 @@ print_error() {
     echo -e "${RED}[ERROR]${NC} $1"
 }
 
+# 挂载检查函数
+check_mount() {
+    local mnt=$1
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+        mount | grep -q "$mnt"
+    else
+        mountpoint -q "$mnt"
+    fi
+}
+
 # 清理函数
 cleanup() {
     print_info "正在清理..."
-    if mountpoint -q "$MOUNT_DIR" 2>/dev/null; then
+    if check_mount "$MOUNT_DIR" 2>/dev/null; then
         print_info "卸载 $MOUNT_DIR"
-        fusermount3 -u "$MOUNT_DIR" || sudo umount "$MOUNT_DIR" || true
+        if [[ "$OSTYPE" == "darwin"* ]]; then
+            umount "$MOUNT_DIR" || sudo umount "$MOUNT_DIR" || true
+        else
+            fusermount3 -u "$MOUNT_DIR" || sudo umount "$MOUNT_DIR" || true
+        fi
     fi
     
     # 等待卸载完成
@@ -47,7 +61,13 @@ cleanup() {
     
     if [ -d "$BASE_DIR" ]; then
         print_info "删除临时目录 $BASE_DIR"
-        rm -rf "$BASE_DIR"
+        rm -rf "$BASE_DIR" 2>/dev/null || {
+            print_warn "无法删除 $BASE_DIR，可能需要手动清理"
+            # 尝试单独删除挂载点
+            if [ -d "$MOUNT_DIR" ]; then
+                rmdir "$MOUNT_DIR" 2>/dev/null || rm -rf "$MOUNT_DIR" 2>/dev/null || true
+            fi
+        }
     fi
 }
 
@@ -110,6 +130,12 @@ print_info "  Upper: $UPPER_DIR"
 print_info "  Work:  $WORK_DIR"
 print_info "  Mount: $MOUNT_DIR"
 
+# 显示 lower 和 upper 目录内容
+print_info "Lower 层内容:"
+ls -la "$LOWER_DIR" | sed 's/^/  /'
+print_info "Upper 层内容:"
+ls -la "$UPPER_DIR" | sed 's/^/  /'
+
 # 检查 Rust 项目是否存在
 if [ ! -f "$PROJECT_DIR/Cargo.toml" ]; then
     print_error "找不到 Cargo.toml，请确保在正确的项目目录中运行此脚本"
@@ -117,41 +143,152 @@ if [ ! -f "$PROJECT_DIR/Cargo.toml" ]; then
 fi
 
 # 检查 /etc/fuse.conf 是否允许 user_allow_other
-if ! grep -q "^user_allow_other" /etc/fuse.conf 2>/dev/null; then
-    print_warn "注意：/etc/fuse.conf 中未启用 user_allow_other，可能需要 sudo 权限"
-    print_warn "建议运行: echo 'user_allow_other' | sudo tee -a /etc/fuse.conf"
+if [[ "$OSTYPE" != "darwin"* ]]; then
+    if ! grep -q "^user_allow_other" /etc/fuse.conf 2>/dev/null; then
+        print_warn "注意：/etc/fuse.conf 中未启用 user_allow_other，可能需要 sudo 权限"
+        print_warn "建议运行: echo 'user_allow_other' | sudo tee -a /etc/fuse.conf"
+    fi
 fi
 
 print_info "编译并运行 OverlayFS 示例..."
 cd "$PROJECT_DIR"
 
+# 检查并加载 FUSE 模块 (仅 Linux)
+if [[ "$OSTYPE" != "darwin"* ]]; then
+    if ! lsmod | grep -q fuse; then
+        print_info "正在加载 FUSE 模块..."
+        if sudo modprobe fuse 2>/dev/null; then
+            print_info "✅ FUSE 模块已加载"
+        else
+            print_warn "⚠️ 无法加载 FUSE 模块，可能需要手动处理"
+        fi
+    fi
+fi
+
+# 编译 Rust 示例
+print_info "编译 Rust 示例..."
+env RUSTFLAGS="-A warnings" cargo build --release -q --example overlayfs_example
+
 # 运行 overlay 示例
 print_info "启动 OverlayFS，挂载点: $MOUNT_DIR"
-cargo run --example overlay -- \
-    -o "lowerdir=$LOWER_DIR,upperdir=$UPPER_DIR,workdir=$WORK_DIR" \
-    -l "$LOG_LEVEL" \
-    "$FS_NAME" \
-    "$MOUNT_DIR" &
+cargo run --release -q --example overlayfs_example -- \
+    --mountpoint "$MOUNT_DIR" \
+    --upperdir "$UPPER_DIR" \
+    --lowerdir "$LOWER_DIR" \
+    --allow-other &
 
 FUSE_PID=$!
 print_info "OverlayFS 进程 ID: $FUSE_PID"
 
 # 等待挂载完成
-sleep 2
+print_info "等待挂载完成..."
+for i in {1..99}; do
+    sleep 1
+    if check_mount "$MOUNT_DIR" 2>/dev/null; then
+        break
+    fi
+    print_info "等待挂载... ($i/99)"
+done
 
 # 检查挂载是否成功
-if mountpoint -q "$MOUNT_DIR" 2>/dev/null; then
+if check_mount "$MOUNT_DIR" 2>/dev/null; then
     print_info "✅ 挂载成功！可以访问 $MOUNT_DIR"
     print_info "挂载点内容:"
+    print_info "$(ls -la $MOUNT_DIR)"
     ls -la "$MOUNT_DIR" 2>/dev/null | sed 's/^/  /' || print_warn "无法列出挂载点内容，可能需要权限"
     
-    print_info "按 Ctrl+C 停止文件系统..."
-    wait $FUSE_PID
+     # 自动化验证
+    print_info "开始自动化验证..."
+    EXIT_CODE=0
+
+    # 1. 验证 Lower 层文件
+    if [ -f "$MOUNT_DIR/lower_file.txt" ]; then
+        CONTENT=$(cat "$MOUNT_DIR/lower_file.txt")
+        if [ "$CONTENT" == "这是来自 lower 层的文件" ]; then
+            print_info "✅ Lower 层文件内容验证通过"
+        else
+            print_error "❌ Lower 层文件内容验证失败"
+            EXIT_CODE=1
+        fi
+    else
+        print_error "❌ 找不到 Lower 层文件"
+        EXIT_CODE=1
+    fi
+
+    # 2. 验证 Upper 层文件
+    if [ -f "$MOUNT_DIR/upper_file.txt" ]; then
+        CONTENT=$(cat "$MOUNT_DIR/upper_file.txt")
+        if [ "$CONTENT" == "这是来自 upper 层的文件" ]; then
+            print_info "✅ Upper 层文件内容验证通过"
+        else
+            print_error "❌ Upper 层文件内容验证失败"
+            EXIT_CODE=1
+        fi
+    else
+        print_error "❌ 找不到 Upper 层文件"
+        EXIT_CODE=1
+    fi
+
+    # 3. 验证子目录
+    if [ -d "$MOUNT_DIR/subdir" ] && [ -f "$MOUNT_DIR/subdir/nested_file.txt" ]; then
+        print_info "✅Lower 层子目录结构验证通过"
+    else
+        print_error "❌ Lower 层子目录验证失败"
+        EXIT_CODE=1
+    fi
+
+    # 4. 验证写操作 (写入 Upper 层)
+    print_info "尝试写入测试..."
+    if echo "new file" > "$MOUNT_DIR/new_file.txt"; then
+        if [ -f "$UPPER_DIR/new_file.txt" ]; then
+            print_info "✅ 写入验证通过 (文件正确出现在 Upper 层)"
+            rm "$MOUNT_DIR/new_file.txt"
+        else
+            print_error "❌ 写入验证失败: 文件未出现在 Upper 层"
+            EXIT_CODE=1
+        fi
+    else
+        print_error "❌ 写入操作失败"
+        EXIT_CODE=1
+    fi
+
+    if [ "${EXIT_CODE:-0}" -eq 0 ]; then
+        print_info "🎉 所有自动化验证通过！"
+    else
+        print_error "💥 自动化验证失败"
+    fi
+
+    # 自动清理
+    print_info "验证完成，准备清理..."
+    kill $FUSE_PID 2>/dev/null || true
+    wait $FUSE_PID 2>/dev/null || true
+    
+    # 显式清理
+    cleanup
+    
+    exit ${EXIT_CODE:-0}
 else
     print_error "❌ 挂载失败"
-    kill $FUSE_PID 2>/dev/null || true
+    print_info "调试信息:"
+    print_info "  挂载点: $MOUNT_DIR"
+    print_info "  Lower: $LOWER_DIR"
+    print_info "  Upper: $UPPER_DIR"
+    print_info "  进程状态: $(ps -p $FUSE_PID -o pid,ppid,state,cmd 2>/dev/null || echo '进程已退出')"
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+        print_info "  挂载检查: $(mount | grep "$MOUNT_DIR" || echo '不是挂载点')"
+        print_info "  FUSE 模块: (macOS fuse)"
+    else
+        print_info "  挂载检查: $(mountpoint "$MOUNT_DIR" 2>&1 || echo '不是挂载点')"
+        print_info "  FUSE 模块: $(lsmod | grep fuse || echo 'FUSE 模块未加载')"
+    fi
+    
+    # 检查进程是否还在运行
+    if kill -0 $FUSE_PID 2>/dev/null; then
+        print_info "停止 FUSE 进程..."
+        kill $FUSE_PID 2>/dev/null || true
+        sleep 2
+    fi
     exit 1
 fi
 
 print_info "OverlayFS 已停止运行"
-

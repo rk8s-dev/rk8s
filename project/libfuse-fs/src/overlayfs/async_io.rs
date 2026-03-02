@@ -23,6 +23,15 @@ impl Filesystem for OverlayFs {
         if self.config.do_import {
             self.import().await?;
         }
+        #[cfg(target_os = "linux")]
+        {
+            for layer in self.lower_layers.iter() {
+                layer.init(_req).await?;
+            }
+            if let Some(upper) = &self.upper_layer {
+                upper.init(_req).await?;
+            }
+        }
         if !self.config.do_import || self.config.writeback {
             self.writeback.store(true, Ordering::Relaxed);
         }
@@ -833,6 +842,37 @@ impl Filesystem for OverlayFs {
             .await
             .map_err(|e| e.into())
     }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn getlk(
+        &self,
+        _req: Request,
+        _inode: Inode,
+        _fh: u64,
+        _lock_owner: u64,
+        _start: u64,
+        _end: u64,
+        _type: u32,
+        _pid: u32,
+    ) -> Result<ReplyLock> {
+        Err(libc::ENOSYS.into())
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn setlk(
+        &self,
+        _req: Request,
+        _inode: Inode,
+        _fh: u64,
+        _lock_owner: u64,
+        _start: u64,
+        _end: u64,
+        _type: u32,
+        _pid: u32,
+        _block: bool,
+    ) -> Result<()> {
+        Err(libc::ENOSYS.into())
+    }
     /// check file access permissions. This will be called for the `access()` system call. If the
     /// `default_permissions` mount option is given, this method is not be called. This method is
     /// not called under Linux kernel versions 2.4.x.
@@ -879,7 +919,10 @@ impl Filesystem for OverlayFs {
 
         let mut flags: i32 = flags as i32;
         flags |= libc::O_NOFOLLOW;
-        flags &= !libc::O_DIRECT;
+        #[cfg(target_os = "linux")]
+        {
+            flags &= !libc::O_DIRECT;
+        }
         if self.config.writeback {
             if flags & libc::O_ACCMODE == libc::O_WRONLY {
                 flags &= !libc::O_ACCMODE;
@@ -1076,8 +1119,9 @@ mod tests {
 
     use crate::{
         overlayfs::{OverlayFs, config::Config},
-        passthrough::{PassthroughArgs, new_passthroughfs_layer, newlogfs::LoggingFileSystem},
+        passthrough::{PassthroughArgs, new_passthroughfs_layer},
     };
+    use rfuse3::raw::logfs::LoggingFileSystem;
 
     #[tokio::test]
     #[ignore]

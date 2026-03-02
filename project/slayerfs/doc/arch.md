@@ -120,6 +120,8 @@ This project is still evolving. The current behavior (as of now) is:
     to readers.
   - Flush serializes with writes: while a flush is in progress, new writes to the
     same file wait.
+  - VFS exposes `flush` / `fsync` to trigger timestamp updates for mmap-heavy
+    workloads via `update_timestamps_on_flush`.
 
 - Truncate (single-process):
   - Truncate locks all file handles, flushes pending writes, updates metadata,
@@ -202,4 +204,3 @@ CREATE TABLE sessions (
 	last_heartbeat TIMESTAMP
 );
 ```
-

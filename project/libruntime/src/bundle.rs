@@ -1,13 +1,13 @@
 use std::{
+    env,
     ffi::OsString,
     fs::File,
     io::{BufReader, copy},
     path::{Path, PathBuf},
-    process::Command,
 };
 
-use anyhow::Context;
 use anyhow::anyhow;
+use anyhow::{Context, Result};
 use flate2::read::GzDecoder;
 use futures::future;
 use libfuse_fs::overlayfs::{OverlayArgs, mount_fs};
@@ -16,6 +16,7 @@ use sha256::try_digest;
 use std::str::FromStr;
 use tar::Archive;
 use tokio::fs;
+use tokio::process::Command;
 use tracing::{debug, info};
 
 /// Converts an OCI image directory to a bundle directory.
@@ -107,7 +108,12 @@ async fn extract_layers<P: AsRef<Path>, B: AsRef<Path>>(
     debug!("Image Config: {:?}", image_config);
 
     let layer_descriptors = image_manifest.layers();
-    assert_eq!(diff_ids.len(), layer_descriptors.len());
+    anyhow::ensure!(
+        diff_ids.len() == layer_descriptors.len(),
+        "OCI image layer count mismatch: diff_ids={} vs layer_descriptors={}",
+        diff_ids.len(),
+        layer_descriptors.len()
+    );
 
     let mut layers_futures = Vec::new();
     let bundle_path = PathBuf::from(bundle_path.as_ref());
@@ -201,7 +207,85 @@ async fn extract_tar_gz<P: AsRef<Path>>(tar_gz_path: P, extract_dir: P) -> anyho
     .with_context(|| "Failed to spawn blocking task for tar extraction")?
 }
 
-#[allow(unused)]
+pub fn prepare_runtime_customize_layer<P: AsRef<Path>>(path: P) -> Result<()> {
+    // 1. Add customized-hosts file(if RKS_ADDRESS variable is not set, it SIMPLY means it's not in cluster mode)
+    if let Ok(address) = env::var("RKS_ADDRESS")
+        && !address.is_empty()
+    {
+        let nameserver_ip = address.split(':').next().unwrap_or(&address);
+        info!(
+            "RKS_ADDRESS set to {}, preparing runtime customization layer...",
+            address
+        );
+
+        let etc_dir = path.as_ref().join("etc");
+        if !etc_dir.exists() {
+            std::fs::create_dir_all(&etc_dir).with_context(|| {
+                format!("Failed to create etc dir in runtime layer: {:?}", etc_dir)
+            })?;
+        }
+
+        let resolv_path = etc_dir.join("resolv.conf");
+        let resolv_content =
+            format!("nameserver {nameserver_ip}\nsearch cluster.local\noptions ndots:5\n");
+
+        std::fs::write(&resolv_path, resolv_content)
+            .with_context(|| format!("Failed to write resolv to layer: {:?}", resolv_path))?;
+    }
+    // 2. Do other stuff
+
+    Ok(())
+}
+
+/// Only prepare the overlay directory structure, without executing mount and copy.
+/// Used by RootfsMount on the rkforge side for persistent overlay mounts.
+///
+/// Returns `(lower_dirs, upper_dir, work_dir, merged_dir)`,
+/// where `lower_dirs` is arranged according to overlayfs semantics (newest layer first).
+pub async fn prepare_overlay_dirs<P: AsRef<Path>>(
+    bundle_path: P,
+    layers: &[PathBuf],
+) -> anyhow::Result<(Vec<PathBuf>, PathBuf, PathBuf, PathBuf)> {
+    let bundle_path = bundle_path.as_ref();
+    let upper_dir = bundle_path.join("upper");
+    let work_dir = bundle_path.join("work");
+    let merged_dir = bundle_path.join("merged");
+    let runtime_layer = bundle_path.join("runtime_layer");
+
+    // Arrange according to overlayfs semantics: newest layer first
+    let mut lower_dirs: Vec<PathBuf> = layers
+        .iter()
+        .rev()
+        .map(|dir| {
+            Path::new(dir)
+                .canonicalize()
+                .with_context(|| format!("Failed to get canonical path for: {dir:?}"))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+
+    // Prepare runtime custom layer (e.g., DNS configuration)
+    prepare_runtime_customize_layer(&runtime_layer)
+        .map_err(|e| anyhow!("failed to prepare the customize layer: {e}"))?;
+
+    if runtime_layer.exists() {
+        lower_dirs.insert(0, runtime_layer.canonicalize()?);
+    }
+
+    // Clean up and recreate directories
+    for dir in [&upper_dir, &work_dir, &merged_dir] {
+        if dir.exists() {
+            fs::remove_dir_all(dir)
+                .await
+                .with_context(|| format!("Failed to remove directory: {}", dir.display()))?;
+        }
+        fs::create_dir_all(dir)
+            .await
+            .with_context(|| format!("Failed to create directory: {}", dir.display()))?;
+    }
+
+    Ok((lower_dirs, upper_dir, work_dir, merged_dir))
+}
+
 pub async fn mount_and_copy_bundle<P: AsRef<Path>>(
     bundle_path: P,
     layers: &[PathBuf],
@@ -214,8 +298,9 @@ pub async fn mount_and_copy_bundle<P: AsRef<Path>>(
     let bundle_path = bundle_path.as_ref();
     let upper_dir = bundle_path.join("upper");
     let merged_dir = bundle_path.join("merged");
+    let runtime_layer = bundle_path.join("runtime_layer");
 
-    let lower_dirs = layers
+    let mut lower_dirs = layers
         .iter()
         .rev()
         .map(|dir| {
@@ -226,19 +311,26 @@ pub async fn mount_and_copy_bundle<P: AsRef<Path>>(
         })
         .collect::<Result<Vec<String>, _>>()?;
 
+    // Add rkl-rkforge's customize's layer for target container like: hosts file, probe
+    prepare_runtime_customize_layer(&runtime_layer)
+        .map_err(|e| anyhow!("failed to prepare the customize layer: {e}"))?;
+
+    if runtime_layer.exists() {
+        lower_dirs.insert(0, runtime_layer.canonicalize()?.display().to_string());
+    }
+
     if merged_dir.exists() {
         debug!("{} directory exists deleting...", merged_dir.display());
         fs::remove_dir_all(&merged_dir)
             .await
-            .with_context(|| format!("failed to delete the dir {merged_dir:?}"));
+            .with_context(|| format!("failed to delete the dir {merged_dir:?}"))?;
     }
 
     if upper_dir.exists() {
         debug!("{} directory exists deleting...", upper_dir.display());
-        debug!("{} directory exists deleting...", upper_dir.display());
         fs::remove_dir_all(&upper_dir)
             .await
-            .with_context(|| format!("failed to delete the dir {upper_dir:?}"));
+            .with_context(|| format!("failed to delete the dir {upper_dir:?}"))?;
     }
 
     fs::create_dir_all(&merged_dir)
@@ -265,7 +357,7 @@ pub async fn mount_and_copy_bundle<P: AsRef<Path>>(
             .unwrap_or(&OsString::from_str("unknown").unwrap())
     );
     // mount with libfuse
-    let mut mnt_handle = mount_fs(OverlayArgs {
+    let mnt_handle = mount_fs(OverlayArgs {
         lowerdir: lower_dirs,
         upperdir: &upper_dir,
         mountpoint: &merged_dir,
@@ -286,6 +378,7 @@ pub async fn mount_and_copy_bundle<P: AsRef<Path>>(
             rootfs.display()
         ))
         .status()
+        .await
         .with_context(|| "Failed to execute cp command")?;
 
     if !status.success() {
@@ -297,13 +390,18 @@ pub async fn mount_and_copy_bundle<P: AsRef<Path>>(
 
     mnt_handle.unmount().await?;
 
-    // clean
     fs::remove_dir_all(&upper_dir)
         .await
         .with_context(|| format!("Failed to remove upper directory: {upper_dir:?}"))?;
     fs::remove_dir_all(&merged_dir)
         .await
         .with_context(|| format!("Failed to remove merged directory: {merged_dir:?}"))?;
+
+    if runtime_layer.exists() {
+        fs::remove_dir_all(&runtime_layer)
+            .await
+            .with_context(|| format!("Failed to remove runtime directory: {runtime_layer:?}"))?;
+    }
 
     // for layer in layers {
     //     fs::remove_dir_all(layer)

@@ -1,14 +1,9 @@
 use clap::Parser;
-use slayerfs::cadapter::client::ObjectClient;
-use slayerfs::cadapter::localfs::LocalFsBackend;
-use slayerfs::chuck::chunk::ChunkLayout;
-use slayerfs::chuck::store::ObjectBlockStore;
 use slayerfs::fuse::mount::mount_vfs_unprivileged;
-use slayerfs::meta::MetaStore;
-use slayerfs::meta::config::DatabaseType;
-use slayerfs::meta::factory::MetaStoreFactory;
-use slayerfs::meta::stores::{DatabaseMetaStore, EtcdMetaStore, RedisMetaStore};
-use slayerfs::vfs::fs::VFS;
+use slayerfs::{
+    ChunkLayout, DatabaseMetaStore, DatabaseType, EtcdMetaStore, LocalFsBackend, MetaStore,
+    MetaStoreFactory, ObjectBlockStore, ObjectClient, RedisMetaStore, VFS,
+};
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::signal;
@@ -157,7 +152,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let processed_config = process_config_for_backend(&config_content, &meta_config_dir)?;
         std::fs::write(&target_config_path, processed_config)?;
 
-        let config = slayerfs::meta::config::Config::from_file(&target_config_path)
+        let config = slayerfs::Config::from_file(&target_config_path)
             .map_err(|e| format!("Failed to load config file: {}", e))?;
         let meta_store: Arc<dyn MetaStore> = match &config.database.db_config {
             DatabaseType::Sqlite { .. } | DatabaseType::Postgres { .. } => {

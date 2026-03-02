@@ -1,0 +1,33 @@
+[package]
+name = "xlineapi"
+version = "0.1.0"
+edition.workspace = true
+authors = ["DatenLord <dev@datenlord.io>"]
+description = "Xline RPC API"
+license = "Apache-2.0"
+readme = "README.md"
+repository = "https://github.com/xline-kv/Xline/tree/master/xlineapi"
+categories = ["RPC"]
+keywords = ["RPC", "Interfaces"]
+
+[dependencies]
+async-trait = { workspace = true }
+curp = { path = "../curp" }
+curp-external-api = { path = "../curp-external-api" }
+xlinerpc = { path = "../xlinerpc"}
+itertools = { workspace = true }
+prost = { workspace = true }
+serde = { workspace = true }
+thiserror = { workspace = true }
+tonic = { workspace = true }
+utils = { path = "../utils" }
+
+[build-dependencies]
+tonic-build = { workspace = true }
+
+[dev-dependencies]
+strum = "0.26"
+strum_macros = "0.26"
+
+[lints]
+workspace = true
