@@ -191,9 +191,7 @@ pub fn remove_image(args: RmiArgs) -> Result<()> {
 
     let still_referenced = repos.digests().iter().any(|d| **d == digest);
 
-    if !still_referenced
-        && let Err(e) = cleanup_image_blobs(&digest, &repos)
-    {
+    if !still_referenced && let Err(e) = cleanup_image_blobs(&digest, &repos) {
         if args.force {
             eprintln!("Warning: blob cleanup failed: {e}");
         } else {
@@ -608,7 +606,7 @@ fn extract_oci_layout_archive(input_path: &Path, layout_dir: &Path) -> Result<()
     archive.set_preserve_permissions(false);
     archive.set_unpack_xattrs(false);
 
-    let mut entries = archive
+    let entries = archive
         .entries()
         .context("Failed to read tar entries from archive")?;
     for entry in entries {
