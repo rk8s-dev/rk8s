@@ -28,10 +28,18 @@ pub fn create_v2_router(state: Arc<AppState>) -> Router<Arc<AppState>> {
         .layer(middleware::from_fn_with_state(state, populate_oci_claims))
 }
 
-pub async fn probe() -> Result<impl IntoResponse, AppError> {
+pub async fn probe(State(state): State<Arc<AppState>>) -> Result<impl IntoResponse, AppError> {
+    let realm = format!("{}/auth/token", state.config.registry_url);
+    let challenge = format!(
+        r#"Bearer realm="{realm}",service="oci-registry",scope="repository:*:*", Basic Realm="oci registry""#,
+    );
+
     Ok((
         StatusCode::OK,
-        [("Docker-Distribution-API-Version", "registry/2.0")],
+        [
+            ("Docker-Distribution-API-Version", "registry/2.0"),
+            ("Www-Authenticate", &challenge),
+        ],
     )
         .into_response())
 }
