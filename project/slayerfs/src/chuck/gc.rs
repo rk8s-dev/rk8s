@@ -1,47 +1,52 @@
-//! Object Storage Garbage Collector
+//! Block Storage Garbage Collector
 //!
-//! This module provides garbage collection for object storage backends.
+//! This module provides garbage collection for block storage backends.
 
-use crate::chuck::store::BlockStore;
-use crate::meta::store::{MetaStore, MetaError};
+use crate::chuck::store::{BlockKey, BlockStore};
+use crate::meta::store::{MetaError, MetaStore};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::time::interval;
 use tracing::{debug, error, info, warn};
 
-/// Configuration for the garbage collector.
+/// Configuration for block-level garbage collection.
 #[derive(Debug, Clone)]
-pub struct GCConfig {
+#[allow(dead_code)]
+pub struct BlockGcConfig {
     /// Interval between GC runs
     pub interval: Duration,
     /// Minimum age of delayed slices before deletion (safety period)
     pub min_age_secs: i64,
     /// Maximum number of slices to process per run
     pub batch_size: usize,
+    /// Block size for calculating number of blocks to delete
+    pub block_size: u64,
 }
 
-impl Default for GCConfig {
+impl Default for BlockGcConfig {
     fn default() -> Self {
         Self {
-            interval: Duration::from_secs(3600), // 1 hour
-            min_age_secs: 3600,                   // 1 hour safety period
+            interval: Duration::from_secs(3600),
+            min_age_secs: 3600,
             batch_size: 1000,
+            block_size: 4 * 1024 * 1024,
         }
     }
 }
 
-/// Garbage collector for object storage block data.
+/// Garbage collector for block storage data.
+#[allow(dead_code)]
 pub struct BlockStoreGC<M, B> {
     meta_store: Arc<M>,
     block_store: Arc<B>,
 }
 
+#[allow(dead_code)]
 impl<M, B> BlockStoreGC<M, B>
 where
     M: MetaStore + Send + Sync + 'static,
     B: BlockStore + Send + Sync + 'static,
 {
-    /// Create a new garbage collector.
     pub fn new(meta_store: Arc<M>, block_store: Arc<B>) -> Self {
         Self {
             meta_store,
@@ -49,11 +54,10 @@ where
         }
     }
 
-    /// Start the garbage collector background task.
-    pub fn start(self, config: GCConfig) -> tokio::task::JoinHandle<()> {
+    pub fn start(self, config: BlockGcConfig) -> tokio::task::JoinHandle<()> {
         tokio::spawn(async move {
             let mut ticker = interval(config.interval);
-            
+
             info!(
                 interval_secs = config.interval.as_secs(),
                 min_age_secs = config.min_age_secs,
@@ -63,7 +67,7 @@ where
 
             loop {
                 ticker.tick().await;
-                
+
                 if let Err(e) = self.run_gc_cycle(&config).await {
                     error!(error = %e, "GC cycle failed");
                 }
@@ -71,19 +75,39 @@ where
         })
     }
 
-    /// Run a single GC cycle.
-    pub async fn run_gc_cycle(&self, config: &GCConfig) -> Result<(), GCError> {
-        // Process delayed slices from metadata store
-        let deleted_count = self
+    pub async fn run_gc_cycle(&self, config: &BlockGcConfig) -> Result<(), GCError> {
+        let deleted_slices = self
             .meta_store
             .process_delayed_slices(config.batch_size, config.min_age_secs)
             .await
-            .map_err(|e| GCError::MetaError(e))?;
+            .map_err(GCError::MetaError)?;
+
+        let deleted_count = deleted_slices.len();
 
         if deleted_count > 0 {
             info!(
                 deleted_count = deleted_count,
-                "GC cycle completed, processed delayed slices"
+                "GC cycle: processed delayed slices, deleting block data..."
+            );
+
+            for (slice_id, offset, size) in deleted_slices {
+                if let Err(e) = self
+                    .delete_slice_blocks(slice_id, offset, size, config.block_size)
+                    .await
+                {
+                    warn!(
+                        slice_id = slice_id,
+                        offset = offset,
+                        size = size,
+                        error = %e,
+                        "Failed to delete slice blocks from block store"
+                    );
+                }
+            }
+
+            info!(
+                deleted_count = deleted_count,
+                "GC cycle completed, deleted block data"
             );
         } else {
             debug!("GC cycle completed, no slices to process");
@@ -91,10 +115,44 @@ where
 
         Ok(())
     }
+
+    async fn delete_slice_blocks(
+        &self,
+        slice_id: u64,
+        offset: u64,
+        size: u64,
+        block_size: u64,
+    ) -> Result<(), GCError> {
+        if size == 0 {
+            return Ok(());
+        }
+
+        // Calculate the actual block range based on offset within the chunk
+        // Blocks are indexed by (slice_id, block_index) where block_index = offset / block_size
+        let start_block = offset / block_size;
+        let end_block = (offset + size).div_ceil(block_size);
+        let num_blocks = end_block - start_block;
+
+        if num_blocks == 0 {
+            return Ok(());
+        }
+
+        self.block_store
+            .delete_range((slice_id, start_block as u32), num_blocks)
+            .await
+            .map_err(|e| {
+                GCError::BlockStoreError(format!(
+                    "Failed to delete blocks for slice {} at offset {}: {}",
+                    slice_id, offset, e
+                ))
+            })?;
+
+        Ok(())
+    }
 }
 
-/// Errors that can occur during GC.
 #[derive(Debug)]
+#[allow(dead_code)]
 pub enum GCError {
     MetaError(MetaError),
     BlockStoreError(String),

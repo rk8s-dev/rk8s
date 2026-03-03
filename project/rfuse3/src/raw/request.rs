@@ -1,6 +1,5 @@
 use crate::raw::abi::fuse_in_header;
 use crate::raw::session::WorkItem;
-
 #[derive(Debug, Default, Copy, Clone, Eq, PartialEq, Hash, Ord, PartialOrd)]
 /// Request data
 pub struct Request {

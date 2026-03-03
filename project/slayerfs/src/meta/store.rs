@@ -592,13 +592,13 @@ pub trait MetaStore: Send + Sync {
 
     /// process delayed slices: delete old slices after verification
     /// this should be called by GC worker periodically
-    /// returns the number of slices actually deleted
+    /// returns the list of successfully deleted slices (slice_id, offset, size) for block store cleanup
     /// max_age_secs: minimum age of delayed slices to delete (for safety)
     async fn process_delayed_slices(
         &self,
         batch_size: usize,
         max_age_secs: i64,
-    ) -> Result<usize, MetaError> {
+    ) -> Result<Vec<(u64, u64, u64)>, MetaError> {
         let _ = (batch_size, max_age_secs);
         Err(MetaError::NotImplemented)
     }

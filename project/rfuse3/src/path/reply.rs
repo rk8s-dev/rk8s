@@ -5,7 +5,6 @@ use std::time::{Duration, SystemTime};
 
 use futures_util::stream::Stream;
 
-use crate::mount_options::DEFAULT_MAX_WRITE;
 #[cfg(feature = "file-lock")]
 pub use crate::raw::reply::ReplyLock;
 pub use crate::raw::reply::{
@@ -73,18 +72,10 @@ impl From<(Inode, FileAttr)> for crate::raw::reply::FileAttr {
 }
 
 #[derive(Debug, Copy, Clone, Ord, PartialOrd, Eq, PartialEq, Hash)]
-/// init reply.
+/// init reply
 pub struct ReplyInit {
-    /// Maximum size of write requests.
+    /// the max write size
     pub max_write: NonZeroU32,
-}
-
-impl Default for ReplyInit {
-    fn default() -> Self {
-        Self {
-            max_write: NonZeroU32::new(DEFAULT_MAX_WRITE).expect("default max_write is non-zero"),
-        }
-    }
 }
 
 #[derive(Debug, Clone, Ord, PartialOrd, Eq, PartialEq, Hash)]

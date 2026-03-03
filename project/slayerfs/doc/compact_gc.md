@@ -34,22 +34,25 @@ compact is triggered when:
 - fragmentation ratio >= min_fragment_ratio (0.1)
 
 compact mode selection:
-- slice count < async_threshold (100): background async compact
-- async_threshold <= slice count < sync_threshold (350): urgent async compact
-- slice count >= sync_threshold (350): sync compact (blocks writes)
+- slice count >= min_slice_count (5) and < sync_threshold (350): async compact (background, non-blocking)
+- slice count >= sync_threshold (350): sync compact (blocks writes to the chunk)
+
+note: there are two modes (async/sync), not three. the async mode handles all cases from min_slice_count up to sync_threshold.
 
 ### fragmentation ratio calculation
 
 ```
-fragmentation_ratio = 1.0 - (max_contiguous_coverage / total_slice_size)
+fragmentation_ratio = (total_slice_size - merged_slice_size) / total_slice_size
 ```
 
 example:
 - slice a: offset 0, length 100
-- slice b: offset 50, length 100
-- total size: 200
-- max contiguous coverage: 150 (0-150)
-- fragmentation ratio: 1.0 - (150/200) = 0.25
+- slice b: offset 50, length 100 (overlaps with slice a by 50 bytes)
+- total slice size: 200 (100 + 100)
+- merged slice size: 150 (0-150, after removing overlap)
+- fragmentation ratio: (200 - 150) / 200 = 0.25
+
+note: this measures the amount of overlapping data between slices, not the physical layout fragmentation. higher ratio means more redundant data that can be eliminated by compaction.
 
 ### compact process
 
@@ -99,10 +102,21 @@ note: object storage data cleanup is handled separately by the object gc worker,
 
 ### gc worker configuration
 
+block-level gc (blockstoregc in `src/chuck/gc.rs`):
+
+| parameter | default value | description |
+|-----------|---------------|-------------|
+| interval | 3600s | gc check interval |
+| batch_size | 1000 | maximum slices to process per run |
+| min_age_secs | 3600 | minimum age before hard deletion |
+| block_size | 4mb | block size for calculating blocks to delete |
+
+object-level gc (markbasedgarbagecollector in `src/daemon/worker.rs`):
+
 | parameter | default value | description |
 |-----------|---------------|-------------|
 | interval_secs | 3600 | gc check interval in seconds |
-| batch_size | 100 | maximum slices to process per run |
+| batch_size | 100 | maximum files to process per run |
 | max_age_secs | 3600 | minimum age before hard deletion |
 
 ## configuration
@@ -110,6 +124,7 @@ note: object storage data cleanup is handled separately by the object gc worker,
 compact and gc parameters are configured via `CompactConfig`:
 
 ```rust
+// CompactConfig in src/meta/config.rs
 pub struct CompactConfig {
     pub min_slice_count: usize,      // default: 5
     pub min_fragment_ratio: f64,     // default: 0.1
@@ -117,6 +132,22 @@ pub struct CompactConfig {
     pub sync_threshold: usize,       // default: 350
     pub interval: Duration,          // default: 1 hour
     pub max_chunks_per_run: usize,   // default: 1000
+}
+
+// BlockGcConfig in src/chuck/gc.rs (for block-level GC)
+pub struct BlockGcConfig {
+    pub interval: Duration,          // default: 1 hour
+    pub min_age_secs: i64,           // default: 1 hour
+    pub batch_size: usize,           // default: 1000
+    pub block_size: u64,             // default: 4MB
+}
+
+// ObjectGcConfig in src/daemon/worker.rs (for object-level GC)
+pub struct ObjectGcConfig {
+    pub interval_secs: u64,          // default: 1 hour
+    pub batch_size: usize,           // default: 100
+    pub max_age_secs: i64,           // default: 1 hour
+    pub layout: ChunkLayout,
 }
 ```
 
@@ -149,12 +180,18 @@ pub struct CompactConfig {
 - executes compact in background
 - logs compact statistics
 
-### gcworker (marksweepgarbagecollector)
+### gc workers
 
+**blockstoregc** (`src/chuck/gc.rs`):
 - runs periodically (configurable interval)
 - processes delayed slices for hard deletion
-- cleans up object storage
-- reports gc statistics
+- cleans up block storage data
+- configured via `blockgcconfig`
+
+**markbasedgarbagecollector** (`src/daemon/worker.rs`):
+- handles cleanup of deleted files
+- removes orphaned objects from object storage
+- configured via `objectgcconfig`
 
 ## monitoring and metrics
 

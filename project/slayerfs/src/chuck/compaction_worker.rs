@@ -3,7 +3,7 @@
 //! This module provides a background worker that periodically scans chunks
 //! and compacts those that meet the configured thresholds.
 
-use crate::chuck::{Compactor, GCConfig, BlockStoreGC};
+use crate::chuck::{BlockGcConfig, BlockStoreGC, Compactor};
 use crate::meta::store::MetaStore;
 use std::sync::Arc;
 use std::time::Duration;
@@ -12,6 +12,7 @@ use tracing::{debug, error, info, warn};
 
 /// Configuration for the compaction worker.
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct CompactionWorkerConfig {
     /// interval between compaction scans
     pub scan_interval: Duration,
@@ -31,6 +32,7 @@ impl Default for CompactionWorkerConfig {
     }
 }
 
+#[allow(dead_code)]
 pub struct CompactionWorker<M, B> {
     meta_store: Arc<M>,
     compactor: Arc<Compactor<M, B>>,
@@ -41,6 +43,7 @@ where
     M: MetaStore + Send + Sync + 'static,
     B: crate::chuck::BlockStore + Send + Sync + 'static,
 {
+    #[allow(dead_code)]
     pub fn new(meta_store: Arc<M>, block_store: Arc<B>) -> Self {
         let compactor = Arc::new(Compactor::new(meta_store.clone(), block_store));
         Self {
@@ -50,10 +53,11 @@ where
     }
 
     /// start the compaction worker and GC as background tasks, returns the join handles for both tasks.
+    #[allow(dead_code)]
     pub fn start(
         self,
         worker_config: CompactionWorkerConfig,
-        gc_config: GCConfig,
+        gc_config: BlockGcConfig,
     ) -> (tokio::task::JoinHandle<()>, tokio::task::JoinHandle<()>) {
         let compactor = self.compactor.clone();
         let meta_store = self.meta_store.clone();
@@ -65,8 +69,9 @@ where
             let mut ticker = interval(worker_config.scan_interval);
             loop {
                 ticker.tick().await;
-                
-                if let Err(e) = run_compaction_cycle(&meta_store, &compactor, &worker_config).await {
+
+                if let Err(e) = run_compaction_cycle(&meta_store, &compactor, &worker_config).await
+                {
                     error!(error = %e, "Compaction cycle failed");
                 }
             }
@@ -79,10 +84,11 @@ where
 }
 
 /// run a single compaction cycle.
+#[allow(dead_code)]
 async fn run_compaction_cycle<M, B>(
     meta_store: &Arc<M>,
-    compactor: &Arc<Compactor<M, B>>,
-    config: &CompactionWorkerConfig,
+    _compactor: &Arc<Compactor<M, B>>,
+    _config: &CompactionWorkerConfig,
 ) -> anyhow::Result<()>
 where
     M: MetaStore + Send + Sync,

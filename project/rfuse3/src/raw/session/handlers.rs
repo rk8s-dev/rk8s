@@ -2472,7 +2472,6 @@ pub(super) async fn worker_batch_forget<FS: Filesystem + Send + Sync + 'static>(
 }
 
 #[cfg(target_os = "macos")]
-#[cfg(target_os = "macos")]
 pub(super) async fn worker_setvolname<FS: Filesystem + Send + Sync + 'static>(
     _ctx: &Arc<DispatchCtx<FS>>,
     _item: WorkItem,

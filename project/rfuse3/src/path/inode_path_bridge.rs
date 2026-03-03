@@ -1,14 +1,15 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::ffi::{OsStr, OsString};
 use std::fmt::{self, Debug, Formatter};
 use std::path::PathBuf;
-use std::sync::Mutex;
 
+#[cfg(all(not(feature = "tokio-runtime"), feature = "async-io-runtime"))]
+use async_lock::RwLock;
 use bytes::Bytes;
-use dashmap::mapref::entry::Entry;
-use dashmap::DashMap;
 use futures_util::stream::{self, Stream, StreamExt};
-use tracing::warn;
+use slab::Slab;
+#[cfg(all(not(feature = "async-io-runtime"), feature = "tokio-runtime"))]
+use tokio::sync::RwLock;
 
 use super::inode_generator::InodeGenerator;
 use super::path_filesystem::PathFilesystem;
@@ -33,37 +34,14 @@ impl Name {
     }
 }
 
-/// High-performance inode-name manager using DashMap for concurrent access.
-/// This replaces the previous RwLock<HashMap> implementation to reduce lock contention.
 #[derive(Debug)]
 struct InodeNameManager {
-    /// Maps inode -> set of names (supports hard links)
-    inode_to_names: DashMap<Inode, HashSet<Name>>,
-    /// Maps name -> inode for fast lookup
-    name_to_inode: DashMap<Name, Inode>,
-    /// Protected inode allocator
-    inode_generator: Mutex<InodeGenerator>,
+    inode_to_names: HashMap<Inode, HashSet<Name>>,
+    name_to_inode: HashMap<Name, Inode>,
+    inode_generator: InodeGenerator,
 }
 
 impl InodeNameManager {
-    fn new() -> Self {
-        let mut generator = InodeGenerator::new();
-        let root_inode = generator.allocate_inode();
-        assert_eq!(root_inode, ROOT_INODE);
-
-        let inode_to_names = DashMap::new();
-        inode_to_names.insert(
-            root_inode,
-            HashSet::from_iter(vec![Name::new(root_inode, OsString::from("/"))]),
-        );
-
-        Self {
-            inode_to_names,
-            name_to_inode: DashMap::new(),
-            inode_generator: Mutex::new(generator),
-        }
-    }
-
     fn get_absolute_path(&self, inode: Inode) -> Option<PathBuf> {
         let names = self.inode_to_names.get(&inode)?;
         let name = names.iter().next().unwrap();
@@ -78,46 +56,35 @@ impl InodeNameManager {
         }
     }
 
-    fn remove_name(&self, name: &Name) {
-        if let Some((_, inode)) = self.name_to_inode.remove(name) {
-            if let Entry::Occupied(mut entry) = self.inode_to_names.entry(inode) {
-                let names = entry.get_mut();
+    fn remove_name(&mut self, name: &Name) {
+        if let Some(inode) = self.name_to_inode.remove(name) {
+            if let Some(names) = self.inode_to_names.get_mut(&inode) {
                 names.remove(name);
+
                 if names.is_empty() {
-                    entry.remove();
-                    if let Ok(mut gen) = self.inode_generator.lock() {
-                        gen.release_inode(inode);
-                    }
+                    self.inode_to_names.remove(&inode);
+                    self.inode_generator.release_inode(inode);
                 }
             }
         }
     }
 
-    fn remove_inode(&self, inode: Inode) {
-        if let Some((_, names)) = self.inode_to_names.remove(&inode) {
-            for name in names {
-                self.name_to_inode.remove(&name);
-            }
+    fn remove_inode(&mut self, inode: Inode) {
+        if let Some(names) = self.inode_to_names.remove(&inode) {
+            names.iter().for_each(|name| {
+                self.name_to_inode.remove(name);
+            });
         }
 
-        if let Ok(mut gen) = self.inode_generator.lock() {
-            gen.release_inode(inode);
-        }
+        self.inode_generator.release_inode(inode);
     }
 
     fn contains_name(&self, name: &Name) -> bool {
         self.name_to_inode.contains_key(name)
     }
 
-    fn insert_name(&self, name: Name) -> Inode {
-        let inode = self
-            .inode_generator
-            .lock()
-            .unwrap_or_else(|poisoned| {
-                warn!("inode_generator lock was poisoned, recovering");
-                poisoned.into_inner()
-            })
-            .allocate_inode();
+    fn insert_name(&mut self, name: Name) -> Inode {
+        let inode = self.inode_generator.allocate_inode();
 
         self.name_to_inode.insert(name.clone(), inode);
 
@@ -129,60 +96,41 @@ impl InodeNameManager {
         inode
     }
 
-    /// Get or insert inode for a name atomically
-    fn get_or_insert_inode(&self, name: Name) -> Inode {
-        // Fast path: check if already exists
-        if let Some(inode) = self.name_to_inode.get(&name).map(|r| *r) {
-            return inode;
-        }
-
-        // Slow path: need to insert
-        let inode = self
-            .inode_generator
-            .lock()
-            .unwrap_or_else(|poisoned| {
-                warn!("inode_generator lock was poisoned, recovering");
-                poisoned.into_inner()
-            })
-            .allocate_inode();
-
-        // Use entry API to handle race condition
-        let actual_inode = *self.name_to_inode.entry(name.clone()).or_insert(inode);
-
-        if actual_inode == inode {
-            // We won the race, insert into inode_to_names
-            let mut names = HashSet::with_capacity(1);
-            names.insert(name);
-            self.inode_to_names.insert(inode, names);
-        } else {
-            // Lost the race, release the allocated inode
-            if let Ok(mut gen) = self.inode_generator.lock() {
-                gen.release_inode(inode);
-            }
-        }
-
-        actual_inode
-    }
-
-    /// Get parent inode for a given inode
-    fn get_parent_inode(&self, inode: Inode) -> Option<Inode> {
-        self.inode_to_names
-            .get(&inode)
-            .and_then(|names| names.iter().next().map(|n| n.parent))
+    fn get_name_inode(&self, name: &Name) -> Option<Inode> {
+        self.name_to_inode.get(name).copied()
     }
 }
 
 pub struct InodePathBridge<FS> {
     path_filesystem: FS,
-    /// Concurrent inode-name manager using DashMap internally
-    inode_name_manager: InodeNameManager,
+    inode_name_manager: RwLock<InodeNameManager>,
 }
 
 impl<FS> InodePathBridge<FS> {
     pub fn new(path_filesystem: FS) -> Self {
+        let mut slab = Slab::new();
+        // drop 0 key
+        slab.insert(());
+
+        let mut inode_name_manager = InodeNameManager {
+            inode_to_names: Default::default(),
+            name_to_inode: Default::default(),
+            inode_generator: InodeGenerator::new(),
+        };
+
+        let root_inode = inode_name_manager.inode_generator.allocate_inode();
+
+        assert_eq!(root_inode, ROOT_INODE);
+
+        // root parent is itself
+        inode_name_manager.inode_to_names.insert(
+            root_inode,
+            HashSet::from_iter(vec![Name::new(root_inode, OsString::from("/"))]),
+        );
+
         Self {
             path_filesystem,
-            inode_name_manager: InodeNameManager::new(),
+            inode_name_manager: RwLock::new(inode_name_manager),
         }
     }
 }
@@ -198,8 +146,11 @@ where
     FS: PathFilesystem + Send + Sync + 'static,
 {
     async fn init(&self, req: Request) -> Result<ReplyInit> {
-        self.path_filesystem.init(req).await?;
-        Ok(ReplyInit::default())
+        let reply_init = self.path_filesystem.init(req).await?;
+
+        Ok(ReplyInit {
+            max_write: reply_init.max_write,
+        })
     }
 
     async fn destroy(&self, req: Request) {
@@ -207,8 +158,9 @@ where
     }
 
     async fn lookup(&self, req: Request, parent: u64, name: &OsStr) -> Result<ReplyEntry> {
-        let parent_path = self
-            .inode_name_manager
+        let mut inode_name_manager = self.inode_name_manager.write().await;
+
+        let parent_path = inode_name_manager
             .get_absolute_path(parent)
             .ok_or_else(Errno::new_not_exist)?;
 
@@ -219,8 +171,7 @@ where
         {
             Err(err) => {
                 if err.is_not_exist() {
-                    self.inode_name_manager
-                        .remove_name(&Name::new(parent, name.to_owned()));
+                    inode_name_manager.remove_name(&Name::new(parent, name.to_owned()));
                 }
 
                 Err(err)
@@ -228,7 +179,10 @@ where
 
             Ok(entry) => {
                 let name = Name::new(parent, name.to_owned());
-                let inode = self.inode_name_manager.get_or_insert_inode(name);
+
+                let inode = inode_name_manager
+                    .get_name_inode(&name)
+                    .unwrap_or_else(|| inode_name_manager.insert_name(name));
 
                 Ok(ReplyEntry {
                     ttl: entry.ttl,
@@ -242,12 +196,20 @@ where
     async fn forget(&self, req: Request, inode: u64, nlookup: u64) {
         // TODO if kernel forget a dir which has children, it may break
 
-        if let Some(path) = self.inode_name_manager.get_absolute_path(inode) {
+        let mut inode_name_manager = self.inode_name_manager.write().await;
+
+        if let Some(path) = inode_name_manager.get_absolute_path(inode) {
             self.path_filesystem
                 .forget(req, path.as_ref(), nlookup)
                 .await;
 
-            self.inode_name_manager.remove_inode(inode);
+            if let Some(names) = inode_name_manager.inode_to_names.remove(&inode) {
+                for name in names {
+                    inode_name_manager.name_to_inode.remove(&name);
+                }
+
+                inode_name_manager.inode_generator.release_inode(inode);
+            }
         }
     }
 
@@ -258,7 +220,8 @@ where
         fh: Option<u64>,
         flags: u32,
     ) -> Result<ReplyAttr> {
-        let path = self.inode_name_manager.get_absolute_path(inode);
+        let inode_name_manager = self.inode_name_manager.read().await;
+        let path = inode_name_manager.get_absolute_path(inode);
 
         let attr = self
             .path_filesystem
@@ -278,7 +241,8 @@ where
         fh: Option<u64>,
         set_attr: SetAttr,
     ) -> Result<ReplyAttr> {
-        let path = self.inode_name_manager.get_absolute_path(inode);
+        let inode_name_manager = self.inode_name_manager.read().await;
+        let path = inode_name_manager.get_absolute_path(inode);
 
         let attr = self
             .path_filesystem
@@ -292,8 +256,8 @@ where
     }
 
     async fn readlink(&self, req: Request, inode: u64) -> Result<ReplyData> {
-        let path = self
-            .inode_name_manager
+        let inode_name_manager = self.inode_name_manager.read().await;
+        let path = inode_name_manager
             .get_absolute_path(inode)
             .ok_or_else(Errno::new_not_exist)?;
 
@@ -307,8 +271,8 @@ where
         name: &OsStr,
         link: &OsStr,
     ) -> Result<ReplyEntry> {
-        let parent_path = self
-            .inode_name_manager
+        let mut inode_name_manager = self.inode_name_manager.write().await;
+        let parent_path = inode_name_manager
             .get_absolute_path(parent)
             .ok_or_else(Errno::new_not_exist)?;
 
@@ -320,7 +284,7 @@ where
             Err(err) => {
                 if err.is_not_exist() {
                     let name = Name::new(parent, name.to_owned());
-                    self.inode_name_manager.remove_name(&name);
+                    inode_name_manager.remove_name(&name);
                 }
 
                 Err(err)
@@ -328,7 +292,10 @@ where
 
             Ok(entry) => {
                 let name = Name::new(parent, name.to_owned());
-                let inode = self.inode_name_manager.get_or_insert_inode(name);
+
+                let inode = inode_name_manager
+                    .get_name_inode(&name)
+                    .unwrap_or_else(|| inode_name_manager.insert_name(name));
 
                 Ok(ReplyEntry {
                     ttl: entry.ttl,
@@ -347,8 +314,8 @@ where
         mode: u32,
         rdev: u32,
     ) -> Result<ReplyEntry> {
-        let parent_path = self
-            .inode_name_manager
+        let mut inode_name_manager = self.inode_name_manager.write().await;
+        let parent_path = inode_name_manager
             .get_absolute_path(parent)
             .ok_or_else(Errno::new_not_exist)?;
 
@@ -360,7 +327,7 @@ where
             Err(err) => {
                 if err.is_exist() {
                     let name = Name::new(parent, name.to_owned());
-                    self.inode_name_manager.remove_name(&name);
+                    inode_name_manager.remove_name(&name);
                 }
 
                 Err(err)
@@ -368,7 +335,10 @@ where
 
             Ok(entry) => {
                 let name = Name::new(parent, name.to_owned());
-                let inode = self.inode_name_manager.get_or_insert_inode(name);
+
+                let inode = inode_name_manager
+                    .get_name_inode(&name)
+                    .unwrap_or_else(|| inode_name_manager.insert_name(name));
 
                 Ok(ReplyEntry {
                     ttl: entry.ttl,
@@ -387,8 +357,8 @@ where
         mode: u32,
         umask: u32,
     ) -> Result<ReplyEntry> {
-        let parent_path = self
-            .inode_name_manager
+        let mut inode_name_manager = self.inode_name_manager.write().await;
+        let parent_path = inode_name_manager
             .get_absolute_path(parent)
             .ok_or_else(Errno::new_not_exist)?;
 
@@ -400,7 +370,7 @@ where
             Err(err) => {
                 if err.is_exist() {
                     let name = Name::new(parent, name.to_owned());
-                    self.inode_name_manager.remove_name(&name);
+                    inode_name_manager.remove_name(&name);
                 }
 
                 Err(err)
@@ -408,7 +378,10 @@ where
 
             Ok(entry) => {
                 let name = Name::new(parent, name.to_owned());
-                let inode = self.inode_name_manager.get_or_insert_inode(name);
+
+                let inode = inode_name_manager
+                    .get_name_inode(&name)
+                    .unwrap_or_else(|| inode_name_manager.insert_name(name));
 
                 Ok(ReplyEntry {
                     ttl: entry.ttl,
@@ -420,8 +393,8 @@ where
     }
 
     async fn unlink(&self, req: Request, parent: u64, name: &OsStr) -> Result<()> {
-        let parent_path = self
-            .inode_name_manager
+        let mut inode_name_manager = self.inode_name_manager.write().await;
+        let parent_path = inode_name_manager
             .get_absolute_path(parent)
             .ok_or_else(Errno::new_not_exist)?;
 
@@ -432,27 +405,26 @@ where
         {
             if err.is_not_exist() {
                 let name = Name::new(parent, name.to_owned());
-                self.inode_name_manager.remove_name(&name);
+                inode_name_manager.remove_name(&name);
             } else if err.is_dir() {
                 let name = Name::new(parent, name.to_owned());
 
-                if !self.inode_name_manager.contains_name(&name) {
-                    self.inode_name_manager.insert_name(name);
+                if !inode_name_manager.contains_name(&name) {
+                    inode_name_manager.insert_name(name);
                 }
             }
 
             Err(err)
         } else {
-            self.inode_name_manager
-                .remove_name(&Name::new(parent, name.to_owned()));
+            inode_name_manager.remove_name(&Name::new(parent, name.to_owned()));
 
             Ok(())
         }
     }
 
     async fn rmdir(&self, req: Request, parent: u64, name: &OsStr) -> Result<()> {
-        let parent_path = self
-            .inode_name_manager
+        let mut inode_name_manager = self.inode_name_manager.write().await;
+        let parent_path = inode_name_manager
             .get_absolute_path(parent)
             .ok_or_else(Errno::new_not_exist)?;
 
@@ -463,19 +435,18 @@ where
         {
             if err.is_not_exist() {
                 let name = Name::new(parent, name.to_owned());
-                self.inode_name_manager.remove_name(&name);
+                inode_name_manager.remove_name(&name);
             } else if err.is_not_dir() {
                 let name = Name::new(parent, name.to_owned());
 
-                if !self.inode_name_manager.contains_name(&name) {
-                    self.inode_name_manager.insert_name(name);
+                if !inode_name_manager.contains_name(&name) {
+                    inode_name_manager.insert_name(name);
                 }
             }
 
             Err(err)
         } else {
-            self.inode_name_manager
-                .remove_name(&Name::new(parent, name.to_owned()));
+            inode_name_manager.remove_name(&Name::new(parent, name.to_owned()));
 
             Ok(())
         }
@@ -489,12 +460,12 @@ where
         new_parent: u64,
         new_name: &OsStr,
     ) -> Result<()> {
-        let origin_parent_path = self
-            .inode_name_manager
+        let mut inode_name_manager = self.inode_name_manager.write().await;
+
+        let origin_parent_path = inode_name_manager
             .get_absolute_path(parent)
             .ok_or_else(Errno::new_not_exist)?;
-        let new_parent_path = self
-            .inode_name_manager
+        let new_parent_path = inode_name_manager
             .get_absolute_path(new_parent)
             .ok_or_else(Errno::new_not_exist)?;
 
@@ -509,11 +480,13 @@ where
             )
             .await?;
 
-        self.inode_name_manager
-            .remove_name(&Name::new(parent, name.to_owned()));
+        inode_name_manager.remove_name(&Name::new(parent, name.to_owned()));
 
         let new_name = Name::new(new_parent, new_name.to_owned());
-        self.inode_name_manager.get_or_insert_inode(new_name);
+
+        inode_name_manager
+            .get_name_inode(&new_name)
+            .unwrap_or_else(|| inode_name_manager.insert_name(new_name));
 
         Ok(())
     }
@@ -525,12 +498,11 @@ where
         new_parent: u64,
         new_name: &OsStr,
     ) -> Result<ReplyEntry> {
-        let parent_path = self
-            .inode_name_manager
+        let mut inode_name_manager = self.inode_name_manager.write().await;
+        let parent_path = inode_name_manager
             .get_absolute_path(inode)
             .ok_or_else(Errno::new_not_exist)?;
-        let new_parent_path = self
-            .inode_name_manager
+        let new_parent_path = inode_name_manager
             .get_absolute_path(new_parent)
             .ok_or_else(Errno::new_not_exist)?;
 
@@ -546,7 +518,10 @@ where
             .await?;
 
         let name = Name::new(new_parent, new_name.to_owned());
-        let inode = self.inode_name_manager.get_or_insert_inode(name);
+
+        let inode = inode_name_manager
+            .get_name_inode(&name)
+            .unwrap_or_else(|| inode_name_manager.insert_name(name));
 
         Ok(ReplyEntry {
             ttl: entry.ttl,
@@ -556,8 +531,8 @@ where
     }
 
     async fn open(&self, req: Request, inode: u64, flags: u32) -> Result<ReplyOpen> {
-        let path = self
-            .inode_name_manager
+        let inode_name_manager = self.inode_name_manager.read().await;
+        let path = inode_name_manager
             .get_absolute_path(inode)
             .ok_or_else(Errno::new_not_exist)?;
 
@@ -572,7 +547,11 @@ where
         offset: u64,
         size: u32,
     ) -> Result<ReplyData> {
-        let path = self.inode_name_manager.get_absolute_path(inode);
+        let path = self
+            .inode_name_manager
+            .read()
+            .await
+            .get_absolute_path(inode);
 
         self.path_filesystem
             .read(
@@ -595,7 +574,11 @@ where
         write_flags: u32,
         flags: u32,
     ) -> Result<ReplyWrite> {
-        let path = self.inode_name_manager.get_absolute_path(inode);
+        let path = self
+            .inode_name_manager
+            .read()
+            .await
+            .get_absolute_path(inode);
 
         self.path_filesystem
             .write(
@@ -611,8 +594,8 @@ where
     }
 
     async fn statfs(&self, req: Request, inode: u64) -> Result<ReplyStatFs> {
-        let path = self
-            .inode_name_manager
+        let inode_name_manager = self.inode_name_manager.read().await;
+        let path = inode_name_manager
             .get_absolute_path(inode)
             .ok_or_else(Errno::new_not_exist)?;
 
@@ -628,7 +611,11 @@ where
         lock_owner: u64,
         flush: bool,
     ) -> Result<()> {
-        let path = self.inode_name_manager.get_absolute_path(inode);
+        let path = self
+            .inode_name_manager
+            .read()
+            .await
+            .get_absolute_path(inode);
 
         self.path_filesystem
             .release(
@@ -643,7 +630,11 @@ where
     }
 
     async fn fsync(&self, req: Request, inode: u64, fh: u64, datasync: bool) -> Result<()> {
-        let path = self.inode_name_manager.get_absolute_path(inode);
+        let path = self
+            .inode_name_manager
+            .read()
+            .await
+            .get_absolute_path(inode);
 
         self.path_filesystem
             .fsync(req, path.as_ref().map(|path| path.as_ref()), fh, datasync)
@@ -659,8 +650,8 @@ where
         flags: u32,
         position: u32,
     ) -> Result<()> {
-        let path = self
-            .inode_name_manager
+        let inode_name_manager = self.inode_name_manager.read().await;
+        let path = inode_name_manager
             .get_absolute_path(inode)
             .ok_or_else(Errno::new_not_exist)?;
 
@@ -676,8 +667,8 @@ where
         name: &OsStr,
         size: u32,
     ) -> Result<ReplyXAttr> {
-        let path = self
-            .inode_name_manager
+        let inode_name_manager = self.inode_name_manager.read().await;
+        let path = inode_name_manager
             .get_absolute_path(inode)
             .ok_or_else(Errno::new_not_exist)?;
 
@@ -687,8 +678,8 @@ where
     }
 
     async fn listxattr(&self, req: Request, inode: u64, size: u32) -> Result<ReplyXAttr> {
-        let path = self
-            .inode_name_manager
+        let inode_name_manager = self.inode_name_manager.read().await;
+        let path = inode_name_manager
             .get_absolute_path(inode)
             .ok_or_else(Errno::new_not_exist)?;
 
@@ -698,8 +689,8 @@ where
     }
 
     async fn removexattr(&self, req: Request, inode: u64, name: &OsStr) -> Result<()> {
-        let path = self
-            .inode_name_manager
+        let inode_name_manager = self.inode_name_manager.read().await;
+        let path = inode_name_manager
             .get_absolute_path(inode)
             .ok_or_else(Errno::new_not_exist)?;
 
@@ -709,7 +700,11 @@ where
     }
 
     async fn flush(&self, req: Request, inode: u64, fh: u64, lock_owner: u64) -> Result<()> {
-        let path = self.inode_name_manager.get_absolute_path(inode);
+        let path = self
+            .inode_name_manager
+            .read()
+            .await
+            .get_absolute_path(inode);
 
         self.path_filesystem
             .flush(req, path.as_ref().map(|path| path.as_ref()), fh, lock_owner)
@@ -717,8 +712,8 @@ where
     }
 
     async fn opendir(&self, req: Request, inode: u64, flags: u32) -> Result<ReplyOpen> {
-        let path = self
-            .inode_name_manager
+        let inode_name_manager = self.inode_name_manager.read().await;
+        let path = inode_name_manager
             .get_absolute_path(inode)
             .ok_or_else(Errno::new_not_exist)?;
 
@@ -734,8 +729,8 @@ where
         fh: u64,
         offset: i64,
     ) -> Result<ReplyDirectory<impl Stream<Item = Result<DirectoryEntry>> + Send + '_>> {
-        let parent_path = self
-            .inode_name_manager
+        let mut inode_name_manager = self.inode_name_manager.write().await;
+        let parent_path = inode_name_manager
             .get_absolute_path(parent)
             .ok_or_else(Errno::new_not_exist)?;
 
@@ -756,12 +751,20 @@ where
             let inode = if entry.name == OsStr::new(".") {
                 parent
             } else if entry.name == OsStr::new("..") {
-                self.inode_name_manager
-                    .get_parent_inode(parent)
-                    .unwrap_or(ROOT_INODE)
+                inode_name_manager
+                    .inode_to_names
+                    .get(&parent)
+                    .unwrap()
+                    .iter()
+                    .next()
+                    .unwrap()
+                    .parent
             } else {
                 let name = Name::new(parent, entry.name.clone());
-                self.inode_name_manager.get_or_insert_inode(name)
+
+                inode_name_manager
+                    .get_name_inode(&name)
+                    .unwrap_or_else(|| inode_name_manager.insert_name(name))
             };
 
             entry_list.push(Ok(DirectoryEntry {
@@ -778,8 +781,8 @@ where
     }
 
     async fn releasedir(&self, req: Request, inode: u64, fh: u64, flags: u32) -> Result<()> {
-        let path = self
-            .inode_name_manager
+        let inode_name_manager = self.inode_name_manager.read().await;
+        let path = inode_name_manager
             .get_absolute_path(inode)
             .ok_or_else(Errno::new_not_exist)?;
 
@@ -789,8 +792,8 @@ where
     }
 
     async fn fsyncdir(&self, req: Request, inode: u64, fh: u64, datasync: bool) -> Result<()> {
-        let path = self
-            .inode_name_manager
+        let inode_name_manager = self.inode_name_manager.read().await;
+        let path = inode_name_manager
             .get_absolute_path(inode)
             .ok_or_else(Errno::new_not_exist)?;
 
@@ -812,7 +815,11 @@ where
         r#type: u32,
         pid: u32,
     ) -> Result<ReplyLock> {
-        let path = self.inode_name_manager.get_absolute_path(inode);
+        let path = self
+            .inode_name_manager
+            .read()
+            .await
+            .get_absolute_path(inode);
 
         self.path_filesystem
             .getlk(
@@ -842,7 +849,11 @@ where
         pid: u32,
         block: bool,
     ) -> Result<()> {
-        let path = self.inode_name_manager.get_absolute_path(inode);
+        let path = self
+            .inode_name_manager
+            .read()
+            .await
+            .get_absolute_path(inode);
 
         self.path_filesystem
             .setlk(
@@ -860,8 +871,8 @@ where
     }
 
     async fn access(&self, req: Request, inode: u64, mask: u32) -> Result<()> {
-        let path = self
-            .inode_name_manager
+        let inode_name_manager = self.inode_name_manager.read().await;
+        let path = inode_name_manager
             .get_absolute_path(inode)
             .ok_or_else(Errno::new_not_exist)?;
 
@@ -876,8 +887,8 @@ where
         mode: u32,
         flags: u32,
     ) -> Result<ReplyCreated> {
-        let parent_path = self
-            .inode_name_manager
+        let mut inode_name_manager = self.inode_name_manager.write().await;
+        let parent_path = inode_name_manager
             .get_absolute_path(parent)
             .ok_or_else(Errno::new_not_exist)?;
 
@@ -889,7 +900,10 @@ where
             Err(err) => {
                 if err.is_exist() || err.is_dir() {
                     let name = Name::new(parent, name.to_owned());
-                    self.inode_name_manager.get_or_insert_inode(name);
+
+                    inode_name_manager
+                        .get_name_inode(&name)
+                        .unwrap_or_else(|| inode_name_manager.insert_name(name));
                 }
 
                 Err(err)
@@ -897,7 +911,10 @@ where
 
             Ok(created) => {
                 let name = Name::new(parent, name.to_owned());
-                let inode = self.inode_name_manager.get_or_insert_inode(name);
+
+                let inode = inode_name_manager
+                    .get_name_inode(&name)
+                    .unwrap_or_else(|| inode_name_manager.insert_name(name));
 
                 Ok(ReplyCreated {
                     ttl: created.ttl,
@@ -916,8 +933,8 @@ where
     }
 
     async fn bmap(&self, req: Request, inode: u64, block_size: u32, idx: u64) -> Result<ReplyBmap> {
-        let path = self
-            .inode_name_manager
+        let inode_name_manager = self.inode_name_manager.read().await;
+        let path = inode_name_manager
             .get_absolute_path(inode)
             .ok_or_else(Errno::new_not_exist)?;
 
@@ -937,7 +954,11 @@ where
         events: u32,
         notify: &Notify,
     ) -> Result<ReplyPoll> {
-        let path = self.inode_name_manager.get_absolute_path(inode);
+        let path = self
+            .inode_name_manager
+            .read()
+            .await
+            .get_absolute_path(inode);
 
         self.path_filesystem
             .poll(
@@ -953,8 +974,8 @@ where
     }
 
     async fn notify_reply(&self, req: Request, inode: u64, offset: u64, data: Bytes) -> Result<()> {
-        let path = self
-            .inode_name_manager
+        let inode_name_manager = self.inode_name_manager.read().await;
+        let path = inode_name_manager
             .get_absolute_path(inode)
             .ok_or_else(Errno::new_not_exist)?;
 
@@ -966,10 +987,12 @@ where
     async fn batch_forget(&self, req: Request, inodes: &[(u64, u64)]) {
         // TODO if kernel forget a dir which has children, it may break
 
+        let mut inode_name_manager = self.inode_name_manager.write().await;
+
         let paths = inodes
             .iter()
             .copied()
-            .filter_map(|inode| self.inode_name_manager.get_absolute_path(inode.0))
+            .filter_map(|inode| inode_name_manager.get_absolute_path(inode.0))
             .collect::<Vec<_>>();
         let paths = paths.iter().map(|path| path.as_ref()).collect::<Vec<_>>();
 
@@ -978,7 +1001,7 @@ where
         inodes
             .iter()
             .copied()
-            .for_each(|inode| self.inode_name_manager.remove_inode(inode.0));
+            .for_each(|inode| inode_name_manager.remove_inode(inode.0));
     }
 
     async fn fallocate(
@@ -990,7 +1013,11 @@ where
         length: u64,
         mode: u32,
     ) -> Result<()> {
-        let path = self.inode_name_manager.get_absolute_path(inode);
+        let path = self
+            .inode_name_manager
+            .read()
+            .await
+            .get_absolute_path(inode);
 
         self.path_filesystem
             .fallocate(
@@ -1013,8 +1040,8 @@ where
         lock_owner: u64,
     ) -> Result<ReplyDirectoryPlus<impl Stream<Item = Result<DirectoryEntryPlus>> + Send + '_>>
     {
-        let parent_path = self
-            .inode_name_manager
+        let mut inode_name_manager = self.inode_name_manager.write().await;
+        let parent_path = inode_name_manager
             .get_absolute_path(parent)
             .ok_or_else(Errno::new_not_exist)?;
 
@@ -1035,12 +1062,20 @@ where
             let inode = if entry.name == OsStr::new(".") {
                 parent
             } else if entry.name == OsStr::new("..") {
-                self.inode_name_manager
-                    .get_parent_inode(parent)
-                    .unwrap_or(ROOT_INODE)
+                inode_name_manager
+                    .inode_to_names
+                    .get(&parent)
+                    .unwrap()
+                    .iter()
+                    .next()
+                    .unwrap()
+                    .parent
             } else {
                 let name = Name::new(parent, entry.name.clone());
-                self.inode_name_manager.get_or_insert_inode(name)
+
+                inode_name_manager
+                    .get_name_inode(&name)
+                    .unwrap_or_else(|| inode_name_manager.insert_name(name))
             };
 
             entry_list.push(Ok(DirectoryEntryPlus {
@@ -1069,12 +1104,12 @@ where
         new_name: &OsStr,
         flags: u32,
     ) -> Result<()> {
-        let origin_parent_path = self
-            .inode_name_manager
+        let mut inode_name_manager = self.inode_name_manager.write().await;
+
+        let origin_parent_path = inode_name_manager
             .get_absolute_path(parent)
             .ok_or_else(Errno::new_not_exist)?;
-        let new_parent_path = self
-            .inode_name_manager
+        let new_parent_path = inode_name_manager
             .get_absolute_path(new_parent)
             .ok_or_else(Errno::new_not_exist)?;
 
@@ -1090,11 +1125,13 @@ where
             )
             .await?;
 
-        self.inode_name_manager
-            .remove_name(&Name::new(parent, name.to_owned()));
+        inode_name_manager.remove_name(&Name::new(parent, name.to_owned()));
 
         let new_name = Name::new(new_parent, new_name.to_owned());
-        self.inode_name_manager.get_or_insert_inode(new_name);
+
+        inode_name_manager
+            .get_name_inode(&new_name)
+            .unwrap_or_else(|| inode_name_manager.insert_name(new_name));
 
         Ok(())
     }
@@ -1107,7 +1144,11 @@ where
         offset: u64,
         whence: u32,
     ) -> Result<ReplyLSeek> {
-        let path = self.inode_name_manager.get_absolute_path(inode);
+        let path = self
+            .inode_name_manager
+            .read()
+            .await
+            .get_absolute_path(inode);
 
         self.path_filesystem
             .lseek(
@@ -1133,8 +1174,11 @@ where
         length: u64,
         flags: u64,
     ) -> Result<ReplyCopyFileRange> {
-        let path_in = self.inode_name_manager.get_absolute_path(inode);
-        let path_out = self.inode_name_manager.get_absolute_path(inode_out);
+        let inode_name_manager = self.inode_name_manager.read().await;
+        let path_in = inode_name_manager.get_absolute_path(inode);
+        let path_out = inode_name_manager.get_absolute_path(inode_out);
+
+        drop(inode_name_manager);
 
         self.path_filesystem
             .copy_file_range(

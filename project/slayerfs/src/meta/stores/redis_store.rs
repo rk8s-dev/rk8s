@@ -2080,7 +2080,7 @@ impl MetaStore for RedisMetaStore {
         new_slices: &[SliceDesc],
         old_slices_to_delay: &[u8],
     ) -> Result<(), MetaError> {
-        if !old_slices_to_delay.is_empty() && old_slices_to_delay.len() % 12 != 0 {
+        if !old_slices_to_delay.is_empty() && !old_slices_to_delay.len().is_multiple_of(12) {
             return Err(MetaError::Internal(
                 "Invalid delayed data length".to_string(),
             ));
@@ -2090,7 +2090,8 @@ impl MetaStore for RedisMetaStore {
         let chunk_key = self.chunk_key(chunk_id);
         let delayed_key = format!("delayed:{}", chunk_id);
 
-        let script = redis::Script::new(r#"
+        let script = redis::Script::new(
+            r#"
             local key = KEYS[1]
             local new_slices_json = cjson.decode(ARGV[1])
             local old_slices_ids = cjson.decode(ARGV[2])
@@ -2123,22 +2124,24 @@ impl MetaStore for RedisMetaStore {
             end
             
             return table.getn(keep_list)
-        "#);
+        "#,
+        );
 
         let new_slices_vec: Vec<SliceDesc> = new_slices.to_vec();
-        let new_slices_json = serde_json::to_string(&new_slices_vec).map_err(|e| MetaError::Serialization(e.to_string()))?;
-        
+        let new_slices_json = serde_json::to_string(&new_slices_vec)
+            .map_err(|e| MetaError::Serialization(e.to_string()))?;
+
         let mut old_ids = Vec::new();
         if !old_slices_to_delay.is_empty() {
-             for chunk in old_slices_to_delay.chunks(12) {
+            for chunk in old_slices_to_delay.chunks(12) {
                 let slice_id = u64::from_le_bytes([
-                    chunk[0], chunk[1], chunk[2], chunk[3],
-                    chunk[4], chunk[5], chunk[6], chunk[7],
+                    chunk[0], chunk[1], chunk[2], chunk[3], chunk[4], chunk[5], chunk[6], chunk[7],
                 ]);
                 old_ids.push(slice_id);
             }
         }
-        let old_ids_json = serde_json::to_string(&old_ids).map_err(|e| MetaError::Serialization(e.to_string()))?;
+        let old_ids_json =
+            serde_json::to_string(&old_ids).map_err(|e| MetaError::Serialization(e.to_string()))?;
 
         let _: () = script
             .key(chunk_key)
@@ -2150,22 +2153,26 @@ impl MetaStore for RedisMetaStore {
 
         if !old_slices_to_delay.is_empty() {
             let now = Utc::now().timestamp();
-            for chunk in old_slices_to_delay.chunks(12) {
+            // Format: slice_id (u64) + offset (u64) + size (u32) = 20 bytes per slice
+            for chunk in old_slices_to_delay.chunks(20) {
                 let slice_id = u64::from_le_bytes([
-                    chunk[0], chunk[1], chunk[2], chunk[3],
-                    chunk[4], chunk[5], chunk[6], chunk[7],
+                    chunk[0], chunk[1], chunk[2], chunk[3], chunk[4], chunk[5], chunk[6], chunk[7],
                 ]);
-                let size = u32::from_le_bytes([chunk[8], chunk[9], chunk[10], chunk[11]]);
-                
+                let offset = u64::from_le_bytes([
+                    chunk[8], chunk[9], chunk[10], chunk[11], chunk[12], chunk[13], chunk[14],
+                    chunk[15],
+                ]);
+                let size = u32::from_le_bytes([chunk[16], chunk[17], chunk[18], chunk[19]]);
+
                 let delayed_slice_key = format!("delayed_slice:{}", slice_id);
-                let value = format!("{}:{}:{}", chunk_id, size, now);
+                let value = format!("{}:{}:{}:{}", chunk_id, offset, size, now);
                 let _: () = redis::cmd("SET")
                     .arg(&delayed_slice_key)
                     .arg(value)
                     .query_async(&mut conn)
                     .await
                     .map_err(redis_err)?;
-                
+
                 let _: () = redis::cmd("SADD")
                     .arg(&delayed_key)
                     .arg(slice_id)
@@ -2183,50 +2190,76 @@ impl MetaStore for RedisMetaStore {
         &self,
         batch_size: usize,
         max_age_secs: i64,
-    ) -> Result<usize, MetaError> {
+    ) -> Result<Vec<(u64, u64, u64)>, MetaError> {
         let mut conn = self.conn.clone();
         let cutoff_time = Utc::now().timestamp() - max_age_secs;
-        let mut deleted_count = 0;
+        let mut deleted_slices = Vec::new();
 
+        // Collect keys first using SCAN
         let pattern = "delayed_slice:*";
-        let keys: Vec<String> = redis::cmd("KEYS")
-            .arg(pattern)
-            .query_async(&mut conn)
-            .await
-            .map_err(redis_err)?;
-
-        for key in keys.into_iter().take(batch_size) {
-            let value: String = match redis::cmd("GET")
-                .arg(&key)
-                .query_async(&mut conn)
+        let keys: Vec<String> = {
+            let mut keys = Vec::new();
+            let mut cursor: redis::AsyncIter<'_, String> = redis::cmd("SCAN")
+                .cursor_arg(0)
+                .arg("MATCH")
+                .arg(pattern)
+                .arg("COUNT")
+                .arg(batch_size.max(100))
+                .clone()
+                .iter_async(&mut conn)
                 .await
-            {
+                .map_err(redis_err)?;
+
+            while let Some(key) = cursor.next_item().await {
+                keys.push(key);
+                if keys.len() >= batch_size {
+                    break;
+                }
+            }
+            keys
+        };
+
+        for key in keys {
+            let value: String = match redis::cmd("GET").arg(&key).query_async(&mut conn).await {
                 Ok(v) => v,
                 Err(_) => continue,
             };
 
+            // Format: chunk_id:offset:size:created_at
             let parts: Vec<&str> = value.split(':').collect();
-            if parts.len() != 3 {
+            if parts.len() != 4 {
                 continue;
             }
 
-            let created_at: i64 = match parts[2].parse() {
+            let created_at: i64 = match parts[3].parse() {
                 Ok(t) => t,
                 Err(_) => continue,
             };
 
             if created_at < cutoff_time {
+                let slice_id: u64 = key
+                    .strip_prefix("delayed_slice:")
+                    .and_then(|s| s.parse().ok())
+                    .unwrap_or(0);
+                let offset: u64 = match parts[1].parse() {
+                    Ok(o) => o,
+                    Err(_) => continue,
+                };
+                let size: u64 = match parts[2].parse() {
+                    Ok(s) => s,
+                    Err(_) => continue,
+                };
                 let _: () = redis::cmd("DEL")
                     .arg(&key)
                     .query_async(&mut conn)
                     .await
                     .map_err(redis_err)?;
-                
-                deleted_count += 1;
+
+                deleted_slices.push((slice_id, offset, size));
             }
         }
 
-        Ok(deleted_count)
+        Ok(deleted_slices)
     }
 
     fn as_any(&self) -> &dyn Any {

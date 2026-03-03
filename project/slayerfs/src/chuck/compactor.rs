@@ -1,5 +1,5 @@
 //! Compactor: coordinates MetaStore and BlockStore to perform real compaction.
-//! 
+//!
 //! The compaction process follows these steps:
 //! Read Phase: Fetch all slice metadata from MetaStore
 //! Merge Phase: Calculate optimal merge using Intervals utility
@@ -8,12 +8,12 @@
 //! Commit Phase: Atomically update metadata (replace old slices with new)
 //! Cleanup Phase: Schedule old data for deletion
 use crate::chuck::{
-    slice::{SliceDesc, block_span_iter_chunk},
-    store::{BlockStore, BlockKey},
     ChunkLayout,
+    slice::{SliceDesc, block_span_iter_chunk},
+    store::{BlockKey, BlockStore},
 };
-use crate::meta::store::{MetaStore, MetaError};
 use crate::meta::SLICE_ID_KEY;
+use crate::meta::store::{MetaError, MetaStore};
 use crate::utils::Intervals;
 use anyhow::{Context, Result};
 use std::sync::Arc;
@@ -21,17 +21,20 @@ use tracing::{debug, info, warn};
 
 /// Compactor coordinates metadata and block store to perform real data compaction.
 pub struct Compactor<M, B> {
+    #[allow(dead_code)]
     meta_store: Arc<M>,
     block_store: Arc<B>,
     layout: ChunkLayout,
 }
 
+#[allow(dead_code)]
 impl<M, B> Compactor<M, B>
 where
     M: MetaStore + Send + Sync + 'static,
     B: BlockStore + Send + Sync + 'static,
 {
     /// Create a new compactor with the given meta store and block store.
+    #[allow(dead_code)]
     pub fn new(meta_store: Arc<M>, block_store: Arc<B>) -> Self {
         Self {
             meta_store,
@@ -59,14 +62,24 @@ where
         &self.meta_store
     }
 
-    pub async fn compact_chunk(&self, chunk_id: u64, _inode: i64) -> Result<Option<u64>, CompactorError> {
+    pub async fn compact_chunk(
+        &self,
+        chunk_id: u64,
+        _inode: i64,
+    ) -> Result<Option<u64>, CompactorError> {
         // Get all slices for this chunk from metadata store
-        let slices = self.meta_store.get_slices(chunk_id)
+        let slices = self
+            .meta_store
+            .get_slices(chunk_id)
             .await
-            .map_err(|e| CompactorError::MetaError(e))?;
+            .map_err(CompactorError::MetaError)?;
 
         if slices.len() <= 1 {
-            debug!(chunk_id = chunk_id, slice_count = slices.len(), "No need to compact");
+            debug!(
+                chunk_id = chunk_id,
+                slice_count = slices.len(),
+                "No need to compact"
+            );
             return Ok(None);
         }
 
@@ -78,7 +91,7 @@ where
 
         // Calculate merged slice layout using Intervals
         let merged_slices = self.calculate_merged_slices(&slices)?;
-        
+
         if merged_slices.len() >= slices.len() {
             debug!(
                 chunk_id = chunk_id,
@@ -91,7 +104,7 @@ where
 
         // Identify which slices are being replaced (fully covered)
         let replaced_slice_ids: Vec<u64> = self.find_replaced_slices(&slices, &merged_slices);
-        
+
         if replaced_slice_ids.is_empty() {
             debug!(
                 chunk_id = chunk_id,
@@ -103,13 +116,16 @@ where
         // Read data from old slices and merge
         let chunk_size = self.layout.chunk_size;
         let mut merged_data = vec![0u8; chunk_size as usize];
-        
-        self.read_and_merge_slices(&slices, &mut merged_data).await?;
+
+        self.read_and_merge_slices(&slices, &mut merged_data)
+            .await?;
 
         // Allocate new slice ID
-        let new_slice_id = self.meta_store.next_id(SLICE_ID_KEY)
+        let new_slice_id = self
+            .meta_store
+            .next_id(SLICE_ID_KEY)
             .await
-            .map_err(|e| CompactorError::MetaError(e))? as u64;
+            .map_err(CompactorError::MetaError)? as u64;
 
         // Write merged data to BlockStore
         self.write_merged_data(new_slice_id, &merged_data).await?;
@@ -126,7 +142,8 @@ where
         let delayed_data = self.prepare_delayed_data(&slices, &replaced_slice_ids);
 
         // Update metadata: replace old slices with new one (atomic operation)
-        self.replace_slices_in_meta(chunk_id, &[new_slice], &delayed_data).await?;
+        self.replace_slices_in_meta(chunk_id, &[new_slice], &delayed_data)
+            .await?;
 
         info!(
             chunk_id = chunk_id,
@@ -140,13 +157,16 @@ where
     }
 
     /// Calculate merged slices by removing fully covered regions.
-    fn calculate_merged_slices(&self, slices: &[SliceDesc]) -> Result<Vec<SliceDesc>, CompactorError> {
+    fn calculate_merged_slices(
+        &self,
+        slices: &[SliceDesc],
+    ) -> Result<Vec<SliceDesc>, CompactorError> {
         if slices.is_empty() {
             return Ok(vec![]);
         }
 
         let chunk_id = slices[0].chunk_id;
-        
+
         // Sort by slice_id descending (newest first) for "latest wins" processing
         let mut slices_sorted: Vec<SliceDesc> = slices.to_vec();
         slices_sorted.sort_by_key(|s| std::cmp::Reverse(s.slice_id));
@@ -161,7 +181,7 @@ where
 
             // Use Intervals to calculate uncovered portions
             let mut intervals = Intervals::new(slice_start, slice_end);
-            
+
             for (covered_start, covered_end) in &covered_ranges {
                 let _ = intervals.cut(*covered_start, *covered_end);
             }
@@ -192,21 +212,14 @@ where
     ///
     /// Returns slice IDs that are completely covered by newer data.
     fn find_replaced_slices(&self, original: &[SliceDesc], merged: &[SliceDesc]) -> Vec<u64> {
-        let merged_ids: std::collections::HashSet<u64> = merged
-            .iter()
-            .map(|s| s.slice_id)
-            .collect();
-        
-        let original_ids: std::collections::HashSet<u64> = original
-            .iter()
-            .map(|s| s.slice_id)
-            .collect();
-        
+        let merged_ids: std::collections::HashSet<u64> =
+            merged.iter().map(|s| s.slice_id).collect();
+
+        let original_ids: std::collections::HashSet<u64> =
+            original.iter().map(|s| s.slice_id).collect();
+
         // Slices that exist in original but not in merged are fully replaced
-        original_ids
-            .difference(&merged_ids)
-            .copied()
-            .collect()
+        original_ids.difference(&merged_ids).copied().collect()
     }
 
     /// Prepare delayed deletion data for old slices.
@@ -245,20 +258,23 @@ where
 
         for slice in sorted_slices {
             let slice_data = self.read_slice_data(&slice).await?;
-            
+
             // Copy slice data to merged buffer at correct offset
             let start = slice.offset as usize;
             let end = start + slice.length as usize;
-            
+
             if end > merged_data.len() {
-                return Err(CompactorError::InvalidData(
-                    format!("Slice {} exceeds chunk bounds: offset={}, length={}, chunk_size={}",
-                        slice.slice_id, slice.offset, slice.length, merged_data.len())
-                ));
+                return Err(CompactorError::InvalidData(format!(
+                    "Slice {} exceeds chunk bounds: offset={}, length={}, chunk_size={}",
+                    slice.slice_id,
+                    slice.offset,
+                    slice.length,
+                    merged_data.len()
+                )));
             }
-            
+
             merged_data[start..end].copy_from_slice(&slice_data);
-            
+
             debug!(
                 slice_id = slice.slice_id,
                 offset = slice.offset,
@@ -273,31 +289,28 @@ where
     /// Read all block data for a slice from BlockStore.
     async fn read_slice_data(&self, slice: &SliceDesc) -> Result<Vec<u8>, CompactorError> {
         let mut data = vec![0u8; slice.length as usize];
-        
+
         // Iterate over all blocks in this slice
-        let spans: Vec<_> = block_span_iter_chunk(
-            slice.offset.into(),
-            slice.length,
-            self.layout
-        ).collect();
+        let spans: Vec<_> =
+            block_span_iter_chunk(slice.offset.into(), slice.length, self.layout).collect();
 
         let mut offset_in_slice = 0usize;
-        
+
         for span in spans {
             let block_key = (slice.slice_id, span.index as u32);
             let block_size = self.layout.block_size as usize;
             let mut block_buf = vec![0u8; block_size];
-            
+
             self.block_store
                 .read_range(block_key, span.offset, &mut block_buf[..span.len as usize])
                 .await
                 .map_err(|e| CompactorError::BlockStoreError(e.to_string()))?;
-            
+
             // Copy relevant part to slice data buffer
             let copy_len = (span.len as usize).min(data.len() - offset_in_slice);
             data[offset_in_slice..offset_in_slice + copy_len]
                 .copy_from_slice(&block_buf[..copy_len]);
-            
+
             offset_in_slice += copy_len;
         }
 
@@ -306,28 +319,25 @@ where
 
     /// Write merged data to BlockStore as a new slice.
     async fn write_merged_data(&self, slice_id: u64, data: &[u8]) -> Result<(), CompactorError> {
-        let spans: Vec<_> = block_span_iter_chunk(
-            0u64.into(),
-            data.len() as u64,
-            self.layout
-        ).collect();
+        let spans: Vec<_> =
+            block_span_iter_chunk(0u64.into(), data.len() as u64, self.layout).collect();
 
         let mut offset = 0usize;
-        
+
         for span in spans {
             let block_key = (slice_id, span.index as u32);
             let block_size = self.layout.block_size as usize;
             let mut block_data = vec![0u8; block_size];
             let copy_len = (span.len as usize).min(data.len() - offset);
             block_data[..copy_len].copy_from_slice(&data[offset..offset + copy_len]);
-            
+
             self.block_store
                 .write_fresh_range(block_key, span.offset, &block_data[..copy_len])
                 .await
                 .map_err(|e| CompactorError::BlockStoreError(e.to_string()))?;
-            
+
             offset += copy_len;
-            
+
             debug!(
                 slice_id = slice_id,
                 block_index = span.index,
@@ -347,15 +357,15 @@ where
         self.meta_store
             .replace_slices_for_compact(chunk_id, new_slices, delayed_data)
             .await
-            .map_err(|e| CompactorError::MetaError(e))?;
-        
+            .map_err(CompactorError::MetaError)?;
+
         debug!(
             chunk_id = chunk_id,
             new_slice_count = new_slices.len(),
             delayed_count = delayed_data.len() / 12,
             "Metadata atomically updated for compaction"
         );
-        
+
         Ok(())
     }
 
@@ -370,16 +380,25 @@ where
             if slice.slice_id == new_slice_id {
                 continue;
             }
-            
-            // Calculate number of blocks to delete
-            let num_blocks = slice.length.div_ceil(self.layout.block_size as u64);
-            
-            self.block_store
-                .delete_range((slice.slice_id, 0), num_blocks)
-                .await
-                .map_err(|e| CompactorError::BlockStoreError(e.to_string()))?;
-            
-            debug!(slice_id = slice.slice_id, "Deleted old slice data from block store");
+
+            // Calculate the actual block range based on offset within the chunk
+            let start_block = slice.offset / self.layout.block_size as u64;
+            let end_block = (slice.offset + slice.length).div_ceil(self.layout.block_size as u64);
+            let num_blocks = end_block - start_block;
+
+            if num_blocks > 0 {
+                self.block_store
+                    .delete_range((slice.slice_id, start_block as u32), num_blocks)
+                    .await
+                    .map_err(|e| CompactorError::BlockStoreError(e.to_string()))?;
+
+                debug!(
+                    slice_id = slice.slice_id,
+                    start_block = start_block,
+                    num_blocks = num_blocks,
+                    "Deleted old slice data from block store"
+                );
+            }
         }
 
         Ok(())
@@ -391,6 +410,7 @@ where
 pub enum CompactorError {
     MetaError(MetaError),
     BlockStoreError(String),
+    #[allow(dead_code)]
     InvalidData(String),
     IoError(std::io::Error),
 }
@@ -463,9 +483,14 @@ mod tests {
 
         async fn next_id(&self, key: &str) -> Result<i64, MetaError> {
             if key == SLICE_ID_KEY {
-                Ok(self.next_slice_id.fetch_add(1, std::sync::atomic::Ordering::SeqCst) as i64)
+                Ok(self
+                    .next_slice_id
+                    .fetch_add(1, std::sync::atomic::Ordering::SeqCst) as i64)
             } else {
-                Err(MetaError::NotSupported(format!("Key {} not supported", key)))
+                Err(MetaError::NotSupported(format!(
+                    "Key {} not supported",
+                    key
+                )))
             }
         }
 
@@ -487,7 +512,10 @@ mod tests {
         async fn lookup(&self, _parent: i64, _name: &str) -> Result<Option<i64>, MetaError> {
             Ok(None)
         }
-        async fn lookup_path(&self, _path: &str) -> Result<Option<(i64, crate::meta::store::FileType)>, MetaError> {
+        async fn lookup_path(
+            &self,
+            _path: &str,
+        ) -> Result<Option<(i64, crate::meta::store::FileType)>, MetaError> {
             Ok(None)
         }
         async fn readdir(&self, _ino: i64) -> Result<Vec<crate::meta::store::DirEntry>, MetaError> {
@@ -505,10 +533,22 @@ mod tests {
         async fn unlink(&self, _parent: i64, _name: &str) -> Result<(), MetaError> {
             Ok(())
         }
-        async fn rename(&self, _old_parent: i64, _old_name: &str, _new_parent: i64, _new_name: String) -> Result<(), MetaError> {
+        async fn rename(
+            &self,
+            _old_parent: i64,
+            _old_name: &str,
+            _new_parent: i64,
+            _new_name: String,
+        ) -> Result<(), MetaError> {
             Ok(())
         }
-        async fn rename_exchange(&self, _old_parent: i64, _old_name: &str, _new_parent: i64, _new_name: &str) -> Result<(), MetaError> {
+        async fn rename_exchange(
+            &self,
+            _old_parent: i64,
+            _old_name: &str,
+            _new_parent: i64,
+            _new_name: &str,
+        ) -> Result<(), MetaError> {
             Ok(())
         }
         async fn set_file_size(&self, _ino: i64, _size: u64) -> Result<(), MetaError> {
@@ -520,8 +560,12 @@ mod tests {
         async fn get_paths(&self, _ino: i64) -> Result<Vec<String>, MetaError> {
             Ok(vec![])
         }
-        fn root_ino(&self) -> i64 { 1 }
-        async fn initialize(&self) -> Result<(), MetaError> { Ok(()) }
+        fn root_ino(&self) -> i64 {
+            1
+        }
+        async fn initialize(&self) -> Result<(), MetaError> {
+            Ok(())
+        }
         async fn get_deleted_files(&self) -> Result<Vec<i64>, MetaError> {
             Ok(vec![])
         }
@@ -531,10 +575,18 @@ mod tests {
         async fn append_slice(&self, _chunk_id: u64, _slice: SliceDesc) -> Result<(), MetaError> {
             Ok(())
         }
-        async fn write(&self, _ino: i64, _chunk_id: u64, _slice: SliceDesc, _new_size: u64) -> Result<(), MetaError> {
+        async fn write(
+            &self,
+            _ino: i64,
+            _chunk_id: u64,
+            _slice: SliceDesc,
+            _new_size: u64,
+        ) -> Result<(), MetaError> {
             Ok(())
         }
-        fn as_any(&self) -> &dyn std::any::Any { self }
+        fn as_any(&self) -> &dyn std::any::Any {
+            self
+        }
     }
 
     #[tokio::test]
@@ -563,8 +615,18 @@ mod tests {
 
         // Test case: Slice 1 (offset 0, len 100) fully covered by Slice 2 (offset 0, len 150)
         let slices = vec![
-            SliceDesc { slice_id: 1, chunk_id: 1, offset: 0, length: 100 },
-            SliceDesc { slice_id: 2, chunk_id: 1, offset: 0, length: 150 },
+            SliceDesc {
+                slice_id: 1,
+                chunk_id: 1,
+                offset: 0,
+                length: 100,
+            },
+            SliceDesc {
+                slice_id: 2,
+                chunk_id: 1,
+                offset: 0,
+                length: 150,
+            },
         ];
 
         let merged = compactor.calculate_merged_slices(&slices).unwrap();
@@ -581,12 +643,25 @@ mod tests {
         let compactor = Compactor::new(meta_store, block_store);
 
         let original = vec![
-            SliceDesc { slice_id: 1, chunk_id: 1, offset: 0, length: 100 },
-            SliceDesc { slice_id: 2, chunk_id: 1, offset: 0, length: 150 },
+            SliceDesc {
+                slice_id: 1,
+                chunk_id: 1,
+                offset: 0,
+                length: 100,
+            },
+            SliceDesc {
+                slice_id: 2,
+                chunk_id: 1,
+                offset: 0,
+                length: 150,
+            },
         ];
-        let merged = vec![
-            SliceDesc { slice_id: 2, chunk_id: 1, offset: 0, length: 150 },
-        ];
+        let merged = vec![SliceDesc {
+            slice_id: 2,
+            chunk_id: 1,
+            offset: 0,
+            length: 150,
+        }];
 
         let replaced = compactor.find_replaced_slices(&original, &merged);
         assert_eq!(replaced.len(), 1);
@@ -600,17 +675,29 @@ mod tests {
         let compactor = Compactor::new(meta_store, block_store);
 
         let slices = vec![
-            SliceDesc { slice_id: 1, chunk_id: 1, offset: 0, length: 100 },
-            SliceDesc { slice_id: 2, chunk_id: 1, offset: 0, length: 150 },
+            SliceDesc {
+                slice_id: 1,
+                chunk_id: 1,
+                offset: 0,
+                length: 100,
+            },
+            SliceDesc {
+                slice_id: 2,
+                chunk_id: 1,
+                offset: 0,
+                length: 150,
+            },
         ];
         let replaced = vec![1];
 
         let delayed = compactor.prepare_delayed_data(&slices, &replaced);
         assert_eq!(delayed.len(), 12);
-        let slice_id = u64::from_le_bytes([delayed[0], delayed[1], delayed[2], delayed[3],
-                                          delayed[4], delayed[5], delayed[6], delayed[7]]);
+        let slice_id = u64::from_le_bytes([
+            delayed[0], delayed[1], delayed[2], delayed[3], delayed[4], delayed[5], delayed[6],
+            delayed[7],
+        ]);
         let size = u32::from_le_bytes([delayed[8], delayed[9], delayed[10], delayed[11]]);
-        
+
         assert_eq!(slice_id, 1);
         assert_eq!(size, 100);
     }

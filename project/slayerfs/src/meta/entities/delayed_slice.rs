@@ -15,6 +15,8 @@ pub struct Model {
     pub slice_id: i64,
     /// Chunk ID that this slice belongs to
     pub chunk_id: i64,
+    /// Offset within the chunk (for calculating block index)
+    pub offset: i64,
     /// Size of the slice (for object storage cleanup)
     pub size: i64,
     /// Timestamp when this record was created

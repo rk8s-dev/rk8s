@@ -2,53 +2,31 @@
 
 use crate::cadapter::client::{ObjectBackend, ObjectClient};
 use crate::chuck::ChunkLayout;
+use crate::meta::config::CompactConfig;
 use crate::meta::store::MetaStore;
 use std::sync::Arc;
-use tokio::time::{Duration, interval};
+use std::time::Duration;
+use tokio::time::interval;
 use tracing::{debug, error, info};
-
-/// Compact worker configuration
-#[derive(Debug, Clone)]
-#[allow(dead_code)]
-pub struct CompactWorkerConfig {
-    /// Compact check interval
-    pub interval_secs: u64,
-    /// Max chunks to process per run
-    pub max_chunks_per_run: usize,
-}
-
-impl Default for CompactWorkerConfig {
-    fn default() -> Self {
-        Self {
-            interval_secs: 600, // seconds
-            max_chunks_per_run: 1000,
-        }
-    }
-}
 
 /// Compact worker for background slice compaction
 #[allow(dead_code)]
 pub(crate) struct CompactWorker {
     meta_store: Arc<dyn MetaStore>,
-    config: CompactWorkerConfig,
+    config: CompactConfig,
 }
 
 #[allow(dead_code)]
 impl CompactWorker {
-    pub(crate) fn new(meta_store: Arc<dyn MetaStore>, config: CompactWorkerConfig) -> Self {
+    pub(crate) fn new(meta_store: Arc<dyn MetaStore>, config: CompactConfig) -> Self {
         Self { meta_store, config }
     }
 
-    /// start the compact worker with graceful shutdown support
     pub(crate) async fn start(&self) {
-        let mut interval = interval(Duration::from_secs(self.config.interval_secs));
+        let mut ticker = interval(self.config.interval);
 
-        // info!("Compact worker started, interval {} seconds", self.config.interval_secs);
-
-        // shutdown signal handling
         let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel::<()>();
 
-        // setup Ctrl+C handler
         tokio::spawn(async move {
             if let Ok(()) = tokio::signal::ctrl_c().await {
                 info!("Received Ctrl+C, shutting down compact worker gracefully");
@@ -58,7 +36,7 @@ impl CompactWorker {
 
         loop {
             tokio::select! {
-                _ = interval.tick() => {
+                _ = ticker.tick() => {
                     match self.run_compact_cycle().await {
                         Ok(compacted_count) => {
                             if compacted_count > 0 {
@@ -85,26 +63,17 @@ impl CompactWorker {
         info!("Compact worker stopped");
     }
 
-    /// execute a full compact cycle
     async fn run_compact_cycle(&self) -> Result<usize, Box<dyn std::error::Error + Send + Sync>> {
         debug!("Starting compact cycle");
-
-        // run compaction on chunks that meet the threshold criteria
         let compacted_count = self.meta_store.run_compact_by_threshold().await?;
-
         Ok(compacted_count)
     }
 }
 
-/// Start compact worker with graceful shutdown support
 #[allow(dead_code)]
-pub async fn start_compact_worker(
-    meta_store: Arc<dyn MetaStore>,
-    config: Option<CompactWorkerConfig>,
-) {
+pub async fn start_compact_worker(meta_store: Arc<dyn MetaStore>, config: Option<CompactConfig>) {
     let config = config.unwrap_or_default();
     let worker = CompactWorker::new(meta_store, config);
-
     worker.start().await;
 }
 
@@ -113,26 +82,25 @@ pub(crate) fn start_upload_workers() {
     // TODO: implement upload worker pool
 }
 
-/// Garbage collection configuration
+/// Configuration for object-level garbage collection.
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
-pub struct GcConfig {
+pub struct ObjectGcConfig {
     /// GC run interval (seconds)
     pub interval_secs: u64,
     /// GC run batch size
     pub batch_size: usize,
     /// Minimum age of delayed slices to delete (seconds)
     pub max_age_secs: i64,
-
     pub layout: ChunkLayout,
 }
 
-impl Default for GcConfig {
+impl Default for ObjectGcConfig {
     fn default() -> Self {
         Self {
             interval_secs: 3600,
             batch_size: 100,
-            max_age_secs: 3600, // 1 hour default
+            max_age_secs: 3600,
             layout: ChunkLayout::default(),
         }
     }
@@ -142,7 +110,7 @@ impl Default for GcConfig {
 pub(crate) struct MarkBasedGarbageCollector<B: ObjectBackend> {
     meta_store: Arc<dyn MetaStore>,
     object_client: Arc<ObjectClient<B>>,
-    config: GcConfig,
+    config: ObjectGcConfig,
 }
 
 #[allow(dead_code)]
@@ -150,7 +118,7 @@ impl<B: ObjectBackend> MarkBasedGarbageCollector<B> {
     pub(crate) fn new(
         meta_store: Arc<dyn MetaStore>,
         object_client: Arc<ObjectClient<B>>,
-        config: GcConfig,
+        config: ObjectGcConfig,
     ) -> Self {
         Self {
             meta_store,
@@ -159,16 +127,13 @@ impl<B: ObjectBackend> MarkBasedGarbageCollector<B> {
         }
     }
 
-    /// Start the garbage collector with graceful shutdown support
     pub(crate) async fn start(&self) {
-        let mut interval = interval(Duration::from_secs(self.config.interval_secs));
+        let mut ticker = interval(Duration::from_secs(self.config.interval_secs));
 
         info!("GC interval {} seconds", self.config.interval_secs);
 
-        // Simple shutdown signal handling
         let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel::<()>();
 
-        // Setup Ctrl+C handler
         tokio::spawn(async move {
             if let Ok(()) = tokio::signal::ctrl_c().await {
                 info!("Received Ctrl+C, shutting down GC gracefully");
@@ -178,7 +143,7 @@ impl<B: ObjectBackend> MarkBasedGarbageCollector<B> {
 
         loop {
             tokio::select! {
-                _ = interval.tick() => {
+                _ = ticker.tick() => {
                     match self.run_gc_cycle().await {
                         Ok((delayed_deleted, deleted_files, deleted_objects)) => {
                             if delayed_deleted > 0 || deleted_files > 0 || deleted_objects > 0 {
@@ -205,37 +170,33 @@ impl<B: ObjectBackend> MarkBasedGarbageCollector<B> {
         info!("GC stopped");
     }
 
-    /// Execute a full garbage collection cycle
     async fn run_gc_cycle(
         &self,
     ) -> Result<(usize, usize, usize), Box<dyn std::error::Error + Send + Sync>> {
         info!("Starting GC cycle");
 
-        // process delayed slices, soft deleted slices that are now safe to delete
-        let delayed_deleted = self
+        let deleted_slices = self
             .meta_store
             .process_delayed_slices(self.config.batch_size, self.config.max_age_secs)
             .await?;
-        if delayed_deleted > 0 {
-            info!("Processed {} delayed slices", delayed_deleted);
+        let delayed_deleted_count = deleted_slices.len();
+        if delayed_deleted_count > 0 {
+            info!("Processed {} delayed slices", delayed_deleted_count);
         }
 
-        // get deleted file inodes
         let deleted_inodes = self.meta_store.get_deleted_files().await?;
         debug!("Identified {} deleted file inodes", deleted_inodes.len());
 
         if deleted_inodes.is_empty() {
-            return Ok((delayed_deleted, 0, 0));
+            return Ok((delayed_deleted_count, 0, 0));
         }
 
         let deleted_objects = self.delete_objects(&deleted_inodes).await?;
-
         self.cleanup_deleted_file_metadata(&deleted_inodes).await?;
 
-        Ok((delayed_deleted, deleted_inodes.len(), deleted_objects))
+        Ok((delayed_deleted_count, deleted_inodes.len(), deleted_objects))
     }
 
-    /// batch delete objects
     async fn delete_objects(
         &self,
         deleted_inodes: &[i64],
@@ -280,15 +241,13 @@ impl<B: ObjectBackend> MarkBasedGarbageCollector<B> {
     }
 }
 
-/// Start garbage collector with graceful shutdown support
 #[allow(dead_code)]
 pub async fn start_gc<B: ObjectBackend>(
     meta_store: Arc<dyn MetaStore>,
     object_client: Arc<ObjectClient<B>>,
-    config: Option<GcConfig>,
+    config: Option<ObjectGcConfig>,
 ) {
     let config = config.unwrap_or_default();
     let gc = MarkBasedGarbageCollector::new(meta_store, object_client, config);
-
     gc.start().await;
 }

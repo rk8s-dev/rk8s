@@ -528,4 +528,6 @@ pub trait Filesystem {
     ) -> Result<ReplyCopyFileRange> {
         Err(libc::ENOSYS.into())
     }
+
+    // TODO setupmapping and removemapping
 }
