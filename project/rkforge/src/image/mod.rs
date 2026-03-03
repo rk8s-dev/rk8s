@@ -16,8 +16,8 @@ use std::time::Instant;
 
 use crate::compressor::tar_gz_compressor::TarGzCompressor;
 use crate::image::build_runtime::{
-    BuildHostEntry, BuildNetworkMode, BuildUlimit, BuildUlimitResource, BuildUlimitValue,
-    normalize_cgroup_parent,
+    BuildHostEntry, BuildNetworkMode, BuildSecret, BuildSshAgent, BuildUlimit, BuildUlimitResource,
+    BuildUlimitValue, normalize_cgroup_parent,
 };
 use crate::image::executor::Executor;
 use crate::image::metadata::{BuildMetadata, write_metadata_file};
@@ -123,6 +123,14 @@ pub struct BuildArgs {
     /// Disable cache for specific stages by stage name or index (e.g. --no-cache-filter builder --no-cache-filter 0), can be set multiple times
     #[arg(long = "no-cache-filter", value_name = "STAGE")]
     pub no_cache_filter: Vec<String>,
+
+    /// Secret to expose to the build (format: "id=mysecret[,src=/local/secret]"), can be set multiple times
+    #[arg(long = "secret", value_name = "id=...[,src=...]", value_parser = parse_secret_option)]
+    pub secrets: Vec<BuildSecret>,
+
+    /// SSH agent socket or keys to expose to the build (format: "default|<id>[=<socket>]"), can be set multiple times
+    #[arg(long = "ssh", value_name = "default|<id>[=<socket>]", value_parser = parse_ssh_option)]
+    pub ssh: Vec<BuildSshAgent>,
 
     /// Build context. Defaults to the directory of the Dockerfile.
     #[arg(default_value = ".")]
@@ -259,6 +267,123 @@ fn parse_ulimit_option(raw: &str) -> std::result::Result<BuildUlimit, String> {
         soft,
         hard,
     })
+}
+
+fn parse_secret_option(raw: &str) -> std::result::Result<BuildSecret, String> {
+    let mut id = None;
+    let mut src = None;
+
+    for part in raw.split(',') {
+        let (key, value) = part.split_once('=').ok_or_else(|| {
+            format!("invalid --secret value `{raw}`: expected comma-separated KEY=VALUE pairs")
+        })?;
+        match key.trim() {
+            "id" => {
+                let v = value.trim();
+                if v.is_empty() {
+                    return Err(format!(
+                        "invalid --secret value `{raw}`: id must not be empty"
+                    ));
+                }
+                id = Some(v.to_string());
+            }
+            "src" => {
+                let v = value.trim();
+                if v.is_empty() {
+                    return Err(format!(
+                        "invalid --secret value `{raw}`: src must not be empty"
+                    ));
+                }
+                src = Some(PathBuf::from(v));
+            }
+            other => {
+                return Err(format!(
+                    "invalid --secret value `{raw}`: unknown key `{other}`"
+                ));
+            }
+        }
+    }
+
+    let id = id.ok_or_else(|| format!("invalid --secret value `{raw}`: missing required `id`"))?;
+
+    if id.contains('/') || id.contains('\\') || id.contains("..") || id.contains('\0') {
+        return Err(format!(
+            "invalid --secret value `{raw}`: id `{id}` must not contain path separators or `..`"
+        ));
+    }
+
+    let src = src.unwrap_or_else(|| PathBuf::from(&id));
+
+    if !src.exists() {
+        return Err(format!(
+            "invalid --secret value `{raw}`: source file `{}` does not exist",
+            src.display()
+        ));
+    }
+    if !src.is_file() {
+        return Err(format!(
+            "invalid --secret value `{raw}`: source `{}` is not a regular file",
+            src.display()
+        ));
+    }
+
+    let src = src
+        .canonicalize()
+        .map_err(|e| format!("invalid --secret value `{raw}`: failed to resolve path: {e}"))?;
+
+    Ok(BuildSecret { id, src })
+}
+
+fn parse_ssh_option(raw: &str) -> std::result::Result<BuildSshAgent, String> {
+    let (id, socket_path) = if let Some((id, path)) = raw.split_once('=') {
+        let id = id.trim();
+        if id.is_empty() {
+            return Err(format!("invalid --ssh value `{raw}`: id must not be empty"));
+        }
+        let path = path.trim();
+        if path.is_empty() {
+            return Err(format!(
+                "invalid --ssh value `{raw}`: socket path must not be empty"
+            ));
+        }
+        (id.to_string(), PathBuf::from(path))
+    } else {
+        let id = raw.trim();
+        if id.is_empty() {
+            return Err("invalid --ssh value: id must not be empty".to_string());
+        }
+        let socket_path = std::env::var("SSH_AUTH_SOCK")
+            .map(PathBuf::from)
+            .map_err(|_| {
+                format!(
+                    "invalid --ssh value `{raw}`: no socket path specified and SSH_AUTH_SOCK is not set"
+                )
+            })?;
+        (id.to_string(), socket_path)
+    };
+
+    if !socket_path.exists() {
+        return Err(format!(
+            "invalid --ssh value `{raw}`: socket `{}` does not exist",
+            socket_path.display()
+        ));
+    }
+
+    use std::os::unix::fs::FileTypeExt;
+    let meta = std::fs::symlink_metadata(&socket_path).map_err(|e| {
+        format!(
+            "invalid --ssh value `{raw}`: failed to inspect `{}`: {e}",
+            socket_path.display()
+        )
+    })?;
+    if !meta.file_type().is_socket() {
+        return Err(format!(
+            "invalid --ssh value `{raw}`: `{}` is not a unix socket",
+            socket_path.display()
+        ));
+    }
+
+    Ok(BuildSshAgent { id, socket_path })
 }
 
 fn parse_dockerfile<P: AsRef<Path>>(dockerfile_path: P) -> Result<Dockerfile> {
@@ -565,6 +690,8 @@ pub fn build_image(build_args: &BuildArgs) -> Result<()> {
         cgroup_parent,
     );
     executor.no_cache_filter(no_cache_filters);
+    executor.secrets(build_args.secrets.clone());
+    executor.ssh(build_args.ssh.clone());
 
     executor.build_image()?;
 
@@ -605,8 +732,9 @@ mod tests {
     use super::{
         BuildArgs, BuildProgressMode, derive_output_name, has_explicit_tag,
         normalize_cgroup_parent_option, normalize_push_reference, parse_add_host_option,
-        parse_dockerfile, parse_global_args, parse_key_value_options, parse_shm_size, parse_tags,
-        parse_ulimit_option, read_primary_image_digest, resolve_dockerfile_path, unique_ref_names,
+        parse_dockerfile, parse_global_args, parse_key_value_options, parse_secret_option,
+        parse_shm_size, parse_ssh_option, parse_tags, parse_ulimit_option,
+        read_primary_image_digest, resolve_dockerfile_path, unique_ref_names,
     };
     use clap::Parser;
     use dockerfile_parser::{BreakableStringComponent, Dockerfile, Instruction, ShellOrExecExpr};
@@ -1029,5 +1157,130 @@ FROM ${BASE}
             digest,
             "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
         );
+    }
+
+    #[test]
+    fn test_parse_secret_option_with_src() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let secret_file = temp_dir.path().join("my_secret");
+        fs::write(&secret_file, b"supersecret").unwrap();
+
+        let raw = format!("id=mysecret,src={}", secret_file.display());
+        let parsed = parse_secret_option(&raw).unwrap();
+        assert_eq!(parsed.id, "mysecret");
+        assert_eq!(parsed.src, secret_file.canonicalize().unwrap());
+    }
+
+    #[test]
+    fn test_parse_secret_option_default_src() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let secret_file = temp_dir.path().join("dbpass");
+        fs::write(&secret_file, b"p@ss").unwrap();
+
+        let raw = format!("id=dbpass,src={}", secret_file.display());
+        let parsed = parse_secret_option(&raw).unwrap();
+        assert_eq!(parsed.id, "dbpass");
+        assert_eq!(parsed.src, secret_file.canonicalize().unwrap());
+    }
+
+    #[test]
+    fn test_parse_secret_option_missing_id() {
+        assert!(parse_secret_option("src=/tmp/x").is_err());
+    }
+
+    #[test]
+    fn test_parse_secret_option_missing_file() {
+        assert!(parse_secret_option("id=mysecret,src=/nonexistent/path").is_err());
+    }
+
+    #[test]
+    fn test_parse_secret_option_unknown_key() {
+        assert!(parse_secret_option("id=mysecret,foo=bar").is_err());
+    }
+
+    fn create_unix_socket(path: &std::path::Path) {
+        use std::os::unix::net::UnixListener;
+        let _ = UnixListener::bind(path).unwrap();
+    }
+
+    #[test]
+    fn test_parse_ssh_option_with_socket() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let sock = temp_dir.path().join("agent.sock");
+        create_unix_socket(&sock);
+
+        let raw = format!("default={}", sock.display());
+        let parsed = parse_ssh_option(&raw).unwrap();
+        assert_eq!(parsed.id, "default");
+        assert_eq!(parsed.socket_path, sock);
+    }
+
+    #[test]
+    fn test_parse_ssh_option_missing_socket() {
+        assert!(parse_ssh_option("default=/nonexistent/socket").is_err());
+    }
+
+    #[test]
+    fn test_parse_ssh_option_empty_id() {
+        assert!(parse_ssh_option("").is_err());
+        assert!(parse_ssh_option("=/tmp/x").is_err());
+    }
+
+    #[test]
+    fn test_parse_ssh_option_named_agent() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let sock = temp_dir.path().join("github.sock");
+        create_unix_socket(&sock);
+
+        let raw = format!("github={}", sock.display());
+        let parsed = parse_ssh_option(&raw).unwrap();
+        assert_eq!(parsed.id, "github");
+        assert_eq!(parsed.socket_path, sock);
+    }
+
+    #[test]
+    fn test_parse_ssh_option_rejects_regular_file() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let not_a_socket = temp_dir.path().join("regular.txt");
+        fs::write(&not_a_socket, b"hello").unwrap();
+
+        let raw = format!("default={}", not_a_socket.display());
+        let err = parse_ssh_option(&raw).unwrap_err();
+        assert!(err.contains("not a unix socket"), "error was: {err}");
+    }
+
+    #[test]
+    fn test_parse_secret_option_path_traversal() {
+        assert!(parse_secret_option("id=../etc/passwd,src=/etc/hostname").is_err());
+        assert!(parse_secret_option("id=foo/../../etc/shadow,src=/etc/hostname").is_err());
+        assert!(parse_secret_option("id=sub/file,src=/etc/hostname").is_err());
+    }
+
+    #[test]
+    fn test_parse_1_with_secret_and_ssh() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let secret_file = temp_dir.path().join("token");
+        fs::write(&secret_file, b"secret_token").unwrap();
+        let ssh_sock = temp_dir.path().join("agent.sock");
+        create_unix_socket(&ssh_sock);
+
+        let secret_arg = format!("id=mytoken,src={}", secret_file.display());
+        let ssh_arg = format!("default={}", ssh_sock.display());
+
+        let build_args = BuildArgs::parse_from(vec![
+            "rkforge",
+            "-f",
+            "example-Dockerfile",
+            "--secret",
+            &secret_arg,
+            "--ssh",
+            &ssh_arg,
+            ".",
+        ]);
+
+        assert_eq!(build_args.secrets.len(), 1);
+        assert_eq!(build_args.secrets[0].id, "mytoken");
+        assert_eq!(build_args.ssh.len(), 1);
+        assert_eq!(build_args.ssh[0].id, "default");
     }
 }

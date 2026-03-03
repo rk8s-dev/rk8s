@@ -349,6 +349,12 @@ impl<P: AsRef<Path>> InstructionExt<P> for RunInstruction {
                 merged_envp.insert(key.clone(), value.clone());
             }
         }
+        if !ctx.ssh.is_empty() && !merged_envp.contains_key("SSH_AUTH_SOCK") {
+            merged_envp.insert(
+                "SSH_AUTH_SOCK".to_string(),
+                "/run/rkforge/ssh/ssh_agent.0".to_string(),
+            );
+        }
         let envp: Vec<String> = merged_envp
             .iter()
             .map(|(k, v)| format!("{k}={v}"))
@@ -365,6 +371,8 @@ impl<P: AsRef<Path>> InstructionExt<P> for RunInstruction {
             ulimits: ctx.ulimits.to_vec(),
             network_mode: ctx.network_mode,
             cgroup_parent: ctx.cgroup_parent.clone(),
+            secrets: ctx.secrets.to_vec(),
+            ssh: ctx.ssh.to_vec(),
         };
         task.execute(ctx.mount_config)
     }
@@ -519,6 +527,7 @@ mod tests {
     use crate::{
         image::{
             BuildProgressMode,
+            build_runtime::BuildNetworkMode,
             config::{DEFAULT_ENV, ImageConfig},
             context::StageContext,
         },
@@ -584,8 +593,10 @@ ARG BASE=alpine
             add_hosts: &[],
             shm_size: None,
             ulimits: &[],
-            network_mode: crate::image::build_runtime::BuildNetworkMode::Default,
+            network_mode: BuildNetworkMode::Default,
             cgroup_parent: None,
+            secrets: &[],
+            ssh: &[],
         };
 
         arg_inst.execute(&mut ctx).unwrap();
@@ -630,8 +641,10 @@ ARG BASE=alpine
             add_hosts: &[],
             shm_size: None,
             ulimits: &[],
-            network_mode: crate::image::build_runtime::BuildNetworkMode::Default,
+            network_mode: BuildNetworkMode::Default,
             cgroup_parent: None,
+            secrets: &[],
+            ssh: &[],
         };
 
         arg_inst.execute(&mut ctx).unwrap();
@@ -672,8 +685,10 @@ ENV A=1 B=$A
             add_hosts: &[],
             shm_size: None,
             ulimits: &[],
-            network_mode: crate::image::build_runtime::BuildNetworkMode::Default,
+            network_mode: BuildNetworkMode::Default,
             cgroup_parent: None,
+            secrets: &[],
+            ssh: &[],
         };
 
         dockerfile

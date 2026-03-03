@@ -1,8 +1,10 @@
 use crate::image::build_runtime::{
-    BuildHostEntry, BuildNetworkMode, BuildUlimit, normalize_cgroup_parent,
+    BuildHostEntry, BuildNetworkMode, BuildSecret, BuildSshAgent, BuildUlimit,
+    normalize_cgroup_parent,
 };
 use crate::overlayfs::{
-    bind_mount, do_exec, prepare_hosts, prepare_network, prepare_shm, switch_namespace,
+    bind_mount, do_exec, prepare_hosts, prepare_network, prepare_secrets, prepare_shm, prepare_ssh,
+    switch_namespace,
 };
 use anyhow::{Context, Result, bail};
 use base64::{Engine, engine::general_purpose};
@@ -38,6 +40,10 @@ pub struct ExecInternalArgs {
     pub network: BuildNetworkMode,
     #[arg(long)]
     pub cgroup_parent: Option<String>,
+    #[arg(long)]
+    pub secrets_base64: Option<String>,
+    #[arg(long)]
+    pub ssh_base64: Option<String>,
 }
 
 fn decode_optional_base64_json<T>(value: Option<&str>, arg_name: &str) -> Result<T>
@@ -90,6 +96,11 @@ pub fn exec_internal(args: ExecInternalArgs) -> Result<()> {
     let ulimits: Vec<BuildUlimit> =
         decode_optional_base64_json(args.ulimits_base64.as_deref(), "ulimits-base64")?;
 
+    let secrets: Vec<BuildSecret> =
+        decode_optional_base64_json(args.secrets_base64.as_deref(), "secrets-base64")?;
+    let ssh_agents: Vec<BuildSshAgent> =
+        decode_optional_base64_json(args.ssh_base64.as_deref(), "ssh-base64")?;
+
     bind_mount(mountpoint)?;
     if matches!(
         args.network,
@@ -99,6 +110,8 @@ pub fn exec_internal(args: ExecInternalArgs) -> Result<()> {
     }
     prepare_hosts(mountpoint, &add_hosts)?;
     prepare_shm(mountpoint, args.shm_size)?;
+    prepare_secrets(mountpoint, &secrets)?;
+    prepare_ssh(mountpoint, &ssh_agents)?;
     apply_cgroup_parent(args.cgroup_parent.as_deref())?;
 
     let commands_json = general_purpose::STANDARD

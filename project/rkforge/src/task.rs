@@ -1,4 +1,6 @@
-use crate::image::build_runtime::{BuildHostEntry, BuildNetworkMode, BuildUlimit};
+use crate::image::build_runtime::{
+    BuildHostEntry, BuildNetworkMode, BuildSecret, BuildSshAgent, BuildUlimit,
+};
 use crate::overlayfs::MountConfig;
 use anyhow::{Context, Result};
 use base64::{Engine, engine::general_purpose};
@@ -31,6 +33,10 @@ pub struct RunTask {
     pub network_mode: BuildNetworkMode,
     /// Optional cgroup parent for build-time RUN containers.
     pub cgroup_parent: Option<String>,
+    /// Build-time secrets mounted into /run/secrets/<id>.
+    pub secrets: Vec<BuildSecret>,
+    /// SSH agent sockets mounted into /run/rkforge/ssh/ssh_agent.<N>.
+    pub ssh: Vec<BuildSshAgent>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -101,16 +107,32 @@ impl TaskExec for RunTask {
                 .context("Failed to serialize ulimits to json")?;
             Some(general_purpose::STANDARD.encode(ulimits_json))
         };
+        let secrets_base64 = if self.secrets.is_empty() {
+            None
+        } else {
+            let secrets_json = serde_json::to_string(&self.secrets)
+                .context("Failed to serialize secrets to json")?;
+            Some(general_purpose::STANDARD.encode(secrets_json))
+        };
+        let ssh_base64 = if self.ssh.is_empty() {
+            None
+        } else {
+            let ssh_json = serde_json::to_string(&self.ssh)
+                .context("Failed to serialize ssh agents to json")?;
+            Some(general_purpose::STANDARD.encode(ssh_json))
+        };
 
         trace!(
-            "Run commands: {:?}, envp: {:?}, working_dir: {:?}, user: {:?}, add_hosts: {:?}, shm_size: {:?}, ulimits: {:?}",
+            "Run commands: {:?}, envp: {:?}, working_dir: {:?}, user: {:?}, add_hosts: {:?}, shm_size: {:?}, ulimits: {:?}, secrets: {} ssh: {}",
             self.commands,
             self.envp,
             self.working_dir,
             self.user,
             self.add_hosts,
             self.shm_size,
-            self.ulimits
+            self.ulimits,
+            self.secrets.len(),
+            self.ssh.len()
         );
         command
             .arg("--mountpoint")
@@ -144,6 +166,12 @@ impl TaskExec for RunTask {
         }
         if let Some(cgroup_parent) = &self.cgroup_parent {
             command.arg("--cgroup-parent").arg(cgroup_parent);
+        }
+        if let Some(secrets_base64) = &secrets_base64 {
+            command.arg("--secrets-base64").arg(secrets_base64);
+        }
+        if let Some(ssh_base64) = &ssh_base64 {
+            command.arg("--ssh-base64").arg(ssh_base64);
         }
 
         if self.quiet {

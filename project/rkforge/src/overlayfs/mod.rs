@@ -3,7 +3,7 @@ pub mod linux;
 
 use crate::config::image::CONFIG;
 use crate::image::build_runtime::{
-    BuildHostEntry, BuildUlimit, BuildUlimitResource, BuildUlimitValue,
+    BuildHostEntry, BuildSecret, BuildSshAgent, BuildUlimit, BuildUlimitResource, BuildUlimitValue,
 };
 use anyhow::{Context, Result, bail};
 use base64::{Engine, engine::general_purpose};
@@ -19,6 +19,8 @@ use std::path::{Component, Path, PathBuf};
 pub static DNS_CONFIG: &str = "/etc/resolv.conf";
 pub static HOSTS_CONFIG: &str = "/etc/hosts";
 pub static SHM_CONFIG: &str = "/dev/shm";
+pub static SECRETS_DIR: &str = "/run/secrets";
+pub static RKFORGE_SSH_DIR: &str = "/run/rkforge/ssh";
 pub static BIND_MOUNTS: [&str; 3] = ["/dev", "/proc", "/sys"];
 
 #[derive(Parser, Debug)]
@@ -785,38 +787,132 @@ pub fn prepare_shm<P: AsRef<Path>>(mountpoint: P, shm_size: Option<u64>) -> Resu
     Ok(())
 }
 
+pub fn prepare_secrets<P: AsRef<Path>>(mountpoint: P, secrets: &[BuildSecret]) -> Result<()> {
+    if secrets.is_empty() {
+        return Ok(());
+    }
+
+    let mountpoint = mountpoint.as_ref();
+    let target_dir = mountpoint.join(SECRETS_DIR.strip_prefix('/').unwrap());
+    fs::create_dir_all(&target_dir)
+        .with_context(|| format!("Failed to create {}", target_dir.display()))?;
+
+    nix::mount::mount::<_, _, str, str>(
+        Some("tmpfs"),
+        &target_dir,
+        Some("tmpfs"),
+        nix::mount::MsFlags::empty(),
+        Some("size=1048576,mode=0755"),
+    )
+    .with_context(|| format!("Failed to mount tmpfs on {}", target_dir.display()))?;
+
+    for secret in secrets {
+        let content = fs::read(&secret.src).with_context(|| {
+            format!(
+                "Failed to read secret `{}` from {}",
+                secret.id,
+                secret.src.display()
+            )
+        })?;
+
+        let target_file = target_dir.join(&secret.id);
+        fs::write(&target_file, &content).with_context(|| {
+            format!(
+                "Failed to write secret `{}` to {}",
+                secret.id,
+                target_file.display()
+            )
+        })?;
+
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&target_file, fs::Permissions::from_mode(0o400))
+            .with_context(|| format!("Failed to set permissions on {}", target_file.display()))?;
+    }
+
+    Ok(())
+}
+
+pub fn prepare_ssh<P: AsRef<Path>>(mountpoint: P, ssh_agents: &[BuildSshAgent]) -> Result<()> {
+    if ssh_agents.is_empty() {
+        return Ok(());
+    }
+
+    let mountpoint = mountpoint.as_ref();
+    let target_dir = mountpoint.join(RKFORGE_SSH_DIR.strip_prefix('/').unwrap());
+    fs::create_dir_all(&target_dir)
+        .with_context(|| format!("Failed to create {}", target_dir.display()))?;
+
+    nix::mount::mount::<_, _, str, str>(
+        Some("tmpfs"),
+        &target_dir,
+        Some("tmpfs"),
+        nix::mount::MsFlags::empty(),
+        Some("size=1048576,mode=0755"),
+    )
+    .with_context(|| format!("Failed to mount tmpfs on {}", target_dir.display()))?;
+
+    for (idx, agent) in ssh_agents.iter().enumerate() {
+        let target_socket = target_dir.join(format!("ssh_agent.{idx}"));
+
+        fs::write(&target_socket, b"").with_context(|| {
+            format!(
+                "Failed to create placeholder for ssh agent `{}` at {}",
+                agent.id,
+                target_socket.display()
+            )
+        })?;
+
+        nix::mount::mount::<_, _, str, str>(
+            Some(&agent.socket_path),
+            &target_socket,
+            None,
+            nix::mount::MsFlags::MS_BIND,
+            None,
+        )
+        .with_context(|| {
+            format!(
+                "Failed to bind mount ssh agent `{}` from {} to {}",
+                agent.id,
+                agent.socket_path.display(),
+                target_socket.display()
+            )
+        })?;
+    }
+
+    Ok(())
+}
+
+fn umount_and_remove_dir(path: &Path) -> Result<()> {
+    umount_if_mounted(path)?;
+    if path.exists() {
+        let _ = fs::remove_dir_all(path);
+    }
+    Ok(())
+}
+
+fn remove_temp_file(path: &Path) {
+    if path.exists()
+        && let Err(err) = fs::remove_file(path)
+    {
+        tracing::warn!(
+            error = ?err,
+            path = %path.display(),
+            "Failed to remove temporary file during cleanup"
+        );
+    }
+}
+
 fn cleanup_network<P: AsRef<Path>>(mountpoint: P) -> Result<()> {
     let mountpoint = mountpoint.as_ref();
-    let target_shm = mountpoint.join(SHM_CONFIG.strip_prefix('/').unwrap());
-    umount_if_mounted(&target_shm)?;
 
-    let target_hosts = mountpoint.join(HOSTS_CONFIG.strip_prefix('/').unwrap());
-    umount_if_mounted(&target_hosts)?;
+    umount_and_remove_dir(&mountpoint.join(RKFORGE_SSH_DIR.strip_prefix('/').unwrap()))?;
+    umount_and_remove_dir(&mountpoint.join(SECRETS_DIR.strip_prefix('/').unwrap()))?;
+    umount_if_mounted(&mountpoint.join(SHM_CONFIG.strip_prefix('/').unwrap()))?;
+    umount_if_mounted(&mountpoint.join(HOSTS_CONFIG.strip_prefix('/').unwrap()))?;
+    umount_if_mounted(&mountpoint.join(DNS_CONFIG.strip_prefix('/').unwrap()))?;
 
-    let target_resolv_conf = mountpoint.join(DNS_CONFIG.strip_prefix('/').unwrap());
-    umount_if_mounted(&target_resolv_conf)?;
-
-    let host_hosts_file = runtime_temp_file("hosts");
-    if host_hosts_file.exists()
-        && let Err(err) = fs::remove_file(&host_hosts_file)
-    {
-        tracing::warn!(
-            error = ?err,
-            path = %host_hosts_file.display(),
-            "Failed to remove temporary hosts file during cleanup"
-        );
-    }
-
-    let host_resolv_conf = runtime_temp_file("resolv.conf");
-    if host_resolv_conf.exists()
-        && let Err(err) = fs::remove_file(&host_resolv_conf)
-    {
-        tracing::warn!(
-            error = ?err,
-            path = %host_resolv_conf.display(),
-            "Failed to remove temporary resolv.conf file during cleanup"
-        );
-    }
+    remove_temp_file(&runtime_temp_file("hosts"));
+    remove_temp_file(&runtime_temp_file("resolv.conf"));
     Ok(())
 }
 

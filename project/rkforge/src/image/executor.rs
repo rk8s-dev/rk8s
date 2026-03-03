@@ -2,7 +2,9 @@ use crate::{
     compressor::{LayerCompressionConfig, LayerCompressionResult, LayerCompressor},
     image::{
         BLOBS, BuildProgressMode,
-        build_runtime::{BuildHostEntry, BuildNetworkMode, BuildUlimit},
+        build_runtime::{
+            BuildHostEntry, BuildNetworkMode, BuildSecret, BuildSshAgent, BuildUlimit,
+        },
         config::ImageConfig,
         context::StageContext,
         stage_executor::StageExecutor,
@@ -52,6 +54,8 @@ pub struct Executor {
     pub network_mode: BuildNetworkMode,
     pub cgroup_parent: Option<String>,
     pub no_cache_filters: Vec<String>,
+    pub secrets: Vec<BuildSecret>,
+    pub ssh: Vec<BuildSshAgent>,
 
     pub compressor: Arc<dyn LayerCompressor + Send + Sync>,
 }
@@ -104,6 +108,8 @@ impl Executor {
             network_mode: BuildNetworkMode::Default,
             cgroup_parent: None,
             no_cache_filters: Vec::new(),
+            secrets: Vec::new(),
+            ssh: Vec::new(),
             compressor,
         }
     }
@@ -150,6 +156,14 @@ impl Executor {
 
     pub fn no_cache_filter(&mut self, filters: Vec<String>) {
         self.no_cache_filters = filters;
+    }
+
+    pub fn secrets(&mut self, secrets: Vec<BuildSecret>) {
+        self.secrets = secrets;
+    }
+
+    pub fn ssh(&mut self, ssh: Vec<BuildSshAgent>) {
+        self.ssh = ssh;
     }
 
     pub fn build_image(&mut self) -> Result<()> {
@@ -294,6 +308,8 @@ impl Executor {
                     ulimits: &self.ulimits,
                     network_mode: self.network_mode,
                     cgroup_parent: self.cgroup_parent.clone(),
+                    secrets: &self.secrets,
+                    ssh: &self.ssh,
                 };
                 let mut stage_executor = StageExecutor::new(ctx, stage);
                 stage_executor.execute()

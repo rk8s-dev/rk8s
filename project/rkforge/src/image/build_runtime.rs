@@ -5,6 +5,18 @@ use std::net::IpAddr;
 use std::path::{Component, Path, PathBuf};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct BuildSecret {
+    pub id: String,
+    pub src: PathBuf,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct BuildSshAgent {
+    pub id: String,
+    pub socket_path: PathBuf,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct BuildHostEntry {
     pub host: String,
     pub ip: IpAddr,

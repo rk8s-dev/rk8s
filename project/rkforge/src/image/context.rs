@@ -3,7 +3,9 @@ use std::{collections::HashMap, path::Path};
 use crate::{
     image::{
         BuildProgressMode,
-        build_runtime::{BuildHostEntry, BuildNetworkMode, BuildUlimit},
+        build_runtime::{
+            BuildHostEntry, BuildNetworkMode, BuildSecret, BuildSshAgent, BuildUlimit,
+        },
         config::ImageConfig,
     },
     overlayfs::MountConfig,
@@ -32,4 +34,6 @@ pub struct StageContext<'ctx, P: AsRef<Path>> {
     pub ulimits: &'ctx [BuildUlimit],
     pub network_mode: BuildNetworkMode,
     pub cgroup_parent: Option<String>,
+    pub secrets: &'ctx [BuildSecret],
+    pub ssh: &'ctx [BuildSshAgent],
 }
