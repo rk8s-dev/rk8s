@@ -3349,8 +3349,8 @@ impl MetaStore for DatabaseMetaStore {
             slices.len()
         );
 
-        // delayed slice encoding: 8 bytes id + 4 bytes size = 12 bytes per slice
-        if !delayed.is_empty() && !delayed.len().is_multiple_of(12) {
+        // delayed slice encoding: 8 bytes slice_id + 8 bytes offset + 4 bytes size = 20 bytes per slice
+        if !delayed.is_empty() && !delayed.len().is_multiple_of(20) {
             warn!(
                 inode = inode,
                 delayed_len = delayed.len(),
@@ -3481,7 +3481,11 @@ impl MetaStore for DatabaseMetaStore {
                 let slice_id = u64::from_le_bytes([
                     chunk[0], chunk[1], chunk[2], chunk[3], chunk[4], chunk[5], chunk[6], chunk[7],
                 ]);
-                let size = u32::from_le_bytes([chunk[8], chunk[9], chunk[10], chunk[11]]);
+                let _offset = u64::from_le_bytes([
+                    chunk[8], chunk[9], chunk[10], chunk[11], chunk[12], chunk[13], chunk[14],
+                    chunk[15],
+                ]);
+                let size = u32::from_le_bytes([chunk[16], chunk[17], chunk[18], chunk[19]]);
 
                 let delayed_model = delayed_slice::ActiveModel {
                     slice_id: Set(slice_id as i64),
