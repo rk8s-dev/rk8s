@@ -19,7 +19,5 @@ fn test_container_commands() {
         container_name: container_name.clone(),
     });
 
-    let _ = container_execute(ContainerCommand::Delete {
-        container_name,
-    });
+    let _ = container_execute(ContainerCommand::Delete { container_name });
 }

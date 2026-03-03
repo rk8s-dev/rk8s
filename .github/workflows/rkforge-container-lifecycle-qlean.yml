@@ -1,0 +1,52 @@
+name: rkforge container lifecycle (qlean)
+
+on:
+  pull_request:
+    paths:
+      - "project/rkforge/**"
+      - "project/libruntime/**"
+      - "project/common/**"
+      - "project/Cargo.toml"
+      - "project/Cargo.lock"
+      - ".github/workflows/rkforge-container-lifecycle-qlean.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "project/rkforge/**"
+      - "project/libruntime/**"
+      - "project/common/**"
+      - "project/Cargo.toml"
+      - "project/Cargo.lock"
+      - ".github/workflows/rkforge-container-lifecycle-qlean.yml"
+
+jobs:
+  lifecycle-qlean:
+    name: rkforge lifecycle (qlean VM isolation)
+    runs-on: [self-hosted]
+    timeout-minutes: 45
+    env:
+      CARGO_TERM_COLOR: always
+      RUSTUP_TOOLCHAIN: stable
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Build rkforge binary
+        run: |
+          cd project
+          cargo build -p rkforge --release
+
+      - name: Build qlean test target
+        run: |
+          cd project
+          cargo test -p rkforge --test test_container_lifecycle_qlean --no-run
+
+      - name: Run rkforge lifecycle tests with qlean
+        run: |
+          cd project
+          cargo test -p rkforge --test test_container_lifecycle_qlean -- --nocapture --ignored
+
