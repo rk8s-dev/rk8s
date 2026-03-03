@@ -211,12 +211,14 @@ pub struct LoadOption {
 #[derive(Debug)]
 pub enum LockName {
     CleanupSessionsLock,
+    ChunkCompactLock(u64), // chunk_id
 }
 
 impl fmt::Display for LockName {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             LockName::CleanupSessionsLock => write!(f, "CleanupSessionsLock"),
+            LockName::ChunkCompactLock(chunk_id) => write!(f, "ChunkCompactLock({})", chunk_id),
         }
     }
 }

@@ -3431,7 +3431,7 @@ impl MetaStore for EtcdMetaStore {
         new_slices: &[SliceDesc],
         old_slices_to_delay: &[u8],
     ) -> Result<(), MetaError> {
-        if !old_slices_to_delay.is_empty() && !old_slices_to_delay.len().is_multiple_of(12) {
+        if !old_slices_to_delay.is_empty() && !old_slices_to_delay.len().is_multiple_of(20) {
             return Err(MetaError::Internal(
                 "Invalid delayed data length".to_string(),
             ));

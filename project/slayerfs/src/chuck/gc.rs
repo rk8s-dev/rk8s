@@ -119,7 +119,7 @@ where
     async fn delete_slice_blocks(
         &self,
         slice_id: u64,
-        offset: u64,
+        _offset: u64,
         size: u64,
         block_size: u64,
     ) -> Result<(), GCError> {
@@ -127,23 +127,22 @@ where
             return Ok(());
         }
 
-        // Calculate the actual block range based on offset within the chunk
-        // Blocks are indexed by (slice_id, block_index) where block_index = offset / block_size
-        let start_block = offset / block_size;
-        let end_block = (offset + size).div_ceil(block_size);
-        let num_blocks = end_block - start_block;
+        // Blocks are indexed by (slice_id, block_index) where block_index is slice-relative
+        // (starting from 0), not chunk-relative. The offset parameter is the slice's offset
+        // within the chunk and should not be used for block indexing.
+        let num_blocks = size.div_ceil(block_size);
 
         if num_blocks == 0 {
             return Ok(());
         }
 
         self.block_store
-            .delete_range((slice_id, start_block as u32), num_blocks)
+            .delete_range((slice_id, 0), num_blocks)
             .await
             .map_err(|e| {
                 GCError::BlockStoreError(format!(
-                    "Failed to delete blocks for slice {} at offset {}: {}",
-                    slice_id, offset, e
+                    "Failed to delete blocks for slice {}: {}",
+                    slice_id, e
                 ))
             })?;
 

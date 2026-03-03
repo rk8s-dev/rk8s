@@ -48,6 +48,9 @@ pub struct MountOptions {
     // Other FUSE mount options
     // default 40000
     pub(crate) rootmode: Option<u32>,
+
+    /// max write size
+    pub(crate) max_write: Option<std::num::NonZeroU32>,
 }
 
 impl MountOptions {
@@ -175,6 +178,12 @@ impl MountOptions {
     pub fn custom_options(&mut self, custom_options: impl Into<OsString>) -> &mut Self {
         self.custom_options = Some(custom_options.into());
 
+        self
+    }
+
+    /// Set the maximum write size. If not set, uses the kernel's default.
+    pub fn max_write(&mut self, max_write: std::num::NonZeroU32) -> &mut Self {
+        self.max_write = Some(max_write);
         self
     }
 

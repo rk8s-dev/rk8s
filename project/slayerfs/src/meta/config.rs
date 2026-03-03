@@ -394,6 +394,8 @@ pub struct CompactConfig {
     pub interval: Duration,
     /// Maximum chunks to process per run
     pub max_chunks_per_run: usize,
+    /// Maximum concurrent compaction tasks (parallelism)
+    pub max_concurrent_tasks: usize,
 }
 
 impl Default for CompactConfig {
@@ -405,6 +407,7 @@ impl Default for CompactConfig {
             sync_threshold: 350,
             interval: Duration::from_secs(3600),
             max_chunks_per_run: 1000,
+            max_concurrent_tasks: 4,
         }
     }
 }

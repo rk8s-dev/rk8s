@@ -90,6 +90,14 @@ pub struct ReplyInit {
     pub max_write: NonZeroU32,
 }
 
+impl Default for ReplyInit {
+    fn default() -> Self {
+        Self {
+            max_write: NonZeroU32::new(128 * 1024).unwrap(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Ord, PartialOrd, Eq, PartialEq, Hash)]
 /// entry reply.
 pub struct ReplyEntry {

@@ -35,9 +35,11 @@ compact is triggered when:
 
 compact mode selection:
 - slice count >= min_slice_count (5) and < sync_threshold (350): async compact (background, non-blocking)
-- slice count >= sync_threshold (350): sync compact (blocks writes to the chunk)
+- slice count >= sync_threshold (350): sync compact (intended to block writes to the chunk)
 
-note: there are two modes (async/sync), not three. the async mode handles all cases from min_slice_count up to sync_threshold.
+note: 
+- there are two modes (async/sync), not three. the async mode handles all cases from min_slice_count up to sync_threshold.
+- **sync compact blocking writes is not yet fully implemented** - chunk-level locking mechanism needed
 
 ### fragmentation ratio calculation
 
@@ -126,12 +128,13 @@ compact and gc parameters are configured via `CompactConfig`:
 ```rust
 // CompactConfig in src/meta/config.rs
 pub struct CompactConfig {
-    pub min_slice_count: usize,      // default: 5
-    pub min_fragment_ratio: f64,     // default: 0.1
-    pub async_threshold: usize,      // default: 100
-    pub sync_threshold: usize,       // default: 350
-    pub interval: Duration,          // default: 1 hour
-    pub max_chunks_per_run: usize,   // default: 1000
+    pub min_slice_count: usize,       // default: 5
+    pub min_fragment_ratio: f64,      // default: 0.1
+    pub async_threshold: usize,       // default: 100
+    pub sync_threshold: usize,        // default: 350
+    pub interval: Duration,           // default: 1 hour
+    pub max_chunks_per_run: usize,    // default: 1000
+    pub max_concurrent_tasks: usize,  // default: 4 (config added, concurrent execution TODO)
 }
 
 // BlockGcConfig in src/chuck/gc.rs (for block-level GC)
@@ -162,7 +165,7 @@ pub struct ObjectGcConfig {
 ### write consistency during compact
 
 - async compact: does not block writes
-- sync compact: temporarily blocks writes to the chunk
+- sync compact: **blocking writes not yet implemented** - requires chunk-level locking
 - atomic metadata updates ensure no data loss
 
 ### data safety

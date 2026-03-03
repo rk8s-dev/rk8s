@@ -9,7 +9,7 @@
 //! Cleanup Phase: Schedule old data for deletion
 use crate::chuck::{
     ChunkLayout,
-    slice::{SliceDesc, block_span_iter_chunk},
+    slice::{SliceDesc, SliceOffset, block_span_iter_chunk, block_span_iter_slice},
     store::{BlockKey, BlockStore},
 };
 use crate::meta::SLICE_ID_KEY;
@@ -83,14 +83,29 @@ where
             return Ok(None);
         }
 
-        info!(
-            chunk_id = chunk_id,
-            slice_count = slices.len(),
-            "Starting real compaction"
-        );
-
         // Calculate merged slice layout using Intervals
         let merged_slices = self.calculate_merged_slices(&slices)?;
+
+        // Calculate fragmentation ratio: (total_size - merged_size) / total_size
+        let total_size: u64 = slices.iter().map(|s| s.length).sum();
+        let merged_size: u64 = merged_slices.iter().map(|s| s.length).sum();
+        let fragment_ratio = if total_size > 0 {
+            (total_size - merged_size) as f64 / total_size as f64
+        } else {
+            0.0
+        };
+
+        // Check fragmentation threshold (default 0.1 from config)
+        const MIN_FRAGMENT_RATIO: f64 = 0.1;
+        if fragment_ratio < MIN_FRAGMENT_RATIO {
+            debug!(
+                chunk_id = chunk_id,
+                slice_count = slices.len(),
+                fragment_ratio = fragment_ratio,
+                "Fragmentation ratio too low, skipping compaction"
+            );
+            return Ok(None);
+        }
 
         if merged_slices.len() >= slices.len() {
             debug!(
@@ -101,6 +116,13 @@ where
             );
             return Ok(None);
         }
+
+        info!(
+            chunk_id = chunk_id,
+            slice_count = slices.len(),
+            fragment_ratio = fragment_ratio,
+            "Starting real compaction"
+        );
 
         // Identify which slices are being replaced (fully covered)
         let replaced_slice_ids: Vec<u64> = self.find_replaced_slices(&slices, &merged_slices);
@@ -224,17 +246,20 @@ where
 
     /// Prepare delayed deletion data for old slices.
     ///
-    /// Format: 12 bytes per slice
+    /// Format: 20 bytes per slice
     /// - Bytes 0-7: slice_id (u64, little endian)
-    /// - Bytes 8-11: size (u32, little endian) - for object storage cleanup
+    /// - Bytes 8-15: offset (u64, little endian)
+    /// - Bytes 16-19: size (u32, little endian)
     fn prepare_delayed_data(&self, slices: &[SliceDesc], replaced_ids: &[u64]) -> Vec<u8> {
         let replaced_set: std::collections::HashSet<u64> = replaced_ids.iter().copied().collect();
-        let mut delayed = Vec::with_capacity(replaced_ids.len() * 12);
+        let mut delayed = Vec::with_capacity(replaced_ids.len() * 20);
 
         for slice in slices {
             if replaced_set.contains(&slice.slice_id) {
                 // slice_id: 8 bytes
                 delayed.extend_from_slice(&slice.slice_id.to_le_bytes());
+                // offset: 8 bytes
+                delayed.extend_from_slice(&slice.offset.to_le_bytes());
                 // size: 4 bytes (truncated to u32)
                 let size = slice.length.min(u32::MAX as u64) as u32;
                 delayed.extend_from_slice(&size.to_le_bytes());
@@ -292,7 +317,7 @@ where
 
         // Iterate over all blocks in this slice
         let spans: Vec<_> =
-            block_span_iter_chunk(slice.offset.into(), slice.length, self.layout).collect();
+            block_span_iter_slice(SliceOffset(0), slice.length, self.layout).collect();
 
         let mut offset_in_slice = 0usize;
 
@@ -691,14 +716,25 @@ mod tests {
         let replaced = vec![1];
 
         let delayed = compactor.prepare_delayed_data(&slices, &replaced);
-        assert_eq!(delayed.len(), 12);
+        assert_eq!(delayed.len(), 20);
         let slice_id = u64::from_le_bytes([
             delayed[0], delayed[1], delayed[2], delayed[3], delayed[4], delayed[5], delayed[6],
             delayed[7],
         ]);
-        let size = u32::from_le_bytes([delayed[8], delayed[9], delayed[10], delayed[11]]);
+        let offset = u64::from_le_bytes([
+            delayed[8],
+            delayed[9],
+            delayed[10],
+            delayed[11],
+            delayed[12],
+            delayed[13],
+            delayed[14],
+            delayed[15],
+        ]);
+        let size = u32::from_le_bytes([delayed[16], delayed[17], delayed[18], delayed[19]]);
 
         assert_eq!(slice_id, 1);
+        assert_eq!(offset, 0);
         assert_eq!(size, 100);
     }
 }

@@ -2080,7 +2080,7 @@ impl MetaStore for RedisMetaStore {
         new_slices: &[SliceDesc],
         old_slices_to_delay: &[u8],
     ) -> Result<(), MetaError> {
-        if !old_slices_to_delay.is_empty() && !old_slices_to_delay.len().is_multiple_of(12) {
+        if !old_slices_to_delay.is_empty() && !old_slices_to_delay.len().is_multiple_of(20) {
             return Err(MetaError::Internal(
                 "Invalid delayed data length".to_string(),
             ));
@@ -2133,7 +2133,7 @@ impl MetaStore for RedisMetaStore {
 
         let mut old_ids = Vec::new();
         if !old_slices_to_delay.is_empty() {
-            for chunk in old_slices_to_delay.chunks(12) {
+            for chunk in old_slices_to_delay.chunks(20) {
                 let slice_id = u64::from_le_bytes([
                     chunk[0], chunk[1], chunk[2], chunk[3], chunk[4], chunk[5], chunk[6], chunk[7],
                 ]);
