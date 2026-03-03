@@ -3,7 +3,7 @@ pub mod config;
 pub mod context;
 pub mod execute;
 pub mod executor;
-pub mod metadata;
+mod metadata;
 pub mod stage_executor;
 
 use std::collections::{HashMap, HashSet};
@@ -488,6 +488,14 @@ fn unique_ref_names(parsed_tags: &[ParsedTag]) -> Vec<String> {
     uniq
 }
 
+fn normalize_push_reference(raw_tag: &str) -> String {
+    if has_explicit_tag(raw_tag) {
+        raw_tag.to_string()
+    } else {
+        format!("{raw_tag}:latest")
+    }
+}
+
 pub fn build_image(build_args: &BuildArgs) -> Result<()> {
     if build_args.push && build_args.tags.is_empty() {
         bail!("--push requires at least one -t/--tag");
@@ -565,18 +573,22 @@ pub fn build_image(build_args: &BuildArgs) -> Result<()> {
         write_iidfile(iidfile, &image_digest)?;
     }
     if build_args.push {
+        let mut pushed_tags = HashSet::new();
         for tag in &build_args.tags {
-            push_from_layout(tag, &image_output_dir, None)?;
+            let push_ref = normalize_push_reference(tag);
+            if pushed_tags.insert(push_ref.clone()) {
+                push_from_layout(push_ref, &image_output_dir, None)?;
+            }
         }
     }
     if let Some(metadata_file) = &build_args.metadata_file {
-        let metadata = BuildMetadata {
-            tags: build_args.tags.clone(),
-            digest: image_digest.clone(),
-            id: image_digest,
-            build_args: metadata_build_args,
-            duration_ms: build_started_at.elapsed().as_millis(),
-        };
+        let metadata = BuildMetadata::new(
+            build_args.tags.clone(),
+            image_digest.clone(),
+            image_digest,
+            metadata_build_args,
+            build_started_at.elapsed().as_millis(),
+        );
         write_metadata_file(metadata_file, &metadata)?;
     }
 
@@ -592,9 +604,9 @@ mod tests {
 
     use super::{
         BuildArgs, BuildProgressMode, derive_output_name, has_explicit_tag,
-        normalize_cgroup_parent_option, parse_add_host_option, parse_dockerfile, parse_global_args,
-        parse_key_value_options, parse_shm_size, parse_tags, parse_ulimit_option,
-        read_primary_image_digest, resolve_dockerfile_path, unique_ref_names,
+        normalize_cgroup_parent_option, normalize_push_reference, parse_add_host_option,
+        parse_dockerfile, parse_global_args, parse_key_value_options, parse_shm_size, parse_tags,
+        parse_ulimit_option, read_primary_image_digest, resolve_dockerfile_path, unique_ref_names,
     };
     use clap::Parser;
     use dockerfile_parser::{BreakableStringComponent, Dockerfile, Instruction, ShellOrExecExpr};
@@ -683,6 +695,16 @@ mod tests {
         assert!(!has_explicit_tag("localhost:5000/ns/app"));
         assert!(has_explicit_tag("nginx:v1"));
         assert!(has_explicit_tag("localhost:5000/ns/app:v1"));
+    }
+
+    #[test]
+    fn test_normalize_push_reference() {
+        assert_eq!(normalize_push_reference("repo/app"), "repo/app:latest");
+        assert_eq!(normalize_push_reference("repo/app:v1"), "repo/app:v1");
+        assert_eq!(
+            normalize_push_reference("localhost:5000/repo/app"),
+            "localhost:5000/repo/app:latest"
+        );
     }
 
     #[test]

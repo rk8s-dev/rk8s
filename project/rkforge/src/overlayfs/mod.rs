@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 use std::ffi::CString;
 use std::fs;
 use std::os::fd::AsFd;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 pub static DNS_CONFIG: &str = "/etc/resolv.conf";
 pub static HOSTS_CONFIG: &str = "/etc/hosts";
@@ -619,19 +619,64 @@ fn runtime_temp_file(name: &str) -> PathBuf {
     CONFIG.build_dir.join(format!("{name}.{mount_pid}"))
 }
 
-fn ensure_target_file(path: &Path) -> Result<()> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)
-            .with_context(|| format!("Failed to create directory {}", parent.display()))?;
-    }
-    if !path.exists() {
-        fs::write(path, b"").with_context(|| format!("Failed to create {}", path.display()))?;
+fn ensure_no_symlink_components(root: &Path, target: &Path) -> Result<()> {
+    let relative = target.strip_prefix(root).with_context(|| {
+        format!(
+            "Target path {} escapes mountpoint {}",
+            target.display(),
+            root.display()
+        )
+    })?;
+
+    let mut current = root.to_path_buf();
+    for component in relative.components() {
+        match component {
+            Component::Normal(part) => current.push(part),
+            _ => {
+                bail!(
+                    "Target path {} contains unsupported component",
+                    target.display()
+                );
+            }
+        }
+
+        if let Ok(meta) = fs::symlink_metadata(&current)
+            && meta.file_type().is_symlink()
+        {
+            bail!(
+                "Refusing to use symlink in mount target path: {}",
+                current.display()
+            );
+        }
     }
     Ok(())
 }
 
-fn bind_mount_file(src: &Path, dst: &Path) -> Result<()> {
-    ensure_target_file(dst)?;
+fn ensure_target_file(root: &Path, path: &Path) -> Result<()> {
+    ensure_no_symlink_components(root, path)?;
+    if let Some(parent) = path.parent() {
+        ensure_no_symlink_components(root, parent)?;
+        fs::create_dir_all(parent)
+            .with_context(|| format!("Failed to create directory {}", parent.display()))?;
+    }
+    ensure_no_symlink_components(root, path)?;
+    if !path.exists() {
+        fs::write(path, b"").with_context(|| format!("Failed to create {}", path.display()))?;
+    } else {
+        let meta = fs::symlink_metadata(path)
+            .with_context(|| format!("Failed to inspect {}", path.display()))?;
+        if meta.file_type().is_symlink() {
+            bail!(
+                "Refusing to bind mount onto symlink target {}",
+                path.display()
+            );
+        }
+    }
+    Ok(())
+}
+
+fn bind_mount_file(root: &Path, src: &Path, dst: &Path) -> Result<()> {
+    ensure_target_file(root, dst)?;
     nix::mount::mount::<_, _, str, str>(Some(src), dst, None, nix::mount::MsFlags::MS_BIND, None)
         .with_context(|| {
             format!(
@@ -667,7 +712,7 @@ pub fn prepare_network<P: AsRef<Path>>(mountpoint: P) -> Result<()> {
         .with_context(|| format!("Failed to set ownership on {}", host_resolv_conf.display()))?;
 
     let target_resolv_conf = mountpoint.join(DNS_CONFIG.strip_prefix('/').unwrap());
-    bind_mount_file(&host_resolv_conf, &target_resolv_conf)?;
+    bind_mount_file(mountpoint, &host_resolv_conf, &target_resolv_conf)?;
 
     Ok(())
 }
@@ -704,7 +749,7 @@ pub fn prepare_hosts<P: AsRef<Path>>(mountpoint: P, add_hosts: &[BuildHostEntry]
     chown(&host_hosts_file, Some(uid), Some(gid))
         .with_context(|| format!("Failed to set ownership on {}", host_hosts_file.display()))?;
 
-    bind_mount_file(&host_hosts_file, &target_hosts)?;
+    bind_mount_file(mountpoint, &host_hosts_file, &target_hosts)?;
     Ok(())
 }
 
@@ -797,9 +842,12 @@ pub fn cleanup(args: CleanupArgs) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
+    use std::os::unix::fs::symlink;
+
     use tempfile::tempdir;
 
-    use super::MountConfig;
+    use super::{MountConfig, ensure_target_file};
 
     #[test]
     fn test_mount_config() {
@@ -825,5 +873,30 @@ mod tests {
         assert!(cfg.upper_dir.exists());
         assert!(cfg.mountpoint.exists());
         assert!(cfg.work_dir.exists());
+    }
+
+    #[test]
+    fn test_ensure_target_file_rejects_symlink_target() {
+        let root = tempdir().unwrap();
+        let etc_dir = root.path().join("etc");
+        fs::create_dir_all(&etc_dir).unwrap();
+
+        let real_file = root.path().join("real-hosts");
+        fs::write(&real_file, b"127.0.0.1 localhost\n").unwrap();
+        let symlink_target = etc_dir.join("hosts");
+        symlink(&real_file, &symlink_target).unwrap();
+
+        let err = ensure_target_file(root.path(), &symlink_target).unwrap_err();
+        assert!(err.to_string().contains("symlink"));
+    }
+
+    #[test]
+    fn test_ensure_target_file_rejects_outside_mountpoint() {
+        let root = tempdir().unwrap();
+        let outside = tempdir().unwrap();
+        let outside_target = outside.path().join("hosts");
+
+        let err = ensure_target_file(root.path(), &outside_target).unwrap_err();
+        assert!(err.to_string().contains("escapes mountpoint"));
     }
 }
