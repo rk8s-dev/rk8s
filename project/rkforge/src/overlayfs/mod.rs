@@ -687,6 +687,16 @@ fn bind_mount_file(root: &Path, src: &Path, dst: &Path) -> Result<()> {
         })
 }
 
+fn read_hosts_template(mountpoint: &Path, target_hosts: &Path) -> Result<String> {
+    ensure_no_symlink_components(mountpoint, target_hosts)?;
+    if target_hosts.exists() {
+        fs::read_to_string(target_hosts)
+            .with_context(|| format!("Failed to read {}", target_hosts.display()))
+    } else {
+        Ok("127.0.0.1 localhost\n".to_string())
+    }
+}
+
 fn umount_if_mounted(path: &Path) -> Result<()> {
     if !path.exists() {
         return Ok(());
@@ -724,12 +734,7 @@ pub fn prepare_hosts<P: AsRef<Path>>(mountpoint: P, add_hosts: &[BuildHostEntry]
 
     let mountpoint = mountpoint.as_ref();
     let target_hosts = mountpoint.join(HOSTS_CONFIG.strip_prefix('/').unwrap());
-    let mut hosts_content = if target_hosts.exists() {
-        fs::read_to_string(&target_hosts)
-            .with_context(|| format!("Failed to read {}", target_hosts.display()))?
-    } else {
-        "127.0.0.1 localhost\n".to_string()
-    };
+    let mut hosts_content = read_hosts_template(mountpoint, &target_hosts)?;
 
     if !hosts_content.ends_with('\n') {
         hosts_content.push('\n');
@@ -847,7 +852,7 @@ mod tests {
 
     use tempfile::tempdir;
 
-    use super::{MountConfig, ensure_target_file};
+    use super::{MountConfig, ensure_target_file, read_hosts_template};
 
     #[test]
     fn test_mount_config() {
@@ -898,5 +903,20 @@ mod tests {
 
         let err = ensure_target_file(root.path(), &outside_target).unwrap_err();
         assert!(err.to_string().contains("escapes mountpoint"));
+    }
+
+    #[test]
+    fn test_read_hosts_template_rejects_symlink_target() {
+        let root = tempdir().unwrap();
+        let etc_dir = root.path().join("etc");
+        fs::create_dir_all(&etc_dir).unwrap();
+
+        let leaked = root.path().join("host-secret");
+        fs::write(&leaked, b"secret").unwrap();
+        let hosts = etc_dir.join("hosts");
+        symlink(&leaked, &hosts).unwrap();
+
+        let err = read_hosts_template(root.path(), &hosts).unwrap_err();
+        assert!(err.to_string().contains("symlink"));
     }
 }
