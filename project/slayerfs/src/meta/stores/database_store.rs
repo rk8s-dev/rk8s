@@ -20,7 +20,8 @@ use crate::meta::store::{
     StatFsSnapshot,
 };
 use crate::meta::{INODE_ID_KEY, Permission, SLICE_ID_KEY};
-use crate::utils::Intervals;
+// Note: Intervals was used for merge_slices but no longer needed after
+// changing implementation to not split slices (avoiding offset change issues)
 use crate::utils::NumCastExt;
 use crate::vfs::chunk_id_for;
 use crate::vfs::fs::FileType;
@@ -3200,22 +3201,24 @@ impl MetaStore for DatabaseMetaStore {
         }
         Ok(())
     }
-    /// compact slices by splitting and removing covered portions
+    /// Merge overlapping slices within a chunk, removing only fully covered slices.
+    ///
     /// algorithm:
     /// 1. sort slices by slice_id descending (newest first)
-    /// 2. for each slice, calculate uncovered portions after subtracting ranges
-    ///    covered by newer slices
-    /// 3. create new slice descriptors for each uncovered portion
+    /// 2. for each slice, check if it's fully covered by newer slices
+    /// 3. only remove slices that are fully covered (keep partially covered ones)
     ///
-    /// note: when we split a slice, the new slice keeps the original slice_id
-    /// but with adjusted offset. the reader handles this correctly by computing
-    /// the internal offset as (read_offset - slice.offset).
+    /// note: we cannot split slices because:
+    /// - block data is stored with slice-relative offsets
+    /// - changing slice.offset without rewriting data breaks read calculations
+    /// - (read_offset - slice.offset) would be incorrect
     ///
-    /// that means：
+    /// example:
     /// - slice A: slice_id=1, offset=0, length=100 (old)
     /// - slice B: slice_id=2, offset=50, length=100 (newer)
     /// - A's [50-100] is covered by B, but [0-50] is still needed
-    /// - result: [Slice(1, 0, 50), Slice(2, 50, 100)]
+    /// - since we can't split A without rewriting, we keep all of A
+    /// - result: [Slice(1, 0, 100), Slice(2, 50, 100)]
     ///
     /// - slice A: slice_id=1, offset=0, length=100 (old)
     /// - slice B: slice_id=2, offset=0, length=150 (newer, fully covers A)
@@ -3242,22 +3245,18 @@ impl MetaStore for DatabaseMetaStore {
             let slice_start = slice.offset;
             let slice_end = slice.offset + slice.length;
 
-            // calculate uncovered portions of this slice
-            let mut intervals = Intervals::new(slice_start, slice_end);
-
+            // Check if this slice is fully covered by newer slices
+            let mut is_fully_covered = false;
             for &(covered_start, covered_end) in &covered_ranges {
-                let _ = intervals.cut(covered_start, covered_end);
+                if slice_start >= covered_start && slice_end <= covered_end {
+                    is_fully_covered = true;
+                    break;
+                }
             }
-            let remaining = intervals.collect();
-            // create new slice descriptors for each uncovered portion
-            for (start, end) in remaining {
-                let new_slice = SliceDesc {
-                    slice_id: slice.slice_id,
-                    chunk_id: slice.chunk_id,
-                    offset: start,
-                    length: end - start,
-                };
-                result_slices.push(new_slice);
+
+            if !is_fully_covered {
+                // Keep the entire slice (can't split without rewriting data)
+                result_slices.push(*slice);
             }
 
             // mark this slice's full range as covered for older slices
@@ -3285,7 +3284,30 @@ impl MetaStore for DatabaseMetaStore {
 
         let merged_slices = self.merge_slices(&slices).await?;
 
+        // Find slices that were removed (not in merged result)
+        let merged_ids: std::collections::HashSet<u64> =
+            merged_slices.iter().map(|s| s.slice_id).collect();
+        let removed_slices: Vec<&SliceDesc> = slices
+            .iter()
+            .filter(|s| !merged_ids.contains(&s.slice_id))
+            .collect();
+
+        // Create delayed data for soft deletion
+        let mut delayed_data = Vec::with_capacity(removed_slices.len() * 20);
+        for slice in &removed_slices {
+            delayed_data.extend_from_slice(&slice.slice_id.to_le_bytes());
+            delayed_data.extend_from_slice(&slice.offset.to_le_bytes());
+            let size = slice.length.min(u32::MAX as u64) as u32;
+            delayed_data.extend_from_slice(&size.to_le_bytes());
+        }
+
         self.replace_slices(&txn, chunk_id, &merged_slices).await?;
+
+        // Create delayed records for removed slices (soft delete)
+        if !delayed_data.is_empty() {
+            self.cleanup_delayed_slices(chunk_id, &delayed_data, &txn)
+                .await?;
+        }
 
         txn.commit().await.map_err(MetaError::Database)?;
         Ok(())
@@ -3361,6 +3383,20 @@ impl MetaStore for DatabaseMetaStore {
             ));
         }
 
+        // Validate: all slices must belong to the specified chunk_id
+        for slice in slices {
+            if slice.chunk_id != chunk_id {
+                warn!(
+                    inode = inode,
+                    chunk_id = chunk_id,
+                    slice_id = slice.slice_id,
+                    slice_chunk_id = slice.chunk_id,
+                    "compact_chunk failed: slice chunk_id mismatch"
+                );
+                return Err(MetaError::Internal("Slice chunk_id mismatch".to_string()));
+            }
+        }
+
         let valid_slices: Vec<SliceDesc> = slices
             .iter()
             .filter(|s| {
@@ -3387,6 +3423,41 @@ impl MetaStore for DatabaseMetaStore {
             );
             // no slices were removed, nothing to do
             return Ok(());
+        }
+
+        // Calculate which slices were actually removed
+        let compacted_ids: std::collections::HashSet<u64> =
+            compacted_slices.iter().map(|s| s.slice_id).collect();
+        let removed_ids: std::collections::HashSet<u64> = valid_slices
+            .iter()
+            .map(|s| s.slice_id)
+            .filter(|id| !compacted_ids.contains(id))
+            .collect();
+
+        // Validate: delayed data must match removed slices (if provided)
+        if !delayed.is_empty() {
+            let delayed_ids: std::collections::HashSet<u64> = delayed
+                .chunks(20)
+                .map(|chunk| {
+                    u64::from_le_bytes([
+                        chunk[0], chunk[1], chunk[2], chunk[3], chunk[4], chunk[5], chunk[6],
+                        chunk[7],
+                    ])
+                })
+                .collect();
+
+            if delayed_ids != removed_ids {
+                warn!(
+                    inode = inode,
+                    chunk_id = chunk_id,
+                    delayed_count = delayed_ids.len(),
+                    removed_count = removed_ids.len(),
+                    "compact_chunk failed: delayed data does not match removed slices"
+                );
+                return Err(MetaError::Internal(
+                    "Delayed data mismatch with removed slices".to_string(),
+                ));
+            }
         }
 
         info!(
@@ -3425,6 +3496,9 @@ impl MetaStore for DatabaseMetaStore {
         DatabaseMetaStore::process_delayed_slices(self, batch_size, max_age_secs).await
     }
 
+    /// !!! This function only deletes slices specified in old_slices_to_delay and inserts new_slices,
+    /// !!! leaving other existing slices intact. It does NOT replace all slices in the chunk.
+    /// !!! In real usage, new_slices should have newly allocated IDs to avoid conflicts.
     async fn replace_slices_for_compact(
         &self,
         chunk_id: u64,
@@ -3481,7 +3555,7 @@ impl MetaStore for DatabaseMetaStore {
                 let slice_id = u64::from_le_bytes([
                     chunk[0], chunk[1], chunk[2], chunk[3], chunk[4], chunk[5], chunk[6], chunk[7],
                 ]);
-                let _offset = u64::from_le_bytes([
+                let offset = u64::from_le_bytes([
                     chunk[8], chunk[9], chunk[10], chunk[11], chunk[12], chunk[13], chunk[14],
                     chunk[15],
                 ]);
@@ -3490,6 +3564,7 @@ impl MetaStore for DatabaseMetaStore {
                 let delayed_model = delayed_slice::ActiveModel {
                     slice_id: Set(slice_id as i64),
                     chunk_id: Set(chunk_id as i64),
+                    offset: Set(offset as i64),
                     size: Set(size as i64),
                     created_at: Set(now),
                     reason: Set("compact".to_string()),
@@ -4634,9 +4709,10 @@ mod tests {
         txn.commit().await.unwrap();
 
         // simulate compact process, mark old slice as delayed
-        // delayed data format: 12 bytes per slice (8 bytes slice_id + 4 bytes size)
+        // delayed data format: 20 bytes per slice (8 bytes slice_id + 8 bytes offset + 4 bytes size)
         let mut delayed_data = Vec::new();
         delayed_data.extend_from_slice(&old_slice_id.to_le_bytes()); // 8 bytes slice_id
+        delayed_data.extend_from_slice(&(0u64).to_le_bytes()); // 8 bytes offset
         delayed_data.extend_from_slice(&(100u32).to_le_bytes()); // 4 bytes size
         let txn = store.db.begin().await.unwrap();
         store
@@ -4896,10 +4972,11 @@ mod tests {
         assert_eq!(result[1].offset, 200);
         assert_eq!(result[1].length, 100);
 
-        // test case 2: partially overlapping slices should be split
+        // test case 2: partially overlapping slices — both kept intact
         // slice 1 (older): 0-100, slice 2 (newer): 50-150
-        // slice 1's [0-50] is not covered, so it becomes [0, 50)
-        // slice 2 is fully kept as [50, 150)
+        // slice 1 is NOT fully covered (only [50,100) is overlapped),
+        // so it must be kept with original offset/length to preserve
+        // block data addressing correctness.
         let slices = vec![
             SliceDesc {
                 slice_id: 1,
@@ -4918,12 +4995,15 @@ mod tests {
         assert_eq!(
             result.len(),
             2,
-            "partially overlapping slices should be split into minimal set"
+            "partially overlapping slices should both be kept (no splitting)"
         );
         // result is sorted by offset
-        assert_eq!(result[0].slice_id, 1, "older slice's uncovered part");
+        assert_eq!(result[0].slice_id, 1, "older slice kept intact");
         assert_eq!(result[0].offset, 0);
-        assert_eq!(result[0].length, 50, "slice 1 should be trimmed to [0, 50)");
+        assert_eq!(
+            result[0].length, 100,
+            "slice 1 must keep original length (can't trim without rewriting block data)"
+        );
         assert_eq!(result[1].slice_id, 2, "newer slice fully kept");
         assert_eq!(result[1].offset, 50);
         assert_eq!(result[1].length, 100);
@@ -4999,5 +5079,1485 @@ mod tests {
         assert_eq!(result[0].length, 100);
 
         info!("merge slices functionality test passed");
+    }
+
+    /// Test merge_slices with non-zero offset slices
+    /// This test verifies that partially covered slices with non-zero offset
+    /// are handled correctly (should NOT change slice offset to avoid breaking
+    /// block data addressing which uses slice-relative offsets)
+    #[tokio::test]
+    async fn test_merge_slices_nonzero_offset() {
+        let store = new_test_store().await;
+
+        // Test case: partially overlapping slices with non-zero offset
+        // slice 1 (older): offset=100, length=100 -> [100, 200)
+        // slice 2 (newer): offset=150, length=100 -> [150, 250)
+        // slice 1's [150-200) is covered by slice 2, but [100-150) is still needed
+        // Since we cannot split slice 1 without rewriting block data,
+        // the entire slice 1 should be kept with its original offset
+        let slices = vec![
+            SliceDesc {
+                slice_id: 1,
+                chunk_id: 1,
+                offset: 100,
+                length: 100,
+            },
+            SliceDesc {
+                slice_id: 2,
+                chunk_id: 1,
+                offset: 150,
+                length: 100,
+            },
+        ];
+        let result = store.merge_slices(&slices).await.unwrap();
+
+        // Both slices should be kept (cannot split slice 1)
+        assert_eq!(
+            result.len(),
+            2,
+            "partially covered slice with non-zero offset should be kept entirely"
+        );
+
+        // Verify slice 1 keeps its original offset (100), not changed to uncovered portion
+        let slice_1 = result.iter().find(|s| s.slice_id == 1).unwrap();
+        assert_eq!(
+            slice_1.offset, 100,
+            "slice offset should NOT be changed - would break block data addressing"
+        );
+        assert_eq!(slice_1.length, 100, "slice length should remain unchanged");
+
+        // Verify slice 2 is also kept
+        let slice_2 = result.iter().find(|s| s.slice_id == 2).unwrap();
+        assert_eq!(slice_2.offset, 150);
+        assert_eq!(slice_2.length, 100);
+
+        info!("merge slices with non-zero offset test passed");
+    }
+
+    /// Test that delayed_slice records preserve offset field correctly
+    /// This test verifies the 20-byte format (slice_id + offset + size) is
+    /// correctly parsed and the offset field is persisted in the database
+    #[tokio::test]
+    async fn test_delayed_slice_offset_persistence() {
+        let store = new_test_store().await;
+        let chunk_id = 1u64;
+        let old_slice_id = 42u64;
+        let old_slice_offset = 1234u64; // Non-zero offset to verify persistence
+        let old_slice_size = 5678u32;
+
+        // Create delayed data in 20-byte format:
+        // slice_id (8 bytes) + offset (8 bytes) + size (4 bytes)
+        let mut delayed_data = Vec::new();
+        delayed_data.extend_from_slice(&old_slice_id.to_le_bytes());
+        delayed_data.extend_from_slice(&old_slice_offset.to_le_bytes());
+        delayed_data.extend_from_slice(&old_slice_size.to_le_bytes());
+        assert_eq!(delayed_data.len(), 20, "delayed data should be 20 bytes");
+
+        // Insert delayed slice record
+        let txn = store.db.begin().await.unwrap();
+        store
+            .cleanup_delayed_slices(chunk_id, &delayed_data, &txn)
+            .await
+            .unwrap();
+        txn.commit().await.unwrap();
+
+        // Verify the delayed slice record was inserted with correct offset
+        let delayed_records: Vec<delayed_slice::Model> = DelayedSlice::find()
+            .filter(delayed_slice::Column::SliceId.eq(old_slice_id as i64))
+            .all(&store.db)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            delayed_records.len(),
+            1,
+            "should have exactly one delayed slice record"
+        );
+
+        let record = &delayed_records[0];
+        assert_eq!(
+            record.slice_id, old_slice_id as i64,
+            "slice_id should match"
+        );
+        assert_eq!(
+            record.offset, old_slice_offset as i64,
+            "offset should be correctly persisted (was missing in bug)"
+        );
+        assert_eq!(record.size, old_slice_size as i64, "size should match");
+        assert_eq!(record.chunk_id, chunk_id as i64, "chunk_id should match");
+
+        info!("delayed slice offset persistence test passed");
+    }
+
+    // ==================== Comprehensive merge_slices tests ====================
+
+    /// Verify that merge_slices enforces all slices belong to the same chunk.
+    #[tokio::test]
+    async fn test_merge_slices_different_chunk_ids_rejected() {
+        let store = new_test_store().await;
+        let slices = vec![
+            SliceDesc {
+                slice_id: 1,
+                chunk_id: 1,
+                offset: 0,
+                length: 100,
+            },
+            SliceDesc {
+                slice_id: 2,
+                chunk_id: 2,
+                offset: 0,
+                length: 100,
+            },
+        ];
+        let result = store.merge_slices(&slices).await;
+        assert!(
+            result.is_err(),
+            "should reject slices from different chunks"
+        );
+    }
+
+    /// Partial overlap where newer covers the HEAD of older slice.
+    /// Must keep both slices intact (cannot trim head without breaking addressing).
+    #[tokio::test]
+    async fn test_merge_slices_partial_head_overlap() {
+        let store = new_test_store().await;
+        // Slice A (older): [100, 200), Slice B (newer): [50, 150)
+        // B covers A's head [100, 150), A's tail [150, 200) is uncovered
+        let slices = vec![
+            SliceDesc {
+                slice_id: 1,
+                chunk_id: 1,
+                offset: 100,
+                length: 100,
+            },
+            SliceDesc {
+                slice_id: 2,
+                chunk_id: 1,
+                offset: 50,
+                length: 100,
+            },
+        ];
+        let result = store.merge_slices(&slices).await.unwrap();
+        assert_eq!(result.len(), 2, "both kept since A is not fully covered");
+        let a = result.iter().find(|s| s.slice_id == 1).unwrap();
+        assert_eq!(a.offset, 100, "slice A offset must not change");
+        assert_eq!(a.length, 100, "slice A length must not change");
+    }
+
+    /// Partial overlap where newer covers the TAIL of older slice.
+    #[tokio::test]
+    async fn test_merge_slices_partial_tail_overlap() {
+        let store = new_test_store().await;
+        // Slice A (older): [0, 100), Slice B (newer): [80, 200)
+        // B covers A's tail [80, 100), A's head [0, 80) is uncovered
+        let slices = vec![
+            SliceDesc {
+                slice_id: 1,
+                chunk_id: 1,
+                offset: 0,
+                length: 100,
+            },
+            SliceDesc {
+                slice_id: 2,
+                chunk_id: 1,
+                offset: 80,
+                length: 120,
+            },
+        ];
+        let result = store.merge_slices(&slices).await.unwrap();
+        assert_eq!(result.len(), 2);
+        let a = result.iter().find(|s| s.slice_id == 1).unwrap();
+        assert_eq!(a.offset, 0);
+        assert_eq!(a.length, 100, "slice A kept intact, not trimmed");
+    }
+
+    /// Newer slice covers the MIDDLE of older slice (sandwich).
+    #[tokio::test]
+    async fn test_merge_slices_middle_overlap() {
+        let store = new_test_store().await;
+        // A (older): [0, 200), B (newer): [50, 150)
+        // B covers [50, 150) of A, but A's [0, 50) and [150, 200) are uncovered
+        let slices = vec![
+            SliceDesc {
+                slice_id: 1,
+                chunk_id: 1,
+                offset: 0,
+                length: 200,
+            },
+            SliceDesc {
+                slice_id: 2,
+                chunk_id: 1,
+                offset: 50,
+                length: 100,
+            },
+        ];
+        let result = store.merge_slices(&slices).await.unwrap();
+        assert_eq!(result.len(), 2, "A is NOT fully covered, must keep both");
+        let a = result.iter().find(|s| s.slice_id == 1).unwrap();
+        assert_eq!(a.offset, 0);
+        assert_eq!(a.length, 200);
+    }
+
+    /// Non-zero offset scenario (the original bug scenario from the discussion).
+    /// Slice A: [100, 200), Slice B: [150, 250) — partial overlap at tail,
+    /// A is not fully covered, must keep intact.
+    #[tokio::test]
+    async fn test_merge_slices_nonzero_offset_tail_overlap() {
+        let store = new_test_store().await;
+        let slices = vec![
+            SliceDesc {
+                slice_id: 1,
+                chunk_id: 1,
+                offset: 100,
+                length: 100,
+            },
+            SliceDesc {
+                slice_id: 2,
+                chunk_id: 1,
+                offset: 150,
+                length: 100,
+            },
+        ];
+        let result = store.merge_slices(&slices).await.unwrap();
+        assert_eq!(result.len(), 2);
+        let a = result.iter().find(|s| s.slice_id == 1).unwrap();
+        assert_eq!(a.offset, 100, "offset must stay at 100");
+        assert_eq!(a.length, 100, "length must stay at 100");
+    }
+
+    /// Three slices where slice 1 is covered by the UNION of slices 2+3,
+    /// but NOT by any single slice. Slice 1 must be kept.
+    #[tokio::test]
+    async fn test_merge_slices_union_coverage_not_removed() {
+        let store = new_test_store().await;
+        // A (oldest): [0, 100), B: [0, 60), C: [50, 100)
+        // B∪C covers [0, 100) = A's range, but neither B nor C alone fully covers A.
+        let slices = vec![
+            SliceDesc {
+                slice_id: 1,
+                chunk_id: 1,
+                offset: 0,
+                length: 100,
+            },
+            SliceDesc {
+                slice_id: 2,
+                chunk_id: 1,
+                offset: 0,
+                length: 60,
+            },
+            SliceDesc {
+                slice_id: 3,
+                chunk_id: 1,
+                offset: 50,
+                length: 50,
+            },
+        ];
+        let result = store.merge_slices(&slices).await.unwrap();
+        // Current implementation checks single-range coverage, not union.
+        // A is NOT fully covered by any single covered_range entry.
+        assert_eq!(
+            result.len(),
+            3,
+            "none is fully covered by a single newer slice"
+        );
+    }
+
+    /// Exact same range: newer fully covers older.
+    #[tokio::test]
+    async fn test_merge_slices_exact_same_range() {
+        let store = new_test_store().await;
+        let slices = vec![
+            SliceDesc {
+                slice_id: 1,
+                chunk_id: 1,
+                offset: 50,
+                length: 100,
+            },
+            SliceDesc {
+                slice_id: 2,
+                chunk_id: 1,
+                offset: 50,
+                length: 100,
+            },
+        ];
+        let result = store.merge_slices(&slices).await.unwrap();
+        assert_eq!(
+            result.len(),
+            1,
+            "older slice fully covered by exact same range"
+        );
+        assert_eq!(result[0].slice_id, 2);
+    }
+
+    /// Chain coverage: A fully covered by B, B fully covered by C.
+    #[tokio::test]
+    async fn test_merge_slices_chain_coverage() {
+        let store = new_test_store().await;
+        // A: [0, 50), B: [0, 80), C: [0, 100)
+        let slices = vec![
+            SliceDesc {
+                slice_id: 1,
+                chunk_id: 1,
+                offset: 0,
+                length: 50,
+            },
+            SliceDesc {
+                slice_id: 2,
+                chunk_id: 1,
+                offset: 0,
+                length: 80,
+            },
+            SliceDesc {
+                slice_id: 3,
+                chunk_id: 1,
+                offset: 0,
+                length: 100,
+            },
+        ];
+        let result = store.merge_slices(&slices).await.unwrap();
+        assert_eq!(result.len(), 1, "only the newest slice survives");
+        assert_eq!(result[0].slice_id, 3);
+    }
+
+    /// Adjacent but non-overlapping slices: both kept.
+    #[tokio::test]
+    async fn test_merge_slices_adjacent_no_overlap() {
+        let store = new_test_store().await;
+        let slices = vec![
+            SliceDesc {
+                slice_id: 1,
+                chunk_id: 1,
+                offset: 0,
+                length: 100,
+            },
+            SliceDesc {
+                slice_id: 2,
+                chunk_id: 1,
+                offset: 100,
+                length: 100,
+            },
+        ];
+        let result = store.merge_slices(&slices).await.unwrap();
+        assert_eq!(result.len(), 2, "adjacent slices are non-overlapping");
+    }
+
+    /// Many slices, some fully covered and some not.
+    #[tokio::test]
+    async fn test_merge_slices_complex_scenario() {
+        let store = new_test_store().await;
+        // Timeline (oldest→newest): 1, 2, 3, 4, 5
+        // 1: [0, 50)   — covered by 2 AND 5
+        // 2: [0, 100)  — covered by 5
+        // 3: [200, 300) — not covered by any single newer slice
+        // 4: [250, 280) — newer than 3 but smaller
+        // 5: [0, 100)
+        let slices = vec![
+            SliceDesc {
+                slice_id: 1,
+                chunk_id: 1,
+                offset: 0,
+                length: 50,
+            },
+            SliceDesc {
+                slice_id: 2,
+                chunk_id: 1,
+                offset: 0,
+                length: 100,
+            },
+            SliceDesc {
+                slice_id: 3,
+                chunk_id: 1,
+                offset: 200,
+                length: 100,
+            },
+            SliceDesc {
+                slice_id: 4,
+                chunk_id: 1,
+                offset: 250,
+                length: 30,
+            },
+            SliceDesc {
+                slice_id: 5,
+                chunk_id: 1,
+                offset: 0,
+                length: 100,
+            },
+        ];
+        let result = store.merge_slices(&slices).await.unwrap();
+        let ids: Vec<u64> = result.iter().map(|s| s.slice_id).collect();
+        // 1: fully covered by 2 AND 5 → removed
+        assert!(!ids.contains(&1), "slice 1 fully covered by 2");
+        // 2: fully covered by 5 → removed
+        assert!(!ids.contains(&2), "slice 2 fully covered by 5");
+        // 3: NOT fully covered (only [250, 280) covered by 4) → kept
+        assert!(ids.contains(&3), "slice 3 not fully covered");
+        // 4: newer, not covered → kept
+        assert!(ids.contains(&4), "slice 4 newer, kept");
+        // 5: newest in [0,100), not covered → kept
+        assert!(ids.contains(&5), "slice 5 newest, kept");
+    }
+
+    /// Zero-length slice should be handled (edge case).
+    #[tokio::test]
+    async fn test_merge_slices_zero_length() {
+        let store = new_test_store().await;
+        let slices = vec![
+            SliceDesc {
+                slice_id: 1,
+                chunk_id: 1,
+                offset: 0,
+                length: 0,
+            },
+            SliceDesc {
+                slice_id: 2,
+                chunk_id: 1,
+                offset: 0,
+                length: 100,
+            },
+        ];
+        let result = store.merge_slices(&slices).await.unwrap();
+        // A zero-length slice at offset 0: start=0, end=0.
+        // Coverage check: 0 >= 0 && 0 <= 100 → fully covered → removed
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].slice_id, 2);
+    }
+
+    // ==================== Comprehensive compact_chunk tests ====================
+
+    /// Compact with partially overlapping slices — no slices removed (both kept).
+    #[tokio::test]
+    async fn test_compact_chunk_partial_overlap_no_change() {
+        let store = new_test_store().await;
+        let chunk_id = 10u64;
+        // Slice 1: [0, 100), Slice 2: [50, 150) — partial overlap, neither fully covered
+        let slices = vec![
+            SliceDesc {
+                slice_id: 1,
+                chunk_id,
+                offset: 0,
+                length: 100,
+            },
+            SliceDesc {
+                slice_id: 2,
+                chunk_id,
+                offset: 50,
+                length: 100,
+            },
+        ];
+        let txn = store.db.begin().await.unwrap();
+        for s in &slices {
+            let model = slice_meta::ActiveModel {
+                slice_id: Set(s.slice_id as i64),
+                chunk_id: Set(chunk_id as i64),
+                offset: Set(s.offset as i64),
+                length: Set(s.length as i64),
+                ..Default::default()
+            };
+            model.insert(&txn).await.unwrap();
+        }
+        txn.commit().await.unwrap();
+
+        let result = store
+            .compact_chunk(1, 0, &[], &slices, 0, 0, chunk_id, 150, &[])
+            .await;
+        assert!(result.is_ok());
+
+        let final_slices = store.get_slices(chunk_id).await.unwrap();
+        assert_eq!(
+            final_slices.len(),
+            2,
+            "partial overlap: no slices can be removed, count unchanged"
+        );
+    }
+
+    /// Compact with chain of fully-covered slices → cascading removal.
+    #[tokio::test]
+    async fn test_compact_chunk_cascading_full_coverage() {
+        let store = new_test_store().await;
+        let chunk_id = 20u64;
+        // 1: [0,50), 2: [0,80), 3: [0,100) — 1 covered by 2, 2 covered by 3
+        let slices = vec![
+            SliceDesc {
+                slice_id: 1,
+                chunk_id,
+                offset: 0,
+                length: 50,
+            },
+            SliceDesc {
+                slice_id: 2,
+                chunk_id,
+                offset: 0,
+                length: 80,
+            },
+            SliceDesc {
+                slice_id: 3,
+                chunk_id,
+                offset: 0,
+                length: 100,
+            },
+        ];
+        let txn = store.db.begin().await.unwrap();
+        for s in &slices {
+            let model = slice_meta::ActiveModel {
+                slice_id: Set(s.slice_id as i64),
+                chunk_id: Set(chunk_id as i64),
+                offset: Set(s.offset as i64),
+                length: Set(s.length as i64),
+                ..Default::default()
+            };
+            model.insert(&txn).await.unwrap();
+        }
+        txn.commit().await.unwrap();
+
+        // Prepare delayed data for slices 1 and 2 (format: slice_id + offset + size = 20 bytes each)
+        let mut delayed_data = Vec::new();
+        // Slice 1: offset=0, length=50
+        delayed_data.extend_from_slice(&1u64.to_le_bytes());
+        delayed_data.extend_from_slice(&0u64.to_le_bytes());
+        delayed_data.extend_from_slice(&50u32.to_le_bytes());
+        // Slice 2: offset=0, length=80
+        delayed_data.extend_from_slice(&2u64.to_le_bytes());
+        delayed_data.extend_from_slice(&0u64.to_le_bytes());
+        delayed_data.extend_from_slice(&80u32.to_le_bytes());
+
+        let result = store
+            .compact_chunk(1, 0, &[], &slices, 0, 0, chunk_id, 100, &delayed_data)
+            .await;
+        assert!(result.is_ok());
+
+        let final_slices = store.get_slices(chunk_id).await.unwrap();
+        assert_eq!(final_slices.len(), 1, "only slice 3 should remain");
+        assert_eq!(final_slices[0].slice_id, 3);
+
+        // Verify delayed slices were created for removed slices
+        let delayed: Vec<delayed_slice::Model> = DelayedSlice::find()
+            .filter(delayed_slice::Column::ChunkId.eq(chunk_id as i64))
+            .all(&store.db)
+            .await
+            .unwrap();
+        assert_eq!(
+            delayed.len(),
+            2,
+            "slices 1 and 2 should be in delayed table"
+        );
+        let delayed_ids: Vec<i64> = delayed.iter().map(|d| d.slice_id).collect();
+        assert!(delayed_ids.contains(&1));
+        assert!(delayed_ids.contains(&2));
+    }
+
+    /// compact_chunk with invalid chunk_id=0 returns error.
+    #[tokio::test]
+    async fn test_compact_chunk_invalid_chunk_id() {
+        let store = new_test_store().await;
+        let slices = vec![
+            SliceDesc {
+                slice_id: 1,
+                chunk_id: 0,
+                offset: 0,
+                length: 50,
+            },
+            SliceDesc {
+                slice_id: 2,
+                chunk_id: 0,
+                offset: 0,
+                length: 100,
+            },
+        ];
+        let result = store
+            .compact_chunk(1, 0, &[], &slices, 0, 0, 0, 100, &[])
+            .await;
+        assert!(result.is_err(), "chunk_id=0 should be rejected");
+    }
+
+    /// compact_chunk with fewer than 2 slices is a no-op.
+    #[tokio::test]
+    async fn test_compact_chunk_single_slice_noop() {
+        let store = new_test_store().await;
+        let chunk_id = 30u64;
+        let slices = vec![SliceDesc {
+            slice_id: 1,
+            chunk_id,
+            offset: 0,
+            length: 100,
+        }];
+        let txn = store.db.begin().await.unwrap();
+        let model = slice_meta::ActiveModel {
+            slice_id: Set(1),
+            chunk_id: Set(chunk_id as i64),
+            offset: Set(0),
+            length: Set(100),
+            ..Default::default()
+        };
+        model.insert(&txn).await.unwrap();
+        txn.commit().await.unwrap();
+
+        let result = store
+            .compact_chunk(1, 0, &[], &slices, 0, 0, chunk_id, 100, &[])
+            .await;
+        assert!(result.is_ok());
+
+        let final_slices = store.get_slices(chunk_id).await.unwrap();
+        assert_eq!(final_slices.len(), 1, "single slice is unchanged");
+    }
+
+    /// compact_chunk with size=0 returns error.
+    #[tokio::test]
+    async fn test_compact_chunk_zero_size() {
+        let store = new_test_store().await;
+        let slices = vec![
+            SliceDesc {
+                slice_id: 1,
+                chunk_id: 1,
+                offset: 0,
+                length: 50,
+            },
+            SliceDesc {
+                slice_id: 2,
+                chunk_id: 1,
+                offset: 0,
+                length: 100,
+            },
+        ];
+        let result = store
+            .compact_chunk(1, 0, &[], &slices, 0, 0, 1, 0, &[])
+            .await;
+        assert!(result.is_err(), "size=0 should be rejected");
+    }
+
+    /// Slices that exceed chunk bounds are filtered out.
+    #[tokio::test]
+    async fn test_compact_chunk_out_of_bounds_slices_filtered() {
+        let store = new_test_store().await;
+        let chunk_id = 40u64;
+        // Slice 1: [0, 50) — within bounds
+        // Slice 2: [0, 100) — within bounds, covers slice 1
+        // Slice 3: [90, 200) — exceeds size=150 → filtered out
+        let slices = vec![
+            SliceDesc {
+                slice_id: 1,
+                chunk_id,
+                offset: 0,
+                length: 50,
+            },
+            SliceDesc {
+                slice_id: 2,
+                chunk_id,
+                offset: 0,
+                length: 100,
+            },
+            SliceDesc {
+                slice_id: 3,
+                chunk_id,
+                offset: 90,
+                length: 110,
+            },
+        ];
+        let txn = store.db.begin().await.unwrap();
+        for s in &slices {
+            let model = slice_meta::ActiveModel {
+                slice_id: Set(s.slice_id as i64),
+                chunk_id: Set(chunk_id as i64),
+                offset: Set(s.offset as i64),
+                length: Set(s.length as i64),
+                ..Default::default()
+            };
+            model.insert(&txn).await.unwrap();
+        }
+        txn.commit().await.unwrap();
+
+        // size=150, pos=0 → chunk_end=150. Slice 3 end=200 > 150 → filtered.
+        let result = store
+            .compact_chunk(1, 0, &[], &slices, 0, 0, chunk_id, 150, &[])
+            .await;
+        assert!(result.is_ok());
+
+        let final_slices = store.get_slices(chunk_id).await.unwrap();
+        // Valid slices [1, 2]: 1 fully covered by 2 → removed.
+        // replace_slices replaces ALL slices for the chunk with merged result.
+        assert_eq!(final_slices.len(), 1);
+        assert_eq!(final_slices[0].slice_id, 2);
+    }
+
+    /// Delayed data with invalid length (not multiple of 20) is rejected.
+    #[tokio::test]
+    async fn test_compact_chunk_invalid_delayed_data() {
+        let store = new_test_store().await;
+        let slices = vec![
+            SliceDesc {
+                slice_id: 1,
+                chunk_id: 1,
+                offset: 0,
+                length: 50,
+            },
+            SliceDesc {
+                slice_id: 2,
+                chunk_id: 1,
+                offset: 0,
+                length: 100,
+            },
+        ];
+        // 15 bytes — not a multiple of 20
+        let bad_delayed = vec![0u8; 15];
+        let result = store
+            .compact_chunk(1, 0, &[], &slices, 0, 0, 1, 100, &bad_delayed)
+            .await;
+        assert!(
+            result.is_err(),
+            "invalid delayed data length should be rejected"
+        );
+    }
+
+    // ==================== Comprehensive GC tests ====================
+
+    /// GC respects min_age: delayed slices younger than threshold are NOT deleted.
+    #[tokio::test]
+    async fn test_gc_respects_min_age() {
+        let store = new_test_store().await;
+        let chunk_id = 50u64;
+
+        // Insert a delayed slice with current timestamp
+        let mut delayed_data = Vec::new();
+        delayed_data.extend_from_slice(&(42u64).to_le_bytes());
+        delayed_data.extend_from_slice(&(0u64).to_le_bytes());
+        delayed_data.extend_from_slice(&(100u32).to_le_bytes());
+
+        let txn = store.db.begin().await.unwrap();
+        store
+            .cleanup_delayed_slices(chunk_id, &delayed_data, &txn)
+            .await
+            .unwrap();
+        txn.commit().await.unwrap();
+
+        // GC with max_age=3600 — slice was just created, should NOT be processed
+        let deleted = store.process_delayed_slices(100, 3600).await.unwrap();
+        assert!(deleted.is_empty(), "fresh delayed slice should not be GC'd");
+
+        // Verify it's still in the delayed table
+        let remaining: Vec<delayed_slice::Model> = DelayedSlice::find()
+            .filter(delayed_slice::Column::ChunkId.eq(chunk_id as i64))
+            .all(&store.db)
+            .await
+            .unwrap();
+        assert_eq!(remaining.len(), 1, "delayed slice should still exist");
+    }
+
+    /// GC processes multiple delayed slices in batch.
+    #[tokio::test]
+    async fn test_gc_batch_processing() {
+        let store = new_test_store().await;
+        let chunk_id = 60u64;
+
+        // Create slice_meta entries so they can be deleted
+        let txn = store.db.begin().await.unwrap();
+        for i in 1u64..=5 {
+            let model = slice_meta::ActiveModel {
+                slice_id: Set(i as i64),
+                chunk_id: Set(chunk_id as i64),
+                offset: Set(0),
+                length: Set(100),
+                ..Default::default()
+            };
+            model.insert(&txn).await.unwrap();
+        }
+        txn.commit().await.unwrap();
+
+        // Insert 5 delayed slices
+        let mut delayed_data = Vec::new();
+        for i in 1u64..=5 {
+            delayed_data.extend_from_slice(&i.to_le_bytes());
+            delayed_data.extend_from_slice(&(0u64).to_le_bytes());
+            delayed_data.extend_from_slice(&(100u32).to_le_bytes());
+        }
+        let txn = store.db.begin().await.unwrap();
+        store
+            .cleanup_delayed_slices(chunk_id, &delayed_data, &txn)
+            .await
+            .unwrap();
+        txn.commit().await.unwrap();
+
+        // GC with max_age=-1 (process immediately)
+        let deleted = store.process_delayed_slices(100, -1).await.unwrap();
+        assert_eq!(deleted.len(), 5, "all 5 delayed slices should be GC'd");
+
+        // Verify all slice_meta entries are gone
+        let remaining_slices = store.get_slices(chunk_id).await.unwrap();
+        assert!(
+            remaining_slices.is_empty(),
+            "all slices should be hard-deleted"
+        );
+
+        // Verify delayed table is clean
+        let remaining_delayed: Vec<delayed_slice::Model> = DelayedSlice::find()
+            .filter(delayed_slice::Column::ChunkId.eq(chunk_id as i64))
+            .all(&store.db)
+            .await
+            .unwrap();
+        assert!(
+            remaining_delayed.is_empty(),
+            "delayed table should be clean"
+        );
+    }
+
+    /// GC batch_size limits the number of slices processed per run.
+    #[tokio::test]
+    async fn test_gc_batch_size_limit() {
+        let store = new_test_store().await;
+        let chunk_id = 70u64;
+
+        // Create 5 slice_meta entries
+        let txn = store.db.begin().await.unwrap();
+        for i in 1u64..=5 {
+            let model = slice_meta::ActiveModel {
+                slice_id: Set(i as i64),
+                chunk_id: Set(chunk_id as i64),
+                offset: Set(0),
+                length: Set(100),
+                ..Default::default()
+            };
+            model.insert(&txn).await.unwrap();
+        }
+        txn.commit().await.unwrap();
+
+        // Insert 5 delayed slices
+        let mut delayed_data = Vec::new();
+        for i in 1u64..=5 {
+            delayed_data.extend_from_slice(&i.to_le_bytes());
+            delayed_data.extend_from_slice(&(0u64).to_le_bytes());
+            delayed_data.extend_from_slice(&(100u32).to_le_bytes());
+        }
+        let txn = store.db.begin().await.unwrap();
+        store
+            .cleanup_delayed_slices(chunk_id, &delayed_data, &txn)
+            .await
+            .unwrap();
+        txn.commit().await.unwrap();
+
+        // GC with batch_size=2 — only 2 should be processed
+        let deleted = store.process_delayed_slices(2, -1).await.unwrap();
+        assert_eq!(deleted.len(), 2, "only 2 should be processed (batch limit)");
+
+        // Process the rest
+        let deleted2 = store.process_delayed_slices(10, -1).await.unwrap();
+        assert_eq!(deleted2.len(), 3, "remaining 3 should be processed");
+    }
+
+    /// GC correctly returns (slice_id, offset, size) for block store cleanup.
+    #[tokio::test]
+    async fn test_gc_returns_correct_block_cleanup_info() {
+        let store = new_test_store().await;
+        let chunk_id = 80u64;
+
+        let txn = store.db.begin().await.unwrap();
+        let model = slice_meta::ActiveModel {
+            slice_id: Set(42),
+            chunk_id: Set(chunk_id as i64),
+            offset: Set(1234),
+            length: Set(5678),
+            ..Default::default()
+        };
+        model.insert(&txn).await.unwrap();
+        txn.commit().await.unwrap();
+
+        // Insert delayed with specific offset
+        let mut delayed_data = Vec::new();
+        delayed_data.extend_from_slice(&(42u64).to_le_bytes());
+        delayed_data.extend_from_slice(&(1234u64).to_le_bytes());
+        delayed_data.extend_from_slice(&(5678u32).to_le_bytes());
+
+        let txn = store.db.begin().await.unwrap();
+        store
+            .cleanup_delayed_slices(chunk_id, &delayed_data, &txn)
+            .await
+            .unwrap();
+        txn.commit().await.unwrap();
+
+        let deleted = store.process_delayed_slices(100, -1).await.unwrap();
+        assert_eq!(deleted.len(), 1);
+        let (sid, offset, size) = deleted[0];
+        assert_eq!(sid, 42, "slice_id");
+        assert_eq!(offset, 1234, "offset for block cleanup");
+        assert_eq!(size, 5678, "size for block cleanup");
+    }
+
+    /// GC on empty delayed table is a no-op.
+    #[tokio::test]
+    async fn test_gc_empty_delayed_table() {
+        let store = new_test_store().await;
+        let deleted = store.process_delayed_slices(100, -1).await.unwrap();
+        assert!(deleted.is_empty());
+    }
+
+    // ==================== Threshold trigger tests ====================
+
+    /// should_compact_chunk with exact threshold boundary (5 slices, 0 fragmentation).
+    #[tokio::test]
+    async fn test_threshold_min_slices_no_fragmentation() {
+        let store = new_test_store().await;
+        let chunk_id = 90u64;
+
+        // Add 5 non-overlapping slices — no fragmentation
+        let txn = store.db.begin().await.unwrap();
+        for i in 0u64..5 {
+            let model = slice_meta::ActiveModel {
+                slice_id: Set(i as i64 + 1),
+                chunk_id: Set(chunk_id as i64),
+                offset: Set((i * 100) as i64),
+                length: Set(100),
+                ..Default::default()
+            };
+            model.insert(&txn).await.unwrap();
+        }
+        txn.commit().await.unwrap();
+
+        let (should, _is_sync) = store.should_compact_chunk(chunk_id).await.unwrap();
+        assert!(
+            !should,
+            "5 non-overlapping slices have 0 fragmentation, skip"
+        );
+    }
+
+    /// should_compact_chunk with high fragmentation triggers compact.
+    #[tokio::test]
+    async fn test_threshold_high_fragmentation_triggers() {
+        let store = new_test_store().await;
+        let chunk_id = 95u64;
+
+        // 5 identical slices → 4 are fully covered → high fragmentation
+        let txn = store.db.begin().await.unwrap();
+        for i in 1u64..=5 {
+            let model = slice_meta::ActiveModel {
+                slice_id: Set(i as i64),
+                chunk_id: Set(chunk_id as i64),
+                offset: Set(0),
+                length: Set(100),
+                ..Default::default()
+            };
+            model.insert(&txn).await.unwrap();
+        }
+        txn.commit().await.unwrap();
+
+        let (should, _is_sync) = store.should_compact_chunk(chunk_id).await.unwrap();
+        assert!(
+            should,
+            "5 identical slices = high fragmentation, should compact"
+        );
+    }
+
+    /// get_chunk_compact_stats returns correct fragmentation ratio.
+    #[tokio::test]
+    async fn test_compact_stats_fragmentation_ratio() {
+        let store = new_test_store().await;
+        let chunk_id = 100u64;
+
+        // 2 identical slices: total=200, merged=100, fragmentation=0.5
+        let txn = store.db.begin().await.unwrap();
+        for i in 1u64..=2 {
+            let model = slice_meta::ActiveModel {
+                slice_id: Set(i as i64),
+                chunk_id: Set(chunk_id as i64),
+                offset: Set(0),
+                length: Set(100),
+                ..Default::default()
+            };
+            model.insert(&txn).await.unwrap();
+        }
+        txn.commit().await.unwrap();
+
+        let (count, total_size, frag_ratio) =
+            store.get_chunk_compact_stats(chunk_id).await.unwrap();
+        assert_eq!(count, 2);
+        assert_eq!(total_size, 200);
+        assert!(
+            (frag_ratio - 0.5).abs() < 0.01,
+            "fragmentation should be ~0.5, got {}",
+            frag_ratio
+        );
+    }
+
+    // ==================== Integration: compact then GC end-to-end ====================
+
+    /// End-to-end: write overlapping slices → compact → GC → verify final state.
+    #[tokio::test]
+    async fn test_end_to_end_compact_then_gc() {
+        let store = new_test_store().await;
+        let chunk_id = 200u64;
+
+        // Write 3 slices where 1 and 2 are fully covered by 3
+        let txn = store.db.begin().await.unwrap();
+        for (id, offset, length) in [(1, 0, 50), (2, 10, 60), (3, 0, 100)] {
+            let model = slice_meta::ActiveModel {
+                slice_id: Set(id),
+                chunk_id: Set(chunk_id as i64),
+                offset: Set(offset),
+                length: Set(length),
+                ..Default::default()
+            };
+            model.insert(&txn).await.unwrap();
+        }
+        txn.commit().await.unwrap();
+
+        // Step 1: compact
+        let slices = store.get_slices(chunk_id).await.unwrap();
+        assert_eq!(slices.len(), 3);
+
+        // Prepare delayed data for slices 1 and 2 (fully covered by slice 3)
+        let mut delayed_data = Vec::new();
+        // Slice 1: id=1, offset=0, length=50
+        delayed_data.extend_from_slice(&1u64.to_le_bytes());
+        delayed_data.extend_from_slice(&0u64.to_le_bytes());
+        delayed_data.extend_from_slice(&50u32.to_le_bytes());
+        // Slice 2: id=2, offset=10, length=60
+        delayed_data.extend_from_slice(&2u64.to_le_bytes());
+        delayed_data.extend_from_slice(&10u64.to_le_bytes());
+        delayed_data.extend_from_slice(&60u32.to_le_bytes());
+
+        let result = store
+            .compact_chunk(1, 0, &[], &slices, 0, 0, chunk_id, 100, &delayed_data)
+            .await;
+        assert!(result.is_ok());
+
+        let after_compact = store.get_slices(chunk_id).await.unwrap();
+        assert_eq!(after_compact.len(), 1, "only slice 3 should remain");
+        assert_eq!(after_compact[0].slice_id, 3);
+
+        // Step 2: verify delayed slices
+        let delayed: Vec<delayed_slice::Model> = DelayedSlice::find()
+            .filter(delayed_slice::Column::ChunkId.eq(chunk_id as i64))
+            .all(&store.db)
+            .await
+            .unwrap();
+        assert_eq!(delayed.len(), 2, "slices 1 and 2 should be delayed");
+
+        // Step 3: GC
+        let gc_result = store.process_delayed_slices(100, -1).await.unwrap();
+        assert_eq!(gc_result.len(), 2, "2 slices should be hard-deleted");
+
+        // Step 4: verify delayed table is clean
+        let delayed_after: Vec<delayed_slice::Model> = DelayedSlice::find()
+            .filter(delayed_slice::Column::ChunkId.eq(chunk_id as i64))
+            .all(&store.db)
+            .await
+            .unwrap();
+        assert!(delayed_after.is_empty());
+
+        // Final metadata: only slice 3 remains
+        let final_slices = store.get_slices(chunk_id).await.unwrap();
+        assert_eq!(final_slices.len(), 1);
+        assert_eq!(final_slices[0].slice_id, 3);
+    }
+
+    /// End-to-end: repeated writes to same range → compact → verify data range.
+    #[tokio::test]
+    async fn test_end_to_end_repeated_overwrites() {
+        let store = new_test_store().await;
+        let chunk_id = 210u64;
+
+        // Simulate 10 writes to the same range [0, 100), each newer fully covers previous
+        let txn = store.db.begin().await.unwrap();
+        for i in 1u64..=10 {
+            let model = slice_meta::ActiveModel {
+                slice_id: Set(i as i64),
+                chunk_id: Set(chunk_id as i64),
+                offset: Set(0),
+                length: Set(100),
+                ..Default::default()
+            };
+            model.insert(&txn).await.unwrap();
+        }
+        txn.commit().await.unwrap();
+
+        let slices = store.get_slices(chunk_id).await.unwrap();
+        assert_eq!(slices.len(), 10);
+
+        // Prepare delayed data for slices 1-9 (all fully covered by slice 10)
+        let mut delayed_data = Vec::new();
+        for i in 1u64..=9 {
+            delayed_data.extend_from_slice(&i.to_le_bytes()); // slice_id
+            delayed_data.extend_from_slice(&0u64.to_le_bytes()); // offset
+            delayed_data.extend_from_slice(&100u32.to_le_bytes()); // length
+        }
+
+        let result = store
+            .compact_chunk(1, 0, &[], &slices, 0, 0, chunk_id, 100, &delayed_data)
+            .await;
+        assert!(result.is_ok());
+
+        let after_compact = store.get_slices(chunk_id).await.unwrap();
+        assert_eq!(after_compact.len(), 1, "only the latest slice survives");
+        assert_eq!(after_compact[0].slice_id, 10, "newest slice kept");
+
+        // GC
+        let gc_result = store.process_delayed_slices(100, -1).await.unwrap();
+        assert_eq!(gc_result.len(), 9, "9 old slices should be GC'd");
+    }
+
+    /// compact_chunk_with_delay internal method test.
+    #[tokio::test]
+    async fn test_compact_chunk_with_delay() {
+        let store = new_test_store().await;
+        let chunk_id = 220u64;
+
+        // 1: [0, 50), 2: [0, 100) — 1 is fully covered by 2
+        let txn = store.db.begin().await.unwrap();
+        for (id, len) in [(1i64, 50i64), (2, 100)] {
+            let model = slice_meta::ActiveModel {
+                slice_id: Set(id),
+                chunk_id: Set(chunk_id as i64),
+                offset: Set(0),
+                length: Set(len),
+                ..Default::default()
+            };
+            model.insert(&txn).await.unwrap();
+        }
+        txn.commit().await.unwrap();
+
+        store.compact_chunk_with_delay(chunk_id).await.unwrap();
+
+        let slices = store.get_slices(chunk_id).await.unwrap();
+        assert_eq!(slices.len(), 1);
+        assert_eq!(slices[0].slice_id, 2);
+
+        let delayed: Vec<delayed_slice::Model> = DelayedSlice::find()
+            .filter(delayed_slice::Column::ChunkId.eq(chunk_id as i64))
+            .all(&store.db)
+            .await
+            .unwrap();
+        assert_eq!(delayed.len(), 1);
+        assert_eq!(delayed[0].slice_id, 1);
+    }
+
+    /// run_compact_by_threshold processes multiple chunks.
+    #[tokio::test]
+    async fn test_run_compact_by_threshold_multi_chunk() {
+        let store = new_test_store().await;
+
+        // Chunk A: 5 identical slices → should compact
+        let txn = store.db.begin().await.unwrap();
+        for i in 1u64..=5 {
+            let model = slice_meta::ActiveModel {
+                slice_id: Set(i as i64),
+                chunk_id: Set(300),
+                offset: Set(0),
+                length: Set(100),
+                ..Default::default()
+            };
+            model.insert(&txn).await.unwrap();
+        }
+        // Chunk B: 2 non-overlapping slices → should NOT compact (< 5)
+        for i in 6u64..=7 {
+            let model = slice_meta::ActiveModel {
+                slice_id: Set(i as i64),
+                chunk_id: Set(301),
+                offset: Set(((i - 6) * 200) as i64),
+                length: Set(100),
+                ..Default::default()
+            };
+            model.insert(&txn).await.unwrap();
+        }
+        txn.commit().await.unwrap();
+
+        let compacted = store.run_compact_by_threshold().await.unwrap();
+        assert_eq!(compacted, 1, "only chunk A should be compacted");
+
+        // Chunk A: 5→1
+        let slices_a = store.get_slices(300).await.unwrap();
+        assert_eq!(slices_a.len(), 1);
+        // Chunk B: unchanged
+        let slices_b = store.get_slices(301).await.unwrap();
+        assert_eq!(slices_b.len(), 2);
+    }
+
+    // ==================== Edge case / robustness tests ====================
+
+    /// merge_slices preserves order when multiple non-overlapping slices exist.
+    #[tokio::test]
+    async fn test_merge_slices_ordering() {
+        let store = new_test_store().await;
+        let slices = vec![
+            SliceDesc {
+                slice_id: 3,
+                chunk_id: 1,
+                offset: 200,
+                length: 50,
+            },
+            SliceDesc {
+                slice_id: 1,
+                chunk_id: 1,
+                offset: 0,
+                length: 50,
+            },
+            SliceDesc {
+                slice_id: 2,
+                chunk_id: 1,
+                offset: 100,
+                length: 50,
+            },
+        ];
+        let result = store.merge_slices(&slices).await.unwrap();
+        assert_eq!(result.len(), 3);
+        // Should be sorted by offset
+        assert_eq!(result[0].offset, 0);
+        assert_eq!(result[1].offset, 100);
+        assert_eq!(result[2].offset, 200);
+    }
+
+    /// cleanup_delayed_slices rejects non-multiple-of-20 data.
+    #[tokio::test]
+    async fn test_cleanup_delayed_slices_invalid_length() {
+        let store = new_test_store().await;
+        let txn = store.db.begin().await.unwrap();
+        let result = store.cleanup_delayed_slices(1, &[1, 2, 3], &txn).await;
+        assert!(result.is_err());
+    }
+
+    /// cleanup_delayed_slices with empty data is a no-op.
+    #[tokio::test]
+    async fn test_cleanup_delayed_slices_empty() {
+        let store = new_test_store().await;
+        let txn = store.db.begin().await.unwrap();
+        let result = store.cleanup_delayed_slices(1, &[], &txn).await;
+        assert!(result.is_ok());
+        txn.commit().await.unwrap();
+    }
+
+    /// Compact on a chunk where all valid slices are filtered produces cleanup.
+    #[tokio::test]
+    async fn test_compact_chunk_all_filtered() {
+        let store = new_test_store().await;
+        let chunk_id = 400u64;
+        // All slices exceed chunk bounds
+        let slices = vec![
+            SliceDesc {
+                slice_id: 1,
+                chunk_id,
+                offset: 0,
+                length: 200,
+            },
+            SliceDesc {
+                slice_id: 2,
+                chunk_id,
+                offset: 0,
+                length: 300,
+            },
+        ];
+        let txn = store.db.begin().await.unwrap();
+        for s in &slices {
+            let model = slice_meta::ActiveModel {
+                slice_id: Set(s.slice_id as i64),
+                chunk_id: Set(chunk_id as i64),
+                offset: Set(s.offset as i64),
+                length: Set(s.length as i64),
+                ..Default::default()
+            };
+            model.insert(&txn).await.unwrap();
+        }
+        txn.commit().await.unwrap();
+
+        // size=100 → both slices have end > 100, all filtered out
+        let result = store
+            .compact_chunk(1, 0, &[], &slices, 0, 0, chunk_id, 100, &[])
+            .await;
+        assert!(result.is_ok());
+    }
+
+    /// prepare_delayed_data encoding is consistent with cleanup_delayed_slices decoding.
+    #[tokio::test]
+    async fn test_delayed_data_encode_decode_roundtrip() {
+        let store = new_test_store().await;
+        let slices = vec![
+            SliceDesc {
+                slice_id: 42,
+                chunk_id: 1,
+                offset: 1234,
+                length: 5678,
+            },
+            SliceDesc {
+                slice_id: 99,
+                chunk_id: 1,
+                offset: 0,
+                length: u32::MAX as u64,
+            },
+        ];
+        let replaced_ids = vec![42u64, 99];
+        let delayed_data = DatabaseMetaStore::prepare_delayed_data(&slices, &replaced_ids);
+
+        assert_eq!(delayed_data.len(), 40, "2 slices x 20 bytes");
+
+        // Decode first entry
+        let sid1 = u64::from_le_bytes(delayed_data[0..8].try_into().unwrap());
+        let off1 = u64::from_le_bytes(delayed_data[8..16].try_into().unwrap());
+        let sz1 = u32::from_le_bytes(delayed_data[16..20].try_into().unwrap());
+        assert_eq!(sid1, 42);
+        assert_eq!(off1, 1234);
+        assert_eq!(sz1, 5678);
+
+        // Decode second entry
+        let sid2 = u64::from_le_bytes(delayed_data[20..28].try_into().unwrap());
+        let off2 = u64::from_le_bytes(delayed_data[28..36].try_into().unwrap());
+        let sz2 = u32::from_le_bytes(delayed_data[36..40].try_into().unwrap());
+        assert_eq!(sid2, 99);
+        assert_eq!(off2, 0);
+        assert_eq!(sz2, u32::MAX);
+
+        // Feed to cleanup_delayed_slices → should insert correctly
+        let chunk_id = 1u64;
+        let txn = store.db.begin().await.unwrap();
+        store
+            .cleanup_delayed_slices(chunk_id, &delayed_data, &txn)
+            .await
+            .unwrap();
+        txn.commit().await.unwrap();
+
+        let records: Vec<delayed_slice::Model> = DelayedSlice::find()
+            .order_by_asc(delayed_slice::Column::SliceId)
+            .all(&store.db)
+            .await
+            .unwrap();
+        assert_eq!(records.len(), 2);
+        assert_eq!(records[0].slice_id, 42);
+        assert_eq!(records[0].offset, 1234);
+        assert_eq!(records[0].size, 5678);
+        assert_eq!(records[1].slice_id, 99);
+        assert_eq!(records[1].offset, 0);
+        assert_eq!(records[1].size, u32::MAX as i64);
+    }
+
+    /// find_replaced_slice_ids correctly identifies removed slices.
+    #[tokio::test]
+    async fn test_find_replaced_slice_ids() {
+        let original = vec![
+            SliceDesc {
+                slice_id: 1,
+                chunk_id: 1,
+                offset: 0,
+                length: 50,
+            },
+            SliceDesc {
+                slice_id: 2,
+                chunk_id: 1,
+                offset: 0,
+                length: 100,
+            },
+            SliceDesc {
+                slice_id: 3,
+                chunk_id: 1,
+                offset: 200,
+                length: 50,
+            },
+        ];
+        let merged = vec![
+            SliceDesc {
+                slice_id: 2,
+                chunk_id: 1,
+                offset: 0,
+                length: 100,
+            },
+            SliceDesc {
+                slice_id: 3,
+                chunk_id: 1,
+                offset: 200,
+                length: 50,
+            },
+        ];
+        let replaced = DatabaseMetaStore::find_replaced_slice_ids(&original, &merged);
+        assert_eq!(replaced.len(), 1);
+        assert!(replaced.contains(&1));
+    }
+
+    /// replace_slices_for_compact atomically replaces slices and creates delayed records.
+    #[tokio::test]
+    async fn test_replace_slices_for_compact() {
+        let store = new_test_store().await;
+        let chunk_id = 500u64;
+
+        // Insert initial slices
+        let txn = store.db.begin().await.unwrap();
+        for i in 1u64..=3 {
+            let model = slice_meta::ActiveModel {
+                slice_id: Set(i as i64),
+                chunk_id: Set(chunk_id as i64),
+                offset: Set(0),
+                length: Set(100),
+                ..Default::default()
+            };
+            model.insert(&txn).await.unwrap();
+        }
+        txn.commit().await.unwrap();
+
+        // Replace: new slice 4 replaces slices 1 and 2, slice 3 remains unchanged
+        // Note: replace_slices_for_compact only deletes old_slices_to_delay,
+        // existing slices not in delete list but with same ID as new_slices would cause conflict.
+        // In real usage, new_slices always have newly allocated IDs.
+        let new_slices = vec![SliceDesc {
+            slice_id: 4, // New slice ID
+            chunk_id,
+            offset: 0,
+            length: 100,
+        }];
+        let mut delayed_data = Vec::new();
+        for i in [1u64, 2] {
+            delayed_data.extend_from_slice(&i.to_le_bytes());
+            delayed_data.extend_from_slice(&(0u64).to_le_bytes());
+            delayed_data.extend_from_slice(&(100u32).to_le_bytes());
+        }
+
+        store
+            .replace_slices_for_compact(chunk_id, &new_slices, &delayed_data)
+            .await
+            .unwrap();
+
+        // Verify: slices 3 and 4 in slice_meta (3 was kept, 4 was added)
+        let slices = store.get_slices(chunk_id).await.unwrap();
+        assert_eq!(slices.len(), 2);
+        let slice_ids: Vec<u64> = slices.iter().map(|s| s.slice_id).collect();
+        assert!(slice_ids.contains(&3));
+        assert!(slice_ids.contains(&4));
+
+        // Verify: 2 delayed records
+        let delayed: Vec<delayed_slice::Model> = DelayedSlice::find()
+            .filter(delayed_slice::Column::ChunkId.eq(chunk_id as i64))
+            .all(&store.db)
+            .await
+            .unwrap();
+        assert_eq!(delayed.len(), 2);
+    }
+
+    /// merge_overlapping_slices correctly applies merge to DB and creates delayed records.
+    #[tokio::test]
+    async fn test_merge_overlapping_slices_in_db() {
+        let store = new_test_store().await;
+        let chunk_id = 600u64;
+
+        // 1: [0,50), 2: [0,100) — 1 is fully covered
+        let txn = store.db.begin().await.unwrap();
+        for (id, len) in [(1i64, 50i64), (2, 100)] {
+            let model = slice_meta::ActiveModel {
+                slice_id: Set(id),
+                chunk_id: Set(chunk_id as i64),
+                offset: Set(0),
+                length: Set(len),
+                ..Default::default()
+            };
+            model.insert(&txn).await.unwrap();
+        }
+        txn.commit().await.unwrap();
+
+        store.merge_overlapping_slices(chunk_id).await.unwrap();
+
+        // Verify: only slice 2 remains in slice_meta
+        let slices = store.get_slices(chunk_id).await.unwrap();
+        assert_eq!(slices.len(), 1);
+        assert_eq!(slices[0].slice_id, 2);
+
+        // Verify: slice 1 is in delayed table (soft delete)
+        let delayed: Vec<delayed_slice::Model> = DelayedSlice::find()
+            .filter(delayed_slice::Column::ChunkId.eq(chunk_id as i64))
+            .all(&store.db)
+            .await
+            .unwrap();
+        assert_eq!(delayed.len(), 1, "removed slice should be in delayed table");
+        assert_eq!(delayed[0].slice_id, 1);
+        assert_eq!(delayed[0].offset, 0);
+        assert_eq!(delayed[0].size, 50);
     }
 }

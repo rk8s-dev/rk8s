@@ -14,7 +14,6 @@ use crate::chuck::{
 };
 use crate::meta::SLICE_ID_KEY;
 use crate::meta::store::{MetaError, MetaStore};
-use crate::utils::Intervals;
 use anyhow::{Context, Result};
 use std::sync::Arc;
 use tracing::{debug, info, warn};
@@ -178,7 +177,12 @@ where
         Ok(Some(new_slice_id))
     }
 
-    /// Calculate merged slices by removing fully covered regions.
+    /// Calculate merged slices by removing fully covered slices.
+    ///
+    /// This only removes slices that are **completely** covered by newer slices.
+    /// Partially covered slices are kept intact because changing a slice's
+    /// offset/length would break block data addressing — block data is stored
+    /// at `(slice_id, block_index)` relative to the slice's original offset.
     fn calculate_merged_slices(
         &self,
         slices: &[SliceDesc],
@@ -186,8 +190,6 @@ where
         if slices.is_empty() {
             return Ok(vec![]);
         }
-
-        let chunk_id = slices[0].chunk_id;
 
         // Sort by slice_id descending (newest first) for "latest wins" processing
         let mut slices_sorted: Vec<SliceDesc> = slices.to_vec();
@@ -201,24 +203,14 @@ where
             let slice_start = slice.offset;
             let slice_end = slice.offset + slice.length;
 
-            // Use Intervals to calculate uncovered portions
-            let mut intervals = Intervals::new(slice_start, slice_end);
+            // Check if this slice is fully covered by newer slices
+            let is_fully_covered = covered_ranges
+                .iter()
+                .any(|&(cs, ce)| slice_start >= cs && slice_end <= ce);
 
-            for (covered_start, covered_end) in &covered_ranges {
-                let _ = intervals.cut(*covered_start, *covered_end);
-            }
-
-            let remaining = intervals.collect();
-
-            // Create new slice descriptors for each uncovered portion
-            for (start, end) in remaining {
-                let new_slice = SliceDesc {
-                    slice_id: slice.slice_id,
-                    chunk_id,
-                    offset: start,
-                    length: end - start,
-                };
-                result_slices.push(new_slice);
+            if !is_fully_covered {
+                // Keep the entire slice — can't split without rewriting block data
+                result_slices.push(slice);
             }
 
             // Mark this slice's full range as covered for older slices
@@ -406,20 +398,19 @@ where
                 continue;
             }
 
-            // Calculate the actual block range based on offset within the chunk
-            let start_block = slice.offset / self.layout.block_size as u64;
-            let end_block = (slice.offset + slice.length).div_ceil(self.layout.block_size as u64);
-            let num_blocks = end_block - start_block;
+            // Block indices are slice-relative (starting from 0), not chunk-relative.
+            // Data was written via write_at_vectored(slice_id, SliceOffset(0), ...)
+            // so blocks are at (slice_id, 0), (slice_id, 1), etc.
+            let num_blocks = slice.length.div_ceil(self.layout.block_size as u64);
 
             if num_blocks > 0 {
                 self.block_store
-                    .delete_range((slice.slice_id, start_block as u32), num_blocks)
+                    .delete_range((slice.slice_id, 0), num_blocks)
                     .await
                     .map_err(|e| CompactorError::BlockStoreError(e.to_string()))?;
 
                 debug!(
                     slice_id = slice.slice_id,
-                    start_block = start_block,
                     num_blocks = num_blocks,
                     "Deleted old slice data from block store"
                 );
@@ -736,5 +727,410 @@ mod tests {
         assert_eq!(slice_id, 1);
         assert_eq!(offset, 0);
         assert_eq!(size, 100);
+    }
+
+    // Comprehensive calculate_merged_slices tests
+    fn make_compactor() -> Compactor<MockMetaStore, InMemoryBlockStore> {
+        Compactor::new(
+            Arc::new(MockMetaStore::new()),
+            Arc::new(InMemoryBlockStore::new()),
+        )
+    }
+
+    #[test]
+    fn test_calculate_merged_empty() {
+        let c = make_compactor();
+        let result = c.calculate_merged_slices(&[]).unwrap();
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_calculate_merged_single_slice() {
+        let c = make_compactor();
+        let slices = vec![SliceDesc {
+            slice_id: 1,
+            chunk_id: 1,
+            offset: 0,
+            length: 100,
+        }];
+        let result = c.calculate_merged_slices(&slices).unwrap();
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].slice_id, 1);
+    }
+
+    /// Partial overlap: both slices must be kept intact (no splitting).
+    #[test]
+    fn test_calculate_merged_partial_overlap_kept() {
+        let c = make_compactor();
+        let slices = vec![
+            SliceDesc {
+                slice_id: 1,
+                chunk_id: 1,
+                offset: 0,
+                length: 100,
+            },
+            SliceDesc {
+                slice_id: 2,
+                chunk_id: 1,
+                offset: 50,
+                length: 100,
+            },
+        ];
+        let result = c.calculate_merged_slices(&slices).unwrap();
+        assert_eq!(result.len(), 2, "partial overlap: both kept");
+        // Verify original offset/length preserved
+        let s1 = result.iter().find(|s| s.slice_id == 1).unwrap();
+        assert_eq!(s1.offset, 0);
+        assert_eq!(s1.length, 100);
+    }
+
+    /// Full coverage: older slice removed.
+    #[test]
+    fn test_calculate_merged_full_coverage() {
+        let c = make_compactor();
+        let slices = vec![
+            SliceDesc {
+                slice_id: 1,
+                chunk_id: 1,
+                offset: 10,
+                length: 50,
+            },
+            SliceDesc {
+                slice_id: 2,
+                chunk_id: 1,
+                offset: 0,
+                length: 100,
+            },
+        ];
+        let result = c.calculate_merged_slices(&slices).unwrap();
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].slice_id, 2);
+    }
+
+    /// Non-zero offset head overlap: older slice kept intact.
+    #[test]
+    fn test_calculate_merged_head_overlap_nonzero_offset() {
+        let c = make_compactor();
+        // A: [100, 200), B: [80, 160) — covers head of A
+        let slices = vec![
+            SliceDesc {
+                slice_id: 1,
+                chunk_id: 1,
+                offset: 100,
+                length: 100,
+            },
+            SliceDesc {
+                slice_id: 2,
+                chunk_id: 1,
+                offset: 80,
+                length: 80,
+            },
+        ];
+        let result = c.calculate_merged_slices(&slices).unwrap();
+        assert_eq!(result.len(), 2);
+        let s1 = result.iter().find(|s| s.slice_id == 1).unwrap();
+        assert_eq!(s1.offset, 100, "offset must NOT change");
+        assert_eq!(s1.length, 100, "length must NOT change");
+    }
+
+    /// Chain: A⊂B⊂C → only C survives.
+    #[test]
+    fn test_calculate_merged_chain() {
+        let c = make_compactor();
+        let slices = vec![
+            SliceDesc {
+                slice_id: 1,
+                chunk_id: 1,
+                offset: 10,
+                length: 20,
+            },
+            SliceDesc {
+                slice_id: 2,
+                chunk_id: 1,
+                offset: 5,
+                length: 50,
+            },
+            SliceDesc {
+                slice_id: 3,
+                chunk_id: 1,
+                offset: 0,
+                length: 100,
+            },
+        ];
+        let result = c.calculate_merged_slices(&slices).unwrap();
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].slice_id, 3);
+    }
+
+    /// Non-overlapping: all kept.
+    #[test]
+    fn test_calculate_merged_disjoint() {
+        let c = make_compactor();
+        let slices = vec![
+            SliceDesc {
+                slice_id: 1,
+                chunk_id: 1,
+                offset: 0,
+                length: 50,
+            },
+            SliceDesc {
+                slice_id: 2,
+                chunk_id: 1,
+                offset: 100,
+                length: 50,
+            },
+            SliceDesc {
+                slice_id: 3,
+                chunk_id: 1,
+                offset: 200,
+                length: 50,
+            },
+        ];
+        let result = c.calculate_merged_slices(&slices).unwrap();
+        assert_eq!(result.len(), 3);
+    }
+
+    /// Middle overlap (sandwich): older slice kept intact.
+    #[test]
+    fn test_calculate_merged_sandwich() {
+        let c = make_compactor();
+        // A: [0, 200), B: [50, 150) — B covers only middle of A
+        let slices = vec![
+            SliceDesc {
+                slice_id: 1,
+                chunk_id: 1,
+                offset: 0,
+                length: 200,
+            },
+            SliceDesc {
+                slice_id: 2,
+                chunk_id: 1,
+                offset: 50,
+                length: 100,
+            },
+        ];
+        let result = c.calculate_merged_slices(&slices).unwrap();
+        assert_eq!(result.len(), 2, "A not fully covered, kept intact");
+    }
+
+    /// Exact same range: older removed.
+    #[test]
+    fn test_calculate_merged_exact_overlap() {
+        let c = make_compactor();
+        let slices = vec![
+            SliceDesc {
+                slice_id: 1,
+                chunk_id: 1,
+                offset: 100,
+                length: 200,
+            },
+            SliceDesc {
+                slice_id: 2,
+                chunk_id: 1,
+                offset: 100,
+                length: 200,
+            },
+        ];
+        let result = c.calculate_merged_slices(&slices).unwrap();
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].slice_id, 2);
+    }
+
+    /// Result is sorted by offset.
+    #[test]
+    fn test_calculate_merged_sorted_output() {
+        let c = make_compactor();
+        let slices = vec![
+            SliceDesc {
+                slice_id: 3,
+                chunk_id: 1,
+                offset: 200,
+                length: 50,
+            },
+            SliceDesc {
+                slice_id: 1,
+                chunk_id: 1,
+                offset: 0,
+                length: 50,
+            },
+            SliceDesc {
+                slice_id: 2,
+                chunk_id: 1,
+                offset: 100,
+                length: 50,
+            },
+        ];
+        let result = c.calculate_merged_slices(&slices).unwrap();
+        for i in 1..result.len() {
+            assert!(result[i].offset >= result[i - 1].offset, "not sorted");
+        }
+    }
+
+    // find_replaced_slices tests
+    #[test]
+    fn test_find_replaced_no_overlap() {
+        let c = make_compactor();
+        let orig = vec![
+            SliceDesc {
+                slice_id: 1,
+                chunk_id: 1,
+                offset: 0,
+                length: 50,
+            },
+            SliceDesc {
+                slice_id: 2,
+                chunk_id: 1,
+                offset: 100,
+                length: 50,
+            },
+        ];
+        let merged = orig.clone();
+        let replaced = c.find_replaced_slices(&orig, &merged);
+        assert!(replaced.is_empty());
+    }
+
+    #[test]
+    fn test_find_replaced_all_removed() {
+        let c = make_compactor();
+        let orig = vec![
+            SliceDesc {
+                slice_id: 1,
+                chunk_id: 1,
+                offset: 0,
+                length: 50,
+            },
+            SliceDesc {
+                slice_id: 2,
+                chunk_id: 1,
+                offset: 0,
+                length: 50,
+            },
+            SliceDesc {
+                slice_id: 3,
+                chunk_id: 1,
+                offset: 0,
+                length: 100,
+            },
+        ];
+        let merged = vec![SliceDesc {
+            slice_id: 3,
+            chunk_id: 1,
+            offset: 0,
+            length: 100,
+        }];
+        let mut replaced = c.find_replaced_slices(&orig, &merged);
+        replaced.sort();
+        assert_eq!(replaced, vec![1, 2]);
+    }
+
+    // Compactor with real block store
+    #[tokio::test]
+    async fn test_compactor_compact_chunk_full_coverage() {
+        let meta = Arc::new(MockMetaStore::new());
+        let store = Arc::new(InMemoryBlockStore::new());
+        let layout = ChunkLayout::default();
+
+        // 2 slices, slice 1 fully covered by slice 2
+        let chunk_id = 1u64;
+        {
+            let mut guard = meta.slices.lock().unwrap();
+            guard.insert(
+                chunk_id,
+                vec![
+                    SliceDesc {
+                        slice_id: 1,
+                        chunk_id,
+                        offset: 0,
+                        length: 100,
+                    },
+                    SliceDesc {
+                        slice_id: 2,
+                        chunk_id,
+                        offset: 0,
+                        length: 200,
+                    },
+                ],
+            );
+        }
+
+        // Write some data for slice 1 and slice 2
+        let s1_data = vec![0xAAu8; 100];
+        store.write_fresh_range((1, 0), 0, &s1_data).await.unwrap();
+        let s2_data = vec![0xBBu8; 200];
+        store.write_fresh_range((2, 0), 0, &s2_data).await.unwrap();
+
+        let compactor = Compactor::with_layout(meta.clone(), store.clone(), layout);
+        let result = compactor.compact_chunk(chunk_id, 1).await;
+
+        // Should succeed (assuming fragment ratio is met — 100/(100+200)=0.33 > 0.1)
+        match result {
+            Ok(Some(new_id)) => {
+                // New slice should have been written
+                assert!(new_id > 0);
+                // Meta should have been updated
+                let slices = meta.get_slices(chunk_id).await.unwrap();
+                assert_eq!(slices.len(), 1, "should have 1 merged slice");
+            }
+            Ok(None) => {
+                // Fragmentation was too low or no slices to merge — acceptable
+            }
+            Err(e) => panic!("compact_chunk failed: {:?}", e),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_compactor_single_slice_no_compact() {
+        let meta = Arc::new(MockMetaStore::new());
+        let store = Arc::new(InMemoryBlockStore::new());
+
+        {
+            let mut guard = meta.slices.lock().unwrap();
+            guard.insert(
+                1,
+                vec![SliceDesc {
+                    slice_id: 1,
+                    chunk_id: 1,
+                    offset: 0,
+                    length: 100,
+                }],
+            );
+        }
+
+        let compactor = Compactor::new(meta, store);
+        let result = compactor.compact_chunk(1, 1).await.unwrap();
+        assert_eq!(result, None, "single slice should not trigger compaction");
+    }
+
+    // Error handling tests
+
+    #[test]
+    fn test_compactor_error_display_all_variants() {
+        let e1 = CompactorError::MetaError(MetaError::NotImplemented);
+        assert!(e1.to_string().contains("MetaStore error"));
+
+        let e2 = CompactorError::BlockStoreError("disk full".to_string());
+        assert!(e2.to_string().contains("BlockStore error"));
+
+        let e3 = CompactorError::InvalidData("bad slice".to_string());
+        assert!(e3.to_string().contains("Invalid data"));
+
+        let e4 = CompactorError::IoError(std::io::Error::new(std::io::ErrorKind::Other, "io"));
+        assert!(e4.to_string().contains("IO error"));
+    }
+
+    #[test]
+    fn test_compactor_error_source() {
+        let e = CompactorError::MetaError(MetaError::NotImplemented);
+        assert!(std::error::Error::source(&e).is_some());
+
+        let e = CompactorError::BlockStoreError("x".into());
+        assert!(std::error::Error::source(&e).is_none());
+    }
+
+    #[test]
+    fn test_compactor_error_from_conversions() {
+        let _: CompactorError = MetaError::NotImplemented.into();
+        let _: CompactorError = std::io::Error::new(std::io::ErrorKind::Other, "x").into();
+        let _: CompactorError = anyhow::anyhow!("test").into();
     }
 }
