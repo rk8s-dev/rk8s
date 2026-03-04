@@ -73,6 +73,7 @@ blake2b_simd = "1.0"
 blake3 = "1.8"
 builder-pattern = "0.4.2"
 bytes = "1.10.1"
+object_store = { version = "0.13", features = ["aws"] }
 caps = "0.5.5"
 chrono = { version = "0.4.42", features = ["serde"] }
 clap = { version = "4.5.49", features = ["derive"] }

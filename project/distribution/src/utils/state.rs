@@ -1,14 +1,16 @@
 use crate::config::Config;
 use crate::domain::repo::{PgRepoRepository, RepoRepository};
 use crate::domain::user::{PgUserRepository, UserRepository};
-use crate::storage::{Storage, driver::filesystem::FilesystemStorage};
+use crate::storage::Storage;
+use crate::storage::driver::filesystem::FilesystemStorage;
+use crate::storage::driver::s3::S3Storage;
 use sqlx::PgPool;
 use std::{collections::HashMap, sync::Arc};
 use tokio::sync::RwLock;
 
 #[derive(Clone, Debug)]
 pub struct UploadSession {
-    pub uploaded: u64, // the total bytes uploaded
+    pub uploaded: u64,
 }
 
 #[derive(Clone)]
@@ -22,9 +24,27 @@ pub struct AppState {
 
 impl AppState {
     pub async fn new(config: Config, pool: Arc<PgPool>) -> Self {
-        let storage_backend: Arc<dyn Storage + Send + Sync> = match config.storge_type.as_str() {
+        let storage_backend: Arc<dyn Storage + Send + Sync> = match config.storage_type.as_str() {
             "FILESYSTEM" => Arc::new(FilesystemStorage::new(&config.root_dir)),
-            _ => Arc::new(FilesystemStorage::new(&config.root_dir)),
+            "S3" => {
+                let Some(s3_cfg) = config.s3_config.as_ref() else {
+                    tracing::error!("S3 config must be present when storage_type is S3");
+                    std::process::exit(1);
+                };
+                match S3Storage::new(s3_cfg) {
+                    Ok(s) => Arc::new(s),
+                    Err(e) => {
+                        tracing::error!("Failed to initialize S3 storage: {e}");
+                        std::process::exit(1);
+                    }
+                }
+            }
+            other => {
+                tracing::error!(
+                    "Unsupported storage type: '{other}'. Valid values: FILESYSTEM, S3"
+                );
+                std::process::exit(1);
+            }
         };
 
         AppState {
