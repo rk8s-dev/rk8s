@@ -191,7 +191,7 @@ async fn create_container_config(
     command: &[&str],
 ) -> Result<String> {
     let config_path = format!("/tmp/{}.yaml", container_name);
-    
+
     // Build args as YAML array
     let args_yaml = command
         .iter()
@@ -323,7 +323,15 @@ async fn test_create_start_stop_rm(vm: &mut Machine) -> Result<()> {
 
     tracing::info!("Stopping container {} with SIGTERM...", container_name);
     // Use youki kill command directly since rkforge doesn't expose kill in CLI
-    exec_check(vm, &format!("youki kill {} SIGTERM", container_name)).await?;
+    // Need to specify --root to point to youki state directory
+    exec_check(
+        vm,
+        &format!(
+            "youki --root {} kill {} SIGTERM",
+            YOUKI_STATE_DIR, container_name
+        ),
+    )
+    .await?;
     wait_for_container_status(vm, &container_name, "stopped", 10).await?;
 
     tracing::info!("Removing container {}...", container_name);
@@ -361,8 +369,15 @@ async fn test_run_kill_rm(vm: &mut Machine) -> Result<()> {
     wait_for_container_status(vm, &container_name, "running", 10).await?;
 
     tracing::info!("Killing container {} with SIGKILL...", container_name);
-    // Use youki kill command directly
-    exec_check(vm, &format!("youki kill {} SIGKILL", container_name)).await?;
+    // Use youki kill command directly with --root option
+    exec_check(
+        vm,
+        &format!(
+            "youki --root {} kill {} SIGKILL",
+            YOUKI_STATE_DIR, container_name
+        ),
+    )
+    .await?;
     wait_for_container_status(vm, &container_name, "stopped", 10).await?;
 
     tracing::info!("Removing container {}...", container_name);
@@ -409,7 +424,14 @@ async fn test_concurrent_containers(vm: &mut Machine) -> Result<()> {
 
     for container_name in &containers {
         tracing::info!("Killing container {}...", container_name);
-        exec_check(vm, &format!("youki kill {} SIGKILL", container_name)).await?;
+        exec_check(
+            vm,
+            &format!(
+                "youki --root {} kill {} SIGKILL",
+                YOUKI_STATE_DIR, container_name
+            ),
+        )
+        .await?;
         wait_for_container_status(vm, container_name, "stopped", 10).await?;
 
         tracing::info!("Removing container {}...", container_name);

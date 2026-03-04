@@ -35,6 +35,20 @@ jobs:
         with:
           submodules: recursive
 
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y --no-install-recommends \
+            qemu-system-x86 \
+            qemu-utils \
+            bridge-utils
+
+      - name: Setup network bridge for qlean
+        run: |
+          # qlean needs network bridge access
+          sudo chmod 666 /dev/kvm || true
+          sudo chmod 666 /dev/net/tun || true
+
       - name: Build rkforge binary
         run: |
           cd project
@@ -48,5 +62,5 @@ jobs:
       - name: Run rkforge lifecycle tests with qlean
         run: |
           cd project
-          cargo test -p rkforge --test test_container_lifecycle_qlean -- --nocapture --ignored
+          sudo -E cargo test -p rkforge --test test_container_lifecycle_qlean -- --nocapture --ignored
 
