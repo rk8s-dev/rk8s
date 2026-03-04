@@ -9,6 +9,11 @@ use serde::{
 use serde_json::Value;
 
 /// Configuration options for RustyVault.
+///
+/// This module defines the top-level `Config` structure used to configure
+/// the RustyVault process and library consumers. It contains listener and
+/// storage backend configuration plus several runtime options used by the
+/// server and embedded `libvault` instances.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Config {
     #[serde(deserialize_with = "validate_listener")]
@@ -39,6 +44,11 @@ pub struct Config {
     #[default(5)]
     pub mounts_monitor_interval: u64,
 }
+
+/// Helper enum to control mount entry HMAC verification level.
+///
+/// Used when reading mount metadata to determine which HMAC verification
+/// behavior should be applied for compatibility or stronger security.
 
 #[derive(Debug, Copy, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "lowercase")]

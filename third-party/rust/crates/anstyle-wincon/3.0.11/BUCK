@@ -27,7 +27,7 @@ rust_library(
     os_deps = {
         "windows": [
             "//third-party/rust/crates/once_cell_polyfill/1.70.2:once_cell_polyfill",
-            "//third-party/rust/crates/windows-sys/0.61.2:windows-sys",
+            "//third-party/rust/crates/windows-sys/0.60.2:windows-sys",
         ],
     },
     visibility = ["PUBLIC"],

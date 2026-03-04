@@ -27,8 +27,8 @@ rust_library(
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/hostname/0.4.2:hostname",
-        "//third-party/rust/crates/libc/0.2.180:libc",
+        "//third-party/rust/crates/libc/0.2.182:libc",
         "//third-party/rust/crates/log/0.4.29:log",
-        "//third-party/rust/crates/time/0.3.44:time",
+        "//third-party/rust/crates/time/0.3.47:time",
     ],
 )

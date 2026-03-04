@@ -48,7 +48,7 @@ rust_library(
         "//third-party/rust/crates/cfg-if/1.0.4:cfg-if",
         "//third-party/rust/crates/const-random/0.1.18:const-random",
         "//third-party/rust/crates/getrandom/0.3.4:getrandom",
-        "//third-party/rust/crates/zerocopy/0.8.31:zerocopy",
+        "//third-party/rust/crates/zerocopy/0.8.39:zerocopy",
     ],
 )
 

@@ -27,7 +27,7 @@ rust_library(
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/base64/0.22.1:base64",
-        "//third-party/rust/crates/bytes/1.11.0:bytes",
+        "//third-party/rust/crates/bytes/1.11.1:bytes",
         "//third-party/rust/crates/headers-core/0.3.0:headers-core",
         "//third-party/rust/crates/http/1.4.0:http",
         "//third-party/rust/crates/httpdate/1.0.3:httpdate",

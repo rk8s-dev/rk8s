@@ -1,6 +1,10 @@
 pub mod libfuse;
 pub mod linux;
 
+use crate::config::image::CONFIG;
+use crate::image::build_runtime::{
+    BuildHostEntry, BuildSecret, BuildSshAgent, BuildUlimit, BuildUlimitResource, BuildUlimitValue,
+};
 use anyhow::{Context, Result, bail};
 use base64::{Engine, engine::general_purpose};
 use clap::Parser;
@@ -10,11 +14,13 @@ use serde::{Deserialize, Serialize};
 use std::ffi::CString;
 use std::fs;
 use std::os::fd::AsFd;
-use std::path::{Path, PathBuf};
-
-use crate::config::image::CONFIG;
+use std::path::{Component, Path, PathBuf};
 
 pub static DNS_CONFIG: &str = "/etc/resolv.conf";
+pub static HOSTS_CONFIG: &str = "/etc/hosts";
+pub static SHM_CONFIG: &str = "/dev/shm";
+pub static SECRETS_DIR: &str = "/run/secrets";
+pub static RKFORGE_SSH_DIR: &str = "/run/rkforge/ssh";
 pub static BIND_MOUNTS: [&str; 3] = ["/dev", "/proc", "/sys"];
 
 #[derive(Parser, Debug)]
@@ -23,6 +29,9 @@ pub struct MountArgs {
     config_base64: String,
     #[arg(long)]
     libfuse: bool,
+    /// Container runtime daemon mode: do not unshare mount namespace, control lifecycle via IPC messages (SIGTERM as fallback)
+    #[arg(long)]
+    daemon: bool,
 }
 
 pub fn do_mount(args: MountArgs) -> Result<()> {
@@ -47,11 +56,209 @@ pub fn do_mount(args: MountArgs) -> Result<()> {
         .send(tx)
         .context("Failed to send IPC sender to parent")?;
 
-    if args.libfuse {
+    if args.daemon {
+        daemon_mount(&cfg, child_tx, rx, args.libfuse)
+    } else if args.libfuse {
         libfuse::do_mount(&cfg, child_tx, rx)
     } else {
         linux::do_mount(&cfg, child_tx, rx)
     }
+}
+
+/// Daemon mode mount: do not unshare mount namespace, control lifecycle via IPC messages.
+/// The mount point is visible in the host namespace, ready for youki to use directly.
+///
+/// Lifecycle management strategy:
+/// - Normal exit: Parent process sends "exit" message via IPC, daemon unmounts gracefully upon receipt
+/// - Abnormal exit: Parent process crashes causing IPC disconnect, daemon detects it, attempts to unmount and exits
+/// - Fallback: Parent process can terminate daemon via SIGTERM signal (caught by tokio signal handler
+///   to ensure unmount before exit, rather than direct _exit causing resource leaks)
+fn daemon_mount(
+    cfg: &MountConfig,
+    tx: IpcSender<String>,
+    rx: IpcReceiver<String>,
+    use_libfuse: bool,
+) -> Result<()> {
+    check_mountpoint(cfg)?;
+
+    // setsid detaches from terminal, becoming the leader of a new session
+    nix::unistd::setsid().ok(); // ignore error (might already be session leader)
+
+    if use_libfuse {
+        daemon_mount_libfuse(cfg, tx, rx)
+    } else {
+        daemon_mount_native(cfg, tx, rx)
+    }
+}
+
+/// Mount overlayfs using libfuse in daemon mode.
+///
+/// Listens to three events simultaneously via tokio::select!:
+/// 1. FUSE mount handle completion/error
+/// 2. IPC receives explicit "exit" message (normal shutdown via `RootfsMount::stop()`)
+/// 3. SIGTERM signal (fallback shutdown path, used by `delete_container` after `RootfsMount::load()`)
+///
+/// IMPORTANT: IPC disconnect (parent process exiting) does NOT trigger unmount.
+/// The parent process (`rkforge run`) exits after starting the container, which drops
+/// the `IpcSender` and disconnects IPC. The daemon must keep serving the FUSE mount
+/// so the container can continue running. Cleanup happens via SIGTERM during container delete.
+fn daemon_mount_libfuse(
+    cfg: &MountConfig,
+    tx: IpcSender<String>,
+    rx: IpcReceiver<String>,
+) -> Result<()> {
+    use libfuse_fs::overlayfs::OverlayArgs;
+    use std::sync::Arc;
+
+    let mut lowerdir = cfg.lower_dir.clone();
+    lowerdir.reverse();
+
+    crate::rt::block_on(async {
+        let mut mount_handle = libfuse_fs::overlayfs::mount_fs(OverlayArgs {
+            lowerdir: &lowerdir,
+            upperdir: &cfg.upper_dir,
+            mountpoint: &cfg.mountpoint,
+            privileged: CONFIG.is_root,
+            mapping: None::<&str>,
+            name: None::<String>,
+            allow_other: true,
+        })
+        .await;
+
+        tx.send("ready".to_string())
+            .context("Failed to send ready message to parent")?;
+
+        let handle = &mut mount_handle;
+
+        // Register SIGTERM signal listener (tokio async signal handling, safe and composable)
+        let mut sigterm = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+            .context("Failed to register SIGTERM handler")?;
+
+        // Decouple IPC "exit" message from IPC disconnect using Notify.
+        // Only an explicit "exit" message triggers unmount; IPC disconnect (parent process
+        // exiting normally) is expected and the daemon continues serving.
+        let exit_notify = Arc::new(tokio::sync::Notify::new());
+        let notify_clone = exit_notify.clone();
+        tokio::task::spawn_blocking(move || match rx.recv() {
+            Ok(line) if line.trim() == "exit" => {
+                notify_clone.notify_one();
+            }
+            Ok(line) => {
+                tracing::error!("Unknown IPC message from parent: {line}");
+            }
+            Err(e) => {
+                // IPC disconnected: parent process exited normally after starting the container.
+                // Do NOT trigger unmount — the container is still running and needs the FUSE mount.
+                // The daemon will be cleaned up via SIGTERM during container delete.
+                tracing::info!(
+                    "IPC disconnected: {e}, parent exited. Continuing to serve overlay mount."
+                );
+            }
+        });
+
+        tokio::select! {
+            res = handle => {
+                res?;
+                Ok(())
+            },
+            _ = exit_notify.notified() => {
+                tracing::info!("Received 'exit' via IPC, unmounting libfuse overlay");
+                mount_handle.unmount().await?;
+                Ok(())
+            },
+            _ = sigterm.recv() => {
+                tracing::info!("Received SIGTERM, unmounting libfuse overlay");
+                mount_handle.unmount().await?;
+                Ok(())
+            }
+        }
+    })?
+}
+
+/// Mount Linux native overlayfs in daemon mode.
+///
+/// Native overlay is a kernel mount, the mount point persists even if the daemon process exits,
+/// but it should still be gracefully unmounted to avoid leftovers. Listens to both
+/// IPC explicit "exit" message and SIGTERM signal via tokio::select!.
+///
+/// IMPORTANT: IPC disconnect (parent process exiting) does NOT trigger unmount.
+/// See `daemon_mount_libfuse` for rationale.
+fn daemon_mount_native(
+    cfg: &MountConfig,
+    tx: IpcSender<String>,
+    rx: IpcReceiver<String>,
+) -> Result<()> {
+    use nix::mount::{MntFlags, MsFlags, mount, umount2};
+    use std::os::unix::ffi::OsStrExt;
+    use std::sync::Arc;
+
+    let lower_dirs_bytes: Vec<&[u8]> = cfg
+        .lower_dir
+        .iter()
+        .rev()
+        .map(|p| p.as_os_str().as_bytes())
+        .collect();
+    let lower_dir_option = lower_dirs_bytes.join(&b':');
+    let mut options = Vec::new();
+    options.extend_from_slice(b"lowerdir=");
+    options.extend_from_slice(&lower_dir_option);
+    options.extend_from_slice(b",upperdir=");
+    options.extend_from_slice(cfg.upper_dir.as_os_str().as_bytes());
+    options.extend_from_slice(b",workdir=");
+    options.extend_from_slice(cfg.work_dir.as_os_str().as_bytes());
+
+    mount(
+        Some("overlay".as_bytes()),
+        &cfg.mountpoint,
+        Some("overlay".as_bytes()),
+        MsFlags::empty(),
+        Some(&options[..]),
+    )
+    .context("Failed to mount native overlayfs")?;
+
+    tx.send("ready".to_string())
+        .context("Failed to send ready message to parent")?;
+
+    let mountpoint = cfg.mountpoint.clone();
+
+    // Decouple IPC "exit" message from IPC disconnect using Notify.
+    // Only an explicit "exit" message triggers unmount; IPC disconnect is expected.
+    let exit_notify = Arc::new(tokio::sync::Notify::new());
+    let notify_clone = exit_notify.clone();
+    // Spawn IPC listener in a background thread (must be outside the async block
+    // so that `rx` is moved into the thread, not into the async context)
+    std::thread::spawn(move || match rx.recv() {
+        Ok(line) if line.trim() == "exit" => {
+            notify_clone.notify_one();
+        }
+        Ok(line) => {
+            tracing::error!("Unknown IPC message from parent: {line}");
+        }
+        Err(e) => {
+            tracing::info!(
+                "IPC disconnected: {e}, parent exited. Continuing to serve overlay mount."
+            );
+        }
+    });
+
+    // Use tokio runtime to wait for exit_notify or SIGTERM signal
+    crate::rt::block_on(async move {
+        let mut sigterm = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+            .context("Failed to register SIGTERM handler")?;
+
+        tokio::select! {
+            _ = exit_notify.notified() => {
+                tracing::info!("Received 'exit' via IPC, unmounting native overlayfs");
+                umount2(&mountpoint, MntFlags::MNT_DETACH)
+                    .context("Failed to unmount native overlayfs")?;
+            },
+            _ = sigterm.recv() => {
+                tracing::info!("Received SIGTERM, unmounting native overlayfs");
+                let _ = umount2(&mountpoint, MntFlags::MNT_DETACH);
+            }
+        }
+        Ok(())
+    })?
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -64,7 +271,7 @@ pub struct MountConfig {
     ///
     /// When the struct is being dropped, remove this directory.
     pub overlay: PathBuf,
-    upper_cnt: i32,
+    pub(crate) upper_cnt: i32,
     pub libfuse: bool,
 }
 
@@ -242,12 +449,56 @@ pub struct UserSpec {
     pub gid: Option<u32>,
 }
 
+fn to_rlimit_value(value: BuildUlimitValue) -> libc::rlim_t {
+    match value {
+        BuildUlimitValue::Unlimited => libc::RLIM_INFINITY,
+        BuildUlimitValue::Value(v) => v as libc::rlim_t,
+    }
+}
+
+fn to_rlimit_resource(resource: BuildUlimitResource) -> libc::c_int {
+    match resource {
+        BuildUlimitResource::Core => libc::RLIMIT_CORE as libc::c_int,
+        BuildUlimitResource::Cpu => libc::RLIMIT_CPU as libc::c_int,
+        BuildUlimitResource::Data => libc::RLIMIT_DATA as libc::c_int,
+        BuildUlimitResource::Fsize => libc::RLIMIT_FSIZE as libc::c_int,
+        BuildUlimitResource::Nofile => libc::RLIMIT_NOFILE as libc::c_int,
+        BuildUlimitResource::Nproc => libc::RLIMIT_NPROC as libc::c_int,
+        BuildUlimitResource::Stack => libc::RLIMIT_STACK as libc::c_int,
+        BuildUlimitResource::As => libc::RLIMIT_AS as libc::c_int,
+        BuildUlimitResource::Memlock => libc::RLIMIT_MEMLOCK as libc::c_int,
+    }
+}
+
+fn apply_ulimits(ulimits: &[BuildUlimit]) -> Result<()> {
+    for ulimit in ulimits {
+        let lim = libc::rlimit {
+            rlim_cur: to_rlimit_value(ulimit.soft),
+            rlim_max: to_rlimit_value(ulimit.hard),
+        };
+
+        let ret = unsafe { libc::setrlimit(to_rlimit_resource(ulimit.resource) as _, &lim) };
+        if ret != 0 {
+            let err = std::io::Error::last_os_error();
+            bail!(
+                "Failed to set ulimit `{}` to soft={:?}, hard={:?}: {}",
+                ulimit.resource.as_name(),
+                ulimit.soft,
+                ulimit.hard,
+                err
+            );
+        }
+    }
+    Ok(())
+}
+
 pub fn do_exec<P: AsRef<Path>>(
     mountpoint: P,
     command_args: &[&str],
     envp: &[CString],
     working_dir: &str,
     user: Option<&str>,
+    ulimits: &[BuildUlimit],
 ) -> Result<()> {
     let mountpoint = mountpoint.as_ref();
     do_chroot(mountpoint)?;
@@ -267,6 +518,9 @@ pub fn do_exec<P: AsRef<Path>>(
             return Err(e).with_context(|| format!("Failed to chdir to {}", working_dir));
         }
     }
+
+    // Apply resource limits before switching user.
+    apply_ulimits(ulimits)?;
 
     // Resolve and switch user if specified.
     // IMPORTANT: User resolution happens AFTER chroot so that username/group lookups
@@ -359,10 +613,107 @@ pub fn bind_mount<P: AsRef<Path>>(mountpoint: P) -> Result<()> {
     Ok(())
 }
 
+fn runtime_temp_file(name: &str) -> PathBuf {
+    let mount_pid = std::env::var("MOUNT_PID")
+        .ok()
+        .and_then(|v| v.parse::<u32>().ok())
+        .unwrap_or_else(std::process::id);
+    CONFIG.build_dir.join(format!("{name}.{mount_pid}"))
+}
+
+fn ensure_no_symlink_components(root: &Path, target: &Path) -> Result<()> {
+    let relative = target.strip_prefix(root).with_context(|| {
+        format!(
+            "Target path {} escapes mountpoint {}",
+            target.display(),
+            root.display()
+        )
+    })?;
+
+    let mut current = root.to_path_buf();
+    for component in relative.components() {
+        match component {
+            Component::Normal(part) => current.push(part),
+            _ => {
+                bail!(
+                    "Target path {} contains unsupported component",
+                    target.display()
+                );
+            }
+        }
+
+        if let Ok(meta) = fs::symlink_metadata(&current)
+            && meta.file_type().is_symlink()
+        {
+            bail!(
+                "Refusing to use symlink in mount target path: {}",
+                current.display()
+            );
+        }
+    }
+    Ok(())
+}
+
+fn ensure_target_file(root: &Path, path: &Path) -> Result<()> {
+    ensure_no_symlink_components(root, path)?;
+    if let Some(parent) = path.parent() {
+        ensure_no_symlink_components(root, parent)?;
+        fs::create_dir_all(parent)
+            .with_context(|| format!("Failed to create directory {}", parent.display()))?;
+    }
+    ensure_no_symlink_components(root, path)?;
+    if !path.exists() {
+        fs::write(path, b"").with_context(|| format!("Failed to create {}", path.display()))?;
+    } else {
+        let meta = fs::symlink_metadata(path)
+            .with_context(|| format!("Failed to inspect {}", path.display()))?;
+        if meta.file_type().is_symlink() {
+            bail!(
+                "Refusing to bind mount onto symlink target {}",
+                path.display()
+            );
+        }
+    }
+    Ok(())
+}
+
+fn bind_mount_file(root: &Path, src: &Path, dst: &Path) -> Result<()> {
+    ensure_target_file(root, dst)?;
+    nix::mount::mount::<_, _, str, str>(Some(src), dst, None, nix::mount::MsFlags::MS_BIND, None)
+        .with_context(|| {
+            format!(
+                "Failed to bind mount {} to {}",
+                src.display(),
+                dst.display()
+            )
+        })
+}
+
+fn read_hosts_template(mountpoint: &Path, target_hosts: &Path) -> Result<String> {
+    ensure_no_symlink_components(mountpoint, target_hosts)?;
+    if target_hosts.exists() {
+        fs::read_to_string(target_hosts)
+            .with_context(|| format!("Failed to read {}", target_hosts.display()))
+    } else {
+        Ok("127.0.0.1 localhost\n".to_string())
+    }
+}
+
+fn umount_if_mounted(path: &Path) -> Result<()> {
+    if !path.exists() {
+        return Ok(());
+    }
+
+    match nix::mount::umount2(path, nix::mount::MntFlags::MNT_DETACH) {
+        Ok(()) => Ok(()),
+        Err(nix::errno::Errno::EINVAL) | Err(nix::errno::Errno::ENOENT) => Ok(()),
+        Err(e) => Err(e).with_context(|| format!("Failed to unmount {}", path.display())),
+    }
+}
+
 pub fn prepare_network<P: AsRef<Path>>(mountpoint: P) -> Result<()> {
     let mountpoint = mountpoint.as_ref();
-    // Create a temp `resolv.conf` file
-    let host_resolv_conf = CONFIG.build_dir.join("resolv.conf");
+    let host_resolv_conf = runtime_temp_file("resolv.conf");
     if host_resolv_conf.exists() {
         fs::remove_file(&host_resolv_conf)?;
     }
@@ -373,36 +724,195 @@ pub fn prepare_network<P: AsRef<Path>>(mountpoint: P) -> Result<()> {
         .with_context(|| format!("Failed to set ownership on {}", host_resolv_conf.display()))?;
 
     let target_resolv_conf = mountpoint.join(DNS_CONFIG.strip_prefix('/').unwrap());
-    nix::mount::mount::<_, _, str, str>(
-        Some(&host_resolv_conf),
-        &target_resolv_conf,
-        None,
-        nix::mount::MsFlags::MS_BIND,
-        None,
-    )
-    .with_context(|| {
-        format!(
-            "Failed to bind mount {} to {}",
-            host_resolv_conf.display(),
-            target_resolv_conf.display()
-        )
-    })?;
+    bind_mount_file(mountpoint, &host_resolv_conf, &target_resolv_conf)?;
 
     Ok(())
 }
 
-fn cleanup_network<P: AsRef<Path>>(mountpoint: P) -> Result<()> {
-    let mountpoint = mountpoint.as_ref();
-    let target_resolv_conf = mountpoint.join(DNS_CONFIG.strip_prefix('/').unwrap());
-    if target_resolv_conf.exists() {
-        nix::mount::umount2(&target_resolv_conf, nix::mount::MntFlags::MNT_DETACH)
-            .with_context(|| format!("Failed to unmount {}", target_resolv_conf.display()))?;
+pub fn prepare_hosts<P: AsRef<Path>>(mountpoint: P, add_hosts: &[BuildHostEntry]) -> Result<()> {
+    if add_hosts.is_empty() {
+        return Ok(());
     }
 
-    let host_resolv_conf = CONFIG.build_dir.join("resolv.conf");
-    if host_resolv_conf.exists() {
-        fs::remove_file(&host_resolv_conf)?;
+    let mountpoint = mountpoint.as_ref();
+    let target_hosts = mountpoint.join(HOSTS_CONFIG.strip_prefix('/').unwrap());
+    let mut hosts_content = read_hosts_template(mountpoint, &target_hosts)?;
+
+    if !hosts_content.ends_with('\n') {
+        hosts_content.push('\n');
     }
+    for item in add_hosts {
+        hosts_content.push_str(&format!("{}\t{}\n", item.ip, item.host));
+    }
+
+    let host_hosts_file = runtime_temp_file("hosts");
+    if host_hosts_file.exists() {
+        fs::remove_file(&host_hosts_file)?;
+    }
+    fs::write(&host_hosts_file, hosts_content)
+        .with_context(|| format!("Failed to write {}", host_hosts_file.display()))?;
+    let uid = getuid();
+    let gid = getgid();
+    chown(&host_hosts_file, Some(uid), Some(gid))
+        .with_context(|| format!("Failed to set ownership on {}", host_hosts_file.display()))?;
+
+    bind_mount_file(mountpoint, &host_hosts_file, &target_hosts)?;
+    Ok(())
+}
+
+pub fn prepare_shm<P: AsRef<Path>>(mountpoint: P, shm_size: Option<u64>) -> Result<()> {
+    let Some(shm_size) = shm_size else {
+        return Ok(());
+    };
+
+    let mountpoint = mountpoint.as_ref();
+    let target_shm = mountpoint.join(SHM_CONFIG.strip_prefix('/').unwrap());
+    fs::create_dir_all(&target_shm)
+        .with_context(|| format!("Failed to create {}", target_shm.display()))?;
+
+    let options = format!("size={shm_size},mode=1777");
+    nix::mount::mount::<_, _, str, str>(
+        Some("tmpfs"),
+        &target_shm,
+        Some("tmpfs"),
+        nix::mount::MsFlags::empty(),
+        Some(options.as_str()),
+    )
+    .with_context(|| {
+        format!(
+            "Failed to mount tmpfs on {} with options `{options}`",
+            target_shm.display()
+        )
+    })?;
+    Ok(())
+}
+
+pub fn prepare_secrets<P: AsRef<Path>>(mountpoint: P, secrets: &[BuildSecret]) -> Result<()> {
+    if secrets.is_empty() {
+        return Ok(());
+    }
+
+    let mountpoint = mountpoint.as_ref();
+    let target_dir = mountpoint.join(SECRETS_DIR.strip_prefix('/').unwrap());
+    fs::create_dir_all(&target_dir)
+        .with_context(|| format!("Failed to create {}", target_dir.display()))?;
+
+    nix::mount::mount::<_, _, str, str>(
+        Some("tmpfs"),
+        &target_dir,
+        Some("tmpfs"),
+        nix::mount::MsFlags::empty(),
+        Some("size=1048576,mode=0755"),
+    )
+    .with_context(|| format!("Failed to mount tmpfs on {}", target_dir.display()))?;
+
+    for secret in secrets {
+        let content = fs::read(&secret.src).with_context(|| {
+            format!(
+                "Failed to read secret `{}` from {}",
+                secret.id,
+                secret.src.display()
+            )
+        })?;
+
+        let target_file = target_dir.join(&secret.id);
+        fs::write(&target_file, &content).with_context(|| {
+            format!(
+                "Failed to write secret `{}` to {}",
+                secret.id,
+                target_file.display()
+            )
+        })?;
+
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&target_file, fs::Permissions::from_mode(0o400))
+            .with_context(|| format!("Failed to set permissions on {}", target_file.display()))?;
+    }
+
+    Ok(())
+}
+
+pub fn prepare_ssh<P: AsRef<Path>>(mountpoint: P, ssh_agents: &[BuildSshAgent]) -> Result<()> {
+    if ssh_agents.is_empty() {
+        return Ok(());
+    }
+
+    let mountpoint = mountpoint.as_ref();
+    let target_dir = mountpoint.join(RKFORGE_SSH_DIR.strip_prefix('/').unwrap());
+    fs::create_dir_all(&target_dir)
+        .with_context(|| format!("Failed to create {}", target_dir.display()))?;
+
+    nix::mount::mount::<_, _, str, str>(
+        Some("tmpfs"),
+        &target_dir,
+        Some("tmpfs"),
+        nix::mount::MsFlags::empty(),
+        Some("size=1048576,mode=0755"),
+    )
+    .with_context(|| format!("Failed to mount tmpfs on {}", target_dir.display()))?;
+
+    for (idx, agent) in ssh_agents.iter().enumerate() {
+        let target_socket = target_dir.join(format!("ssh_agent.{idx}"));
+
+        fs::write(&target_socket, b"").with_context(|| {
+            format!(
+                "Failed to create placeholder for ssh agent `{}` at {}",
+                agent.id,
+                target_socket.display()
+            )
+        })?;
+
+        nix::mount::mount::<_, _, str, str>(
+            Some(&agent.socket_path),
+            &target_socket,
+            None,
+            nix::mount::MsFlags::MS_BIND,
+            None,
+        )
+        .with_context(|| {
+            format!(
+                "Failed to bind mount ssh agent `{}` from {} to {}",
+                agent.id,
+                agent.socket_path.display(),
+                target_socket.display()
+            )
+        })?;
+    }
+
+    Ok(())
+}
+
+fn umount_and_remove_dir(path: &Path) -> Result<()> {
+    umount_if_mounted(path)?;
+    if path.exists() {
+        let _ = fs::remove_dir_all(path);
+    }
+    Ok(())
+}
+
+fn remove_temp_file(path: &Path) {
+    if path.exists()
+        && let Err(err) = fs::remove_file(path)
+    {
+        tracing::warn!(
+            error = ?err,
+            path = %path.display(),
+            "Failed to remove temporary file during cleanup"
+        );
+    }
+}
+
+fn cleanup_network<P: AsRef<Path>>(mountpoint: P) -> Result<()> {
+    let mountpoint = mountpoint.as_ref();
+
+    umount_and_remove_dir(&mountpoint.join(RKFORGE_SSH_DIR.strip_prefix('/').unwrap()))?;
+    umount_and_remove_dir(&mountpoint.join(SECRETS_DIR.strip_prefix('/').unwrap()))?;
+    umount_if_mounted(&mountpoint.join(SHM_CONFIG.strip_prefix('/').unwrap()))?;
+    umount_if_mounted(&mountpoint.join(HOSTS_CONFIG.strip_prefix('/').unwrap()))?;
+    umount_if_mounted(&mountpoint.join(DNS_CONFIG.strip_prefix('/').unwrap()))?;
+
+    remove_temp_file(&runtime_temp_file("hosts"));
+    remove_temp_file(&runtime_temp_file("resolv.conf"));
     Ok(())
 }
 
@@ -433,9 +943,12 @@ pub fn cleanup(args: CleanupArgs) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
+    use std::os::unix::fs::symlink;
+
     use tempfile::tempdir;
 
-    use super::MountConfig;
+    use super::{MountConfig, ensure_target_file, read_hosts_template};
 
     #[test]
     fn test_mount_config() {
@@ -461,5 +974,45 @@ mod tests {
         assert!(cfg.upper_dir.exists());
         assert!(cfg.mountpoint.exists());
         assert!(cfg.work_dir.exists());
+    }
+
+    #[test]
+    fn test_ensure_target_file_rejects_symlink_target() {
+        let root = tempdir().unwrap();
+        let etc_dir = root.path().join("etc");
+        fs::create_dir_all(&etc_dir).unwrap();
+
+        let real_file = root.path().join("real-hosts");
+        fs::write(&real_file, b"127.0.0.1 localhost\n").unwrap();
+        let symlink_target = etc_dir.join("hosts");
+        symlink(&real_file, &symlink_target).unwrap();
+
+        let err = ensure_target_file(root.path(), &symlink_target).unwrap_err();
+        assert!(err.to_string().contains("symlink"));
+    }
+
+    #[test]
+    fn test_ensure_target_file_rejects_outside_mountpoint() {
+        let root = tempdir().unwrap();
+        let outside = tempdir().unwrap();
+        let outside_target = outside.path().join("hosts");
+
+        let err = ensure_target_file(root.path(), &outside_target).unwrap_err();
+        assert!(err.to_string().contains("escapes mountpoint"));
+    }
+
+    #[test]
+    fn test_read_hosts_template_rejects_symlink_target() {
+        let root = tempdir().unwrap();
+        let etc_dir = root.path().join("etc");
+        fs::create_dir_all(&etc_dir).unwrap();
+
+        let leaked = root.path().join("host-secret");
+        fs::write(&leaked, b"secret").unwrap();
+        let hosts = etc_dir.join("hosts");
+        symlink(&leaked, &hosts).unwrap();
+
+        let err = read_hosts_template(root.path(), &hosts).unwrap_err();
+        assert!(err.to_string().contains("symlink"));
     }
 }

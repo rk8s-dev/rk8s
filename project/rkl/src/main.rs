@@ -8,6 +8,7 @@ use tracing_subscriber::filter::LevelFilter;
 use tracing_subscriber::{EnvFilter, Registry, layer::SubscriberExt};
 
 mod commands;
+mod config;
 mod daemon;
 mod network;
 mod quic;
@@ -24,6 +25,8 @@ use commands::{
 use tracing::error;
 
 use crate::commands::volume::{VolumeCommand, volume_execute};
+
+use rkforge::overlayfs::MountArgs;
 
 const DEFAULT_RKL_LOG_DIR: &str = "/var/log/rk8s/rkl";
 const LOG_PREFIX: &str = "rkl.log";
@@ -51,6 +54,7 @@ impl Cli {
             Workload::Replicaset(cmd) => replicaset_execute(cmd),
             Workload::Deployment(cmd) => deployment_execute(cmd),
             Workload::Service(cmd) => service_execute(cmd),
+            Workload::Mount(args) => rkforge::overlayfs::do_mount(args),
         }
     }
 }
@@ -80,6 +84,10 @@ enum Workload {
 
     #[command(subcommand, about = "Manage Services", alias = "svc")]
     Service(ServiceCommand),
+
+    /// Internal: overlay mount daemon (hidden from help)
+    #[command(hide = true)]
+    Mount(MountArgs),
 }
 
 fn main() -> Result<(), anyhow::Error> {

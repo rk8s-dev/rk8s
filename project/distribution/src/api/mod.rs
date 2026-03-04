@@ -12,9 +12,11 @@ use crate::service::repo::{change_visibility, list_visible_repos};
 use crate::utils::jwt::{Claims, decode};
 use crate::utils::password::check_password;
 use crate::utils::state::AppState;
+use axum::Json;
 use axum::Router;
-use axum::extract::OptionalFromRequestParts;
+use axum::extract::{OptionalFromRequestParts, State};
 use axum::http::request::Parts;
+use axum::response::IntoResponse;
 use axum::routing::{get, post, put};
 use axum_extra::TypedHeader;
 use axum_extra::headers::Authorization;
@@ -24,6 +26,7 @@ use std::sync::Arc;
 pub fn create_router(state: Arc<AppState>) -> Router<()> {
     // we need to handle both /v2 and /v2/
     let mut router = Router::new()
+        .route("/healthz", get(healthz))
         .route("/v2/", get(probe))
         .nest("/v2", v2::create_v2_router(state.clone()))
         .nest("/api/v1", custom_v1_router(state.clone()))
@@ -34,6 +37,10 @@ pub fn create_router(state: Arc<AppState>) -> Router<()> {
         router = router.nest("/debug", debug_router(state.clone()));
     }
     router.with_state(state)
+}
+
+pub async fn healthz(State(_): State<Arc<AppState>>) -> Result<impl IntoResponse, AppError> {
+    Ok(Json("http ready"))
 }
 
 fn custom_v1_router(state: Arc<AppState>) -> Router<Arc<AppState>> {

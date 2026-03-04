@@ -27,10 +27,10 @@ rust_library(
     rustc_flags = ["@$(location :zvariant_utils-manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/proc-macro2/1.0.103:proc-macro2",
-        "//third-party/rust/crates/quote/1.0.42:quote",
+        "//third-party/rust/crates/proc-macro2/1.0.106:proc-macro2",
+        "//third-party/rust/crates/quote/1.0.44:quote",
         "//third-party/rust/crates/serde/1.0.228:serde",
-        "//third-party/rust/crates/syn/2.0.111:syn",
+        "//third-party/rust/crates/syn/2.0.115:syn",
         "//third-party/rust/crates/winnow/0.7.14:winnow",
     ],
 )

@@ -51,4 +51,21 @@ impl Repositories {
             None => Ok(None),
         }
     }
+
+    /// Return all (image_ref, digest) pairs, sorted by image reference for stable output.
+    pub fn entries(&self) -> Vec<(&String, &String)> {
+        let mut v: Vec<_> = self.repositories.iter().collect();
+        v.sort_by_key(|(k, _)| *k);
+        v
+    }
+
+    /// Remove an image reference entry, returning its digest if it existed.
+    pub fn remove(&mut self, image_ref: &str) -> Option<String> {
+        self.repositories.remove(image_ref)
+    }
+
+    /// Return all digest values currently referenced.
+    pub fn digests(&self) -> Vec<&String> {
+        self.repositories.values().collect()
+    }
 }

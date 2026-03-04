@@ -74,8 +74,8 @@ impl Secret {
             internal_data: Map::new(),
         };
 
-        if internal.is_some() {
-            secret.internal_data.clone_from(internal.as_ref().unwrap());
+        if let Some(internal) = &internal {
+            secret.internal_data.clone_from(internal);
         }
 
         secret.internal_data.insert(

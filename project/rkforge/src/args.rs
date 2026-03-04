@@ -1,5 +1,5 @@
-use crate::commands::{ComposeCommand, PodCommand, VolumeCommand};
-use crate::{copy, image, login, logout, overlayfs, pull, push, repo, run};
+use crate::commands::{ComposeCommand, PodCommand, VolumeCommand, config_cli::ConfigArgs};
+use crate::{copy, image, images, login, logout, overlayfs, pull, push, repo, run};
 use clap::{Parser, Subcommand};
 
 #[derive(Parser, Debug)]
@@ -13,6 +13,8 @@ pub struct Cli {
 pub enum Commands {
     /// Build a container image from Dockerfile
     Build(image::BuildArgs),
+    /// Get or set rkforge configuration
+    Config(ConfigArgs),
     /// Manage container compositions
     #[command(subcommand)]
     Compose(ComposeCommand),
@@ -26,6 +28,13 @@ pub enum Commands {
     Delete(DeleteArgs),
     /// Execute a command in a running container
     Exec(Box<ExecArgs>),
+    /// List local images
+    #[command(alias = "ls")]
+    Images(images::ImagesArgs),
+    /// Display detailed information about an image
+    Inspect(images::InspectArgs),
+    /// Load an image from a tar archive
+    Load(images::LoadArgs),
     /// Login to distribution server
     Login(login::LoginArgs),
     /// Logout from distribution server
@@ -43,17 +52,33 @@ pub enum Commands {
     Ps(PsArgs),
     /// List and manage repositories
     Repo(repo::RepoArgs),
+    /// Remove one or more local images
+    Rmi(images::RmiArgs),
     /// Run a command in a new container
     Run(RunArgs),
+    /// Save an image to a tar archive
+    Save(images::SaveArgs),
     /// Start one or more containers
     Start(StartArgs),
     /// Display the status of a container
     State(StateArgs),
+    /// Create a tag for a local image
+    Tag(images::TagArgs),
     /// Manage volumes
     #[command(subcommand)]
     Volume(VolumeCommand),
     #[command(hide = true)]
     ExecInternal(run::ExecInternalArgs),
+    /// Kill a running container
+    Kill(KillArgs),
+    /// Stop a running container (SIGTERM + wait)
+    Stop(StopArgs),
+    /// Wait until a container exits
+    Wait(WaitArgs),
+    /// Remove one or more containers
+    Rm(RmArgs),
+    /// Attach to a running container's stdio
+    Attach(AttachArgs),
 }
 
 /// Run a command in a new container
@@ -104,6 +129,62 @@ pub struct PsArgs {
     /// Specify the format (default or table)
     #[arg(long, short)]
     pub format: Option<String>,
+}
+
+/// Kill a container
+#[derive(Parser, Debug, Clone)]
+pub struct KillArgs {
+    #[arg(value_name = "CONTAINER_NAME")]
+    pub container_name: String,
+
+    /// Signal to send (default: SIGKILL)
+    #[arg(long, default_value = "KILL")]
+    pub signal: String,
+}
+
+/// Stop a container (SIGTERM + wait)
+#[derive(Parser, Debug, Clone)]
+pub struct StopArgs {
+    #[arg(value_name = "CONTAINER_NAME")]
+    pub container_name: String,
+
+    /// Timeout in seconds before SIGKILL
+    #[arg(long, default_value = "10")]
+    pub timeout: u64,
+}
+
+/// Wait for a container to exit
+#[derive(Parser, Debug, Clone)]
+pub struct WaitArgs {
+    #[arg(value_name = "CONTAINER_NAME")]
+    pub container_name: String,
+
+    /// Timeout in seconds (0 means wait indefinitely).
+    /// Note: exit code is always 0 if libcontainer does not expose the actual exit code.
+    #[arg(long, default_value = "0")]
+    pub timeout: u64,
+}
+
+/// Remove one or more containers
+#[derive(Parser, Debug, Clone)]
+pub struct RmArgs {
+    #[arg(value_name = "CONTAINER_NAME")]
+    pub container_name: Option<String>,
+
+    /// Force removal of a running container
+    #[arg(long, short = 'f')]
+    pub force: bool,
+
+    /// Remove all stopped containers
+    #[arg(long, short = 'a')]
+    pub all: bool,
+}
+
+/// Attach to a running container
+#[derive(Parser, Debug, Clone)]
+pub struct AttachArgs {
+    #[arg(value_name = "CONTAINER_NAME")]
+    pub container_name: String,
 }
 
 /// Execute a command in a running container

@@ -1,0 +1,126 @@
+name: Distribution server deploy
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/distribution-deploy.yml"
+      - "/project/distribution/**"
+
+env:
+  REGISTRY_ALIAS: m8q5m4u3
+  REPOSITORY: rk8s
+  IMAGE_TAG_BASE: distribution-0.1.0-pre-release
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-push-single-arch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # -----------------------------
+      # AWS auth
+      # -----------------------------
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+
+      - name: Login to Amazon ECR Public
+        id: login-ecr-public
+        uses: aws-actions/amazon-ecr-login@v2
+        with:
+          registry-type: public
+
+
+      # -----------------------------
+      # Build once, push to AWS
+      # -----------------------------
+      - name: Build & push amd64 image to AWS
+        working-directory: project
+        env:
+          AWS_REGISTRY: ${{ steps.login-ecr-public.outputs.registry }}
+        run: |
+          set -euo pipefail
+
+          PLATFORM="linux/amd64"
+          ARCH_SUFFIX="amd64"
+
+          AWS_IMAGE_BASE="$AWS_REGISTRY/${{ env.REGISTRY_ALIAS }}/${{ env.REPOSITORY }}"
+
+          TAG="${{ env.IMAGE_TAG_BASE }}-$ARCH_SUFFIX"
+
+          docker buildx build \
+            --platform "$PLATFORM" \
+            --provenance=false \
+            --sbom=false \
+            -f distribution/Dockerfile \
+            -t "$AWS_IMAGE_BASE:$TAG" \
+            --push .
+
+  manifest:
+    needs: build-push-single-arch
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+
+      - name: Login to Amazon ECR Public
+        id: login-ecr-public
+        uses: aws-actions/amazon-ecr-login@v2
+        with:
+          registry-type: public
+
+      - name: Create & push manifest
+        env:
+          REGISTRY: ${{ steps.login-ecr-public.outputs.registry }}
+        run: |
+          IMAGE_BASE="$REGISTRY/${{ env.REGISTRY_ALIAS }}/${{ env.REPOSITORY }}"
+          docker manifest create "$IMAGE_BASE:${{ env.IMAGE_TAG_BASE }}" \
+            "$IMAGE_BASE:${{ env.IMAGE_TAG_BASE }}-amd64"
+          docker manifest push "$IMAGE_BASE:${{ env.IMAGE_TAG_BASE }}"
+
+  deploy-aws:
+    needs: manifest
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Force ECS redeploy
+        run: |
+          aws ecs update-service \
+            --cluster rk8s \
+            --service distribution \
+            --force-new-deployment
+        env:
+          AWS_REGION: ap-southeast-2
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+
+

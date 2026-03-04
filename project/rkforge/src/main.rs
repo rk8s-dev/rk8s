@@ -8,6 +8,7 @@ mod compressor;
 mod config;
 mod copy;
 mod image;
+mod images;
 mod login;
 mod logout;
 mod oci_spec;
@@ -22,7 +23,7 @@ mod storage;
 mod task;
 mod utils;
 use crate::args::{Cli, Commands};
-use crate::commands::{compose, container, pod, volume};
+use crate::commands::{compose, config_cli, container, pod, volume};
 use anyhow::Result;
 use clap::Parser;
 use tracing_subscriber::prelude::*;
@@ -36,6 +37,7 @@ fn main() -> Result<()> {
 
     match cli.command {
         Commands::Build(args) => image::build_image(&args),
+        Commands::Config(args) => config_cli::config(args),
         Commands::Cleanup(args) => overlayfs::cleanup(args),
         Commands::Compose(cmd) => compose::compose_execute(cmd),
         Commands::Copy(args) => copy::copy(args),
@@ -72,6 +74,9 @@ fn main() -> Result<()> {
             )?;
             std::process::exit(exit_code)
         }
+        Commands::Images(args) => images::list_images(args),
+        Commands::Inspect(args) => images::inspect_image(args),
+        Commands::Load(args) => images::load_image(args),
         Commands::Login(args) => login::login(args),
         Commands::Logout(args) => logout::logout(args),
         Commands::Mount(args) => overlayfs::do_mount(args),
@@ -80,10 +85,20 @@ fn main() -> Result<()> {
         Commands::Pull(args) => pull::pull(args),
         Commands::Push(args) => push::push(args),
         Commands::Repo(args) => repo::repo(args),
+        Commands::Rmi(args) => images::remove_image(args),
         Commands::Run(args) => container::run_container(&args.container_yaml, args.volumes),
+        Commands::Save(args) => images::save_image(args),
         Commands::Start(args) => container::start_container(&args.container_name),
         Commands::State(args) => container::state_container(&args.container_name),
+        Commands::Tag(args) => images::tag_image(args),
         Commands::Volume(cmd) => volume::volume_execute(cmd),
         Commands::ExecInternal(args) => run::exec_internal(args),
+        Commands::Kill(args) => container::kill_container(&args.container_name, &args.signal),
+        Commands::Stop(args) => container::stop_container(&args.container_name, args.timeout),
+        Commands::Wait(args) => container::wait_container(&args.container_name, args.timeout),
+        Commands::Rm(args) => {
+            container::rm_container(args.container_name.as_deref(), args.force, args.all)
+        }
+        Commands::Attach(args) => container::attach_container(&args.container_name),
     }
 }

@@ -239,8 +239,8 @@ impl Certificate {
         let serial_number = self.serial_number.to_asn1_integer()?;
         builder.set_serial_number(&serial_number)?;
         builder.set_subject_name(&self.subject)?;
-        if ca_cert.is_some() {
-            builder.set_issuer_name(ca_cert.unwrap().subject_name())?;
+        if let Some(ca) = ca_cert {
+            builder.set_issuer_name(ca.subject_name())?;
         } else {
             builder.set_issuer_name(&self.subject)?;
         }
@@ -325,8 +325,8 @@ impl Certificate {
             "sm2" => MessageDigest::sm3(),
             _ => return Err(RvError::ErrPkiKeyTypeInvalid),
         };
-        if ca_key.is_some() {
-            builder.sign(ca_key.as_ref().unwrap(), digest)?;
+        if let Some(key) = ca_key {
+            builder.sign(key, digest)?;
         } else {
             builder.sign(private_key, digest)?;
         }
@@ -391,8 +391,8 @@ impl Certificate {
             serial_number: serial_number_hex.to_lowercase(),
         };
 
-        if ca_cert.is_some() {
-            cert_bundle.ca_chain = vec![ca_cert.unwrap().to_owned()];
+        if let Some(ca) = ca_cert {
+            cert_bundle.ca_chain = vec![ca.to_owned()];
         }
 
         Ok(cert_bundle)

@@ -42,6 +42,7 @@ rust_library(
         "signal-hook-registry",
         "socket2",
         "sync",
+        "test-util",
         "time",
         "tokio-macros",
         "tracing",
@@ -50,26 +51,26 @@ rust_library(
     rustc_flags = ["@$(location :tokio-manifest[env_flags])"],
     os_deps = {
         "linux": [
-            "//third-party/rust/crates/signal-hook-registry/1.4.7:signal-hook-registry",
-            "//third-party/rust/crates/socket2/0.6.1:socket2",
+            "//third-party/rust/crates/signal-hook-registry/1.4.8:signal-hook-registry",
+            "//third-party/rust/crates/socket2/0.6.2:socket2",
         ],
         "macos": [
-            "//third-party/rust/crates/signal-hook-registry/1.4.7:signal-hook-registry",
-            "//third-party/rust/crates/socket2/0.6.1:socket2",
+            "//third-party/rust/crates/signal-hook-registry/1.4.8:signal-hook-registry",
+            "//third-party/rust/crates/socket2/0.6.2:socket2",
         ],
         "windows": [
-            "//third-party/rust/crates/socket2/0.6.1:socket2",
+            "//third-party/rust/crates/socket2/0.6.2:socket2",
             "//third-party/rust/crates/windows-sys/0.61.2:windows-sys",
         ],
     },
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/bytes/1.11.0:bytes",
-        "//third-party/rust/crates/libc/0.2.180:libc",
+        "//third-party/rust/crates/bytes/1.11.1:bytes",
+        "//third-party/rust/crates/libc/0.2.182:libc",
         "//third-party/rust/crates/mio/1.1.1:mio",
         "//third-party/rust/crates/parking_lot/0.12.5:parking_lot",
         "//third-party/rust/crates/pin-project-lite/0.2.16:pin-project-lite",
         "//third-party/rust/crates/tokio-macros/2.6.0:tokio-macros",
-        "//third-party/rust/crates/tracing/0.1.43:tracing",
+        "//third-party/rust/crates/tracing/0.1.44:tracing",
     ],
 )

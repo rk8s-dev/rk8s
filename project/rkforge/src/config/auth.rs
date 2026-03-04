@@ -6,11 +6,56 @@ use std::path::Path;
 use std::pin::Pin;
 
 #[derive(Serialize, Deserialize, Debug, Default, Ord, PartialOrd, Eq, PartialEq)]
-pub struct AuthConfig {
-    pub entries: Vec<AuthEntry>,
+pub struct ImageConfig {
+    pub storage: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Default, Ord, PartialOrd, Eq, PartialEq)]
+pub struct RkforgeConfig {
+    #[serde(default)]
+    pub entries: Vec<AuthEntry>,
+    #[serde(default)]
+    pub image: ImageConfig,
+}
+
+impl RkforgeConfig {
+    const APP_NAME: &'static str = "rk8s";
+    const CONFIG_NAME: &'static str = "rkforge";
+
+    /// Loads the config from pre-defined config path.
+    pub fn load() -> anyhow::Result<Self> {
+        let path = original_user_config_path(Self::APP_NAME, Some(Self::CONFIG_NAME))?;
+        Self::load_from(path)
+    }
+
+    pub fn load_from(path: impl AsRef<Path>) -> anyhow::Result<Self> {
+        let path = path.as_ref();
+        confy::load_path(path)
+            .with_context(|| format!("failed to load config file `{}`", path.display()))
+    }
+
+    pub fn store(&self) -> anyhow::Result<()> {
+        let path = original_user_config_path(Self::APP_NAME, Some(Self::CONFIG_NAME))?;
+        confy::store_path(&path, self)
+            .with_context(|| format!("failed to store config file `{}`", path.display()))
+    }
+
+    pub fn storage_root(&self) -> Option<&str> {
+        self.image
+            .storage
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug, Default, Ord, PartialOrd, Eq, PartialEq)]
+pub struct AuthConfig {
+    #[serde(default)]
+    pub entries: Vec<AuthEntry>,
+}
+
+#[derive(Clone, Serialize, Deserialize, Debug, Default, Ord, PartialOrd, Eq, PartialEq)]
 pub struct AuthEntry {
     pub pat: String,
     pub url: String,
@@ -26,9 +71,6 @@ impl AuthEntry {
 }
 
 impl AuthConfig {
-    const APP_NAME: &'static str = "rk8s";
-    const CONFIG_NAME: &'static str = "rkforge";
-
     pub fn single_entry(&self) -> anyhow::Result<&AuthEntry> {
         match self.entries.len() {
             0 => anyhow::bail!("No entries. Maybe you need to set a url."),
@@ -82,25 +124,17 @@ impl AuthConfig {
         f(self.resolve_entry(url)?)
     }
 
-    /// Loads the config from pre-defined config path.
     pub fn load() -> anyhow::Result<Self> {
-        let path = original_user_config_path(Self::APP_NAME, Some(Self::CONFIG_NAME))?;
-        Self::load_from(path)
+        let config = RkforgeConfig::load()?;
+        Ok(Self {
+            entries: config.entries,
+        })
     }
 
     pub fn load_from(path: impl AsRef<Path>) -> anyhow::Result<Self> {
-        let path = path.as_ref();
-        confy::load_path(path)
-            .with_context(|| format!("failed to load config file `{}`", path.display()))
-    }
-
-    fn store(&self) -> anyhow::Result<()> {
-        confy::store(Self::APP_NAME, Self::CONFIG_NAME, self).with_context(|| {
-            format!(
-                "failed to store config file `{}.{}`",
-                Self::APP_NAME,
-                Self::CONFIG_NAME,
-            )
+        let config = RkforgeConfig::load_from(path)?;
+        Ok(Self {
+            entries: config.entries,
         })
     }
 
@@ -110,7 +144,7 @@ impl AuthConfig {
     }
 
     pub fn login(pat: impl Into<String>, url: impl Into<String>) -> anyhow::Result<()> {
-        let mut config = Self::load()?;
+        let mut config = RkforgeConfig::load()?;
 
         let url = url.into();
         let entry = AuthEntry::new(pat, &url);
@@ -128,7 +162,7 @@ impl AuthConfig {
     }
 
     pub fn logout(url: impl Into<String>) -> anyhow::Result<()> {
-        let mut config = Self::load()?;
+        let mut config = RkforgeConfig::load()?;
         let url = url.into();
         config.entries.retain(|entry| entry.url != url);
         config.store()
@@ -147,4 +181,77 @@ where
     };
 
     f(entry).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{AuthConfig, ImageConfig, RkforgeConfig};
+    use std::fs;
+    use tempfile::tempdir;
+
+    #[test]
+    fn test_storage_root_empty_is_none() {
+        let config = RkforgeConfig {
+            image: ImageConfig {
+                storage: Some("   ".to_string()),
+            },
+            ..Default::default()
+        };
+        assert_eq!(config.storage_root(), None);
+    }
+
+    #[test]
+    fn test_storage_root_trimmed_value() {
+        let config = RkforgeConfig {
+            image: ImageConfig {
+                storage: Some("  /data/rkforge  ".to_string()),
+            },
+            ..Default::default()
+        };
+        assert_eq!(config.storage_root(), Some("/data/rkforge"));
+    }
+
+    #[test]
+    fn test_load_config_with_storage_and_entries() {
+        let dir = tempdir().unwrap();
+        let config_path = dir.path().join("rkforge.toml");
+        fs::write(
+            &config_path,
+            r#"
+[[entries]]
+pat = "token"
+url = "example.com"
+
+[image]
+storage = "/data/rkforge"
+"#,
+        )
+        .unwrap();
+
+        let config = RkforgeConfig::load_from(&config_path).unwrap();
+        assert_eq!(config.entries.len(), 1);
+        assert_eq!(config.storage_root(), Some("/data/rkforge"));
+    }
+
+    #[test]
+    fn test_auth_view_keeps_entries_compatibility() {
+        let dir = tempdir().unwrap();
+        let config_path = dir.path().join("rkforge.toml");
+        fs::write(
+            &config_path,
+            r#"
+[[entries]]
+pat = "token"
+url = "example.com"
+
+[image]
+storage = "/data/rkforge"
+"#,
+        )
+        .unwrap();
+
+        let auth = AuthConfig::load_from(&config_path).unwrap();
+        assert_eq!(auth.entries.len(), 1);
+        assert_eq!(auth.entries[0].url, "example.com");
+    }
 }

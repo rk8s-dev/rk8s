@@ -31,18 +31,18 @@ rust_library(
     ],
     rustc_flags = ["@$(location :sysinfo-manifest[env_flags])"],
     os_deps = {
-        "linux": ["//third-party/rust/crates/libc/0.2.180:libc"],
+        "linux": ["//third-party/rust/crates/libc/0.2.182:libc"],
         "macos": [
-            "//third-party/rust/crates/libc/0.2.180:libc",
+            "//third-party/rust/crates/libc/0.2.182:libc",
             "//third-party/rust/crates/objc2-core-foundation/0.3.2:objc2-core-foundation",
             "//third-party/rust/crates/objc2-io-kit/0.3.2:objc2-io-kit",
         ],
         "windows": [
-            "//third-party/rust/crates/libc/0.2.180:libc",
-            "//third-party/rust/crates/ntapi/0.4.1:ntapi",
+            "//third-party/rust/crates/libc/0.2.182:libc",
+            "//third-party/rust/crates/ntapi/0.4.3:ntapi",
             "//third-party/rust/crates/windows/0.61.3:windows",
         ],
     },
     visibility = ["PUBLIC"],
-    deps = ["//third-party/rust/crates/memchr/2.7.6:memchr"],
+    deps = ["//third-party/rust/crates/memchr/2.8.0:memchr"],
 )

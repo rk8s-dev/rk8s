@@ -23,7 +23,13 @@ rust_library(
     crate = "aes_gcm",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
-    features = ["aes"],
+    features = [
+        "aes",
+        "alloc",
+        "default",
+        "getrandom",
+        "rand_core",
+    ],
     rustc_flags = ["@$(location :aes-gcm-manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [

@@ -1,3 +1,9 @@
+# 0.1.11 (February 24th, 2026)
+
+### Fixed
+
+- packaging: specify `rfuse3` version requirement via workspace so crates.io publishing works.
+
 # 0.1.10 (February 1st, 2026)
 
 ### Fixed

@@ -32,7 +32,7 @@ rust_library(
     os_deps = {
         "windows": [
             "//third-party/rust/crates/byteorder/1.5.0:byteorder",
-            "//third-party/rust/crates/bytes/1.11.0:bytes",
+            "//third-party/rust/crates/bytes/1.11.1:bytes",
             "//third-party/rust/crates/delegate/0.13.5:delegate",
             "//third-party/rust/crates/futures/0.3.31:futures",
             "//third-party/rust/crates/log/0.4.29:log",

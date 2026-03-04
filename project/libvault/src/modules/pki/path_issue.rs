@@ -1,10 +1,13 @@
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use base64::Engine;
 use humantime::parse_duration;
-use openssl::{asn1::Asn1Time, x509::X509NameBuilder};
+use openssl::{asn1::Asn1Time, pkey::PKey, x509::X509NameBuilder};
+use rand::Rng;
 use serde_json::{Map, Value};
+use tracing::info;
 
-use super::{PkiBackend, PkiBackendInner, types};
+use super::{PkiBackend, PkiBackendInner, ssh_util, types};
 use crate::{
     errors::RvError,
     logical::{Backend, Field, FieldType, Operation, Path, Request, Response},
@@ -18,64 +21,157 @@ impl PkiBackend {
         let backend = self.inner.clone();
 
         Path::builder()
-            .pattern(r"issue/(?P<role>\w[\w-]+\w)")
+            .pattern(r"issue/(?P<cert_type>tls|ssh)/(?P<role>\w[\w-]*)")
+            .field(
+                "cert_type",
+                Field::builder()
+                    .field_type(FieldType::Str)
+                    .required(true)
+                    .description("Certificate type: tls or ssh"),
+            )
             .field(
                 "role",
                 Field::builder()
                     .field_type(FieldType::Str)
+                    .required(true)
                     .description("The desired role with configuration for this request"),
             )
+            // TLS fields
             .field(
                 "common_name",
                 Field::builder()
                     .field_type(FieldType::Str)
-                    .description(
-                        r#"
-        The requested common name; if you want more than one, specify the alternative names in the alt_names map"#,
-                    ),
+                    .description("The requested common name"),
             )
             .field(
                 "alt_names",
                 Field::builder()
                     .field_type(FieldType::Str)
-                    .description(
-                        r#"
-        The requested Subject Alternative Names, if any, in a comma-delimited list"#,
-                    ),
+                    .description("Subject Alternative Names, comma-delimited"),
             )
             .field(
                 "ip_sans",
                 Field::builder()
                     .field_type(FieldType::Str)
-                    .description(
-                        r#"The requested IP SANs, if any, in a comma-delimited list"#,
-                    ),
+                    .description("IP SANs, comma-delimited"),
             )
             .field(
                 "ttl",
                 Field::builder()
                     .field_type(FieldType::Str)
-                    .description("Specifies requested Time To Live"),
+                    .description("Requested Time To Live"),
+            )
+            // SSH fields
+            .field(
+                "key_id",
+                Field::builder()
+                    .field_type(FieldType::Str)
+                    .description("Key identifier for the SSH certificate"),
             )
             .operation(Operation::Write, {
                 let handler = backend.clone();
                 move |backend, req| {
                     let handler = handler.clone();
-                    Box::pin(async move { handler.issue_cert(backend, req).await })
+                    Box::pin(async move { handler.dispatch_issue(backend, req).await })
                 }
             })
-            .help(
-                r#"
-This path allows requesting certificates to be issued according to the
-policy of the given role. The certificate will only be issued if the
-requested common name is allowed by the role policy.
-                "#,
+            .help("Issue a new certificate (TLS or SSH).")
+            .build()
+    }
+
+    pub fn sign_path(&self) -> Path {
+        let backend = self.inner.clone();
+
+        Path::builder()
+            .pattern(r"sign/(?P<cert_type>tls|ssh)/(?P<role>\w[\w-]*)")
+            .field(
+                "cert_type",
+                Field::builder()
+                    .field_type(FieldType::Str)
+                    .required(true)
+                    .description("Certificate type: tls or ssh"),
             )
+            .field(
+                "role",
+                Field::builder()
+                    .field_type(FieldType::Str)
+                    .required(true)
+                    .description("Role name"),
+            )
+            // SSH sign fields
+            .field(
+                "public_key",
+                Field::builder()
+                    .field_type(FieldType::Str)
+                    .description("OpenSSH public key to sign (SSH)"),
+            )
+            .field(
+                "key_id",
+                Field::builder()
+                    .field_type(FieldType::Str)
+                    .description("Key identifier"),
+            )
+            .field(
+                "ttl",
+                Field::builder()
+                    .field_type(FieldType::Str)
+                    .description("Requested TTL"),
+            )
+            // TLS sign fields (CSR)
+            .field(
+                "csr",
+                Field::builder()
+                    .field_type(FieldType::Str)
+                    .description("PEM-encoded CSR (TLS)"),
+            )
+            .operation(Operation::Write, {
+                let handler = backend.clone();
+                move |backend, req| {
+                    let handler = handler.clone();
+                    Box::pin(async move { handler.dispatch_sign(backend, req).await })
+                }
+            })
+            .help("Sign a CSR (TLS) or public key (SSH).")
             .build()
     }
 }
 
 impl PkiBackendInner {
+    // ── Dispatch ──
+
+    pub async fn dispatch_issue(
+        &self,
+        backend: &dyn Backend,
+        req: &mut Request,
+    ) -> Result<Option<Response>, RvError> {
+        let ct = req.get_data("cert_type")?;
+        let ct = ct.as_str().ok_or(RvError::ErrRequestFieldInvalid)?;
+        match ct {
+            "tls" => self.issue_cert(backend, req).await,
+            "ssh" => self.ssh_issue_cert(backend, req).await,
+            _ => Err(RvError::ErrRequestFieldInvalid),
+        }
+    }
+
+    pub async fn dispatch_sign(
+        &self,
+        backend: &dyn Backend,
+        req: &mut Request,
+    ) -> Result<Option<Response>, RvError> {
+        let ct = req.get_data("cert_type")?;
+        let ct = ct.as_str().ok_or(RvError::ErrRequestFieldInvalid)?;
+        match ct {
+            "tls" => {
+                // TLS CSR signing - not yet implemented
+                Err(RvError::ErrPkiKeyOperationInvalid)
+            }
+            "ssh" => self.ssh_sign_key(backend, req).await,
+            _ => Err(RvError::ErrRequestFieldInvalid),
+        }
+    }
+
+    // ── TLS issue ──
+
     pub async fn issue_cert(
         &self,
         backend: &dyn Backend,
@@ -166,7 +262,7 @@ impl PkiBackendInner {
         }
         let subject = subject_name.build();
 
-        let mut cert = cert::Certificate {
+        let mut cert_obj = cert::Certificate {
             not_before,
             not_after,
             subject,
@@ -178,7 +274,7 @@ impl PkiBackendInner {
         };
 
         let cert_bundle =
-            cert.to_cert_bundle(Some(&ca_bundle.certificate), Some(&ca_bundle.private_key))?;
+            cert_obj.to_cert_bundle(Some(&ca_bundle.certificate), Some(&ca_bundle.private_key))?;
 
         if !role_entry.no_store {
             let serial_number_hex = cert_bundle.serial_number.replace(':', "-").to_lowercase();
@@ -231,5 +327,256 @@ impl PkiBackendInner {
         } else {
             Ok(Some(Response::data_response(response.to_map()?)))
         }
+    }
+
+    // ── SSH issue ──
+
+    pub async fn ssh_issue_cert(
+        &self,
+        _backend: &dyn Backend,
+        req: &mut Request,
+    ) -> Result<Option<Response>, RvError> {
+        let payload: types::SshIssueCertificateRequest = req.parse_json()?;
+
+        let role_name = req
+            .get_data("role")?
+            .as_str()
+            .ok_or(RvError::ErrRequestFieldInvalid)?
+            .to_string();
+        let role = self
+            .get_ssh_role(req, &role_name)
+            .await?
+            .ok_or(RvError::ErrPkiSshRoleNotFound)?;
+
+        let ca_bundle = self.fetch_ssh_ca_bundle(req).await?;
+        let ca_key = PKey::private_key_from_pem(ca_bundle.private_key_pem.as_bytes())?;
+        let ca_nid = if ca_key.id() == openssl::pkey::Id::EC {
+            ca_key.ec_key()?.group().curve_name()
+        } else {
+            None
+        };
+
+        let (user_key, user_nid) = ssh_util::generate_ssh_keypair(&role.key_type, role.key_bits)?;
+
+        let cert_type = match role.cert_type.as_str() {
+            "user" => ssh_util::SSH_CERT_TYPE_USER,
+            "host" => ssh_util::SSH_CERT_TYPE_HOST,
+            _ => return Err(RvError::ErrPkiSshCertTypeInvalid),
+        };
+
+        if payload.valid_principals.is_empty() {
+            return Err(RvError::ErrPkiSshPrincipalNotAllowed);
+        }
+        if !role.allowed_users.is_empty() {
+            for principal in &payload.valid_principals {
+                if !role.allowed_users.contains(principal) {
+                    return Err(RvError::ErrPkiSshPrincipalNotAllowed);
+                }
+            }
+        }
+
+        let ttl = if let Some(ref ttl_str) = payload.ttl {
+            parse_duration(ttl_str)?
+        } else {
+            role.ttl
+        };
+
+        let now = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs();
+        let valid_after = now - 10;
+        let valid_before = now + ttl.as_secs();
+
+        let serial: u64 = rand::rng().random();
+
+        let mut extensions = payload.extensions.unwrap_or_default();
+        if extensions.is_empty() && cert_type == ssh_util::SSH_CERT_TYPE_USER {
+            extensions.insert("permit-pty".to_string(), String::new());
+            extensions.insert("permit-user-rc".to_string(), String::new());
+        }
+
+        let cert_type_str = ssh_util::ssh_cert_type_str(&user_key, user_nid)?;
+        let user_pubkey_data = ssh_util::encode_pubkey_for_cert(&user_key, user_nid)?;
+
+        let cert_bytes = ssh_util::build_ssh_certificate(
+            cert_type_str,
+            &user_pubkey_data,
+            serial,
+            &payload.key_id,
+            &payload.valid_principals,
+            valid_after,
+            valid_before,
+            cert_type,
+            &extensions,
+            &ca_key,
+            ca_nid,
+        )?;
+
+        let signed_key = ssh_util::format_openssh_cert(cert_type_str, &cert_bytes);
+        let public_key = ssh_util::format_openssh_pubkey(&user_key, user_nid)?;
+        let private_key =
+            String::from_utf8_lossy(&user_key.private_key_to_pem_pkcs8()?).to_string();
+
+        let serial_hex = format!("{:016x}", serial);
+        self.store_ssh_cert(req, &serial_hex, &signed_key).await?;
+
+        info!(
+            role = %role_name,
+            key_id = %payload.key_id,
+            serial = %serial_hex,
+            principals = ?payload.valid_principals,
+            cert_type = %role.cert_type,
+            key_type = %role.key_type,
+            valid_before = valid_before,
+            "SSH certificate issued"
+        );
+
+        let response = types::SshIssueCertificateResponse {
+            signed_key,
+            private_key,
+            public_key,
+            serial_number: serial_hex,
+            expiration: valid_before as i64,
+        };
+
+        Ok(Some(Response::data_response(response.to_map()?)))
+    }
+
+    // ── SSH sign ──
+
+    pub async fn ssh_sign_key(
+        &self,
+        _backend: &dyn Backend,
+        req: &mut Request,
+    ) -> Result<Option<Response>, RvError> {
+        let payload: types::SshSignKeyRequest = req.parse_json()?;
+
+        let role_name = req
+            .get_data("role")?
+            .as_str()
+            .ok_or(RvError::ErrRequestFieldInvalid)?
+            .to_string();
+        let role = self
+            .get_ssh_role(req, &role_name)
+            .await?
+            .ok_or(RvError::ErrPkiSshRoleNotFound)?;
+
+        let ca_bundle = self.fetch_ssh_ca_bundle(req).await?;
+        let ca_key = PKey::private_key_from_pem(ca_bundle.private_key_pem.as_bytes())?;
+        let ca_nid = if ca_key.id() == openssl::pkey::Id::EC {
+            ca_key.ec_key()?.group().curve_name()
+        } else {
+            None
+        };
+
+        let parts: Vec<&str> = payload.public_key.split_whitespace().collect();
+        if parts.len() < 2 {
+            return Err(RvError::ErrPkiSshPublicKeyInvalid);
+        }
+        let key_type_str = parts[0];
+        let key_data = base64::engine::general_purpose::STANDARD
+            .decode(parts[1])
+            .map_err(|_| RvError::ErrPkiSshPublicKeyInvalid)?;
+
+        match key_type_str {
+            "ssh-rsa"
+            | "ecdsa-sha2-nistp256"
+            | "ecdsa-sha2-nistp384"
+            | "ecdsa-sha2-nistp521"
+            | "ssh-ed25519" => {}
+            _ => return Err(RvError::ErrPkiSshPublicKeyInvalid),
+        }
+
+        if key_data.len() < 4 {
+            return Err(RvError::ErrPkiSshPublicKeyInvalid);
+        }
+        let type_len = u32::from_be_bytes(
+            key_data[0..4]
+                .try_into()
+                .map_err(|_| RvError::ErrPkiSshPublicKeyInvalid)?,
+        ) as usize;
+        if 4 + type_len > key_data.len() {
+            return Err(RvError::ErrPkiSshPublicKeyInvalid);
+        }
+        let pubkey_data = &key_data[4 + type_len..];
+
+        let cert_type = match role.cert_type.as_str() {
+            "user" => ssh_util::SSH_CERT_TYPE_USER,
+            "host" => ssh_util::SSH_CERT_TYPE_HOST,
+            _ => return Err(RvError::ErrPkiSshCertTypeInvalid),
+        };
+
+        if payload.valid_principals.is_empty() {
+            return Err(RvError::ErrPkiSshPrincipalNotAllowed);
+        }
+        if !role.allowed_users.is_empty() {
+            for principal in &payload.valid_principals {
+                if !role.allowed_users.contains(principal) {
+                    return Err(RvError::ErrPkiSshPrincipalNotAllowed);
+                }
+            }
+        }
+
+        let ttl = if let Some(ref ttl_str) = payload.ttl {
+            parse_duration(ttl_str)?
+        } else {
+            role.ttl
+        };
+
+        let now = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs();
+        let valid_after = now - 10;
+        let valid_before = now + ttl.as_secs();
+
+        let serial: u64 = rand::rng().random();
+
+        let mut extensions = payload.extensions.unwrap_or_default();
+        if extensions.is_empty() && cert_type == ssh_util::SSH_CERT_TYPE_USER {
+            extensions.insert("permit-pty".to_string(), String::new());
+            extensions.insert("permit-user-rc".to_string(), String::new());
+        }
+
+        let cert_type_str_out = match key_type_str {
+            "ssh-rsa" => "ssh-rsa-cert-v01@openssh.com",
+            "ecdsa-sha2-nistp256" => "ecdsa-sha2-nistp256-cert-v01@openssh.com",
+            "ecdsa-sha2-nistp384" => "ecdsa-sha2-nistp384-cert-v01@openssh.com",
+            "ecdsa-sha2-nistp521" => "ecdsa-sha2-nistp521-cert-v01@openssh.com",
+            "ssh-ed25519" => "ssh-ed25519-cert-v01@openssh.com",
+            _ => return Err(RvError::ErrPkiSshPublicKeyInvalid),
+        };
+
+        let cert_bytes = ssh_util::build_ssh_certificate(
+            cert_type_str_out,
+            pubkey_data,
+            serial,
+            &payload.key_id,
+            &payload.valid_principals,
+            valid_after,
+            valid_before,
+            cert_type,
+            &extensions,
+            &ca_key,
+            ca_nid,
+        )?;
+
+        let signed_key = ssh_util::format_openssh_cert(cert_type_str_out, &cert_bytes);
+
+        let serial_hex = format!("{:016x}", serial);
+        self.store_ssh_cert(req, &serial_hex, &signed_key).await?;
+
+        info!(
+            role = %role_name,
+            key_id = %payload.key_id,
+            serial = %serial_hex,
+            principals = ?payload.valid_principals,
+            cert_type = %role.cert_type,
+            valid_before = valid_before,
+            "SSH certificate signed"
+        );
+
+        let response = types::SshSignKeyResponse {
+            signed_key,
+            serial_number: serial_hex,
+            expiration: valid_before as i64,
+        };
+
+        Ok(Some(Response::data_response(response.to_map()?)))
     }
 }
