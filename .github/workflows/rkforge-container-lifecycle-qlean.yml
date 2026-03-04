@@ -62,5 +62,5 @@ jobs:
       - name: Run rkforge lifecycle tests with qlean
         run: |
           cd project
-          sudo -E cargo test -p rkforge --test test_container_lifecycle_qlean -- --nocapture --ignored
+          sudo -E -E env "PATH=$PATH" $(which cargo) test -p rkforge --test test_container_lifecycle_qlean -- --nocapture --ignored
 
