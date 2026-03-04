@@ -176,7 +176,10 @@ pub struct Config {
 impl Config {
     pub fn new() -> Result<Self> {
         let is_root = current_user_is_root();
-        let (root_dir, from_config) = resolve_storage_root(is_root)?;
+        let (root_dir, from_config) = match std::env::var("RKFORGE_STORAGE_ROOT") {
+            Ok(val) if !val.is_empty() => (PathBuf::from(val), true),
+            _ => resolve_storage_root(is_root)?,
+        };
         validate_storage_root(&root_dir)?;
         if from_config {
             ensure_storage_root_writable(&root_dir)?;

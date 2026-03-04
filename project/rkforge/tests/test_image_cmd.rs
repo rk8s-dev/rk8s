@@ -10,6 +10,23 @@ use rkforge::images::{
 use rkforge::storage::ultimate_blob_path;
 use sha2::{Digest, Sha256};
 use std::fs;
+use std::sync::OnceLock;
+
+/// Redirect rkforge storage to a per-process temp directory so tests never
+/// touch the real blob cache or `repositories.toml`.  The `OnceLock` ensures
+/// the env var is set exactly once, before `CONFIG` is lazily initialized.
+static TEST_STORAGE: OnceLock<tempfile::TempDir> = OnceLock::new();
+
+fn ensure_test_storage() {
+    TEST_STORAGE.get_or_init(|| {
+        let dir = tempfile::Builder::new()
+            .prefix("rkforge-test-")
+            .tempdir()
+            .expect("Failed to create test storage root");
+        std::env::set_var("RKFORGE_STORAGE_ROOT", dir.path());
+        dir
+    });
+}
 
 /// Write a blob (bytes) into local storage under the given digest and return
 /// the digest string.  The parent directory is created if absent.
@@ -98,6 +115,7 @@ fn cleanup_test_image(image_ref: &str) {
 #[test]
 #[serial]
 fn test_list_images() {
+    ensure_test_storage();
     let image_ref = "library/test-list:latest";
     let _ = provision_test_image(image_ref);
 
@@ -116,6 +134,7 @@ fn test_list_images() {
 #[test]
 #[serial]
 fn test_inspect_image() {
+    ensure_test_storage();
     let image_ref = "library/test-inspect:latest";
     let _ = provision_test_image(image_ref);
 
@@ -130,6 +149,7 @@ fn test_inspect_image() {
 #[test]
 #[serial]
 fn test_inspect_not_found() {
+    ensure_test_storage();
     let result = inspect_image(InspectArgs {
         image_ref: "library/nonexistent:latest".to_string(),
     });
@@ -142,6 +162,7 @@ fn test_inspect_not_found() {
 #[test]
 #[serial]
 fn test_tag_image() {
+    ensure_test_storage();
     let source = "library/test-tag-src:latest";
     let target = "library/test-tag-dst:v1";
     let _ = provision_test_image(source);
@@ -165,6 +186,7 @@ fn test_tag_image() {
 #[test]
 #[serial]
 fn test_rmi_basic() {
+    ensure_test_storage();
     let image_ref = "library/test-rmi:latest";
     let _ = provision_test_image(image_ref);
 
@@ -184,6 +206,7 @@ fn test_rmi_basic() {
 #[test]
 #[serial]
 fn test_rmi_reference_counting() {
+    ensure_test_storage();
     let tag_a = "library/test-refcount-a:latest";
     let tag_b = "library/test-refcount-b:latest";
     let digest = provision_test_image(tag_a).unwrap();
@@ -224,6 +247,7 @@ fn test_rmi_reference_counting() {
 #[test]
 #[serial]
 fn test_rmi_not_found() {
+    ensure_test_storage();
     let result = remove_image(RmiArgs {
         image_ref: "library/nonexistent:latest".to_string(),
         force: false,
@@ -237,6 +261,7 @@ fn test_rmi_not_found() {
 #[test]
 #[serial]
 fn test_save_and_load_roundtrip() {
+    ensure_test_storage();
     let original_ref = "library/test-save:latest";
     let _ = provision_test_image(original_ref);
 
@@ -248,7 +273,10 @@ fn test_save_and_load_roundtrip() {
         image_ref: original_ref.to_string(),
         output: archive_path.to_str().unwrap().to_string(),
     });
-    assert!(save_result.is_ok(), "save_image should succeed: {save_result:?}");
+    assert!(
+        save_result.is_ok(),
+        "save_image should succeed: {save_result:?}"
+    );
     assert!(archive_path.exists(), "tar archive should be created");
 
     // Load under a different tag
@@ -257,7 +285,10 @@ fn test_save_and_load_roundtrip() {
         input: archive_path.to_str().unwrap().to_string(),
         tag: Some(loaded_ref.to_string()),
     });
-    assert!(load_result.is_ok(), "load_image should succeed: {load_result:?}");
+    assert!(
+        load_result.is_ok(),
+        "load_image should succeed: {load_result:?}"
+    );
 
     let repos = Repositories::load().unwrap();
     assert!(
@@ -272,6 +303,7 @@ fn test_save_and_load_roundtrip() {
 #[test]
 #[serial]
 fn test_save_output_already_exists() {
+    ensure_test_storage();
     let image_ref = "library/test-save-dup:latest";
     let _ = provision_test_image(image_ref);
 
@@ -294,6 +326,7 @@ fn test_save_output_already_exists() {
 #[test]
 #[serial]
 fn test_load_nonexistent_file() {
+    ensure_test_storage();
     let result = load_image(LoadArgs {
         input: "/tmp/nonexistent-image-archive.tar".to_string(),
         tag: Some("library/test:latest".to_string()),
@@ -307,6 +340,7 @@ fn test_load_nonexistent_file() {
 #[test]
 #[serial]
 fn test_load_invalid_tar() {
+    ensure_test_storage();
     let tmp_dir = tempfile::tempdir().unwrap();
     let bad_tar = tmp_dir.path().join("bad.tar");
     fs::write(&bad_tar, "this is not a tar file").unwrap();
