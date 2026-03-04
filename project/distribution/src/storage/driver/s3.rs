@@ -1,3 +1,4 @@
+use std::path::Path;
 use std::str::FromStr;
 use std::sync::Arc;
 
@@ -75,14 +76,28 @@ impl S3Storage {
         ObjectPath::from(trimmed)
     }
 
+    fn normalize_session_id(&self, session_id: &str) -> std::result::Result<String, AppError> {
+        uuid::Uuid::parse_str(session_id)
+            .map(|id| id.to_string())
+            .map_err(|_| OciError::BlobUploadUnknown(session_id.to_string()).into())
+    }
+
+    fn upload_dir_path(&self, session_id: &str) -> std::path::PathBuf {
+        Path::new(&self.temp_dir).join(session_id)
+    }
+
     fn upload_temp_path(&self, session_id: &str) -> String {
-        format!("{}/{}/data", self.temp_dir, session_id)
+        self.upload_dir_path(session_id)
+            .join("data")
+            .to_string_lossy()
+            .to_string()
     }
 
     async fn cleanup_temp_files(&self, session_id: &str, temp_path: &str) {
         tokio::fs::remove_file(temp_path).await.ok();
-        let upload_dir = format!("{}/{}", self.temp_dir, session_id);
-        tokio::fs::remove_dir_all(&upload_dir).await.ok();
+        tokio::fs::remove_dir_all(self.upload_dir_path(session_id))
+            .await
+            .ok();
     }
 
     async fn do_finalize_upload(&self, temp_path: &str, s3_path: &ObjectPath) -> Result<()> {
@@ -250,10 +265,11 @@ impl Storage for S3Storage {
     }
 
     async fn write_upload_chunk(&self, session_id: &str, stream: BodyDataStream) -> Result<u64> {
+        let session_id = self.normalize_session_id(session_id)?;
         let body_with_io_error = stream.map_err(io::Error::other);
         let mut body_reader = StreamReader::new(body_with_io_error);
 
-        let temp_path = self.upload_temp_path(session_id);
+        let temp_path = self.upload_temp_path(&session_id);
         let file_path = std::path::Path::new(&temp_path);
         if let Some(parent) = file_path.parent() {
             tokio::fs::create_dir_all(parent).await.map_to_internal()?;
@@ -277,13 +293,14 @@ impl Storage for S3Storage {
     }
 
     async fn finalize_upload(&self, session_id: &str, digest: &Digest) -> Result<()> {
-        let temp_path = self.upload_temp_path(session_id);
+        let session_id = self.normalize_session_id(session_id)?;
+        let temp_path = self.upload_temp_path(&session_id);
         let key = self.path_manager.clone().blob_data_path(digest);
         let s3_path = self.to_object_path(&key);
 
         let result = self.do_finalize_upload(&temp_path, &s3_path).await;
 
-        self.cleanup_temp_files(session_id, &temp_path).await;
+        self.cleanup_temp_files(&session_id, &temp_path).await;
 
         result
     }

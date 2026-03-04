@@ -140,12 +140,13 @@ pub async fn patch_blob_handler(
     headers: HeaderMap,
     request: Request,
 ) -> Result<impl IntoResponse, AppError> {
+    let session = state
+        .get_session(&session_id)
+        .await
+        .ok_or_else(|| OciError::BlobUploadUnknown(session_id.clone()))?;
+
     if headers.get(header::CONTENT_RANGE).is_some() {
         let (start_offset, _) = parse_content_range(&headers)?;
-        let session = state
-            .get_session(&session_id)
-            .await
-            .ok_or_else(|| OciError::BlobUploadUnknown(session_id.clone()))?;
         let current_uploaded_bytes = session.uploaded;
         if start_offset != current_uploaded_bytes {
             return Err(HeaderError::RangeNotSatisfiable {
@@ -185,6 +186,11 @@ pub async fn put_blob_handler(
     Query(params): Query<HashMap<String, String>>,
     request: Request,
 ) -> Result<impl IntoResponse, AppError> {
+    state
+        .get_session(&session_id)
+        .await
+        .ok_or_else(|| OciError::BlobUploadUnknown(session_id.clone()))?;
+
     let digest_str = params.get("digest").ok_or_else(|| {
         OciError::DigestInvalid("digest query parameter is required to finalize upload".to_string())
     })?;
