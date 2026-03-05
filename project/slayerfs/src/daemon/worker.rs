@@ -111,7 +111,7 @@ impl Default for ObjectGcConfig {
 pub(crate) struct MarkBasedGarbageCollector<B: ObjectBackend> {
     meta_store: Arc<dyn MetaStore>,
     object_client: Arc<ObjectClient<B>>,
-    block_store: Arc<dyn BlockStore>,
+    block_store: Arc<dyn BlockStore + Send + Sync>,
     config: ObjectGcConfig,
 }
 
@@ -120,7 +120,7 @@ impl<B: ObjectBackend> MarkBasedGarbageCollector<B> {
     pub(crate) fn new(
         meta_store: Arc<dyn MetaStore>,
         object_client: Arc<ObjectClient<B>>,
-        block_store: Arc<dyn BlockStore>,
+        block_store: Arc<dyn BlockStore + Send + Sync>,
         config: ObjectGcConfig,
     ) -> Self {
         Self {
@@ -297,7 +297,7 @@ impl<B: ObjectBackend> MarkBasedGarbageCollector<B> {
 pub async fn start_gc<B: ObjectBackend>(
     meta_store: Arc<dyn MetaStore>,
     object_client: Arc<ObjectClient<B>>,
-    block_store: Arc<dyn BlockStore>,
+    block_store: Arc<dyn BlockStore + Send + Sync>,
     config: Option<ObjectGcConfig>,
 ) {
     let config = config.unwrap_or_default();
