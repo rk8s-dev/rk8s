@@ -39,7 +39,7 @@ rust_library(
         ],
         "windows": [
             "//third-party/rust/crates/getrandom/0.4.1:getrandom",
-            "//third-party/rust/crates/windows-sys/0.59.0:windows-sys",
+            "//third-party/rust/crates/windows-sys/0.61.2:windows-sys",
         ],
     },
     visibility = ["PUBLIC"],

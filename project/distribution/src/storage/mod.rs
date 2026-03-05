@@ -1,9 +1,11 @@
-use crate::error::AppError;
+use crate::error::{AppError, MapToAppError, OciError};
 use axum::body::BodyDataStream;
 use bytes::{Bytes, BytesMut};
 use futures::stream::StreamExt;
 use oci_spec::image::Digest;
+use sha2::Digest as _;
 use std::pin::Pin;
+use tokio::io::AsyncReadExt;
 
 pub mod driver;
 pub mod paths;
@@ -18,15 +20,63 @@ pub struct StorageObject {
     pub size: u64,
 }
 
+const MAX_MANIFEST_SIZE: u64 = 10 * 1024 * 1024; // 10 MB
+
 impl StorageObject {
     pub async fn into_bytes(self) -> std::result::Result<Bytes, std::io::Error> {
+        if self.size > MAX_MANIFEST_SIZE {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!(
+                    "object too large to buffer: {} bytes (max {})",
+                    self.size, MAX_MANIFEST_SIZE
+                ),
+            ));
+        }
         let mut buf = BytesMut::with_capacity(self.size as usize);
         let mut stream = self.stream;
         while let Some(chunk) = stream.next().await {
             buf.extend_from_slice(&chunk?);
+            if buf.len() as u64 > MAX_MANIFEST_SIZE {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "stream exceeded maximum buffer size",
+                ));
+            }
         }
         Ok(buf.freeze())
     }
+}
+
+/// Compute SHA-256 of a local file and verify it matches the expected digest.
+pub async fn verify_file_digest(path: &str, expected: &Digest) -> Result<()> {
+    if expected.algorithm().as_ref() != "sha256" {
+        return Err(OciError::DigestInvalid(format!(
+            "unsupported algorithm: {}",
+            expected.algorithm()
+        ))
+        .into());
+    }
+
+    let mut file = tokio::fs::File::open(path).await.map_to_internal()?;
+    let mut hasher = sha2::Sha256::new();
+    let mut buf = [0u8; 64 * 1024];
+    loop {
+        let n = file.read(&mut buf).await.map_to_internal()?;
+        if n == 0 {
+            break;
+        }
+        hasher.update(&buf[..n]);
+    }
+    let actual_hex = hex::encode(hasher.finalize());
+
+    if actual_hex != expected.digest() {
+        return Err(OciError::DigestInvalid(format!(
+            "computed sha256:{actual_hex} does not match expected {expected}"
+        ))
+        .into());
+    }
+    Ok(())
 }
 
 #[allow(dead_code)]

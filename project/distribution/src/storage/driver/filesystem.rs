@@ -3,7 +3,7 @@ use std::str::FromStr;
 
 use crate::error::{AppError, InternalError, MapToAppError, OciError};
 use crate::storage::paths::PathManager;
-use crate::storage::{ObjectStream, Storage, StorageObject};
+use crate::storage::{ObjectStream, Storage, StorageObject, verify_file_digest};
 use axum::body::BodyDataStream;
 use futures::TryStreamExt;
 use oci_spec::image::Digest;
@@ -36,7 +36,7 @@ type Result<T> = std::result::Result<T, AppError>;
 #[async_trait::async_trait]
 impl Storage for FilesystemStorage {
     async fn get_blob(&self, digest: &Digest) -> Result<StorageObject> {
-        let path = self.path_manager.clone().blob_data_path(digest);
+        let path = self.path_manager.blob_data_path(digest);
 
         let file = match File::open(&path).await {
             Ok(file) => file,
@@ -53,7 +53,7 @@ impl Storage for FilesystemStorage {
     }
 
     async fn blob_exists(&self, digest: &Digest) -> Result<bool> {
-        let path = self.path_manager.clone().blob_data_path(digest);
+        let path = self.path_manager.blob_data_path(digest);
         match tokio::fs::metadata(path).await {
             Ok(_) => Ok(true),
             Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(false),
@@ -62,7 +62,7 @@ impl Storage for FilesystemStorage {
     }
 
     async fn blob_size(&self, digest: &Digest) -> Result<u64> {
-        let path = self.path_manager.clone().blob_data_path(digest);
+        let path = self.path_manager.blob_data_path(digest);
         match tokio::fs::metadata(&path).await {
             Ok(meta) => Ok(meta.len()),
             Err(e) if e.kind() == io::ErrorKind::NotFound => {
@@ -73,7 +73,7 @@ impl Storage for FilesystemStorage {
     }
 
     async fn resolve_tag(&self, name: &str, tag: &str) -> Result<Digest> {
-        let link_path = self.path_manager.clone().manifest_tag_link_path(name, tag);
+        let link_path = self.path_manager.manifest_tag_link_path(name, tag);
 
         let content = match tokio::fs::read_to_string(&link_path).await {
             Ok(c) => c,
@@ -92,7 +92,7 @@ impl Storage for FilesystemStorage {
         let mut body_reader = StreamReader::new(body_with_io_error);
 
         let file_path = self
-            .ensure_parent_dir(&self.path_manager.clone().blob_data_path(digest))
+            .ensure_parent_dir(&self.path_manager.blob_data_path(digest))
             .await?;
 
         let file = File::create(file_path).await.map_to_internal()?;
@@ -111,7 +111,7 @@ impl Storage for FilesystemStorage {
         let mut body_reader = StreamReader::new(body_with_io_error);
 
         let file_path = self
-            .ensure_parent_dir(&self.path_manager.clone().upload_data_path(session_id))
+            .ensure_parent_dir(&self.path_manager.upload_data_path(session_id))
             .await?;
 
         let file = OpenOptions::new()
@@ -132,14 +132,21 @@ impl Storage for FilesystemStorage {
     }
 
     async fn finalize_upload(&self, session_id: &str, digest: &Digest) -> Result<()> {
-        let upload_data_path = self.path_manager.clone().upload_data_path(session_id);
-        let blob_data_path = self.path_manager.clone().blob_data_path(digest);
+        let upload_data_path = self.path_manager.upload_data_path(session_id);
+        let blob_data_path = self.path_manager.blob_data_path(digest);
+
+        verify_file_digest(&upload_data_path, digest).await?;
 
         self.ensure_parent_dir(&blob_data_path).await?;
 
+        const EXDEV: i32 = 18;
         if let Err(e) = tokio::fs::rename(&upload_data_path, &blob_data_path).await {
-            // EXDEV (errno 18): rename across different mount points, fall back to copy+delete
-            if e.raw_os_error() == Some(18) {
+            if e.raw_os_error() == Some(EXDEV) {
+                tracing::warn!(
+                    "rename across mount points (EXDEV), falling back to copy+delete: {} -> {}",
+                    upload_data_path,
+                    blob_data_path
+                );
                 tokio::fs::copy(&upload_data_path, &blob_data_path)
                     .await
                     .map_to_internal()?;
@@ -152,7 +159,7 @@ impl Storage for FilesystemStorage {
     }
 
     async fn put_tag(&self, name: &str, tag: &str, digest: &Digest) -> Result<()> {
-        let link_path = self.path_manager.clone().manifest_tag_link_path(name, tag);
+        let link_path = self.path_manager.manifest_tag_link_path(name, tag);
         let file_path = self.ensure_parent_dir(&link_path).await?;
 
         tokio::fs::write(file_path, digest.to_string())
@@ -164,7 +171,7 @@ impl Storage for FilesystemStorage {
 
     async fn list_tags(&self, name: &str) -> Result<Vec<String>> {
         let mut entries = vec![];
-        let path = self.path_manager.clone().manifest_tags_path(name);
+        let path = self.path_manager.manifest_tags_path(name);
 
         let mut read_dir = match read_dir(path).await {
             Ok(rd) => rd,
@@ -189,7 +196,7 @@ impl Storage for FilesystemStorage {
     }
 
     async fn delete_tag(&self, name: &str, tag: &str) -> Result<()> {
-        let tag_path = self.path_manager.clone().manifest_tag_path(name, tag);
+        let tag_path = self.path_manager.manifest_tag_path(name, tag);
 
         match remove_dir_all(tag_path).await {
             Ok(_) => Ok(()),
@@ -201,7 +208,7 @@ impl Storage for FilesystemStorage {
     }
 
     async fn delete_blob(&self, digest: &Digest) -> Result<()> {
-        let blob_path = self.path_manager.clone().blob_path(digest);
+        let blob_path = self.path_manager.blob_path(digest);
 
         match remove_dir_all(blob_path).await {
             Ok(_) => Ok(()),

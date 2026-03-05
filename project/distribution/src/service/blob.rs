@@ -140,6 +140,10 @@ pub async fn patch_blob_handler(
     headers: HeaderMap,
     request: Request,
 ) -> Result<impl IntoResponse, AppError> {
+    if !is_valid_name(&name) {
+        return Err(OciError::NameInvalid(name).into());
+    }
+
     let session = state
         .get_session(&session_id)
         .await

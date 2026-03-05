@@ -1,4 +1,13 @@
 use crate::error::{AppError, MapToAppError, OciError};
+
+fn remap_blob_to_manifest_error(err: AppError, reference: &str) -> AppError {
+    match err {
+        AppError::Oci(OciError::BlobUnknown(_)) => {
+            OciError::ManifestUnknown(reference.to_string()).into()
+        }
+        other => other,
+    }
+}
 use crate::utils::repo_identifier::identifier_from_full_name;
 use crate::utils::{
     state::AppState,
@@ -38,7 +47,8 @@ pub async fn get_manifest_handler(
     let buffer = state
         .storage
         .get_blob(&resolved_digest)
-        .await?
+        .await
+        .map_err(|e| remap_blob_to_manifest_error(e, &reference))?
         .into_bytes()
         .await
         .map_to_internal()?;
@@ -82,7 +92,11 @@ pub async fn head_manifest_handler(
         state.storage.resolve_tag(&name, &reference).await?
     };
 
-    let content_length = state.storage.blob_size(&resolved_digest).await?;
+    let content_length = state
+        .storage
+        .blob_size(&resolved_digest)
+        .await
+        .map_err(|e| remap_blob_to_manifest_error(e, &reference))?;
 
     Ok(Response::builder()
         .status(StatusCode::OK)

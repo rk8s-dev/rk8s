@@ -17,7 +17,7 @@ use axum::body::BodyDataStream;
 use crate::config::S3Config;
 use crate::error::{AppError, InternalError, MapToAppError, OciError};
 use crate::storage::paths::PathManager;
-use crate::storage::{ObjectStream, Storage, StorageObject};
+use crate::storage::{ObjectStream, Storage, StorageObject, verify_file_digest};
 
 const MULTIPART_THRESHOLD: u64 = 8 * 1024 * 1024;
 const MULTIPART_CHUNK_SIZE: usize = 8 * 1024 * 1024;
@@ -94,10 +94,16 @@ impl S3Storage {
     }
 
     async fn cleanup_temp_files(&self, session_id: &str, temp_path: &str) {
-        tokio::fs::remove_file(temp_path).await.ok();
-        tokio::fs::remove_dir_all(self.upload_dir_path(session_id))
-            .await
-            .ok();
+        if let Err(e) = tokio::fs::remove_file(temp_path).await
+            && e.kind() != std::io::ErrorKind::NotFound
+        {
+            tracing::warn!("failed to clean up temp file {temp_path}: {e}");
+        }
+        if let Err(e) = tokio::fs::remove_dir_all(self.upload_dir_path(session_id)).await
+            && e.kind() != std::io::ErrorKind::NotFound
+        {
+            tracing::warn!("failed to clean up upload dir for session {session_id}: {e}");
+        }
     }
 
     async fn do_finalize_upload(&self, temp_path: &str, s3_path: &ObjectPath) -> Result<()> {
@@ -181,7 +187,7 @@ type Result<T> = std::result::Result<T, AppError>;
 #[async_trait::async_trait]
 impl Storage for S3Storage {
     async fn get_blob(&self, digest: &Digest) -> Result<StorageObject> {
-        let key = self.path_manager.clone().blob_data_path(digest);
+        let key = self.path_manager.blob_data_path(digest);
         let path = self.to_object_path(&key);
 
         let result = self.store.get(&path).await.map_err(|e| match e {
@@ -198,7 +204,7 @@ impl Storage for S3Storage {
     }
 
     async fn blob_exists(&self, digest: &Digest) -> Result<bool> {
-        let key = self.path_manager.clone().blob_data_path(digest);
+        let key = self.path_manager.blob_data_path(digest);
         let path = self.to_object_path(&key);
 
         match self.store.head(&path).await {
@@ -209,7 +215,7 @@ impl Storage for S3Storage {
     }
 
     async fn blob_size(&self, digest: &Digest) -> Result<u64> {
-        let key = self.path_manager.clone().blob_data_path(digest);
+        let key = self.path_manager.blob_data_path(digest);
         let path = self.to_object_path(&key);
 
         match self.store.head(&path).await {
@@ -222,7 +228,7 @@ impl Storage for S3Storage {
     }
 
     async fn resolve_tag(&self, name: &str, tag: &str) -> Result<Digest> {
-        let key = self.path_manager.clone().manifest_tag_link_path(name, tag);
+        let key = self.path_manager.manifest_tag_link_path(name, tag);
         let path = self.to_object_path(&key);
 
         let result = self.store.get(&path).await.map_err(|e| match e {
@@ -248,18 +254,26 @@ impl Storage for S3Storage {
         let body_with_io_error = stream.map_err(io::Error::other);
         let mut body_reader = StreamReader::new(body_with_io_error);
 
-        let mut buf = Vec::new();
-        let size = tokio::io::copy(&mut body_reader, &mut buf)
+        let session_id = uuid::Uuid::new_v4().to_string();
+        let temp_path = self.upload_temp_path(&session_id);
+        let file_path = std::path::Path::new(&temp_path);
+        if let Some(parent) = file_path.parent() {
+            tokio::fs::create_dir_all(parent).await.map_to_internal()?;
+        }
+
+        let file = File::create(&temp_path).await.map_to_internal()?;
+        let mut file_writer = BufWriter::new(file);
+        let size = io::copy(&mut body_reader, &mut file_writer)
             .await
             .map_to_internal()?;
+        file_writer.shutdown().await.map_to_internal()?;
 
-        let key = self.path_manager.clone().blob_data_path(digest);
-        let path = self.to_object_path(&key);
+        let key = self.path_manager.blob_data_path(digest);
+        let s3_path = self.to_object_path(&key);
 
-        self.store
-            .put(&path, PutPayload::from_bytes(Bytes::from(buf)))
-            .await
-            .map_err(|e| InternalError::Others(format!("S3 put error: {e}")))?;
+        let result = self.do_finalize_upload(&temp_path, &s3_path).await;
+        self.cleanup_temp_files(&session_id, &temp_path).await;
+        result?;
 
         Ok(size)
     }
@@ -295,18 +309,23 @@ impl Storage for S3Storage {
     async fn finalize_upload(&self, session_id: &str, digest: &Digest) -> Result<()> {
         let session_id = self.normalize_session_id(session_id)?;
         let temp_path = self.upload_temp_path(&session_id);
-        let key = self.path_manager.clone().blob_data_path(digest);
+
+        if let Err(e) = verify_file_digest(&temp_path, digest).await {
+            self.cleanup_temp_files(&session_id, &temp_path).await;
+            return Err(e);
+        }
+
+        let key = self.path_manager.blob_data_path(digest);
         let s3_path = self.to_object_path(&key);
 
         let result = self.do_finalize_upload(&temp_path, &s3_path).await;
-
         self.cleanup_temp_files(&session_id, &temp_path).await;
 
         result
     }
 
     async fn put_tag(&self, name: &str, tag: &str, digest: &Digest) -> Result<()> {
-        let key = self.path_manager.clone().manifest_tag_link_path(name, tag);
+        let key = self.path_manager.manifest_tag_link_path(name, tag);
         let path = self.to_object_path(&key);
 
         self.store
@@ -321,7 +340,7 @@ impl Storage for S3Storage {
     }
 
     async fn list_tags(&self, name: &str) -> Result<Vec<String>> {
-        let key = self.path_manager.clone().manifest_tags_path(name);
+        let key = self.path_manager.manifest_tags_path(name);
         let prefix = self.to_object_path(&format!("{key}/"));
 
         let list_result = self
@@ -346,7 +365,7 @@ impl Storage for S3Storage {
     }
 
     async fn delete_tag(&self, name: &str, tag: &str) -> Result<()> {
-        let key = self.path_manager.clone().manifest_tag_link_path(name, tag);
+        let key = self.path_manager.manifest_tag_link_path(name, tag);
         let path = self.to_object_path(&key);
 
         self.store.delete(&path).await.map_err(|e| match e {
@@ -360,7 +379,7 @@ impl Storage for S3Storage {
     }
 
     async fn delete_blob(&self, digest: &Digest) -> Result<()> {
-        let key = self.path_manager.clone().blob_data_path(digest);
+        let key = self.path_manager.blob_data_path(digest);
         let path = self.to_object_path(&key);
 
         self.store.delete(&path).await.map_err(|e| match e {
