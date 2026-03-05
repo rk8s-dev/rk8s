@@ -28,7 +28,7 @@ pub use crate::cadapter::s3::{S3Backend, S3Config};
 pub use crate::chuck::chunk::ChunkLayout;
 pub use crate::chuck::store::{BlockKey, BlockStore, InMemoryBlockStore, ObjectBlockStore};
 pub use crate::meta::client::MetaClient;
-pub use crate::meta::config::{CacheConfig, ClientOptions, Config, DatabaseConfig, DatabaseType};
+pub use crate::meta::config::{CacheConfig, ClientOptions, CompactConfig, Config, DatabaseConfig, DatabaseType};
 pub use crate::meta::factory::MetaStoreFactory;
 pub use crate::meta::file_lock::{FileLockInfo, FileLockQuery, FileLockRange, FileLockType};
 pub use crate::meta::store::{
