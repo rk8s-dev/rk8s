@@ -20,6 +20,7 @@ pub(crate) mod abi;
 mod connection;
 mod filesystem;
 pub mod flags;
+pub mod logfs;
 mod object_safe_filesystem;
 pub mod reply;
 mod request;

@@ -2,12 +2,13 @@
 
 use crate::cadapter::client::{ObjectBackend, ObjectClient};
 use crate::chuck::ChunkLayout;
+use crate::chuck::store::BlockStore;
 use crate::meta::config::CompactConfig;
 use crate::meta::store::MetaStore;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::time::interval;
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, warn};
 
 /// Compact worker for background slice compaction
 #[allow(dead_code)]
@@ -110,6 +111,7 @@ impl Default for ObjectGcConfig {
 pub(crate) struct MarkBasedGarbageCollector<B: ObjectBackend> {
     meta_store: Arc<dyn MetaStore>,
     object_client: Arc<ObjectClient<B>>,
+    block_store: Arc<dyn BlockStore>,
     config: ObjectGcConfig,
 }
 
@@ -118,11 +120,13 @@ impl<B: ObjectBackend> MarkBasedGarbageCollector<B> {
     pub(crate) fn new(
         meta_store: Arc<dyn MetaStore>,
         object_client: Arc<ObjectClient<B>>,
+        block_store: Arc<dyn BlockStore>,
         config: ObjectGcConfig,
     ) -> Self {
         Self {
             meta_store,
             object_client,
+            block_store,
             config,
         }
     }
@@ -175,13 +179,37 @@ impl<B: ObjectBackend> MarkBasedGarbageCollector<B> {
     ) -> Result<(usize, usize, usize), Box<dyn std::error::Error + Send + Sync>> {
         info!("Starting GC cycle");
 
+        // Process delayed slices (from compaction) and delete their block data
         let deleted_slices = self
             .meta_store
             .process_delayed_slices(self.config.batch_size, self.config.max_age_secs)
             .await?;
         let delayed_deleted_count = deleted_slices.len();
+
         if delayed_deleted_count > 0 {
-            info!("Processed {} delayed slices", delayed_deleted_count);
+            info!(
+                deleted_count = delayed_deleted_count,
+                "GC cycle: processed delayed slices, deleting block data..."
+            );
+
+            for (slice_id, _offset, size) in &deleted_slices {
+                if let Err(e) = self
+                    .delete_slice_blocks(*slice_id, *size, self.config.layout.block_size as u64)
+                    .await
+                {
+                    warn!(
+                        slice_id = slice_id,
+                        size = size,
+                        error = %e,
+                        "Failed to delete slice blocks from block store"
+                    );
+                }
+            }
+
+            info!(
+                deleted_count = delayed_deleted_count,
+                "GC cycle: deleted block data for delayed slices"
+            );
         }
 
         let deleted_inodes = self.meta_store.get_deleted_files().await?;
@@ -195,6 +223,30 @@ impl<B: ObjectBackend> MarkBasedGarbageCollector<B> {
         self.cleanup_deleted_file_metadata(&deleted_inodes).await?;
 
         Ok((delayed_deleted_count, deleted_inodes.len(), deleted_objects))
+    }
+
+    async fn delete_slice_blocks(
+        &self,
+        slice_id: u64,
+        size: u64,
+        block_size: u64,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        if size == 0 {
+            return Ok(());
+        }
+
+        // Blocks are indexed by (slice_id, block_index) where block_index is slice-relative
+        let num_blocks = size.div_ceil(block_size);
+
+        if num_blocks == 0 {
+            return Ok(());
+        }
+
+        self.block_store
+            .delete_range((slice_id, 0), num_blocks)
+            .await?;
+
+        Ok(())
     }
 
     async fn delete_objects(
@@ -245,9 +297,10 @@ impl<B: ObjectBackend> MarkBasedGarbageCollector<B> {
 pub async fn start_gc<B: ObjectBackend>(
     meta_store: Arc<dyn MetaStore>,
     object_client: Arc<ObjectClient<B>>,
+    block_store: Arc<dyn BlockStore>,
     config: Option<ObjectGcConfig>,
 ) {
     let config = config.unwrap_or_default();
-    let gc = MarkBasedGarbageCollector::new(meta_store, object_client, config);
+    let gc = MarkBasedGarbageCollector::new(meta_store, object_client, block_store, config);
     gc.start().await;
 }
