@@ -175,7 +175,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         };
 
-        let fs = VFS::new(layout, store, meta_store.clone())
+        let fs = VFS::new(layout, store.clone(), meta_store.clone())
             .await
             .expect("create VFS");
 
@@ -184,11 +184,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let gc_handle = tokio::spawn({
             let meta_store = meta_store.clone();
             let object_client = client.clone();
+            let block_store: Arc<dyn slayerfs::chuck::BlockStore> = Arc::new(store);
             async move {
                 use slayerfs::daemon::worker::start_gc;
                 use std::sync::Arc;
 
-                start_gc(meta_store, Arc::new(object_client), None).await;
+                start_gc(meta_store, Arc::new(object_client), block_store, None).await;
             }
         });
 
