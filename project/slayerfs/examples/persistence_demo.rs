@@ -140,7 +140,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         let layout = ChunkLayout::default();
         let client = ObjectClient::new(LocalFsBackend::new(&backend_storage));
-        let store = Arc::new(ObjectBlockStore::new(client.clone()));
+        let store = ObjectBlockStore::new(client.clone());
 
         let config_content = std::fs::read_to_string(&config_file)
             .map_err(|e| format!("Cannot read config file: {}", e))?;
@@ -175,7 +175,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         };
 
-        let fs = VFS::new(layout, store.clone(), meta_store.clone())
+        // Create a wrapper that can be shared between VFS and GC
+        let block_store_for_gc: Arc<dyn slayerfs::chuck::BlockStore> = Arc::new(
+            ObjectBlockStore::new(client.clone())
+        );
+
+        let fs = VFS::new(layout, store, meta_store.clone())
             .await
             .expect("create VFS");
 
@@ -184,7 +189,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let gc_handle = tokio::spawn({
             let meta_store = meta_store.clone();
             let object_client = client.clone();
-            let block_store: Arc<dyn slayerfs::chuck::BlockStore> = store.clone();
+            let block_store = block_store_for_gc;
             async move {
                 use slayerfs::daemon::worker::start_gc;
                 use std::sync::Arc;
