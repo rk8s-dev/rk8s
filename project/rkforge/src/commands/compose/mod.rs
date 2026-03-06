@@ -301,16 +301,6 @@ impl ComposeManager {
 
                 debug!("get mount: {:#?}", mounts);
 
-                //  setup the network_conf file
-                self.network_manager
-                    .setup_network_conf(&network_name)
-                    .map_err(|e| {
-                        anyhow!(
-                            "Service [{}] create network Config file failed: {}",
-                            srv_name,
-                            e
-                        )
-                    })?;
                 let configs_mounts = self.config_manager.get_mounts_by_service(&srv_name);
 
                 let mut runner = ContainerRunner::from_spec(

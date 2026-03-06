@@ -1,16 +1,16 @@
+mod netwok;
 pub mod rootfs_mount;
-
 use self::rootfs_mount::RootfsMount;
 use crate::{
     commands::{
         Exec, ExecContainer,
+        container::netwok::{RootfulBridgeSpec, setup_rootful_bridge, teardown_rootful_bridge},
         create, delete, exec, list, load_container, start,
         volume::parse_key_val,
     },
     config::image::CONFIG,
     pull,
 };
-use crate::network::{RootfulBridgeSpec, setup_rootful_bridge, teardown_rootful_bridge};
 use anyhow::{Context, Ok, Result, anyhow};
 use chrono::{DateTime, Local};
 use clap::Subcommand;
