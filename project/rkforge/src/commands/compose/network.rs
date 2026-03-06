@@ -34,9 +34,6 @@ use anyhow::Result;
 use anyhow::anyhow;
 use serde::{Deserialize, Serialize};
 
-pub const CNI_VERSION: &str = "1.0.0";
-pub const STD_CONF_PATH: &str = "/etc/cni/net.d";
-
 pub const BRIDGE_PLUGIN_NAME: &str = "libbridge";
 pub const BRIDGE_CONF: &str = "rkl-standalone-bridge.conf";
 /// Subnet size for each compose network (256 IPs per network)
@@ -610,7 +607,6 @@ impl NetworkManager {
                     false,
                 )
                 .map_err(|e| anyhow!("[container {}] netavark setup failed: {e}", runner.id()))?;
-            clean_tmp_netavark_json(&runner.id())?;
         } else {
             return Err(anyhow!("Unsupported ipv6 type"));
         }
@@ -624,6 +620,10 @@ impl NetworkManager {
         let mut json_path = std::env::temp_dir();
         json_path.push("rkl-netavark");
         json_path.push(format!("{}.network.json", id));
+        // If the setup state file is missing, treat cleanup as idempotent.
+        if !json_path.exists() {
+            return Ok(());
+        }
         teardown
             .exec(
                 Some(json_path.into_os_string()),
@@ -634,6 +634,11 @@ impl NetworkManager {
                 false,
             )
             .map_err(|e| anyhow!("[container {}] netavark teardown failed: {e}", id))?;
+        // Remove state file after successful teardown.
+        let mut json_path = std::env::temp_dir();
+        json_path.push("rkl-netavark");
+        json_path.push(format!("{}.network.json", id));
+        let _ = std::fs::remove_file(&json_path);
         Ok(())
     }
 }
@@ -699,15 +704,4 @@ fn create_tmp_netavark_json(opts: &NetworkOptions, id: &str) -> Result<OsString>
     let mut json_file = std::fs::File::create(&json_path)?;
     json_file.write_all(json_str.as_bytes())?;
     Ok(json_path.into_os_string())
-}
-fn clean_tmp_netavark_json(id: &str) -> Result<()> {
-    let mut json_path = std::env::temp_dir();
-    json_path.push("rkl-netavark");
-    json_path.push(format!("{}.network.json", id));
-    if let Some(parent) = json_path.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    std::fs::remove_file(&json_path)?;
-
-    Ok(())
 }
