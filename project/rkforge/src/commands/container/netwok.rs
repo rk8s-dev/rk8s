@@ -101,10 +101,7 @@ fn build_netavark_opts(spec: &RootfulBridgeSpec, container_id: &str) -> Result<N
     let mut networks = HashMap::new();
     let mut network_info = HashMap::new();
 
-    let static_ips = spec
-        .static_ipv4
-        .map(|ip| vec![IpAddr::V4(ip)])
-        .or_else(|| None);
+    let static_ips = spec.static_ipv4.map(|ip| vec![IpAddr::V4(ip)]).or(None);
 
     let per = PerNetworkOptions {
         aliases: if spec.aliases.is_empty() {
@@ -151,7 +148,11 @@ fn build_netavark_opts(spec: &RootfulBridgeSpec, container_id: &str) -> Result<N
     })
 }
 
-pub fn setup_rootful_bridge(netns_path: &str, container_id: &str, spec: RootfulBridgeSpec) -> Result<Ipv4Addr> {
+pub fn setup_rootful_bridge(
+    netns_path: &str,
+    container_id: &str,
+    spec: RootfulBridgeSpec,
+) -> Result<Ipv4Addr> {
     if !Path::new(netns_path).exists() {
         return Err(anyhow!("netns path not found: {netns_path}"));
     }
@@ -203,4 +204,3 @@ pub fn teardown_rootful_bridge(netns_path: &str, container_id: &str) -> Result<(
     let _ = fs::remove_file(&json_path);
     Ok(())
 }
-
