@@ -172,7 +172,7 @@ async fn test_container_lifecycle_sync_mode_with_qlean() -> Result<()> {
             )
             .await?;
             vm.upload(&rkforge_bin, "/usr/local/bin").await?;
-            vm.upload(&aardvark_path, "/usr/bin/aardvark-dns").await?;
+            vm.upload(&aardvark_path, "/usr/bin").await?;
             vm.upload(&libbridge, "/opt/cni/bin").await?;
             vm.upload(&libipam, "/opt/cni/bin").await?;
             vm.upload(&pause_bundle, "/root/bundles").await?;
@@ -181,7 +181,7 @@ async fn test_container_lifecycle_sync_mode_with_qlean() -> Result<()> {
 
             vm_exec_ok(
                 vm,
-                "chmod +x /usr/local/bin/rkforge /opt/cni/bin/libbridge /opt/cni/bin/libipam",
+                "chmod +x /usr/local/bin/rkforge /opt/cni/bin/libbridge /opt/cni/bin/libipam /usr/bin/aardvark-dns",
             )
             .await?;
             vm_exec_ok(vm, "chmod -R a+rx /root/bundles/pause/rootfs || true").await?;
