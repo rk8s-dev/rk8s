@@ -41,7 +41,7 @@ rust_library(
         "@$(location :object-manifest[env_flags])",
     ],
     visibility = ["PUBLIC"],
-    deps = ["//third-party/rust/crates/memchr/2.7.6:memchr"],
+    deps = ["//third-party/rust/crates/memchr/2.8.0:memchr"],
 )
 
 rust_binary(

@@ -29,8 +29,8 @@ rust_binary(
     ],
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/arc-swap/1.7.1:arc-swap",
-        "//third-party/rust/crates/clap/4.5.53:clap",
+        "//third-party/rust/crates/arc-swap/1.8.2:arc-swap",
+        "//third-party/rust/crates/clap/4.5.58:clap",
         "//third-party/rust/crates/flume/0.11.1:flume",
         "//third-party/rust/crates/futures-util/0.3.31:futures-util",
         "//third-party/rust/crates/futures/0.3.31:futures",
@@ -38,7 +38,7 @@ rust_binary(
         "//third-party/rust/crates/hickory-proto/0.25.2:hickory-proto",
         "//third-party/rust/crates/hickory-server/0.25.2:hickory-server",
         "//third-party/rust/crates/inotify/0.11.0:inotify",
-        "//third-party/rust/crates/libc/0.2.180:libc",
+        "//third-party/rust/crates/libc/0.2.182:libc",
         "//third-party/rust/crates/log/0.4.29:log",
         "//third-party/rust/crates/nix/0.30.1:nix",
         "//third-party/rust/crates/syslog/7.0.0:syslog",
@@ -61,8 +61,8 @@ rust_library(
     ],
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/arc-swap/1.7.1:arc-swap",
-        "//third-party/rust/crates/clap/4.5.53:clap",
+        "//third-party/rust/crates/arc-swap/1.8.2:arc-swap",
+        "//third-party/rust/crates/clap/4.5.58:clap",
         "//third-party/rust/crates/flume/0.11.1:flume",
         "//third-party/rust/crates/futures-util/0.3.31:futures-util",
         "//third-party/rust/crates/futures/0.3.31:futures",
@@ -70,7 +70,7 @@ rust_library(
         "//third-party/rust/crates/hickory-proto/0.25.2:hickory-proto",
         "//third-party/rust/crates/hickory-server/0.25.2:hickory-server",
         "//third-party/rust/crates/inotify/0.11.0:inotify",
-        "//third-party/rust/crates/libc/0.2.180:libc",
+        "//third-party/rust/crates/libc/0.2.182:libc",
         "//third-party/rust/crates/log/0.4.29:log",
         "//third-party/rust/crates/nix/0.30.1:nix",
         "//third-party/rust/crates/syslog/7.0.0:syslog",
@@ -86,7 +86,7 @@ rust_binary(
     edition = "2018",
     rustc_flags = ["@$(location :aardvark-dns-manifest[env_flags])"],
     visibility = [],
-    deps = ["//third-party/rust/crates/chrono/0.4.42:chrono"],
+    deps = ["//third-party/rust/crates/chrono/0.4.43:chrono"],
 )
 
 buildscript_run(

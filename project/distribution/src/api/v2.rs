@@ -1,5 +1,4 @@
 use crate::api::middleware::{authorize_repository_access, populate_oci_claims};
-use crate::api::{AuthHeader, extract_claims};
 use crate::error::AppError;
 use crate::service::blob::{
     delete_blob_handler, get_blob_handler, get_blob_status_handler, head_blob_handler,
@@ -29,25 +28,20 @@ pub fn create_v2_router(state: Arc<AppState>) -> Router<Arc<AppState>> {
         .layer(middleware::from_fn_with_state(state, populate_oci_claims))
 }
 
-pub async fn probe(
-    State(state): State<Arc<AppState>>,
-    auth: Option<AuthHeader>,
-) -> Result<impl IntoResponse, AppError> {
-    match extract_claims(
-        auth,
-        &state.config.jwt_secret,
-        state.user_storage.as_ref(),
-        &state.config.registry_url,
+pub async fn probe(State(state): State<Arc<AppState>>) -> Result<impl IntoResponse, AppError> {
+    let realm = format!("{}/auth/token", state.config.registry_url);
+    let challenge = format!(
+        r#"Bearer realm="{realm}",service="oci-registry",scope="repository:*:*", Basic Realm="oci registry""#,
+    );
+
+    Ok((
+        StatusCode::OK,
+        [
+            ("Docker-Distribution-API-Version", "registry/2.0"),
+            ("Www-Authenticate", &challenge),
+        ],
     )
-    .await
-    {
-        Ok(_) => Ok((
-            StatusCode::OK,
-            [("Docker-Distribution-API-Version", "registry/2.0")],
-        )
-            .into_response()),
-        Err(e) => Err(e),
-    }
+        .into_response())
 }
 
 // todo: Perhaps we can extract all required path parameters within middlewares to simplify this.

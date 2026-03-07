@@ -163,8 +163,8 @@ impl TokenStore {
             expiration,
         };
 
-        if salt.is_some() {
-            token_store.salt = String::from_utf8_lossy(&salt.unwrap().value).to_string();
+        if let Some(s) = salt {
+            token_store.salt = String::from_utf8_lossy(&s.value).to_string();
         }
 
         if token_store.salt.is_empty() {
@@ -517,8 +517,7 @@ impl TokenStore {
 
         view.delete(&path).await?;
 
-        if entry.is_some() {
-            let entry = entry.unwrap();
+        if let Some(entry) = entry {
             if entry.parent.as_str() != "" {
                 let path = format!(
                     "{}{}/{}",

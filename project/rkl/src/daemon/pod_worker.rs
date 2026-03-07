@@ -731,7 +731,8 @@ async fn restart_container_locally(
             "Container spec not found for id {} in pod {}",
             container_id,
             event.pod_name
-        ))?;
+        ))?
+        .clone();
 
     if root_path.join(container_id).exists() {
         tracing::debug!(
@@ -750,7 +751,7 @@ async fn restart_container_locally(
     }
 
     let create_request = task_runner
-        .build_create_container_request(&pod_info.pod_sandbox_id, container_spec)
+        .build_create_container_request(&pod_info.pod_sandbox_id, &container_spec)
         .await?;
     let create_response = task_runner.create_container(create_request)?;
     task_runner.start_container(StartContainerRequest {

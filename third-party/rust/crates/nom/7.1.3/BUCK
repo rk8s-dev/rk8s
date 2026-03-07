@@ -31,7 +31,7 @@ rust_library(
     rustc_flags = ["@$(location :nom-manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/memchr/2.7.6:memchr",
+        "//third-party/rust/crates/memchr/2.8.0:memchr",
         "//third-party/rust/crates/minimal-lexical/0.2.1:minimal-lexical",
     ],
 )

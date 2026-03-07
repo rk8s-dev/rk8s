@@ -41,8 +41,8 @@ rust_library(
         "//third-party/rust/crates/futures-lite/2.6.1:futures-lite",
         "//third-party/rust/crates/parking/2.2.1:parking",
         "//third-party/rust/crates/polling/3.11.0:polling",
-        "//third-party/rust/crates/rustix/1.1.2:rustix",
-        "//third-party/rust/crates/slab/0.4.11:slab",
+        "//third-party/rust/crates/rustix/1.1.3:rustix",
+        "//third-party/rust/crates/slab/0.4.12:slab",
     ],
 )
 

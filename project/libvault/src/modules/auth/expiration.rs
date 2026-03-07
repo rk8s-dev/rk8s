@@ -694,15 +694,13 @@ impl ExpirationManager {
             .upgrade()
             .ok_or(RvError::ErrBarrierSealed)?;
 
-        if le.auth.is_some() {
-            return token_store
-                .revoke_tree(&le.auth.as_ref().unwrap().client_token)
-                .await;
+        if let Some(auth) = &le.auth {
+            return token_store.revoke_tree(&auth.client_token).await;
         }
 
         let mut secret: Option<SecretData> = None;
-        if le.secret.is_some() {
-            secret = Some(le.secret.as_ref().unwrap().clone());
+        if let Some(s) = &le.secret {
+            secret = Some(s.clone());
         }
 
         let mut data: Option<Map<String, Value>> = None;
@@ -725,8 +723,8 @@ impl ExpirationManager {
         increment: Duration,
     ) -> Result<Option<Response>, RvError> {
         let mut secret: Option<SecretData> = None;
-        if le.secret.is_some() {
-            let mut s = le.secret.as_ref().unwrap().clone();
+        if let Some(sec) = &le.secret {
+            let mut s = sec.clone();
             s.lease_id = "".to_string();
             s.increment = increment;
             s.issue_time = Some(le.issue_time);
@@ -740,8 +738,8 @@ impl ExpirationManager {
 
         let mut req = Request::new_renew_request(&le.path, secret, data);
         let ret = self.router.handle_request(&mut req).await;
-        if ret.is_err() {
-            log::error!("failed to renew entry: {}", ret.as_ref().unwrap_err());
+        if let Err(e) = &ret {
+            log::error!("failed to renew entry: {}", e);
         }
 
         ret
@@ -755,8 +753,8 @@ impl ExpirationManager {
         increment: Duration,
     ) -> Result<Option<Response>, RvError> {
         let mut auth: Option<Auth> = None;
-        if le.auth.is_some() {
-            let mut au = le.auth.as_ref().unwrap().clone();
+        if let Some(a) = &le.auth {
+            let mut au = a.clone();
             if le.path.starts_with("auth/token/") {
                 au.client_token.clone_from(&le.client_token);
             } else {
@@ -769,8 +767,8 @@ impl ExpirationManager {
 
         let mut req = Request::new_renew_auth_request(&le.path, auth, None);
         let ret = self.router.handle_request(&mut req).await;
-        if ret.is_err() {
-            log::error!("failed to renew_auth entry: {}", ret.as_ref().unwrap_err());
+        if let Err(e) = &ret {
+            log::error!("failed to renew_auth entry: {}", e);
         }
 
         ret

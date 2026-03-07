@@ -846,32 +846,102 @@ impl Filesystem for OverlayFs {
     #[allow(clippy::too_many_arguments)]
     async fn getlk(
         &self,
-        _req: Request,
+        req: Request,
         _inode: Inode,
-        _fh: u64,
-        _lock_owner: u64,
-        _start: u64,
-        _end: u64,
-        _type: u32,
-        _pid: u32,
+        fh: u64,
+        lock_owner: u64,
+        start: u64,
+        end: u64,
+        r#type: u32,
+        pid: u32,
     ) -> Result<ReplyLock> {
-        Err(libc::ENOSYS.into())
+        if !self.no_open.load(Ordering::Relaxed) {
+            let handles = self.handles.lock().await;
+            if let Some(hd) = handles.get(&fh)
+                && let Some(ref rh) = hd.real_handle
+            {
+                match rh
+                    .layer
+                    .getlk(
+                        req,
+                        rh.inode,
+                        rh.handle.load(Ordering::Relaxed),
+                        lock_owner,
+                        start,
+                        end,
+                        r#type,
+                        pid,
+                    )
+                    .await
+                {
+                    Ok(reply) => return Ok(reply),
+                    Err(e) => {
+                        // If underlying layer doesn't support locking, fall through to fallback
+                        let errno: i32 = e.into();
+                        if errno != libc::ENOSYS {
+                            return Err(errno.into());
+                        }
+                    }
+                }
+            }
+        }
+
+        // Fallback: report no lock conflict
+        Ok(ReplyLock {
+            start: 0,
+            end: 0,
+            r#type: libc::F_UNLCK as u32,
+            pid: 0,
+        })
     }
 
     #[allow(clippy::too_many_arguments)]
     async fn setlk(
         &self,
-        _req: Request,
+        req: Request,
         _inode: Inode,
-        _fh: u64,
-        _lock_owner: u64,
-        _start: u64,
-        _end: u64,
-        _type: u32,
-        _pid: u32,
-        _block: bool,
+        fh: u64,
+        lock_owner: u64,
+        start: u64,
+        end: u64,
+        r#type: u32,
+        pid: u32,
+        block: bool,
     ) -> Result<()> {
-        Err(libc::ENOSYS.into())
+        if !self.no_open.load(Ordering::Relaxed) {
+            let handles = self.handles.lock().await;
+            if let Some(hd) = handles.get(&fh)
+                && let Some(ref rh) = hd.real_handle
+            {
+                match rh
+                    .layer
+                    .setlk(
+                        req,
+                        rh.inode,
+                        rh.handle.load(Ordering::Relaxed),
+                        lock_owner,
+                        start,
+                        end,
+                        r#type,
+                        pid,
+                        block,
+                    )
+                    .await
+                {
+                    Ok(()) => return Ok(()),
+                    Err(e) => {
+                        // If underlying layer doesn't support locking, fall through to fallback
+                        let errno: i32 = e.into();
+                        if errno != libc::ENOSYS {
+                            return Err(errno.into());
+                        }
+                    }
+                }
+            }
+        }
+
+        // Fallback: silently accept the lock request
+        Ok(())
     }
     /// check file access permissions. This will be called for the `access()` system call. If the
     /// `default_permissions` mount option is given, this method is not be called. This method is

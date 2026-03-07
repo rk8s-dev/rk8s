@@ -39,7 +39,7 @@ async fn main() -> anyhow::Result<()> {
         .await?;
     sqlx::migrate!("./migrations").run(&pool).await?;
 
-    let state = Arc::new(AppState::new(config, Arc::new(pool)).await);
+    let state = Arc::new(AppState::new(config, Arc::new(pool)).await?);
 
     let listener = tokio::net::TcpListener::bind(format!("{}:{}", args.host, args.port)).await?;
 

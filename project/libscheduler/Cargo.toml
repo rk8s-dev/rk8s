@@ -8,7 +8,7 @@ repository = "https://github.com/r2cn-dev/rk8s/tree/main/project/libscheduler"
 
 [dependencies]
 common = { workspace = true }
-libvault = { workspace = true }
+libvault = { workspace = true, features = ["storage_xline"] }
 anyhow = { workspace = true }
 bitflags = { workspace = true }
 etcd-client = { workspace = true }

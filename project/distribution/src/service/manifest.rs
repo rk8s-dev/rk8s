@@ -1,4 +1,13 @@
 use crate::error::{AppError, MapToAppError, OciError};
+
+fn remap_blob_to_manifest_error(err: AppError, reference: &str) -> AppError {
+    match err {
+        AppError::Oci(OciError::BlobUnknown(_)) => {
+            OciError::ManifestUnknown(reference.to_string()).into()
+        }
+        other => other,
+    }
+}
 use crate::utils::repo_identifier::identifier_from_full_name;
 use crate::utils::{
     state::AppState,
@@ -15,23 +24,7 @@ use oci_spec::image::ImageManifest;
 use oci_spec::{distribution::TagListBuilder, image::Digest as oci_digest};
 use sha2::{Digest, Sha256};
 use std::{collections::HashMap, str::FromStr, sync::Arc};
-use tokio::io::AsyncReadExt;
 
-/// Handles `GET /v2/<name>/manifests/<reference>`.
-///
-/// **Purpose:** Fetches a manifest, which is the "table of contents" for an image.
-///
-/// **Reference:** The `<reference>` path parameter can be either a tag (e.g., "latest")
-/// or a digest (e.g., "sha256:...") of the manifest.
-///
-/// **Behavior according to OCI Distribution Spec:**
-/// - If the `<reference>` is a tag, the server MUST resolve it to a digest and return the
-///   corresponding manifest.
-/// - The response MUST include a `Content-Type` header specifying the manifest's media type.
-/// - A `Docker-Content-Digest` header MUST be returned, containing the actual digest of the
-///   manifest content.
-/// - If the manifest or tag does not exist in the repository, this endpoint MUST return
-///   a `404 Not Found` with a `MANIFEST_UNKNOWN` error code.
 pub async fn get_manifest_handler(
     State(state): State<Arc<AppState>>,
     Path((name, reference)): Path<(String, String)>,
@@ -45,17 +38,18 @@ pub async fn get_manifest_handler(
         );
     }
 
-    let manifest_file = if is_valid_digest(&reference) {
-        let digest = oci_digest::from_str(&reference)
-            .map_err(|_| OciError::DigestInvalid(reference.clone()))?;
-        state.storage.read_by_digest(&digest).await?
+    let resolved_digest = if is_valid_digest(&reference) {
+        oci_digest::from_str(&reference).map_err(|_| OciError::DigestInvalid(reference.clone()))?
     } else {
-        state.storage.read_by_tag(&name, &reference).await?
+        state.storage.resolve_tag(&name, &reference).await?
     };
 
-    let mut buffer = Vec::new();
-    tokio::fs::File::from(manifest_file.into_std().await)
-        .read_to_end(&mut buffer)
+    let buffer = state
+        .storage
+        .get_blob(&resolved_digest)
+        .await
+        .map_err(|e| remap_blob_to_manifest_error(e, &reference))?
+        .into_bytes()
         .await
         .map_to_internal()?;
 
@@ -79,17 +73,6 @@ pub async fn get_manifest_handler(
         .unwrap())
 }
 
-/// Handles `HEAD /v2/<name>/manifests/<reference>`.
-///
-/// **Purpose:** Checks for the existence of a manifest and retrieves its metadata
-/// (digest, size, media type) without downloading the entire content.
-///
-/// **Behavior according to OCI Distribution Spec:**
-/// - This endpoint MUST NOT return a response body.
-/// - If the manifest exists, it MUST return a `200 OK` status.
-/// - The response MUST include the same headers as a `GET` request would, particularly
-///   `Content-Length` and `Docker-Content-Digest`.
-/// - If the manifest or tag does not exist, it MUST return `404 Not Found`.
 pub async fn head_manifest_handler(
     State(state): State<Arc<AppState>>,
     Path((name, reference)): Path<(String, String)>,
@@ -103,56 +86,30 @@ pub async fn head_manifest_handler(
         );
     }
 
-    let manifest_file = if is_valid_digest(&reference) {
-        let digest = oci_digest::from_str(&reference)
-            .map_err(|_| OciError::DigestInvalid(reference.clone()))?;
-        state.storage.read_by_digest(&digest).await?
+    let resolved_digest = if is_valid_digest(&reference) {
+        oci_digest::from_str(&reference).map_err(|_| OciError::DigestInvalid(reference.clone()))?
     } else {
-        state.storage.read_by_tag(&name, &reference).await?
+        state.storage.resolve_tag(&name, &reference).await?
     };
 
-    let metadata = manifest_file.metadata().await.map_to_internal()?;
-    let content_length = metadata.len();
-
-    let digest_str = if is_valid_digest(&reference) {
-        reference
-    } else {
-        let mut buffer = Vec::new();
-        tokio::fs::File::from(manifest_file.into_std().await)
-            .read_to_end(&mut buffer)
-            .await
-            .map_to_internal()?;
-        format!("sha256:{}", hex::encode(Sha256::digest(&buffer)))
-    };
+    let content_length = state
+        .storage
+        .blob_size(&resolved_digest)
+        .await
+        .map_err(|e| remap_blob_to_manifest_error(e, &reference))?;
 
     Ok(Response::builder()
         .status(StatusCode::OK)
         .header(
             header::CONTENT_TYPE,
             "application/vnd.docker.distribution.manifest.v2+json",
-        ) // A common default
+        )
         .header(header::CONTENT_LENGTH, content_length)
-        .header("Docker-Content-Digest", digest_str)
+        .header("Docker-Content-Digest", resolved_digest.to_string())
         .body(Body::empty())
         .unwrap())
 }
 
-/// Handles `PUT /v2/<name>/manifests/<reference>`.
-///
-/// **Purpose:** Uploads a manifest to the repository. This is typically the final
-/// step of an `docker push` operation.
-///
-/// **Behavior according to OCI Distribution Spec:**
-/// - The request body MUST contain the manifest content.
-/// - The server MUST validate that all blobs (layers and config) referenced within the
-///   manifest's content already exist in the registry before accepting it.
-/// - If successful, the server MUST return a `201 Created` status.
-/// - The response MUST include a `Location` header pointing to the canonical location
-///   of the manifest, addressed by its digest.
-/// - If a referenced blob is missing, the server MUST return a `400 Bad Request` with
-///   a `MANIFEST_BLOB_UNKNOWN` error code.
-/// - This endpoint is also the "Create-on-Push" point: if the repository does not exist,
-///   this operation should create it.
 pub async fn put_manifest_handler(
     State(state): State<Arc<AppState>>,
     Path((name, reference)): Path<(String, String)>,
@@ -185,23 +142,28 @@ pub async fn put_manifest_handler(
     }
 
     for descriptor in manifest.layers() {
-        state.storage.read_by_digest(descriptor.digest()).await?;
+        if !state.storage.blob_exists(descriptor.digest()).await? {
+            return Err(OciError::ManifestBlobUnknown(descriptor.digest().to_string()).into());
+        }
     }
-    state
+    if !state
         .storage
-        .read_by_digest(manifest.config().digest())
-        .await?;
+        .blob_exists(manifest.config().digest())
+        .await?
+    {
+        return Err(OciError::ManifestBlobUnknown(manifest.config().digest().to_string()).into());
+    }
 
     let body_stream = Body::from(body_bytes).into_data_stream();
     state
         .storage
-        .write_by_digest(&calculated_digest, body_stream, false)
+        .put_blob(&calculated_digest, body_stream)
         .await?;
 
     if !is_valid_digest(&reference) {
         state
             .storage
-            .link_to_tag(&name, &reference, &calculated_digest)
+            .put_tag(&name, &reference, &calculated_digest)
             .await?;
     }
 
@@ -222,15 +184,6 @@ pub async fn put_manifest_handler(
         .into_response())
 }
 
-/// Handles `GET /v2/<name>/tags/list`.
-///
-/// **Purpose:** Lists the tags available in a repository.
-///
-/// **Behavior according to OCI Distribution Spec:**
-/// - Returns a `200 OK` with a JSON body containing the repository name and a list of its tags.
-///   Example: `{"name": "<name>", "tags": ["v1", "v2", "latest"]}`.
-/// - MUST support pagination via the "n" (limit) and "last" (marker) query parameters.
-/// - Pagination links MUST be provided in the `Link` HTTP header.
 pub async fn get_tag_list_handler(
     State(state): State<Arc<AppState>>,
     Path(name): Path<String>,
@@ -240,7 +193,7 @@ pub async fn get_tag_list_handler(
         return Err(OciError::NameInvalid(name).into());
     }
 
-    let mut all_tags = state.storage.walk_repo_dir(&name).await?;
+    let mut all_tags = state.storage.list_tags(&name).await?;
 
     if let Some(last_tag) = params.get("last") {
         if let Some(last_index) = all_tags.iter().position(|t| t == last_tag) {
@@ -292,18 +245,6 @@ pub async fn get_tag_list_handler(
     Ok(response)
 }
 
-/// Handles `DELETE /v2/<name>/manifests/<reference>`.
-///
-/// **Purpose:** Deletes a manifest from the repository.
-///
-/// **Behavior according to OCI Distribution Spec:**
-/// - If the `reference` is not a valid digest, the server should return `400 Bad Request`.
-/// - If the delete operation is successful, the server MUST return a `202 Accepted` status.
-///   This operation should remove the manifest and dissociate any tags that point to it.
-/// - Deleting a manifest does NOT imply that the underlying blobs are deleted. Blob deletion
-///   is handled separately by a garbage collection process.
-/// - If the manifest identified by the digest does not exist, the server MUST return a
-///   `404 Not Found` with a `MANIFEST_UNKNOWN` error code.
 pub async fn delete_manifest_handler(
     State(state): State<Arc<AppState>>,
     Path((name, reference)): Path<(String, String)>,
@@ -320,9 +261,9 @@ pub async fn delete_manifest_handler(
     if is_valid_digest(&reference) {
         let digest =
             oci_digest::from_str(&reference).map_err(|_| OciError::DigestInvalid(reference))?;
-        state.storage.delete_by_digest(&digest).await?;
+        state.storage.delete_blob(&digest).await?;
     } else {
-        state.storage.delete_by_tag(&name, &reference).await?;
+        state.storage.delete_tag(&name, &reference).await?;
     }
 
     Ok(StatusCode::ACCEPTED)

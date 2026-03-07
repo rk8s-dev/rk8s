@@ -27,9 +27,9 @@ rust_library(
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/futures-util/0.3.31:futures-util",
-        "//third-party/rust/crates/js-sys/0.3.83:js-sys",
-        "//third-party/rust/crates/wasm-bindgen-futures/0.4.56:wasm-bindgen-futures",
-        "//third-party/rust/crates/wasm-bindgen/0.2.106:wasm-bindgen",
-        "//third-party/rust/crates/web-sys/0.3.83:web-sys",
+        "//third-party/rust/crates/js-sys/0.3.85:js-sys",
+        "//third-party/rust/crates/wasm-bindgen-futures/0.4.58:wasm-bindgen-futures",
+        "//third-party/rust/crates/wasm-bindgen/0.2.108:wasm-bindgen",
+        "//third-party/rust/crates/web-sys/0.3.85:web-sys",
     ],
 )

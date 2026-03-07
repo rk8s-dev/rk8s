@@ -1,36 +1,41 @@
 use openssl::x509::X509;
 
-use super::{PkiBackend, PkiBackendInner, types};
+use super::{
+    CertBackend, PgpCertBackend, PkiBackend, PkiBackendInner, SshCertBackend, TlsCertBackend, types,
+};
 use crate::{
     errors::RvError,
     logical::{Backend, Field, FieldType, Operation, Path, Request, Response},
     modules::ResponseExt,
-    storage::StorageEntry,
     utils::cert::CertBundle,
 };
 
 impl PkiBackend {
+    /// `ca/(?P<cert_type>tls|ssh)(/pem)?`
     pub fn fetch_ca_path(&self) -> Path {
         let backend = self.inner.clone();
 
         Path::builder()
-            .pattern("ca(/pem)?")
+            .pattern(r"ca/(?P<cert_type>tls|ssh)(/pem)?")
+            .field(
+                "cert_type",
+                Field::builder()
+                    .field_type(FieldType::Str)
+                    .required(true)
+                    .description("Certificate type: tls or ssh"),
+            )
             .operation(Operation::Read, {
                 let handler = backend.clone();
                 move |backend, req| {
                     let handler = handler.clone();
-                    Box::pin(async move { handler.read_path_fetch_ca(backend, req).await })
+                    Box::pin(async move { handler.dispatch_fetch_ca(backend, req).await })
                 }
             })
-            .help(
-                r#"
-This allows certificates to be fetched. If using the fetch/ prefix any non-revoked certificate can be fetched.
-Using "ca" or "crl" as the value fetches the appropriate information in DER encoding. Add "/pem" to either to get PEM encoding.
-                "#,
-            )
+            .help("Fetch the CA certificate (TLS) or public key (SSH).")
             .build()
     }
 
+    /// `crl(/pem)?` — TLS only
     pub fn fetch_crl_path(&self) -> Path {
         let backend = self.inner.clone();
 
@@ -43,44 +48,41 @@ Using "ca" or "crl" as the value fetches the appropriate information in DER enco
                     Box::pin(async move { handler.read_path_fetch_crl(backend, req).await })
                 }
             })
-            .help(
-                r#"
-This allows certificates to be fetched. If using the fetch/ prefix any non-revoked certificate can be fetched.
-Using "ca" or "crl" as the value fetches the appropriate information in DER encoding. Add "/pem" to either to get PEM encoding.
-                "#,
-            )
+            .help("Fetch the CRL.")
             .build()
     }
 
+    /// `cert/(?P<cert_type>tls|ssh)/(?P<serial>[0-9A-Fa-f-:]+)`
     pub fn fetch_cert_path(&self) -> Path {
         let backend = self.inner.clone();
 
         Path::builder()
-            .pattern(r"cert/(?P<serial>[0-9A-Fa-f-:]+)")
+            .pattern(r"cert/(?P<cert_type>tls|ssh)/(?P<serial>[0-9A-Fa-f-:]+)")
+            .field(
+                "cert_type",
+                Field::builder()
+                    .field_type(FieldType::Str)
+                    .required(true)
+                    .description("Certificate type: tls or ssh"),
+            )
             .field(
                 "serial",
                 Field::builder()
                     .field_type(FieldType::Str)
-                    .description(
-                        "Certificate serial number, in colon- or hyphen-separated octal",
-                    ),
+                    .description("Certificate serial number"),
             )
             .operation(Operation::Read, {
                 let handler = backend.clone();
                 move |backend, req| {
                     let handler = handler.clone();
-                    Box::pin(async move { handler.read_path_fetch_cert(backend, req).await })
+                    Box::pin(async move { handler.dispatch_fetch_cert(backend, req).await })
                 }
             })
-            .help(
-                r#"
-This allows certificates to be fetched. If using the fetch/ prefix any non-revoked certificate can be fetched.
-Using "ca" or "crl" as the value fetches the appropriate information in DER encoding. Add "/pem" to either to get PEM encoding.
-                "#,
-            )
+            .help("Fetch a certificate by serial number.")
             .build()
     }
 
+    /// `cert/crl` — TLS CRL cert
     pub fn fetch_cert_crl_path(&self) -> Path {
         let backend = self.inner.clone();
 
@@ -93,17 +95,83 @@ Using "ca" or "crl" as the value fetches the appropriate information in DER enco
                     Box::pin(async move { handler.read_path_fetch_cert_crl(backend, req).await })
                 }
             })
-            .help(
-                r#"
-This allows certificates to be fetched. If using the fetch/ prefix any non-revoked certificate can be fetched.
-Using "ca" or "crl" as the value fetches the appropriate information in DER encoding. Add "/pem" to either to get PEM encoding.
-                "#,
+            .help("Fetch the CRL certificate.")
+            .build()
+    }
+
+    /// `certs/(?P<cert_type>tls|ssh|pgp)/?$`
+    pub fn list_certs_path(&self) -> Path {
+        let backend = self.inner.clone();
+
+        Path::builder()
+            .pattern(r"certs/(?P<cert_type>tls|ssh|pgp)/?$")
+            .field(
+                "cert_type",
+                Field::builder()
+                    .field_type(FieldType::Str)
+                    .required(true)
+                    .description("Certificate type: tls, ssh, or pgp"),
             )
+            .operation(Operation::List, {
+                let handler = backend.clone();
+                move |backend, req| {
+                    let handler = handler.clone();
+                    Box::pin(async move { handler.dispatch_list_certs(backend, req).await })
+                }
+            })
+            .help("List certificates.")
             .build()
     }
 }
 
 impl PkiBackendInner {
+    // ── Dispatch ──
+
+    pub async fn dispatch_fetch_ca(
+        &self,
+        _backend: &dyn Backend,
+        req: &mut Request,
+    ) -> Result<Option<Response>, RvError> {
+        let ct = req.get_data("cert_type")?;
+        let ct = ct.as_str().ok_or(RvError::ErrRequestFieldInvalid)?;
+        match ct {
+            "tls" => self.read_path_fetch_ca(_backend, req).await,
+            "ssh" => self.read_path_fetch_ssh_ca(_backend, req).await,
+            _ => Err(RvError::ErrRequestFieldInvalid),
+        }
+    }
+
+    pub async fn dispatch_fetch_cert(
+        &self,
+        _backend: &dyn Backend,
+        req: &mut Request,
+    ) -> Result<Option<Response>, RvError> {
+        let ct = req.get_data("cert_type")?;
+        let ct = ct.as_str().ok_or(RvError::ErrRequestFieldInvalid)?;
+        match ct {
+            "tls" => self.read_path_fetch_cert(_backend, req).await,
+            "ssh" => self.read_path_fetch_ssh_cert(_backend, req).await,
+            _ => Err(RvError::ErrRequestFieldInvalid),
+        }
+    }
+
+    pub async fn dispatch_list_certs(
+        &self,
+        _backend: &dyn Backend,
+        req: &mut Request,
+    ) -> Result<Option<Response>, RvError> {
+        let ct = req.get_data("cert_type")?;
+        let ct = ct.as_str().ok_or(RvError::ErrRequestFieldInvalid)?;
+        match ct {
+            "tls" => self.list_certs(_backend, req).await,
+            "ssh" => self.list_ssh_certs(_backend, req).await,
+            "pgp" => self.list_pgp_keys(_backend, req).await,
+            _ => Err(RvError::ErrRequestFieldInvalid),
+        }
+    }
+
+    // ── TLS CA fetch ──
+
     pub async fn handle_fetch_cert_bundle(
         &self,
         cert_bundle: &CertBundle,
@@ -136,6 +204,22 @@ impl PkiBackendInner {
         self.handle_fetch_cert_bundle(&ca_bundle).await
     }
 
+    // ── SSH CA fetch ──
+
+    pub async fn read_path_fetch_ssh_ca(
+        &self,
+        _backend: &dyn Backend,
+        req: &mut Request,
+    ) -> Result<Option<Response>, RvError> {
+        let bundle = self.fetch_ssh_ca_bundle(req).await?;
+        let response = types::SshConfigCaResponse {
+            public_key: bundle.public_key_openssh,
+        };
+        Ok(Some(Response::data_response(response.to_map()?)))
+    }
+
+    // ── CRL ──
+
     pub async fn read_path_fetch_crl(
         &self,
         _backend: &dyn Backend,
@@ -143,6 +227,8 @@ impl PkiBackendInner {
     ) -> Result<Option<Response>, RvError> {
         Ok(None)
     }
+
+    // ── TLS cert fetch ──
 
     pub async fn read_path_fetch_cert(
         &self,
@@ -178,6 +264,29 @@ impl PkiBackendInner {
         Ok(Some(Response::data_response(response.to_map()?)))
     }
 
+    // ── SSH cert fetch ──
+
+    pub async fn read_path_fetch_ssh_cert(
+        &self,
+        _backend: &dyn Backend,
+        req: &mut Request,
+    ) -> Result<Option<Response>, RvError> {
+        let serial_value = req.get_data("serial")?;
+        let serial = serial_value
+            .as_str()
+            .ok_or(RvError::ErrRequestFieldInvalid)?;
+
+        let signed_key = self.fetch_ssh_cert(req, serial).await?;
+
+        let response = types::SshSignKeyResponse {
+            signed_key,
+            serial_number: serial.to_string(),
+            expiration: 0,
+        };
+
+        Ok(Some(Response::data_response(response.to_map()?)))
+    }
+
     pub async fn read_path_fetch_cert_crl(
         &self,
         _backend: &dyn Backend,
@@ -186,16 +295,39 @@ impl PkiBackendInner {
         Ok(None)
     }
 
-    pub async fn fetch_cert(&self, req: &Request, serial_number: &str) -> Result<X509, RvError> {
-        let entry = req
-            .storage_get(format!("certs/{serial_number}").as_str())
-            .await?;
-        if entry.is_none() {
-            return Err(RvError::ErrPkiCertNotFound);
-        }
+    // ── List ──
 
-        let cert: X509 = X509::from_der(entry.unwrap().value.as_slice())?;
-        Ok(cert)
+    pub async fn list_certs(
+        &self,
+        _backend: &dyn Backend,
+        req: &mut Request,
+    ) -> Result<Option<Response>, RvError> {
+        let keys = req.storage_list("certs/tls/").await?;
+        Ok(Some(Response::list_response(&keys)))
+    }
+
+    pub async fn list_ssh_certs(
+        &self,
+        _backend: &dyn Backend,
+        req: &mut Request,
+    ) -> Result<Option<Response>, RvError> {
+        let keys = req.storage_list("certs/ssh/").await?;
+        Ok(Some(Response::list_response(&keys)))
+    }
+
+    pub async fn list_pgp_keys(
+        &self,
+        _backend: &dyn Backend,
+        req: &mut Request,
+    ) -> Result<Option<Response>, RvError> {
+        let keys = req.storage_list("certs/pgp/").await?;
+        Ok(Some(Response::list_response(&keys)))
+    }
+
+    // ── Storage helpers ──
+
+    pub async fn fetch_cert(&self, req: &Request, serial_number: &str) -> Result<X509, RvError> {
+        TlsCertBackend.fetch_cert(req, serial_number).await
     }
 
     pub async fn store_cert(
@@ -204,18 +336,31 @@ impl PkiBackendInner {
         serial_number: &str,
         cert: &X509,
     ) -> Result<(), RvError> {
-        let value = cert.to_der()?;
-        let entry = StorageEntry {
-            key: format!("certs/{serial_number}"),
-            value,
-        };
-        req.storage_put(&entry).await?;
-        Ok(())
+        TlsCertBackend.store_cert(req, serial_number, cert).await
     }
 
     pub async fn delete_cert(&self, req: &Request, serial_number: &str) -> Result<(), RvError> {
-        req.storage_delete(format!("certs/{serial_number}").as_str())
-            .await?;
-        Ok(())
+        TlsCertBackend.delete_cert(req, serial_number).await
+    }
+
+    pub async fn store_ssh_cert(
+        &self,
+        req: &Request,
+        serial_hex: &str,
+        signed_key: &String,
+    ) -> Result<(), RvError> {
+        SshCertBackend.store_cert(req, serial_hex, signed_key).await
+    }
+
+    pub async fn fetch_ssh_cert(&self, req: &Request, serial_hex: &str) -> Result<String, RvError> {
+        SshCertBackend.fetch_cert(req, serial_hex).await
+    }
+
+    pub async fn fetch_pgp_key(
+        &self,
+        req: &Request,
+        key_name: &str,
+    ) -> Result<types::PgpKeyBundle, RvError> {
+        PgpCertBackend.fetch_cert(req, key_name).await
     }
 }

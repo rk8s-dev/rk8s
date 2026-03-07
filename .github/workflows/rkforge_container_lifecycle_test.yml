@@ -1,0 +1,69 @@
+name: rkforge CI
+
+on:
+  pull_request:
+    paths:
+      - "project/rkforge/**"
+      - "project/common/**"
+      - "project/libbridge/**"
+      - "project/libipam/**"
+      - "project/libruntime/**"
+      - "project/libcontainer/**"
+      - "project/libcni/**"
+      - "project/Cargo.toml"
+      - "project/Cargo.lock"
+      - ".github/workflows/rkforge_container_lifecycle_test.yml"
+  # Just run on pull requests as the main branch is protected and requires CI to pass before merging.
+  # This avoids redundant runs on pushes to main.
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  tests:
+    name: Tests (unit + qlean)
+    runs-on: [self-hosted]
+    timeout-minutes: 45
+    env:
+      RUSTUP_TOOLCHAIN: stable
+      RUST_BACKTRACE: "1"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Cache cargo + qlean
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            # project/target
+          key: rkforge-${{ runner.os }}-${{ hashFiles('project/Cargo.lock') }}
+
+      # Set up qlean prerequisites is unnecessary here as the self-hosted runner is already configured with the necessary dependencies and permissions to run qlean tests.
+      # If the runner environment changes in the future, don't forget to add a step to check for qlean prerequisites and set up the environment accordingly.
+
+      - name: Run rkforge unit tests
+        shell: bash
+        run: |
+          cd project
+          cargo test -p rkforge --lib
+
+      - name: Run rkforge fast integration tests
+        shell: bash
+        run: |
+          cd project
+          cargo test -p rkforge --test test_image_cmd
+
+      - name: Run rkforge lifecycle test in qlean VM
+        shell: bash
+        run: |
+          cd project
+          cargo build -p libbridge -p libipam
+          cargo test -p rkforge --test test_container_lifecycle_qlean -- --nocapture

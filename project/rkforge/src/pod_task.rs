@@ -14,8 +14,14 @@ use libruntime::cri::cri_api::{
 use libruntime::cri::{create, delete, kill, load_container, start};
 use libruntime::oci::{self, OCISpecGenerator};
 use libruntime::rootpath;
-use libruntime::utils::{ImagePuller, sync_handle_image_typ};
+use libruntime::utils::{
+    ImagePuller, ImageType, determine_image, sync_handle_image_typ, sync_handle_oci_image_no_copy,
+};
 
+use crate::commands::container::rootfs_mount::RootfsMount;
+use crate::config::image::CONFIG;
+use oci_spec::runtime::RootBuilder;
+use std::collections::HashMap;
 use std::fs::File;
 use std::io::{BufWriter, Read, Write};
 use std::path::{Path, PathBuf};
@@ -37,6 +43,8 @@ pub struct TaskRunner {
     pub task: PodTask,
     pub pause_pid: Option<i32>, // pid of pause container
     pub sandbox_config: Option<PodSandboxConfig>,
+    /// Persistent overlay rootfs mount for each container
+    rootfs_mounts: HashMap<String, RootfsMount>,
 }
 
 impl TaskRunner {
@@ -52,6 +60,7 @@ impl TaskRunner {
             task,
             pause_pid: None,
             sandbox_config: None,
+            rootfs_mounts: HashMap::new(),
         })
     }
 
@@ -262,12 +271,49 @@ impl TaskRunner {
     }
 
     pub fn build_create_container_request(
-        &self,
+        &mut self,
         pod_sandbox_id: &str,
         container: &ContainerSpec,
     ) -> Result<CreateContainerRequest, anyhow::Error> {
         let puller = RkforgeImagePuller {};
-        let (mut config_builder, bundle_path) = sync_handle_image_typ(&puller, container)?;
+
+        let (mut config_builder, bundle_path) = if CONFIG.use_overlay_rootfs {
+            if let ImageType::OCIImage = determine_image(&container.image)? {
+                let (image_config, bundle_path, layers) =
+                    sync_handle_oci_image_no_copy(&puller, &container.image)?;
+
+                // Prepare overlay directories
+                let (lower_dirs, upper_dir, work_dir, merged_dir) =
+                    tokio::runtime::Runtime::new()?.block_on(
+                        libruntime::bundle::prepare_overlay_dirs(&bundle_path, &layers),
+                    )?;
+
+                // Start background overlay daemon
+                let rootfs_mount = RootfsMount::start(
+                    &lower_dirs,
+                    &upper_dir,
+                    &work_dir,
+                    &merged_dir,
+                    &PathBuf::from(&bundle_path),
+                    CONFIG.use_libfuse_overlay,
+                )?;
+
+                self.rootfs_mounts
+                    .insert(container.name.clone(), rootfs_mount);
+
+                let mut builder = ContainerConfigBuilder::default();
+                if let Some(config) = image_config.config() {
+                    builder.args_from_image_config(config.entrypoint(), config.cmd());
+                    builder.envs_from_image_config(config.env());
+                    builder.work_dir(config.working_dir());
+                }
+                (Some(builder), bundle_path)
+            } else {
+                (None, "".to_string())
+            }
+        } else {
+            sync_handle_image_typ(&puller, container)?
+        };
 
         let config = if let Some(ref mut builder) = config_builder {
             builder.container_spec(container.clone())?;
@@ -320,9 +366,19 @@ impl TaskRunner {
             .ok_or_else(|| anyhow!("Pause container PID is not set"))?;
 
         let generator = OCISpecGenerator::new(config, container_spec, Some(pause_pid));
-        let spec = generator.generate().map_err(|e| {
+        let mut spec = generator.generate().map_err(|e| {
             anyhow!("failed to build OCI Specification for container {container_id}: {e}")
         })?;
+
+        // In overlay mode, override Root path to "merged" (OCISpecGenerator defaults to "rootfs")
+        if self.rootfs_mounts.contains_key(&container_id) {
+            let root = RootBuilder::default()
+                .path("merged")
+                .readonly(false)
+                .build()
+                .map_err(|e| anyhow!("failed to build root spec: {e}"))?;
+            spec.set_root(Some(root));
+        }
 
         let bundle_path = if let Some(image_spec) = &config.image {
             image_spec.image.clone()
@@ -446,8 +502,11 @@ impl TaskRunner {
         // if fail clear all containers created
         let mut created_containers = Vec::new();
 
+        // Clone early to avoid borrow conflicts between &self and &mut self
+        let containers = self.task.spec.containers.clone();
+
         // create all container
-        for container in &self.task.spec.containers {
+        for container in &containers {
             let create_request = self.build_create_container_request(&pod_sandbox_id, container)?;
             match self.create_container(create_request) {
                 Ok(create_response) => {
@@ -476,6 +535,9 @@ impl TaskRunner {
                             info!("Container deleted during rollback: {}", container_id);
                         }
                     }
+
+                    // Clean up all started overlay rootfs mounts
+                    self.stop_all_rootfs_mounts();
 
                     // stop pause
                     let stop_request = StopPodSandboxRequest {
@@ -551,6 +613,9 @@ impl TaskRunner {
                         }
                     }
 
+                    // Clean up all started overlay rootfs mounts
+                    self.stop_all_rootfs_mounts();
+
                     let stop_request = StopPodSandboxRequest {
                         pod_sandbox_id: pod_sandbox_id.clone(),
                     };
@@ -581,6 +646,15 @@ impl TaskRunner {
         }
 
         Ok((pod_sandbox_id, podip))
+    }
+
+    /// Stop all started overlay rootfs mounts (used for rollback cleanup)
+    fn stop_all_rootfs_mounts(&mut self) {
+        for (name, mount) in self.rootfs_mounts.drain() {
+            if let Err(e) = mount.stop() {
+                error!("Failed to stop rootfs overlay mount for {name}: {e}");
+            }
+        }
     }
 }
 

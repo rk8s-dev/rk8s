@@ -32,10 +32,10 @@ rust_library(
     rustc_flags = ["@$(location :inotify-manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/bitflags/2.10.0:bitflags",
+        "//third-party/rust/crates/bitflags/2.11.0:bitflags",
         "//third-party/rust/crates/futures-core/0.3.31:futures-core",
         "//third-party/rust/crates/inotify-sys/0.1.5:inotify-sys",
-        "//third-party/rust/crates/libc/0.2.180:libc",
+        "//third-party/rust/crates/libc/0.2.182:libc",
         "//third-party/rust/crates/tokio/1.49.0:tokio",
     ],
 )

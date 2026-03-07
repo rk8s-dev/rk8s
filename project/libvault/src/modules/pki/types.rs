@@ -2,6 +2,19 @@ use crate::modules::pki::CertExt;
 use builder_pattern::Builder;
 use rustls::pki_types::CertificateDer;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::time::Duration;
+
+use crate::utils::{deserialize_duration, serialize_duration};
+
+/// Certificate key type discriminator used in unified route handlers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum CertKeyType {
+    Tls,
+    Ssh,
+    Pgp,
+}
 
 /// Request body for `POST /v1/pki/config/ca`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -166,4 +179,169 @@ pub struct FetchCaResponse {
     pub issuing_ca: Option<String>,
     #[serde(default)]
     pub serial_number: Option<String>,
+}
+
+// ── SSH types ──
+
+/// Request body for `POST /v1/pki/ssh/config/ca`.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct SshConfigCaRequest {
+    #[serde(default)]
+    pub key_type: Option<String>,
+    #[serde(default)]
+    pub key_bits: Option<u32>,
+    #[serde(default)]
+    pub private_key: Option<String>,
+    #[serde(default)]
+    pub public_key: Option<String>,
+}
+
+/// Response body for SSH CA public key.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SshConfigCaResponse {
+    pub public_key: String,
+}
+
+/// SSH role configuration stored in storage.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct SshRoleEntry {
+    #[serde(default = "default_ssh_cert_type")]
+    pub cert_type: String,
+    #[serde(default = "default_ssh_key_type")]
+    pub key_type: String,
+    #[serde(default = "default_ssh_key_bits")]
+    pub key_bits: u32,
+    #[serde(
+        serialize_with = "serialize_duration",
+        deserialize_with = "deserialize_duration",
+        default = "default_ssh_ttl"
+    )]
+    pub ttl: Duration,
+    #[serde(default)]
+    pub allowed_users: Vec<String>,
+    #[serde(default)]
+    pub allowed_extensions: Vec<String>,
+    #[serde(default)]
+    pub default_extensions: HashMap<String, String>,
+}
+
+fn default_ssh_cert_type() -> String {
+    "user".to_string()
+}
+fn default_ssh_key_type() -> String {
+    "rsa".to_string()
+}
+fn default_ssh_key_bits() -> u32 {
+    2048
+}
+fn default_ssh_ttl() -> Duration {
+    Duration::from_secs(3600)
+}
+
+/// Request body for `POST /v1/pki/ssh/issue/{role}`.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct SshIssueCertificateRequest {
+    pub key_id: String,
+    #[serde(default)]
+    pub valid_principals: Vec<String>,
+    #[serde(default)]
+    pub ttl: Option<String>,
+    #[serde(default)]
+    pub extensions: Option<HashMap<String, String>>,
+}
+
+/// Response body for SSH certificate issuance.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SshIssueCertificateResponse {
+    pub signed_key: String,
+    pub private_key: String,
+    pub public_key: String,
+    pub serial_number: String,
+    pub expiration: i64,
+}
+
+/// Request body for `POST /v1/pki/ssh/sign/{role}`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SshSignKeyRequest {
+    pub public_key: String,
+    pub key_id: String,
+    #[serde(default)]
+    pub valid_principals: Vec<String>,
+    #[serde(default)]
+    pub ttl: Option<String>,
+    #[serde(default)]
+    pub extensions: Option<HashMap<String, String>>,
+}
+
+/// Response body for SSH public key signing.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SshSignKeyResponse {
+    pub signed_key: String,
+    pub serial_number: String,
+    pub expiration: i64,
+}
+
+// ── PGP types ──
+
+/// Request body for `POST /v1/pki/pgp/generate/(exported|internal)`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PgpGenerateRequest {
+    pub name: String,
+    pub email: String,
+    #[serde(default)]
+    pub key_type: Option<String>,
+    #[serde(default)]
+    pub key_bits: Option<u32>,
+    #[serde(default)]
+    pub ttl: Option<String>,
+    pub key_name: String,
+}
+
+/// Response body for PGP key generation.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PgpGenerateResponse {
+    pub public_key: String,
+    #[serde(default)]
+    pub private_key: Option<String>,
+    pub fingerprint: String,
+    pub key_id: String,
+}
+
+/// Internal storage bundle for PGP keys.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PgpKeyBundle {
+    pub key_name: String,
+    pub name: String,
+    pub email: String,
+    pub armored_secret_key: String,
+    pub armored_public_key: String,
+    pub fingerprint: String,
+    pub key_id: String,
+}
+
+/// Request body for `POST /v1/pki/pgp/sign`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PgpSignRequest {
+    pub key_name: String,
+    pub data: String,
+}
+
+/// Response body for PGP signing.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PgpSignResponse {
+    pub signature: String,
+}
+
+/// Request body for `POST /v1/pki/pgp/verify`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PgpVerifyRequest {
+    pub key_name: String,
+    pub data: String,
+    pub signature: String,
+}
+
+/// Response body for PGP verification.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PgpVerifyResult {
+    pub valid: bool,
 }

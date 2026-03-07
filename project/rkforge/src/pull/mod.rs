@@ -1,6 +1,6 @@
 mod downloader;
 mod layer;
-mod media;
+pub mod media;
 
 use crate::config::auth::AuthConfig;
 use crate::pull::layer::pull_layers;

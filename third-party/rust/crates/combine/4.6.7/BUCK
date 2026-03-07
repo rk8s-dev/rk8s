@@ -41,8 +41,8 @@ rust_library(
     },
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/bytes/1.11.0:bytes",
-        "//third-party/rust/crates/memchr/2.7.6:memchr",
+        "//third-party/rust/crates/bytes/1.11.1:bytes",
+        "//third-party/rust/crates/memchr/2.8.0:memchr",
         "//third-party/rust/crates/pin-project-lite/0.2.16:pin-project-lite",
         "//third-party/rust/crates/tokio-util/0.7.18:tokio-util",
     ],

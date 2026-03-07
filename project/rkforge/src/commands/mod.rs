@@ -30,6 +30,7 @@ use tracing::info;
 
 // Export subcommands
 pub mod compose;
+pub mod config_cli;
 pub mod container;
 pub mod pod;
 pub mod volume;

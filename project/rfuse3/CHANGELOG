@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-02-24
+
+### Fixed
+- rfuse3: gate `LoggingFileSystem::{getlk,setlk}` behind the `file-lock` feature to match the `Filesystem` trait.
+- rfuse3: fix examples to construct `ReplyInit` via `ReplyInit::default()`.
+
 ## 2026-02-07
 
 ### Added

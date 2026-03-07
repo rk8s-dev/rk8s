@@ -1,6 +1,6 @@
 [package]
 name = "distribution"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2024"
 authors = ["rk8s-dev team"]
 description = "A lite implementation of the OCI Distribution Spec in Rust"
@@ -15,7 +15,9 @@ bcrypt = { workspace = true }
 clap = { workspace = true, features = ["derive", "env"] }
 chrono = { workspace = true }
 dotenvy = { workspace = true }
+bytes = { workspace = true }
 futures = { workspace = true }
+object_store = { workspace = true }
 hex = { workspace = true }
 jsonwebtoken = { workspace = true }
 oci-spec = { workspace = true }

@@ -26,12 +26,12 @@ rust_library(
     rustc_flags = ["@$(location :nftables-manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/schemars/1.1.0:schemars",
+        "//third-party/rust/crates/schemars/1.2.1:schemars",
         "//third-party/rust/crates/serde/1.0.228:serde",
         "//third-party/rust/crates/serde_json/1.0.149:serde_json",
         "//third-party/rust/crates/serde_path_to_error/0.1.20:serde_path_to_error",
         "//third-party/rust/crates/strum/0.27.2:strum",
         "//third-party/rust/crates/strum_macros/0.27.2:strum_macros",
-        "//third-party/rust/crates/thiserror/2.0.17:thiserror",
+        "//third-party/rust/crates/thiserror/2.0.18:thiserror",
     ],
 )

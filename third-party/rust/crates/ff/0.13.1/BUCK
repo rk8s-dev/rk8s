@@ -23,10 +23,15 @@ rust_library(
     crate = "ff",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
-    features = ["alloc"],
+    features = [
+        "alloc",
+        "bits",
+        "bitvec",
+    ],
     rustc_flags = ["@$(location :ff-manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
+        "//third-party/rust/crates/bitvec/1.0.1:bitvec",
         "//third-party/rust/crates/rand_core/0.6.4:rand_core",
         "//third-party/rust/crates/subtle/2.6.1:subtle",
     ],

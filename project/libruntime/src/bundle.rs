@@ -108,7 +108,12 @@ async fn extract_layers<P: AsRef<Path>, B: AsRef<Path>>(
     debug!("Image Config: {:?}", image_config);
 
     let layer_descriptors = image_manifest.layers();
-    assert_eq!(diff_ids.len(), layer_descriptors.len());
+    anyhow::ensure!(
+        diff_ids.len() == layer_descriptors.len(),
+        "OCI image layer count mismatch: diff_ids={} vs layer_descriptors={}",
+        diff_ids.len(),
+        layer_descriptors.len()
+    );
 
     let mut layers_futures = Vec::new();
     let bundle_path = PathBuf::from(bundle_path.as_ref());
@@ -232,6 +237,55 @@ pub fn prepare_runtime_customize_layer<P: AsRef<Path>>(path: P) -> Result<()> {
     Ok(())
 }
 
+/// Only prepare the overlay directory structure, without executing mount and copy.
+/// Used by RootfsMount on the rkforge side for persistent overlay mounts.
+///
+/// Returns `(lower_dirs, upper_dir, work_dir, merged_dir)`,
+/// where `lower_dirs` is arranged according to overlayfs semantics (newest layer first).
+pub async fn prepare_overlay_dirs<P: AsRef<Path>>(
+    bundle_path: P,
+    layers: &[PathBuf],
+) -> anyhow::Result<(Vec<PathBuf>, PathBuf, PathBuf, PathBuf)> {
+    let bundle_path = bundle_path.as_ref();
+    let upper_dir = bundle_path.join("upper");
+    let work_dir = bundle_path.join("work");
+    let merged_dir = bundle_path.join("merged");
+    let runtime_layer = bundle_path.join("runtime_layer");
+
+    // Arrange according to overlayfs semantics: newest layer first
+    let mut lower_dirs: Vec<PathBuf> = layers
+        .iter()
+        .rev()
+        .map(|dir| {
+            Path::new(dir)
+                .canonicalize()
+                .with_context(|| format!("Failed to get canonical path for: {dir:?}"))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+
+    // Prepare runtime custom layer (e.g., DNS configuration)
+    prepare_runtime_customize_layer(&runtime_layer)
+        .map_err(|e| anyhow!("failed to prepare the customize layer: {e}"))?;
+
+    if runtime_layer.exists() {
+        lower_dirs.insert(0, runtime_layer.canonicalize()?);
+    }
+
+    // Clean up and recreate directories
+    for dir in [&upper_dir, &work_dir, &merged_dir] {
+        if dir.exists() {
+            fs::remove_dir_all(dir)
+                .await
+                .with_context(|| format!("Failed to remove directory: {}", dir.display()))?;
+        }
+        fs::create_dir_all(dir)
+            .await
+            .with_context(|| format!("Failed to create directory: {}", dir.display()))?;
+    }
+
+    Ok((lower_dirs, upper_dir, work_dir, merged_dir))
+}
+
 pub async fn mount_and_copy_bundle<P: AsRef<Path>>(
     bundle_path: P,
     layers: &[PathBuf],
@@ -273,7 +327,6 @@ pub async fn mount_and_copy_bundle<P: AsRef<Path>>(
     }
 
     if upper_dir.exists() {
-        debug!("{} directory exists deleting...", upper_dir.display());
         debug!("{} directory exists deleting...", upper_dir.display());
         fs::remove_dir_all(&upper_dir)
             .await
