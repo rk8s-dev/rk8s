@@ -648,6 +648,10 @@ pub fn remove_container(root_path: &Path, state: &State) -> Result<()> {
 pub fn remove_container_network(pid: Pid, container_id: &str) -> Result<()> {
     let netns_path = format!("/proc/{}/ns/net", pid.as_raw());
     if !Path::new(&netns_path).exists() {
+        warn!(
+            "Failed to find {} file, skipping teardown, you may need to manually clean up the network namespace",
+            &netns_path
+        );
         return Ok(());
     }
     // Idempotent: teardown_rootful_bridge returns Ok if state is absent.
