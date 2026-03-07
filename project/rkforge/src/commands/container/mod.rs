@@ -463,15 +463,7 @@ impl ContainerRunner {
         }
 
         let container_id = id.unwrap_or_else(|| self.container_id.clone());
-        start(
-            Start {
-                container_id: container_id.clone(),
-            },
-            root_path.clone(),
-        )?;
 
-        // Compose networking is handled by compose's NetworkManager hook.
-        // For single containers, do one-shot netavark rootful bridge setup after start.
         if self.determine_single_status() {
             let state = self.get_container_state()?;
             let pid = state
@@ -484,6 +476,12 @@ impl ContainerRunner {
         } else if let Some(ip) = self.compose_assigned_ip {
             self.ip = Some(ip);
         }
+        start(
+            Start {
+                container_id: container_id.clone(),
+            },
+            root_path.clone(),
+        )?;
 
         Ok(())
     }

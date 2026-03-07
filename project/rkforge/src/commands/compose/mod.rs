@@ -13,7 +13,7 @@ use libcontainer::syscall::syscall::create_syscall;
 use liboci_cli::{Delete, List};
 
 use serde::{Deserialize, Serialize};
-use tracing::debug;
+use tracing::{debug, warn};
 
 use crate::commands::{
     compose::{
@@ -158,10 +158,11 @@ impl ComposeManager {
             let id = container.id.clone();
             let netns_path = format!("/proc/{pid}/ns/net");
             if !Path::new(&netns_path).exists() {
-                return Err(anyhow!(
-                    "[container {}] netns path not found: {netns_path}",
-                    id
-                ));
+                warn!(
+                    "Failed to find {} file, skipping teardown, you may need to manually clean up the network namespace",
+                    &netns_path
+                );
+                return Ok(());
             }
             self.teardown_network(netns_path, id)?;
             remove_container(&self.root_path, container)?;
