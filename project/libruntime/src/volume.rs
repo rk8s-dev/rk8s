@@ -365,3 +365,9 @@ pub fn string_to_pattern(v: &str) -> Result<VolumePattern> {
         pattern_type: typ,
     })
 }
+
+pub fn parse_key_val(s: &str) -> Result<(String, String), String> {
+    s.split_once("=")
+        .map(|(k, v)| (k.to_string(), v.to_string()))
+        .ok_or_else(|| format!("invalid KEY=VALUE: '{}'", s))
+}

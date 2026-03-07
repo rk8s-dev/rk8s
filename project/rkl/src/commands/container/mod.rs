@@ -1,12 +1,9 @@
 use crate::{
-    commands::{
-        Exec, ExecContainer,
-        compose::network::{BRIDGE_CONF, CliNetworkConfig, STD_CONF_PATH},
-        create, delete, exec, list, load_container, start,
-        volume::parse_key_val,
-    },
+    commands::{Exec, ExecContainer, create, delete, exec, list, load_container, start},
     task::get_cni,
 };
+use libruntime::volume::parse_key_val;
+
 use anyhow::{Ok, Result, anyhow};
 use chrono::{DateTime, Local};
 use clap::Subcommand;
@@ -19,6 +16,7 @@ use libcontainer::{
 };
 use liboci_cli::{Create, Delete, List, Start};
 use libruntime::cri::config::ContainerConfigBuilder;
+use libruntime::network::config::{BRIDGE_CONF, CliNetworkConfig, STD_CONF_PATH};
 use libruntime::oci;
 use libruntime::rootpath;
 use libruntime::utils::{ImageType, determine_image, sync_handle_oci_image};
@@ -115,6 +113,7 @@ pub struct ContainerRunner {
     ip: Option<IpAddr>,
 }
 
+#[allow(dead_code)]
 impl ContainerRunner {
     pub fn ip(&self) -> Option<IpAddr> {
         self.ip
@@ -621,6 +620,7 @@ pub fn delete_container(id: &str) -> Result<()> {
     Ok(())
 }
 
+#[allow(unused)]
 pub fn remove_container(root_path: &Path, state: &State) -> Result<()> {
     let delete_args = Delete {
         container_id: state.id.clone(),
