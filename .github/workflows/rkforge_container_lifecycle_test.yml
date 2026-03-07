@@ -48,11 +48,6 @@ jobs:
               cargo build --release -p aardvark-dns
               sudo mv target/release/aardvark-dns /usr/bin/
           fi
-          if [ -f /usr/bin/aardvark-dns ]; then
-              echo "aardvark-dns already exists, skipping build"
-          else
-              echo "mv aardvark-dns error"
-          fi
 
       - name: Cache cargo + qlean
         uses: actions/cache@v4
