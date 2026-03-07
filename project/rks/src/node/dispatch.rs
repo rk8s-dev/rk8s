@@ -29,6 +29,15 @@ pub async fn dispatch_worker(
             "received Ack"
         ),
 
+        RksMessage::CsiResponse(csi_msg) => {
+            info!(
+                target: "rks::node::worker_dispatch",
+                "received CSI response: {csi_msg}"
+            );
+            // CSI responses are typically handled inline by the orchestration
+            // flow that sent the request. If one arrives here, log it.
+        }
+
         RksMessage::SetPodip((pod_name, pod_ip)) => {
             if let Some(pod_yaml) = xline_store.get_pod_yaml(&pod_name).await? {
                 let mut pod: PodTask = serde_yaml::from_str(&pod_yaml)?;

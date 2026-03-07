@@ -2,6 +2,7 @@ mod api;
 mod cli;
 mod commands;
 mod controllers;
+mod csi;
 mod dns;
 mod internal;
 mod network;
@@ -69,6 +70,9 @@ async fn handle_start_command() -> anyhow::Result<()> {
 
     let node_registry = Arc::new(NodeRegistry::default());
 
+    let volume_store = Arc::new(csi::VolumeStore::new(xline_store.clone()));
+    let csi_controller = Arc::new(csi::RksCsiController::new(volume_store));
+
     register_controllers(
         CONTROLLER_MANAGER.clone(),
         xline_store.clone(),
@@ -86,6 +90,7 @@ async fn handle_start_command() -> anyhow::Result<()> {
         local_manager,
         vault.clone(),
         node_registry,
+        csi_controller,
     ));
 
     internal::start_internal_server(vault.clone()).await?;

@@ -1,4 +1,5 @@
 use crate::api::xlinestore::XlineStore;
+use crate::csi::RksCsiController;
 use crate::network::manager::LocalManager;
 use crate::node::lease_sync::LeaseSynchronizer;
 use crate::node::server::QUICServer;
@@ -198,6 +199,7 @@ pub struct Shared {
     pub vault: Option<Arc<Vault>>,
     pub node_registry: Arc<NodeRegistry>,
     pub log_response_registry: Arc<LogResponseRegistry>,
+    pub csi_controller: Arc<RksCsiController>,
 }
 
 impl Shared {
@@ -206,6 +208,7 @@ impl Shared {
         local_manager: Arc<LocalManager>,
         vault: Option<Arc<Vault>>,
         node_registry: Arc<NodeRegistry>,
+        csi_controller: Arc<RksCsiController>,
     ) -> Self {
         Self {
             xline_store,
@@ -213,6 +216,7 @@ impl Shared {
             vault,
             node_registry,
             log_response_registry: Arc::new(LogResponseRegistry::default()),
+            csi_controller,
         }
     }
 }

@@ -810,6 +810,10 @@ pub enum RksMessage {
         previous: bool,
     },
 
+    // CSI volume lifecycle
+    CsiRequest(libcsi::CsiMessage),
+    CsiResponse(libcsi::CsiMessage),
+
     //response
     Ack,
     Error(String),
@@ -925,6 +929,8 @@ impl std::fmt::Debug for RksMessage {
             Self::UpdateNftablesRules(rules) => {
                 write!(f, "RksMessage::UpdateNftablesRules (len={})", rules.len())
             }
+            Self::CsiRequest(msg) => write!(f, "RksMessage::CsiRequest({:?})", msg),
+            Self::CsiResponse(msg) => write!(f, "RksMessage::CsiResponse({:?})", msg),
             // response
             Self::Ack => f.write_str("RksMessage::Ack"),
             Self::Error(err_msg) => write!(f, "RksMessage::Error({})", err_msg),
@@ -1105,6 +1111,8 @@ impl Display for RksMessage {
                 "Update status for pod '{}' in namespace '{}'",
                 pod_name, pod_namespace
             ),
+            Self::CsiRequest(msg) => write!(f, "CSI request: {}", msg),
+            Self::CsiResponse(msg) => write!(f, "CSI response: {}", msg),
 
             // response
             Self::Ack => f.write_str("Acknowledge message receipt"),

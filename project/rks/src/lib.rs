@@ -2,6 +2,7 @@ pub mod api;
 pub mod cli;
 pub mod commands;
 pub mod controllers;
+pub mod csi;
 pub mod dns;
 pub mod network;
 pub mod node;
