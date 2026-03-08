@@ -43,11 +43,22 @@ jobs:
             guestfish \
             xorriso
 
+      - name: Start backend services
+        run: |
+          docker compose -f project/slayerfs/docker-compose.yml up -d || true
+
       - name: Run tests
         run: |
           cd project
+          cargo build -p slayerfs --example persistence_demo --release
           cargo test -p slayerfs
-          
+          cargo test -p slayerfs -- --ignored
+
+      - name: Stop backend services
+        if: always()
+        run: |
+          docker compose -f project/slayerfs/docker-compose.yml down -v || true
+
       - name: Install nightly toolchain and cargo-fuzz
         run: |
           rustup toolchain install nightly --profile minimal
@@ -83,7 +94,7 @@ jobs:
           cd project/slayerfs
           rm -rf fuzz/artifacts/fs_ops/*
           rm -rf fuzz/.tmp*
-          
+
   xfstests:
     name: xfstests
     if: false
