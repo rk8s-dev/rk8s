@@ -20,6 +20,9 @@ libruntime = { workspace = true }
 libnetwork = { workspace = true }
 rkforge = { workspace = true }
 libcgroups = { workspace = true }
+libcsi = { workspace = true }
+slayerfs = { workspace = true }
+rfuse3 = { workspace = true }
 libcontainer = { workspace = true }
 libvault = { workspace = true }
 clap = { workspace = true, features = ["derive", "env"] }
