@@ -17,7 +17,7 @@ use libcontainer::{
 };
 use liboci_cli::{Create, Delete, List, Start};
 use libruntime::cri::config::ContainerConfigBuilder;
-use libruntime::network::config::{BRIDGE_CONF, CliNetworkConfig, STD_CONF_PATH};
+use libruntime::network::config::{BRIDGE_CONF, CliNetworkConfig};
 use libruntime::oci;
 use libruntime::rootpath;
 use libruntime::utils::{
@@ -46,6 +46,7 @@ use std::{
 use tabwriter::TabWriter;
 use tracing::{debug, error, info, warn};
 
+pub const STD_CONF_PATH: &str = "/etc/cni/net.d";
 struct RkforgeImagePuller {}
 
 #[async_trait::async_trait]
