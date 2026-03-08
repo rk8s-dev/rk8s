@@ -570,7 +570,7 @@ fn backend_urls_for(backend: MetaBackend, default_host: &str) -> Vec<String> {
 async fn default_gateway_ip(vm: &mut Machine) -> Result<Option<String>> {
     let out = exec_check(
         vm,
-        "sh -lc 'ip route | awk \"/default/ {print \\\"$3\\\"; exit}\"'",
+        "sh -lc 'ip route | awk \"/default/ {print \\\"\\\\$3\\\"; exit}\"'",
     )
     .await?;
     let ip = out.trim();
