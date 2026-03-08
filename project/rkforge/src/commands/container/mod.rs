@@ -1,4 +1,4 @@
-mod netwok;
+pub mod netwok;
 pub mod rootfs_mount;
 use self::rootfs_mount::RootfsMount;
 use crate::{
