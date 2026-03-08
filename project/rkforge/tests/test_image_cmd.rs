@@ -23,7 +23,7 @@ fn ensure_test_storage() {
             .prefix("rkforge-test-")
             .tempdir()
             .expect("Failed to create test storage root");
-        std::env::set_var("RKFORGE_STORAGE_ROOT", dir.path());
+        unsafe { std::env::set_var("RKFORGE_STORAGE_ROOT", dir.path()) };
         dir
     });
 }

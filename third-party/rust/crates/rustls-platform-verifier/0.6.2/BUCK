@@ -37,7 +37,7 @@ rust_library(
             "//third-party/rust/crates/security-framework-sys/2.16.0:security-framework-sys",
             "//third-party/rust/crates/security-framework/3.6.0:security-framework",
         ],
-        "windows": ["//third-party/rust/crates/windows-sys/0.59.0:windows-sys"],
+        "windows": ["//third-party/rust/crates/windows-sys/0.61.2:windows-sys"],
     },
     visibility = ["PUBLIC"],
     deps = [

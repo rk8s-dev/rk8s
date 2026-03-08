@@ -28,13 +28,11 @@ use chrono::{DateTime, Local};
 use tabwriter::TabWriter;
 use tracing::info;
 
-pub mod compose;
 pub mod container;
 pub mod deployment;
 pub mod pod;
 pub mod replicaset;
 pub mod service;
-pub mod volume;
 
 pub(crate) fn format_duration(duration: chrono::Duration) -> String {
     let seconds = duration.num_seconds().max(0);

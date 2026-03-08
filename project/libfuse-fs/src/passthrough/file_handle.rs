@@ -15,7 +15,7 @@ use std::os::unix::io::{AsRawFd, RawFd};
 use std::sync::Arc;
 
 #[allow(unused_imports)]
-use tracing::error;
+use tracing::{debug, error};
 use vmm_sys_util::fam::{FamStruct, FamStructWrapper};
 
 use super::EMPTY_CSTR;
@@ -328,7 +328,12 @@ impl OpenableFileHandle {
                 Ok(file)
             } else {
                 let e = io::Error::last_os_error();
-                error!("open_by_handle_at failed error {e:?}");
+                // ESTALE is a recoverable error when file handle becomes stale
+                if e.raw_os_error() == Some(libc::ESTALE) {
+                    debug!("open_by_handle_at: stale file handle (ESTALE)");
+                } else {
+                    error!("open_by_handle_at failed error {e:?}");
+                }
                 Err(e)
             }
         }

@@ -55,7 +55,7 @@ rust_library(
     os_deps = {
         "linux": ["//third-party/rust/crates/libc/0.2.182:libc"],
         "macos": ["//third-party/rust/crates/libc/0.2.182:libc"],
-        "windows": ["//third-party/rust/crates/windows-sys/0.59.0:windows-sys"],
+        "windows": ["//third-party/rust/crates/windows-sys/0.61.2:windows-sys"],
     },
     visibility = ["PUBLIC"],
     deps = [

@@ -1,5 +1,6 @@
 use ipnet::IpNet;
 use libruntime::cri::cri_api::Mount;
+
 use netavark::commands::setup::Setup;
 use netavark::commands::teardown::Teardown;
 use netavark::network::types::Network;
@@ -21,238 +22,13 @@ use crate::commands::compose::spec::NetworkDriver::Host;
 use crate::commands::compose::spec::NetworkDriver::Overlay;
 use crate::commands::compose::spec::NetworkSpec;
 
-use cni_plugin::ip_range::IpRange;
-use ipnetwork::IpNetwork;
 use ipnetwork::Ipv4Network;
-use libipam::config::IPAMConfig;
-use libipam::range_set::RangeSet;
 
 use crate::commands::compose::spec::ComposeSpec;
 use crate::commands::compose::spec::ServiceSpec;
 use crate::commands::container::ContainerRunner;
 use anyhow::Result;
 use anyhow::anyhow;
-use serde::{Deserialize, Serialize};
-
-pub const CNI_VERSION: &str = "1.0.0";
-pub const STD_CONF_PATH: &str = "/etc/cni/net.d";
-
-pub const BRIDGE_PLUGIN_NAME: &str = "libbridge";
-pub const BRIDGE_CONF: &str = "rkl-standalone-bridge.conf";
-/// Subnet size for each compose network (256 IPs per network)
-/// Follows Podman's default subnet allocation strategy
-const DEFAULT_SUBNET_POOL_PREFIX: u8 = 24;
-
-/// Single pool: 172.17.0.0/16, each compose network allocates a /24 (e.g. 172.17.0.0/24, 172.17.1.0/24, ...).
-fn default_subnet_pools() -> Vec<(Ipv4Network, u8)> {
-    vec![(
-        Ipv4Network::new(Ipv4Addr::new(172, 17, 0, 0), 16).unwrap(),
-        DEFAULT_SUBNET_POOL_PREFIX,
-    )]
-}
-
-fn network_intersects(a: &Ipv4Network, b: &Ipv4Network) -> bool {
-    b.contains(a.network()) || a.contains(b.network())
-}
-
-fn next_subnet(subnet: &Ipv4Network) -> Option<Ipv4Network> {
-    let prefix = subnet.prefix();
-    if prefix == 0 {
-        return None;
-    }
-    let base = subnet.network();
-    let base_u32 = u32::from(base);
-    let inc = 1u32.checked_shl((32 - prefix) as u32)?;
-    let next_u32 = base_u32.checked_add(inc)?;
-    let next_addr = Ipv4Addr::from(next_u32.to_be_bytes());
-    Ipv4Network::new(next_addr, prefix).ok()
-}
-
-/// Get first free IPv4 subnet from pools that does not intersect with used. Returns (subnet, gateway).
-/// Gateway is first host in subnet (Podman convention). Same algorithm as GetFreeIPv4NetworkSubnet in podman
-fn get_free_ipv4_subnet(
-    used_networks: &[Ipv4Network],
-    pools: &[(Ipv4Network, u8)],
-) -> Option<(Ipv4Network, Ipv4Addr)> {
-    for (base_pool, size) in pools {
-        let net_ip = base_pool.network();
-        let mut network = Ipv4Network::new(net_ip, *size).ok()?;
-        while base_pool.contains(network.network()) {
-            let intersects = used_networks
-                .iter()
-                .any(|used| network_intersects(&network, used));
-            if !intersects {
-                let gateway = first_host_in_subnet(&network);
-                return Some((network, gateway));
-            }
-            network = next_subnet(&network)?;
-        }
-    }
-    None
-}
-
-fn first_host_in_subnet(subnet: &Ipv4Network) -> Ipv4Addr {
-    let base = subnet.network();
-    let n = u32::from(base);
-    let first_host = n.checked_add(1).unwrap_or(n);
-    Ipv4Addr::from(first_host.to_be_bytes())
-}
-
-fn default_netavark_config_dir() -> OsString {
-    if let Some(v) = std::env::var_os("NETAVARK_CONFIG") {
-        return v;
-    }
-
-    OsString::from("/run/containers/networks")
-}
-
-fn default_aardvark_bin() -> Result<OsString> {
-    if let Some(v) = std::env::var_os("AARDVARK_DNS_BIN") {
-        return Ok(v);
-    }
-    if let Some(v) = std::env::var_os("AARDVARK_BIN") {
-        return Ok(v);
-    }
-
-    let candidates = ["/usr/libexec/podman/aardvark-dns", "/usr/bin/aardvark-dns"];
-    for c in candidates {
-        if Path::new(c).exists() {
-            return Ok(OsString::from(c));
-        }
-    }
-
-    Err(anyhow!("aardvark-dns not found"))
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct CliNetworkConfig {
-    /// default is 1.0.0
-    #[serde(default)]
-    pub cni_version: String,
-    /// the `type` in JSON
-    #[serde(rename = "type")]
-    pub plugin: String,
-    /// network's name
-    #[serde(default)]
-    pub name: String,
-    /// bridge interface' s name (default cni0）
-    #[serde(default)]
-    pub bridge: String,
-    /// whether this network should be set the container's default gateway
-    #[serde(default)]
-    pub is_default_gateway: Option<bool>,
-    /// whether the bridge should at as a gateway
-    #[serde(default)]
-    pub is_gateway: Option<bool>,
-    /// Maximum Transmission Unit (MTU) to set on the bridge interface
-    #[serde(default)]
-    pub mtu: Option<u32>,
-    /// Enable Mac address spoofing check
-    #[serde(default)]
-    pub mac_spoof_check: Option<bool>,
-    /// IPAM type（like host-local, static, etc.）
-    #[serde(default)]
-    pub ipam: Option<IPAMConfig>,
-    /// enable hairpin mod
-    #[serde(default)]
-    pub hairpin_mode: Option<bool>,
-    /// VLAN ID
-    #[serde(default)]
-    pub vlan: Option<u16>,
-    /// VLAN Trunk
-    #[serde(default)]
-    pub vlan_trunk: Option<Vec<u16>>,
-}
-
-impl CliNetworkConfig {
-    pub fn from_name_bridge(network_name: &str, bridge: &str) -> Self {
-        Self {
-            bridge: bridge.to_string(),
-            name: network_name.to_string(),
-            ..Default::default()
-        }
-    }
-
-    /// Due to compose will need a unique subnet
-    /// this function need two extra parameter
-    /// - subnet_addr
-    /// - gateway_addr
-    ///
-    /// Compose networks use Podman-style /24 from subnet pool. prefix is typically 24.
-    pub fn from_subnet_gateway(
-        network_name: &str,
-        bridge: &str,
-        subnet_addr: Ipv4Addr,
-        gateway_addr: Ipv4Addr,
-        prefix: u8,
-    ) -> Self {
-        let ip_range = IpRange {
-            subnet: IpNetwork::V4(Ipv4Network::new(subnet_addr, prefix).unwrap()),
-            range_start: None,
-            range_end: None,
-            gateway: Some(IpAddr::V4(gateway_addr)),
-        };
-
-        let set: RangeSet = vec![ip_range];
-
-        Self {
-            bridge: bridge.to_string(),
-            name: network_name.to_string(),
-            ipam: Some(IPAMConfig {
-                type_field: "libipam".to_string(),
-                name: None,
-                routes: None,
-                resolv_conf: None,
-                data_dir: None,
-                ranges: vec![set],
-                ip_args: vec![],
-            }),
-            ..Default::default()
-        }
-    }
-}
-
-impl Default for CliNetworkConfig {
-    fn default() -> Self {
-        // Default subnet-addr for rkl container management
-        // 172.17.0.0/16
-        let subnet_addr = Ipv4Addr::new(172, 17, 0, 0);
-        let getway_addr = Ipv4Addr::new(172, 17, 0, 1);
-
-        let ip_range = IpRange {
-            subnet: ipnetwork::IpNetwork::V4(Ipv4Network::new(subnet_addr, 16).unwrap()),
-            range_start: None,
-            range_end: None,
-            gateway: Some(IpAddr::V4(getway_addr)),
-        };
-
-        let set: RangeSet = vec![ip_range];
-
-        Self {
-            cni_version: String::from(CNI_VERSION),
-            plugin: String::from(BRIDGE_PLUGIN_NAME),
-            name: Default::default(),
-            bridge: Default::default(),
-            is_default_gateway: Default::default(),
-            is_gateway: Some(true),
-            mtu: Some(1500),
-            mac_spoof_check: Default::default(),
-            hairpin_mode: Default::default(),
-            vlan: Default::default(),
-            vlan_trunk: Default::default(),
-            ipam: Some(IPAMConfig {
-                type_field: "libipam".to_string(),
-                name: None,
-                routes: None,
-                resolv_conf: None,
-                data_dir: None,
-                ranges: vec![set],
-                ip_args: vec![],
-            }),
-        }
-    }
-}
 
 #[derive(Debug)]
 struct NetworkSubnet {
@@ -279,6 +55,7 @@ fn next_container_ip_in_subnet(
     }
     Some(Ipv4Addr::from(next.to_be_bytes()))
 }
+
 #[derive(Debug)]
 pub struct NetworkManager {
     map: HashMap<String, NetworkSpec>,
@@ -343,44 +120,6 @@ impl NetworkManager {
 
     pub fn network_service_mapping(&self) -> HashMap<String, Vec<(String, ServiceSpec)>> {
         self.network_service.clone()
-    }
-
-    pub fn setup_network_conf(&self, network_name: &String) -> Result<()> {
-        // generate the config file
-        let interface = self.network_interface.get(network_name).ok_or_else(|| {
-            anyhow!(
-                "Failed to find bridge interface for network {}",
-                network_name
-            )
-        })?;
-
-        let (subnet_addr, gateway_addr, prefix) = self
-            .network_subnets
-            .get(network_name)
-            .map(|s| (s.subnet.network(), s.gateway, s.subnet.prefix()))
-            .ok_or_else(|| anyhow!("No subnet allocated for network {}", network_name))?;
-
-        let conf = CliNetworkConfig::from_subnet_gateway(
-            network_name,
-            interface,
-            subnet_addr,
-            gateway_addr,
-            prefix,
-        );
-
-        let conf_value = serde_json::to_value(conf).expect("Failed to parse network config");
-
-        let mut conf_path = PathBuf::from(STD_CONF_PATH);
-        conf_path.push(BRIDGE_CONF);
-        if let Some(parent) = conf_path.parent()
-            && !parent.exists()
-        {
-            fs::create_dir_all(parent)?;
-        }
-
-        fs::write(conf_path, serde_json::to_string_pretty(&conf_value)?)?;
-
-        Ok(())
     }
 
     pub fn handle(&mut self, spec: &ComposeSpec) -> Result<()> {
@@ -610,7 +349,6 @@ impl NetworkManager {
                     false,
                 )
                 .map_err(|e| anyhow!("[container {}] netavark setup failed: {e}", runner.id()))?;
-            clean_tmp_netavark_json(&runner.id())?;
         } else {
             return Err(anyhow!("Unsupported ipv6 type"));
         }
@@ -624,6 +362,10 @@ impl NetworkManager {
         let mut json_path = std::env::temp_dir();
         json_path.push("rkl-netavark");
         json_path.push(format!("{}.network.json", id));
+        // If the setup state file is missing, treat cleanup as idempotent.
+        if !json_path.exists() {
+            return Ok(());
+        }
         teardown
             .exec(
                 Some(json_path.into_os_string()),
@@ -634,9 +376,15 @@ impl NetworkManager {
                 false,
             )
             .map_err(|e| anyhow!("[container {}] netavark teardown failed: {e}", id))?;
+        // Remove state file after successful teardown.
+        let mut json_path = std::env::temp_dir();
+        json_path.push("rkl-netavark");
+        json_path.push(format!("{}.network.json", id));
+        let _ = std::fs::remove_file(&json_path);
         Ok(())
     }
 }
+
 // in the future , add dns server
 /// create resolv.conf file
 /// save base resolv.conf file
@@ -700,14 +448,84 @@ fn create_tmp_netavark_json(opts: &NetworkOptions, id: &str) -> Result<OsString>
     json_file.write_all(json_str.as_bytes())?;
     Ok(json_path.into_os_string())
 }
-fn clean_tmp_netavark_json(id: &str) -> Result<()> {
-    let mut json_path = std::env::temp_dir();
-    json_path.push("rkl-netavark");
-    json_path.push(format!("{}.network.json", id));
-    if let Some(parent) = json_path.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    std::fs::remove_file(&json_path)?;
 
-    Ok(())
+/// Single pool: 172.17.0.0/16, each compose network allocates a /24 (e.g. 172.17.0.0/24, 172.17.1.0/24, ...).
+fn default_subnet_pools() -> Vec<(Ipv4Network, u8)> {
+    vec![(
+        Ipv4Network::new(Ipv4Addr::new(172, 17, 0, 0), 16).unwrap(),
+        24,
+    )]
+}
+
+fn network_intersects(a: &Ipv4Network, b: &Ipv4Network) -> bool {
+    b.contains(a.network()) || a.contains(b.network())
+}
+
+fn next_subnet(subnet: &Ipv4Network) -> Option<Ipv4Network> {
+    let prefix = subnet.prefix();
+    if prefix == 0 {
+        return None;
+    }
+    let base = subnet.network();
+    let base_u32 = u32::from(base);
+    let inc = 1u32.checked_shl((32 - prefix) as u32)?;
+    let next_u32 = base_u32.checked_add(inc)?;
+    let next_addr = Ipv4Addr::from(next_u32.to_be_bytes());
+    Ipv4Network::new(next_addr, prefix).ok()
+}
+
+/// Get first free IPv4 subnet from pools that does not intersect with used. Returns (subnet, gateway).
+/// Gateway is first host in subnet (Podman convention). Same algorithm as GetFreeIPv4NetworkSubnet in podman
+fn get_free_ipv4_subnet(
+    used_networks: &[Ipv4Network],
+    pools: &[(Ipv4Network, u8)],
+) -> Option<(Ipv4Network, Ipv4Addr)> {
+    for (base_pool, size) in pools {
+        let net_ip = base_pool.network();
+        let mut network = Ipv4Network::new(net_ip, *size).ok()?;
+        while base_pool.contains(network.network()) {
+            let intersects = used_networks
+                .iter()
+                .any(|used| network_intersects(&network, used));
+            if !intersects {
+                let gateway = first_host_in_subnet(&network);
+                return Some((network, gateway));
+            }
+            network = next_subnet(&network)?;
+        }
+    }
+    None
+}
+
+fn first_host_in_subnet(subnet: &Ipv4Network) -> Ipv4Addr {
+    let base = subnet.network();
+    let n = u32::from(base);
+    let first_host = n.checked_add(1).unwrap_or(n);
+    Ipv4Addr::from(first_host.to_be_bytes())
+}
+
+fn default_netavark_config_dir() -> OsString {
+    if let Some(v) = std::env::var_os("NETAVARK_CONFIG") {
+        return v;
+    }
+
+    OsString::from("/run/containers/networks")
+}
+
+fn default_aardvark_bin() -> Result<OsString> {
+    if let Some(v) = std::env::var_os("AARDVARK_DNS_BIN") {
+        return Ok(v);
+    }
+    if let Some(v) = std::env::var_os("AARDVARK_BIN") {
+        return Ok(v);
+    }
+
+    let candidates = ["/usr/libexec/podman/aardvark-dns", "/usr/bin/aardvark-dns"];
+    for c in candidates {
+        if Path::new(c).exists() {
+            return Ok(OsString::from(c));
+        }
+    }
+
+    Err(anyhow!("aardvark-dns not found"))
 }

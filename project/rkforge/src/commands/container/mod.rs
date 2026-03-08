@@ -1,10 +1,10 @@
+mod netwok;
 pub mod rootfs_mount;
-
 use self::rootfs_mount::RootfsMount;
 use crate::{
     commands::{
         Exec, ExecContainer,
-        compose::network::{BRIDGE_CONF, CliNetworkConfig, STD_CONF_PATH},
+        container::netwok::{RootfulBridgeSpec, setup_rootful_bridge, teardown_rootful_bridge},
         create, delete, exec, list, load_container, start,
         volume::parse_key_val,
     },
@@ -15,7 +15,6 @@ use anyhow::{Context, Ok, Result, anyhow};
 use chrono::{DateTime, Local};
 use clap::Subcommand;
 use common::ContainerSpec;
-use json::JsonValue;
 use libcontainer::syscall::syscall::create_syscall;
 use libcontainer::{
     container::{Container, ContainerStatus, State, state},
@@ -449,27 +448,6 @@ impl ContainerRunner {
         Ok(CreateContainerResponse { container_id })
     }
 
-    pub fn setup_container_network(&self) -> Result<JsonValue> {
-        // If this container is not from compose, then setup the config file again
-        if self.determine_single_status() {
-            setup_network_conf()?;
-        }
-
-        // Compose: use allocated IP from subnet pool instead of 127.0.0.1
-        let address = self
-            .compose_assigned_ip
-            .map(|ip| format!("{}/24", ip))
-            .unwrap_or_else(|| "127.0.0.1/24".to_string());
-
-        Ok(json::object! {
-            "ips": json::array! [
-                json::object! {
-                    "address": address.clone()
-                }
-            ]
-        })
-    }
-
     #[allow(clippy::result_large_err)]
     pub fn load_container(&self) -> Result<Container, LibcontainerError> {
         Container::load(self.root_path.clone().join(&self.container_id))
@@ -483,69 +461,28 @@ impl ContainerRunner {
             delete_container(&self.container_id)?;
             return self.create();
         }
-        // setup the network
-        let setup_result = self.setup_container_network()?;
-        self.retrieve_container_ip(setup_result)?;
 
-        match id {
-            None => {
-                let id = self.get_container_id()?;
-                start(
-                    Start {
-                        container_id: id.clone(),
-                    },
-                    root_path,
-                )?;
+        let container_id = id.unwrap_or_else(|| self.container_id.clone());
 
-                Ok(())
-            }
-            Some(id) => {
-                start(
-                    Start {
-                        container_id: id.clone(),
-                    },
-                    root_path,
-                )?;
-
-                Ok(())
-            }
+        if self.determine_single_status() {
+            let state = self.get_container_state()?;
+            let pid = state
+                .pid
+                .ok_or_else(|| anyhow!("[container {}] PID not found after start", container_id))?;
+            let netns_path = format!("/proc/{pid}/ns/net");
+            let spec = RootfulBridgeSpec::default_single_container_network(&container_id)?;
+            let ip = setup_rootful_bridge(&netns_path, &container_id, spec)?;
+            self.ip = Some(IpAddr::V4(ip));
+        } else if let Some(ip) = self.compose_assigned_ip {
+            self.ip = Some(ip);
         }
-    }
+        start(
+            Start {
+                container_id: container_id.clone(),
+            },
+            root_path.clone(),
+        )?;
 
-    pub fn retrieve_container_ip(&mut self, setup_result: JsonValue) -> Result<()> {
-        // Currently save container's ip as Ipv4 and collect the first IP(A container can have multiple IP addrs)
-        let ips = setup_result["ips"].clone();
-        if !ips.is_array() {
-            return Err(anyhow!("CNI result missing 'ips' array"));
-        };
-        if ips.is_empty() {
-            return Err(anyhow!(
-                "CNI returned no IP addresses for container {}",
-                self.container_id
-            ));
-        }
-        let binding = ips[0]["address"].clone();
-        let ip_with_cidr = binding.as_str().ok_or_else(|| anyhow!(
-                "[container {}] CNI result missing valid IP address string at ['ips'][0]['address']: {binding:?}",
-                self.container_id
-            ))?;
-        debug!(
-            "[container {}] Get container's ip_with_cidr: {ip_with_cidr}",
-            self.container_id
-        );
-        let ip_str = ip_with_cidr.split('/').next().unwrap_or(ip_with_cidr);
-        let ip_addr: IpAddr = ip_str
-            .parse()
-            .map_err(|_| anyhow!("invalid IP address: {ip_with_cidr}"))?;
-        self.ip = match ip_addr {
-            IpAddr::V4(ipv4) => Some(IpAddr::V4(ipv4)),
-            _ => {
-                return Err(anyhow!(
-                    "[container {}] only IPv4 addresses are supported, got: {ip_with_cidr}",
-                    self.container_id
-                ));
-            }
-        };
         Ok(())
     }
 
@@ -656,7 +593,7 @@ pub fn delete_container(id: &str) -> Result<()> {
     let pid = container
         .pid()
         .ok_or(anyhow!("invalid container {} can't find pid", id))?;
-    remove_container_network(pid)?;
+    remove_container_network(pid, id)?;
 
     let delete_args = Delete {
         container_id: id.to_string(),
@@ -693,7 +630,7 @@ pub fn remove_container(root_path: &Path, state: &State) -> Result<()> {
         .pid
         .ok_or(anyhow!("failed to get pid of container {}", &state.id))?;
     // delete the network
-    remove_container_network(Pid::from_raw(pid))?;
+    remove_container_network(Pid::from_raw(pid), &state.id)?;
     delete(delete_args, root_path.to_path_buf())?;
 
     // Stop overlay rootfs mount
@@ -706,9 +643,17 @@ pub fn remove_container(root_path: &Path, state: &State) -> Result<()> {
     Ok(())
 }
 
-pub fn remove_container_network(_pid: Pid) -> Result<()> {
-    // TODO: Implement network removal without get_cni
-    Ok(())
+pub fn remove_container_network(pid: Pid, container_id: &str) -> Result<()> {
+    let netns_path = format!("/proc/{}/ns/net", pid.as_raw());
+    if !Path::new(&netns_path).exists() {
+        warn!(
+            "Failed to find {} file, skipping teardown, you may need to manually clean up the network namespace",
+            &netns_path
+        );
+        return Ok(());
+    }
+    // Idempotent: teardown_rootful_bridge returns Ok if state is absent.
+    teardown_rootful_bridge(&netns_path, container_id)
 }
 pub fn start_container(container_id: &str) -> Result<()> {
     let mut runner = ContainerRunner::from_container_id(container_id, None)?;
@@ -787,23 +732,6 @@ pub fn print_status(container_id: String, root_path: PathBuf) -> Result<()> {
     writeln!(&mut tab_writer, "ID\tPID\tSTATUS\tBUNDLE\tCREATED\tCREATOR")?;
     write!(&mut tab_writer, "{content}")?;
     tab_writer.flush()?;
-
-    Ok(())
-}
-
-pub fn setup_network_conf() -> Result<()> {
-    let conf = CliNetworkConfig::from_name_bridge("single-net", "single0");
-    let conf_value = serde_json::to_value(conf).expect("Failed to parse network config");
-
-    let mut conf_path = PathBuf::from(STD_CONF_PATH);
-    conf_path.push(BRIDGE_CONF);
-    if let Some(parent) = conf_path.parent()
-        && !parent.exists()
-    {
-        fs::create_dir_all(parent)?;
-    }
-
-    fs::write(conf_path, serde_json::to_string_pretty(&conf_value)?)?;
 
     Ok(())
 }
