@@ -162,9 +162,7 @@ impl ComposeManager {
                     "Failed to find {} file, skipping teardown, you may need to manually clean up the network namespace",
                     &netns_path
                 );
-                // network namespace is already gone; skip teardown for this container
-                // and continue with removing containers and eventual directory cleanup
-                continue;
+                return Ok(());
             }
             self.teardown_network(netns_path, id)?;
             remove_container(&self.root_path, container)?;
