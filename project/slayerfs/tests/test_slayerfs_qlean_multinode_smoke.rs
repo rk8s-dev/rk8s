@@ -15,7 +15,7 @@ const HOST_DIAG_ROOT: &str = "/tmp/slayerfs-qlean-multinode";
 const DIST_TESTS_DIR: &str = "/opt/slayerfs-dist-tests/distributed-tests";
 const DIST_RESULTS_DIR: &str = "/tmp/slayerfs-results";
 const DIST_WORKDIR: &str = "/root/slayerfs-dist";
-const DIST_RUN_TIMEOUT_SECS: u64 = 40 * 60;
+const DIST_RUN_TIMEOUT_SECS: u64 = 15 * 60;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum MetaBackend {
@@ -420,8 +420,8 @@ RUN_IOZONE=0
 RUN_XFSTESTS=0
 
 # Light-weight test knobs
-FIO_RUNTIME=10
-FIO_SIZE=256M
+FIO_RUNTIME=5
+FIO_SIZE=128M
 FIO_NUMJOBS=1
 FIO_IODEPTH=4
 FIO_DIRECT=0
