@@ -560,7 +560,7 @@ fn backend_urls_for(backend: MetaBackend, default_host: &str) -> Vec<String> {
         MetaBackend::Etcd => vec![format!("http://{default_host}:2379")],
         MetaBackend::Redis => vec![format!("redis://{default_host}:6379/0")],
         MetaBackend::Postgres => vec![format!(
-            "postgres://slayerfs:slayerfs@{default_host}:5432/database"
+            "postgres://slayerfs:slayerfs@{default_host}:15432/database"
         )],
     }
 }
@@ -568,7 +568,7 @@ fn backend_urls_for(backend: MetaBackend, default_host: &str) -> Vec<String> {
 async fn default_gateway_ip(vm: &mut Machine) -> Result<Option<String>> {
     let out = exec_check(
         vm,
-        "sh -lc 'ip route | awk \"/default/ {print \\\"\\\\$3\\\"; exit}\"'",
+        r#"sh -lc "ip route | awk '/default/ {print \$3; exit}'""#,
     )
     .await?;
     let ip = out.trim();
