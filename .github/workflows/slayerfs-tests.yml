@@ -45,7 +45,7 @@ jobs:
 
       - name: Start backend services
         run: |
-          docker compose -f project/slayerfs/docker-compose.yml up -d || true
+          docker compose -f project/slayerfs/docker-compose.yml up -d
 
       - name: Run tests
         run: |
@@ -57,7 +57,7 @@ jobs:
       - name: Stop backend services
         if: always()
         run: |
-          docker compose -f project/slayerfs/docker-compose.yml down -v || true
+          docker compose -f project/slayerfs/docker-compose.yml down -v
 
       - name: Install nightly toolchain and cargo-fuzz
         run: |
