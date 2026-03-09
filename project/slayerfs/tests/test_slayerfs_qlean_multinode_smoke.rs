@@ -776,7 +776,7 @@ async fn test_slayerfs_qlean_multinode_smoke() -> Result<()> {
                     let backend_urls = backend_urls_for(backend, &fallback_ip);
                     tracing::info!(backend = backend.as_str(), urls = ?backend_urls, "starting backend test run");
 
-                    run_distributed_tests(
+                    let run_res = run_distributed_tests(
                         &mut client1,
                         &repo_root,
                         &client_nodes,
@@ -785,7 +785,17 @@ async fn test_slayerfs_qlean_multinode_smoke() -> Result<()> {
                         &backend_urls,
                     )
                     .await
-                    .with_context(|| format!("distributed tests failed for backend {}", backend.as_str()))?;
+                    .with_context(|| format!("distributed tests failed for backend {}", backend.as_str()));
+
+                    let _ = exec(
+                        &mut client1,
+                        &format!(
+                            "sh -lc 'cd {DIST_TESTS_DIR} && ./run-distributed-tests.sh cleanup'",
+                        ),
+                    )
+                    .await;
+
+                    run_res?;
                 }
 
                 Ok(())
