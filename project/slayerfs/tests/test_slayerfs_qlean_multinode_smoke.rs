@@ -195,7 +195,6 @@ async fn exec(vm: &mut Machine, cmd: &str) -> Result<String> {
     ))
 }
 
-
 async fn maybe_run_single_vm_probe(image: &qlean::Image, config: &MachineConfig) -> Result<()> {
     let enabled = std::env::var("SLAYERFS_QLEAN_SINGLE_VM_CHECK")
         .map(|v| v == "1")
@@ -518,9 +517,8 @@ async fn cleanup_etcd_metadata_remote(vm: &mut Machine, endpoint: &str) -> Resul
         "slices/",
     ];
     for prefix in prefixes {
-        let cmd = format!(
-            "sh -lc 'ETCDCTL_API=3 etcdctl --endpoints={endpoint} del --prefix {prefix}'",
-        );
+        let cmd =
+            format!("sh -lc 'ETCDCTL_API=3 etcdctl --endpoints={endpoint} del --prefix {prefix}'",);
         exec_check(vm, &cmd).await?;
     }
     Ok(())
