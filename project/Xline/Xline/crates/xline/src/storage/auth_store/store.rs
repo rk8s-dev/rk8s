@@ -1165,8 +1165,7 @@ impl AuthStore {
         Arc::clone(&self.revision)
     }
 }
-
-/// parse common name from a DER-encoded certificate.  Returns the first
+/// Parse common name from a DER-encoded certificate.  Returns the first
 /// `CN=` attribute found in the subject string.  We deliberately keep this
 /// logic simple so that it can be re‑used both in unit tests and in the
 /// `init_router` interceptor below.
