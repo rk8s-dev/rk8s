@@ -26,11 +26,22 @@ jobs:
           toolchain: stable
           target: ${{ matrix.target.rust }}
 
-      - name: Install cross-compilation tools
-        if: matrix.target.rust == 'aarch64-unknown-linux-gnu'
+      - name: Install Linux dependencies
+        if: matrix.target.os == 'linux'
         run: |
           sudo apt-get update
+          sudo apt-get install -y build-essential clang lld pkg-config protobuf-compiler zstd
+          sudo apt-get install -y seccomp libseccomp-dev libpython3-dev openssl libssl-dev
+
+      - name: Install cross-compilation tools for ARM64 Linux
+        if: matrix.target.rust == 'aarch64-unknown-linux-gnu'
+        run: |
           sudo apt-get install -y gcc-aarch64-linux-gnu
+
+      - name: Install macOS dependencies
+        if: matrix.target.os == 'darwin'
+        run: |
+          brew install protobuf zstd openssl@3
 
       - name: Cache cargo registry
         uses: actions/cache@v4
