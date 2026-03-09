@@ -532,7 +532,7 @@ async fn cleanup_redis_metadata_remote(vm: &mut Machine, host: &str) -> Result<(
 
 async fn cleanup_postgres_metadata_remote(vm: &mut Machine, host: &str) -> Result<()> {
     let cmd = format!(
-        "sh -lc 'PGPASSWORD=slayerfs psql -h {host} -U slayerfs -d database -c \"DROP SCHEMA public CASCADE; CREATE SCHEMA public;\"'",
+        "sh -lc 'PGPASSWORD=slayerfs psql -h {host} -p 15432 -U slayerfs -d database -c \"DROP SCHEMA public CASCADE; CREATE SCHEMA public;\"'",
     );
     exec_check(vm, &cmd).await?;
     Ok(())
