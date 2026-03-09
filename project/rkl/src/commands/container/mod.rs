@@ -46,6 +46,7 @@ use std::{
 use tabwriter::TabWriter;
 use tracing::{debug, error, info, warn};
 
+pub const STD_CONF_PATH: &str = "/etc/cni/net.d";
 struct RkforgeImagePuller {}
 
 #[async_trait::async_trait]
