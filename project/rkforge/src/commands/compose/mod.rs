@@ -157,16 +157,14 @@ impl ComposeManager {
             })?;
             let id = container.id.clone();
             let netns_path = format!("/proc/{pid}/ns/net");
-            if !Path::new(&netns_path).exists() {
+            if Path::new(&netns_path).exists() {
+                self.teardown_network(netns_path, id)?;
+            } else {
                 warn!(
                     "Failed to find {} file, skipping teardown, you may need to manually clean up the network namespace",
                     &netns_path
                 );
-                // network namespace is already gone; skip teardown for this container
-                // and continue with removing containers and eventual directory cleanup
-                continue;
             }
-            self.teardown_network(netns_path, id)?;
             remove_container(&self.root_path, container)?;
         }
 

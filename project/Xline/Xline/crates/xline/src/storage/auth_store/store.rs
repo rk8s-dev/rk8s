@@ -1170,18 +1170,9 @@ impl AuthStore {
 /// logic simple so that it can be re‑used both in unit tests and in the
 /// `init_router` interceptor below.
 fn parse_cn_from_cert(der: &[u8]) -> Option<String> {
-    if let Ok((_, cert)) = x509_parser::parse_x509_der(der) {
-        let subj = cert.subject().to_string();
-        // subject string looks like "C=XX, ST=YY, L=ZZ, O=..., CN=name"; we just
-        // split on commas and look for a CN= prefix.
-        for part in subj.split(',') {
-            let part = part.trim();
-            if let Some(rest) = part.strip_prefix("CN=") {
-                return Some(rest.to_string());
-            }
-        }
-    }
-    None
+    x509_parser::parse_x509_der(der)
+        .ok()
+        .and_then(|(_, cert)| cert.subject().common_name().map(|s| s.to_string()))
 }
 
 /// Get common name from request metadata or TLS extension.
