@@ -259,12 +259,40 @@ impl ConnectionState for Verified {
     async fn serve(conn: AuthConnection<Self>) -> anyhow::Result<()> {
         let (is_worker, node_id) = conn.classify_connection().await?;
 
-        if is_worker && let Some(node_id) = node_id {
+        let worker_session = if is_worker {
+            if let Some(node_id) = node_id.as_deref() {
+                conn.shared.node_registry.get(node_id).await
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        if is_worker && let Some(node_id) = node_id.as_ref() {
             // Start watching pods if this is a registered worker node
-            let watcher = PodsWatcher::new(node_id, conn.conn.clone(), conn.shared.clone());
+            let watcher = PodsWatcher::new(node_id.clone(), conn.conn.clone(), conn.shared.clone());
             watcher.spawn()?;
         }
 
-        conn.dispatch_loop(is_worker).await
+        let dispatch_result = conn.dispatch_loop(is_worker).await;
+
+        if is_worker
+            && let (Some(node_id), Some(worker_session)) =
+                (node_id.as_deref(), worker_session.as_ref())
+        {
+            if conn
+                .shared
+                .node_registry
+                .unregister_if_matches(node_id, worker_session)
+                .await
+            {
+                info!("worker connection closed, unregistered node: {node_id}");
+            } else {
+                debug!("worker connection closed, but session already replaced: {node_id}");
+            }
+        }
+
+        dispatch_result
     }
 }

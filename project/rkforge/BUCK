@@ -20,7 +20,24 @@ rust_binary(
     crate = "rkforge",
     crate_root = "vendor/src/main.rs",
     edition = "2024",
-    rustc_flags = ["@$(location :rkforge-manifest[env_flags])"],
+    rustc_flags = ["@$(location :rkforge-manifest[env_flags])"] + select({
+        "prelude//os/constraints:windows": select({
+            "prelude//abi/constraints:gnu": [
+                "@$(location //third-party/rust/crates/windows_x86_64_gnu/0.42.2:windows_x86_64_gnu-build-script-run[rustc_flags])",
+                "@$(location //third-party/rust/crates/windows_x86_64_gnu/0.48.5:windows_x86_64_gnu-build-script-run[rustc_flags])",
+                "@$(location //third-party/rust/crates/windows_x86_64_gnu/0.52.6:windows_x86_64_gnu-build-script-run[rustc_flags])",
+                "@$(location //third-party/rust/crates/windows_x86_64_gnu/0.53.1:windows_x86_64_gnu-build-script-run[rustc_flags])",
+                "@$(location //third-party/rust/crates/winapi-x86_64-pc-windows-gnu/0.4.0:winapi-x86_64-pc-windows-gnu-build-script-run[rustc_flags])",
+            ],
+            "DEFAULT": [
+                "@$(location //third-party/rust/crates/windows_x86_64_msvc/0.42.2:windows_x86_64_msvc-build-script-run[rustc_flags])",
+                "@$(location //third-party/rust/crates/windows_x86_64_msvc/0.48.5:windows_x86_64_msvc-build-script-run[rustc_flags])",
+                "@$(location //third-party/rust/crates/windows_x86_64_msvc/0.52.6:windows_x86_64_msvc-build-script-run[rustc_flags])",
+                "@$(location //third-party/rust/crates/windows_x86_64_msvc/0.53.1:windows_x86_64_msvc-build-script-run[rustc_flags])",
+            ],
+        }),
+        "DEFAULT": [],
+    }),
     visibility = ["PUBLIC"],
     deps = [
         "//project/common:common",
@@ -64,7 +81,7 @@ rust_binary(
         "//third-party/rust/crates/libcontainer/0.5.7:libcontainer",
         "//third-party/rust/crates/liboci-cli/0.5.7:liboci-cli",
         "//third-party/rust/crates/netavark/1.17.2:netavark",
-        "//third-party/rust/crates/netlink-packet-route/0.22.0:netlink-packet-route",
+        "//third-party/rust/crates/netlink-packet-route/0.25.1:netlink-packet-route",
         "//third-party/rust/crates/nix/0.29.0:nix",
         "//third-party/rust/crates/oci-client/0.15.0:oci-client",
         "//third-party/rust/crates/oci-spec/0.8.4:oci-spec",
@@ -145,7 +162,7 @@ rust_library(
         "//third-party/rust/crates/libcontainer/0.5.7:libcontainer",
         "//third-party/rust/crates/liboci-cli/0.5.7:liboci-cli",
         "//third-party/rust/crates/netavark/1.17.2:netavark",
-        "//third-party/rust/crates/netlink-packet-route/0.22.0:netlink-packet-route",
+        "//third-party/rust/crates/netlink-packet-route/0.25.1:netlink-packet-route",
         "//third-party/rust/crates/nix/0.29.0:nix",
         "//third-party/rust/crates/oci-client/0.15.0:oci-client",
         "//third-party/rust/crates/oci-spec/0.8.4:oci-spec",
