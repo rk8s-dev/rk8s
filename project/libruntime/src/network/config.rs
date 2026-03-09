@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 use std::net::{IpAddr, Ipv4Addr};
 
 pub const BRIDGE_PLUGIN_NAME: &str = "libbridge";
+pub const STD_CONF_PATH: &str = "/var/tmp";
 pub const BRIDGE_CONF: &str = "rkl-standalone-bridge.conf";
 
 #[derive(Debug, Serialize, Deserialize)]

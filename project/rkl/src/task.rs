@@ -13,7 +13,7 @@ use libruntime::cri::cri_api::{
     RunPodSandboxRequest, RunPodSandboxResponse, StartContainerRequest, StartContainerResponse,
     StopPodSandboxRequest, StopPodSandboxResponse,
 };
-use libruntime::cri::{create, delete, kill, load_container, start};
+use libruntime::cri::{create, create_with_log, delete, kill, load_container, start};
 use libruntime::oci::{self, OCISpecGenerator};
 use libruntime::rootpath;
 use libruntime::utils::{
@@ -653,7 +653,20 @@ impl TaskRunner {
         let root_path = rootpath::determine(None, &*create_syscall())
             .map_err(|e| anyhow!("Failed to determine root path: {}", e))?;
 
-        create(create_args, root_path.clone(), false)
+        // Derive the original container name (strip pod_name prefix added in from_task)
+        let original_container_name = container_id
+            .strip_prefix(&format!("{}-", self.task.metadata.name))
+            .unwrap_or(&container_id);
+
+        let log_path = std::path::PathBuf::from(format!(
+            "/var/log/pods/{}_{}_{}/{}/0.log",
+            self.task.metadata.namespace,
+            self.task.metadata.name,
+            self.task.metadata.uid,
+            original_container_name,
+        ));
+
+        create_with_log(create_args, root_path.clone(), log_path)
             .map_err(|e| anyhow!("Failed to create container: {}", e))?;
 
         Ok(CreateContainerResponse { container_id })

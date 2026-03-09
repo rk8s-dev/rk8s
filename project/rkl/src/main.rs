@@ -15,12 +15,12 @@ mod quic;
 mod task;
 
 use commands::{
-    container::ContainerCommand, deployment::DeploymentCommand, pod::PodCommand,
+    container::ContainerCommand, deployment::DeploymentCommand, logs::LogCommand, pod::PodCommand,
     replicaset::ReplicaSetCommand, service::ServiceCommand,
 };
 use commands::{
-    container::container_execute, deployment::deployment_execute, pod::pod_execute,
-    replicaset::replicaset_execute, service::service_execute,
+    container::container_execute, deployment::deployment_execute, logs::logs_execute,
+    pod::pod_execute, replicaset::replicaset_execute, service::service_execute,
 };
 use tracing::error;
 
@@ -50,6 +50,7 @@ impl Cli {
             Workload::Replicaset(cmd) => replicaset_execute(cmd),
             Workload::Deployment(cmd) => deployment_execute(cmd),
             Workload::Service(cmd) => service_execute(cmd),
+            Workload::Logs(cmd) => logs_execute(cmd),
             Workload::Mount(args) => rkforge::overlayfs::do_mount(args),
         }
     }
@@ -71,6 +72,9 @@ enum Workload {
 
     #[command(subcommand, about = "Manage Services", alias = "svc")]
     Service(ServiceCommand),
+
+    #[command(about = "Get logs from a pod's container")]
+    Logs(LogCommand),
 
     /// Internal: overlay mount daemon (hidden from help)
     #[command(hide = true)]

@@ -83,6 +83,32 @@ impl NodeRegistry {
     }
 }
 
+/// Registry that maps a pod log request key to a channel sender,
+/// so that log chunks arriving from a worker can be forwarded to the waiting user connection.
+#[derive(Default)]
+pub struct LogResponseRegistry {
+    inner: Mutex<HashMap<String, mpsc::Sender<RksMessage>>>,
+}
+
+impl LogResponseRegistry {
+    pub async fn register(&self, key: String) -> mpsc::Receiver<RksMessage> {
+        let (tx, rx) = mpsc::channel(64);
+        self.inner.lock().await.insert(key, tx);
+        rx
+    }
+
+    pub async fn send(&self, key: &str, msg: RksMessage) {
+        let inner = self.inner.lock().await;
+        if let Some(tx) = inner.get(key) {
+            let _ = tx.try_send(msg);
+        }
+    }
+
+    pub async fn unregister(&self, key: &str) {
+        self.inner.lock().await.remove(key);
+    }
+}
+
 fn build_delete_table_ruleset() -> String {
     // Use nftables batch builder for consistency with the rest of the codebase
     let mut batch = Batch::new();
@@ -142,6 +168,7 @@ pub struct Shared {
     pub vault: Option<Arc<Vault>>,
     pub node_registry: Arc<NodeRegistry>,
 }
+pub log_response_registry: Arc<LogResponseRegistry>,
 
 impl Shared {
     pub fn new(
@@ -155,6 +182,7 @@ impl Shared {
             local_manager,
             vault,
             node_registry,
+            log_response_registry: Arc::new(LogResponseRegistry::default()),
         }
     }
 }
