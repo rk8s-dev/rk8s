@@ -12,11 +12,7 @@ use crate::task::TaskRunner;
 use chrono::Utc;
 use common::*;
 use gethostname::gethostname;
-use ipnetwork::Ipv4Network;
-use libnetwork::{
-    config::{NetworkConfig, validate_network_config},
-    ip::{IPStack, PublicIPOpts, lookup_ext_iface},
-};
+use libnetwork::ip::{IPStack, PublicIPOpts, lookup_ext_iface};
 
 use crate::commands::pod::TLSConnectionArgs;
 use crate::quic::client::{Daemon as ClientDaemon, QUICClient};
@@ -182,7 +178,7 @@ pub async fn run_once(
     loop {
         match client.accept_uni().await {
             Ok(mut recv) => {
-                let mut buf = vec![0u8; 4096];
+                let mut buf = vec![0u8; 8192];
                 match recv.read(&mut buf).await {
                     Ok(Some(n)) => match serde_json::from_slice::<RksMessage>(&buf[..n]) {
                         Ok(RksMessage::Ack) => {
@@ -191,10 +187,13 @@ pub async fn run_once(
                         Ok(RksMessage::Error(e)) => {
                             error!("[worker] register error: {e}");
                         }
-                        Ok(RksMessage::SetNetwork(cfg)) => {
-                            info!("[worker] received network config: {cfg:?}");
-
-                            if let Err(e) = handle_network_config(&network_receiver, &cfg).await {
+                        Ok(RksMessage::SetNetwork(node_cfg)) => {
+                            info!("[worker] received network config: {node_cfg:?}");
+                            let config_msg = NetworkConfigMessage::SubnetConfig {
+                                subnet_env: node_cfg.subnet_env.clone(),
+                            };
+                            if let Err(e) = network_receiver.handle_network_config(config_msg).await
+                            {
                                 error!("[worker] failed to apply network config: {e}");
                                 let _ = client
                                     .send_msg(&RksMessage::Error(format!(
@@ -421,64 +420,6 @@ pub async fn run_once(
             }
         }
     }
-}
-
-async fn handle_network_config(
-    network_receiver: &NetworkReceiver,
-    node_cfg: &NodeNetworkConfig,
-) -> Result<()> {
-    info!(
-        "[worker] Processing network configuration for node: {}",
-        node_cfg.node_id
-    );
-
-    let mut network = None;
-    let mut subnet = None;
-    let mut ip_masq = true;
-    let mut mtu = 1500;
-
-    for line in node_cfg.subnet_env.lines() {
-        if let Some((key, value)) = line.split_once('=') {
-            match key {
-                "RKL_NETWORK" => network = Some(value.parse::<Ipv4Network>()?),
-                "RKL_SUBNET" => subnet = Some(value.parse::<Ipv4Network>()?),
-                "RKL_MTU" => mtu = value.parse().unwrap_or(1500),
-                "RKL_IPMASQ" => ip_masq = value.parse().unwrap_or(true),
-                _ => {}
-            }
-        }
-    }
-
-    let mut cfg = NetworkConfig {
-        enable_ipv4: true,
-        enable_ipv6: false,
-        enable_nftables: false,
-        network,
-        ipv6_network: None,
-        subnet_min: None,
-        subnet_max: None,
-        ipv6_subnet_min: None,
-        ipv6_subnet_max: None,
-        subnet_len: 24,
-        ipv6_subnet_len: 64,
-        backend_type: env::var("BACKEND_TYPE").unwrap_or_else(|_| "hostgw".to_string()),
-        backend: None,
-    };
-
-    validate_network_config(&mut cfg)?;
-
-    let config_msg = NetworkConfigMessage::SubnetConfig {
-        network_config: cfg,
-        ip_masq,
-        ipv4_subnet: subnet,
-        ipv6_subnet: None,
-        mtu,
-    };
-
-    network_receiver.handle_network_config(config_msg).await?;
-
-    info!("[worker] Network configuration processed successfully");
-    Ok(())
 }
 
 /// Generate NodeStatus for heartbeat
