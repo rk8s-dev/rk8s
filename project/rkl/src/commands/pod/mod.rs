@@ -462,6 +462,7 @@ fn pod_create(pod_yaml: &str, addr: Option<String>, tls_cfg: TLSConnectionArgs) 
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn pod_logs(
     pod_name: &str,
     container: Option<&str>,

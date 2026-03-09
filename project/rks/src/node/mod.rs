@@ -103,10 +103,6 @@ impl LogResponseRegistry {
             let _ = tx.try_send(msg);
         }
     }
-
-    pub async fn unregister(&self, key: &str) {
-        self.inner.lock().await.remove(key);
-    }
 }
 
 fn build_delete_table_ruleset() -> String {

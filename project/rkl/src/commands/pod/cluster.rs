@@ -112,6 +112,7 @@ fn list_print(pod_list: Vec<PodTask>) -> Result<()> {
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn get_pod_logs(
     pod_name: &str,
     container: Option<&str>,

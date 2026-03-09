@@ -8,7 +8,6 @@ use liboci_cli::{Create, Delete, Kill, List, Start, State};
 use std::fmt::Write as _;
 use std::fs::{self};
 use std::io::{self, BufRead, Write};
-use std::os::fd::OwnedFd;
 use std::path::{Path, PathBuf};
 use tabwriter::TabWriter;
 use tracing::info;
@@ -214,8 +213,8 @@ pub fn create_with_log(args: Create, root_path: PathBuf, log_path: PathBuf) -> R
         .with_console_socket(args.console_socket.as_ref())
         .with_root_path(root_path)?
         .with_preserved_fds(args.preserve_fds)
-        .with_stdout(OwnedFd::from(stdout_w))
-        .with_stderr(OwnedFd::from(stderr_w))
+        .with_stdout(stdout_w)
+        .with_stderr(stderr_w)
         .validate_id()?
         .as_init(&args.bundle)
         .with_systemd(false)
