@@ -12,12 +12,14 @@ jobs:
   build-and-upload:
     runs-on: ${{ matrix.target.runner }}
     strategy:
+      # TODO: remove this one just for test
+      fail-fast: false
       matrix:
         component: [rkforge, distribution, rks, rkl, slayerfs]
         target:
           - { rust: x86_64-unknown-linux-gnu, os: linux, arch: amd64, runner: ubuntu-latest }
           - { rust: aarch64-unknown-linux-gnu, os: linux, arch: arm64, runner: ubuntu-24.04-arm }
-          # - { rust: aarch64-apple-darwin, os: darwin, arch: arm64, runner: macos-latest }
+          - { rust: aarch64-apple-darwin, os: darwin, arch: arm64, runner: macos-latest }
         # exclude:
         #   - target: { rust: aarch64-apple-darwin }
         #     component: rks        
