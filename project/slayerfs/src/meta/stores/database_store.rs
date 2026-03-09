@@ -2874,7 +2874,7 @@ mod tests {
         Config {
             database: DatabaseConfig {
                 db_config: DatabaseType::Postgres {
-                    url: "postgres://slayerfs:slayerfs@127.0.0.1:5432/database".to_string(),
+                    url: "postgres://slayerfs:slayerfs@127.0.0.1:15432/database".to_string(),
                 },
             },
             cache: CacheConfig::default(),
