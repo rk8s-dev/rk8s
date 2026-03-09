@@ -17,6 +17,7 @@ mod pod_task;
 
 mod pull;
 mod push;
+mod registry;
 mod repo;
 mod rt;
 mod run;

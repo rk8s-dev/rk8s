@@ -12,6 +12,7 @@ pub mod overlayfs;
 pub mod pod_task;
 pub mod pull;
 mod push;
+mod registry;
 mod repo;
 mod rt;
 pub mod storage;

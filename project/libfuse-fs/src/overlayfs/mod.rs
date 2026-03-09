@@ -279,13 +279,12 @@ impl RealInode {
             Err(e) => {
                 let ioerror: std::io::Error = e.into();
                 match ioerror.raw_os_error() {
-                    Some(raw_error) => {
-                        if raw_error == libc::ENOSYS {
-                            // We can still call readdir with inode if opendir is not supported in this layer.
-                            ReplyOpen { fh: 0, flags: 0 }
-                        } else {
-                            return Err(e.into());
-                        }
+                    Some(raw_error) if raw_error == libc::ENOSYS => {
+                        // We can still call readdir with inode if opendir is not supported in this layer.
+                        ReplyOpen { fh: 0, flags: 0 }
+                    }
+                    Some(_) => {
+                        return Err(e.into());
                     }
                     None => {
                         return Err(e.into());
