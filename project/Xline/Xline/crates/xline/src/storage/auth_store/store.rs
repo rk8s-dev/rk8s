@@ -16,7 +16,6 @@ use pbkdf2::{
     Pbkdf2,
     password_hash::{PasswordHash, PasswordVerifier},
 };
-use tonic::Status;
 use utils::parking_lot_lock::RwLockMap;
 use xlineapi::{
     AuthInfo,
@@ -128,16 +127,16 @@ impl AuthStore {
         }
     }
 
-    /// Try get auth info from tonic request
+    /// Try get auth info from request
     #[allow(clippy::result_large_err)]
     pub(crate) fn try_get_auth_info_from_request<T>(
         &self,
-        request: &tonic::Request<T>,
-    ) -> Result<Option<AuthInfo>, Status> {
+        request: &xlinerpc::Request<T>,
+    ) -> Result<Option<AuthInfo>, XlineStatus> {
         if !self.is_enabled() {
             return Ok(None);
         }
-        if let Some(token) = get_token(request.metadata()) {
+        if let Some(token) = get_token(request.meta()) {
             let auth_info = self.verify(&token)?;
             return Ok(Some(auth_info));
         }
@@ -1167,12 +1166,10 @@ impl AuthStore {
     }
 }
 
-/// Get common name from tonic request
-fn get_cn<T>(request: &tonic::Request<T>) -> Option<String> {
-    let chain = request.peer_certs()?;
-    let cert_der = chain.first()?;
-    let cert = x509_certificate::X509Certificate::from_der(cert_der.as_ref()).ok()?;
-    cert.subject_common_name()
+/// Get common name from request
+fn get_cn<T>(_request: &xlinerpc::Request<T>) -> Option<String> {
+    // TODO: implement TLS certificate extraction for xlinerpc
+    None
 }
 
 #[cfg(test)]

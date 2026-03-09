@@ -1,13 +1,10 @@
 use crate::{
-    commands::{
-        Exec, ExecContainer,
-        compose::network::{BRIDGE_CONF, CliNetworkConfig, STD_CONF_PATH},
-        create, delete, exec, list, load_container, start,
-        volume::parse_key_val,
-    },
+    commands::{Exec, ExecContainer, create, delete, exec, list, load_container, start},
     config::OVERLAY_CONFIG,
     task::get_cni,
 };
+use libruntime::volume::parse_key_val;
+
 use anyhow::{Ok, Result, anyhow};
 use chrono::{DateTime, Local};
 use clap::Subcommand;
@@ -20,6 +17,7 @@ use libcontainer::{
 };
 use liboci_cli::{Create, Delete, List, Start};
 use libruntime::cri::config::ContainerConfigBuilder;
+use libruntime::network::config::{BRIDGE_CONF, CliNetworkConfig, STD_CONF_PATH};
 use libruntime::oci;
 use libruntime::rootpath;
 use libruntime::utils::{
@@ -121,6 +119,7 @@ pub struct ContainerRunner {
     rootfs_mount: Option<RootfsMount>,
 }
 
+#[allow(dead_code)]
 impl ContainerRunner {
     pub fn ip(&self) -> Option<IpAddr> {
         self.ip
@@ -661,6 +660,7 @@ pub fn delete_container(id: &str) -> Result<()> {
     Ok(())
 }
 
+#[allow(unused)]
 pub fn remove_container(root_path: &Path, state: &State) -> Result<()> {
     // Get bundle_path before delete for overlay cleanup
     let container = load_container(root_path, &state.id)?;

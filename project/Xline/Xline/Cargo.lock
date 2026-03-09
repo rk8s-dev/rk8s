@@ -4616,12 +4616,11 @@ dependencies = [
  "curp-external-api",
  "itertools 0.13.0",
  "prost",
+ "prost-build",
  "serde",
  "strum",
  "strum_macros",
  "thiserror 1.0.64",
- "tonic",
- "tonic-build",
  "utils",
  "xlinerpc",
 ]

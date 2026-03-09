@@ -8,7 +8,8 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Duration;
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Ok, Result, bail};
+
 use qlean::{Distro, MachineConfig, create_image, with_machine};
 use serial_test::serial;
 use tempfile::tempdir;
@@ -48,7 +49,29 @@ fn ensure_host_cni_plugins(project_dir: &Path) -> Result<(PathBuf, PathBuf)> {
     }
     Ok((libbridge, libipam))
 }
+fn ensure_aardvark_dns(project_dir: &Path) -> Result<PathBuf> {
+    let aardvark_path = host_target_bin(project_dir, "aardvark-dns");
+    if aardvark_path.exists() {
+        return Ok(aardvark_path);
+    }
+    let status = Command::new("cargo")
+        .current_dir(project_dir)
+        .args(["build", "-p", "aardvark-dns"])
+        .status()
+        .context("failed to run cargo build for aardvark-dns")?;
+    if !status.success() {
+        bail!("failed to build aardvark-dns");
+    }
 
+    if !aardvark_path.exists() {
+        bail!(
+            "aardvark-dns binary not found at {}",
+            aardvark_path.display()
+        );
+    }
+
+    Ok(aardvark_path)
+}
 fn container_yaml(name: &str, image: &str, args: &[&str]) -> String {
     let args_yaml = args
         .iter()
@@ -111,6 +134,7 @@ async fn vm_assert_status(vm: &mut qlean::Machine, id: &str, expected: &str) -> 
 async fn test_container_lifecycle_sync_mode_with_qlean() -> Result<()> {
     let project_dir = project_dir();
     let rkforge_bin = PathBuf::from(env!("CARGO_BIN_EXE_rkforge"));
+    let aardvark_path = ensure_aardvark_dns(&project_dir)?;
     let (libbridge, libipam) = ensure_host_cni_plugins(&project_dir)?;
     let bundles_dir = project_dir.join("test").join("bundles");
     let pause_bundle = bundles_dir.join("pause");
@@ -148,6 +172,7 @@ async fn test_container_lifecycle_sync_mode_with_qlean() -> Result<()> {
             )
             .await?;
             vm.upload(&rkforge_bin, "/usr/local/bin").await?;
+            vm.upload(&aardvark_path, "/usr/bin").await?;
             vm.upload(&libbridge, "/opt/cni/bin").await?;
             vm.upload(&libipam, "/opt/cni/bin").await?;
             vm.upload(&pause_bundle, "/root/bundles").await?;
@@ -156,7 +181,7 @@ async fn test_container_lifecycle_sync_mode_with_qlean() -> Result<()> {
 
             vm_exec_ok(
                 vm,
-                "chmod +x /usr/local/bin/rkforge /opt/cni/bin/libbridge /opt/cni/bin/libipam",
+                "chmod +x /usr/local/bin/rkforge /opt/cni/bin/libbridge /opt/cni/bin/libipam /usr/bin/aardvark-dns",
             )
             .await?;
             vm_exec_ok(vm, "chmod -R a+rx /root/bundles/pause/rootfs || true").await?;

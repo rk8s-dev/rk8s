@@ -37,6 +37,18 @@ jobs:
         with:
           submodules: recursive
 
+      - name: Ensure aardvark-dns exists
+        shell: bash
+        run: |
+          if [ -f /usr/bin/aardvark-dns ]; then
+              echo "aardvark-dns already exists, skipping build"
+          else
+              echo "aardvark-dns not found, building..."
+              cd project
+              cargo build --release -p aardvark-dns
+              sudo mv target/release/aardvark-dns /usr/bin/
+          fi
+
       - name: Cache cargo + qlean
         uses: actions/cache@v4
         with:

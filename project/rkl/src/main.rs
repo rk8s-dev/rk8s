@@ -15,16 +15,14 @@ mod quic;
 mod task;
 
 use commands::{
-    compose::ComposeCommand, container::ContainerCommand, deployment::DeploymentCommand,
-    pod::PodCommand, replicaset::ReplicaSetCommand, service::ServiceCommand,
+    container::ContainerCommand, deployment::DeploymentCommand, pod::PodCommand,
+    replicaset::ReplicaSetCommand, service::ServiceCommand,
 };
 use commands::{
-    compose::compose_execute, container::container_execute, deployment::deployment_execute,
-    pod::pod_execute, replicaset::replicaset_execute, service::service_execute,
+    container::container_execute, deployment::deployment_execute, pod::pod_execute,
+    replicaset::replicaset_execute, service::service_execute,
 };
 use tracing::error;
-
-use crate::commands::volume::{VolumeCommand, volume_execute};
 
 use rkforge::overlayfs::MountArgs;
 
@@ -49,8 +47,6 @@ impl Cli {
         match self.workload {
             Workload::Pod(cmd) => pod_execute(cmd),
             Workload::Container(cmd) => container_execute(cmd),
-            Workload::Compose(cmd) => compose_execute(cmd),
-            Workload::Volume(cmd) => volume_execute(cmd),
             Workload::Replicaset(cmd) => replicaset_execute(cmd),
             Workload::Deployment(cmd) => deployment_execute(cmd),
             Workload::Service(cmd) => service_execute(cmd),
@@ -67,15 +63,6 @@ enum Workload {
     #[command(subcommand, about = "Manage standalone containers", alias = "c")]
     Container(ContainerCommand),
 
-    #[command(
-        subcommand,
-        about = "Manage multi-container apps using compose",
-        alias = "C"
-    )]
-    Compose(ComposeCommand),
-
-    #[command(subcommand, about = "Manage the volume type", alias = "v")]
-    Volume(VolumeCommand),
     #[command(subcommand, about = "Manage ReplicaSets", alias = "rs")]
     Replicaset(ReplicaSetCommand),
 

@@ -5,7 +5,7 @@ use clippy_utilities::NumericCast;
 use curp::members::ClusterInfo;
 use futures::stream::Stream;
 use tokio::time;
-use tonic::Status;
+use xlinerpc::{Request, Response as XlineResponse, Status};
 use tonic::transport::{ClientTlsConfig, Endpoint};
 use tracing::{debug, warn};
 use utils::{
@@ -16,18 +16,47 @@ use xlineapi::{
     command::{Command, CommandResponse, CurpClient, SyncResponse},
     execute_error::ExecuteError,
 };
-// TODO: use our own status type
-// use xlinerpc::status::Status;
 use crate::{
     id_gen::IdGenerator,
     metrics,
     rpc::{
-        Lease, LeaseClient, LeaseGrantRequest, LeaseGrantResponse, LeaseKeepAliveRequest,
+        LeaseGrantRequest, LeaseGrantResponse, LeaseKeepAliveRequest,
         LeaseKeepAliveResponse, LeaseLeasesRequest, LeaseLeasesResponse, LeaseRevokeRequest,
         LeaseRevokeResponse, LeaseTimeToLiveRequest, LeaseTimeToLiveResponse, RequestWrapper,
     },
     storage::{AuthStore, LeaseStore},
 };
+
+/// Lease service trait
+#[async_trait::async_trait]
+pub trait Lease {
+
+    /// LeaseGrant creates a lease which expires if the server does not receive a keepAlive
+    /// within a given time to live period. All keys attached to the lease will be expired and
+    /// deleted if the lease expires. Each expired key generates a delete event in the event history.
+    async fn lease_grant(
+        &self,
+        request: Request<LeaseGrantRequest>,
+    ) -> Result<XlineResponse<LeaseGrantResponse>, Status>;
+
+    /// LeaseRevoke revokes a lease. All keys attached to the lease will expire and be deleted.
+    async fn lease_revoke(
+        &self,
+        request: Request<LeaseRevokeRequest>,
+    ) -> Result<XlineResponse<LeaseRevokeResponse>, Status>;
+
+    /// LeaseTimeToLive retrieves lease information.
+    async fn lease_time_to_live(
+        &self,
+        request: Request<LeaseTimeToLiveRequest>,
+    ) -> Result<XlineResponse<LeaseTimeToLiveResponse>, Status>;
+
+    /// LeaseLeases lists all existing leases.
+    async fn lease_leases(
+        &self,
+        request: Request<LeaseLeasesRequest>,
+    ) -> Result<XlineResponse<LeaseLeasesResponse>, Status>;
+}
 
 /// Default Lease Request Time
 const DEFAULT_LEASE_REQUEST_TIME: Duration = Duration::from_millis(500);
@@ -291,41 +320,6 @@ impl Lease for LeaseServer {
             metrics::get().lease_expired_total.add(1, &[]);
         }
         Ok(tonic::Response::new(res))
-    }
-
-    /// Server streaming response type for the `LeaseKeepAlive` method.
-    type LeaseKeepAliveStream =
-        Pin<Box<dyn Stream<Item = Result<LeaseKeepAliveResponse, Status>> + Send>>;
-
-    /// `LeaseKeepAlive` keeps the lease alive by streaming keep alive requests from the client
-    /// to the server and streaming keep alive responses from the server to the client.
-    async fn lease_keep_alive(
-        &self,
-        request: tonic::Request<tonic::Streaming<LeaseKeepAliveRequest>>,
-    ) -> Result<tonic::Response<Self::LeaseKeepAliveStream>, Status> {
-        debug!("Receive LeaseKeepAliveRequest {:?}", request);
-        let request_stream = request.into_inner();
-        let stream = loop {
-            if self.lease_storage.is_primary() {
-                break self.leader_keep_alive(request_stream)?;
-            }
-            let leader_id = self.client.fetch_leader_id(false).await?;
-            // Given that a candidate server may become a leader when it won the election or
-            // a follower when it lost the election. Therefore we need to double check here.
-            // We can directly invoke leader_keep_alive when a candidate becomes a leader.
-            if !self.lease_storage.is_primary() {
-                let leader_addrs = self.cluster_info.client_urls(leader_id).unwrap_or_else(|| {
-                    unreachable!(
-                        "The address of leader {} not found in all_members {:?}",
-                        leader_id, self.cluster_info
-                    )
-                });
-                break self
-                    .follower_keep_alive(request_stream, &leader_addrs)
-                    .await?;
-            }
-        };
-        Ok(tonic::Response::new(stream))
     }
 
     /// `LeaseTimeToLive` retrieves lease information.

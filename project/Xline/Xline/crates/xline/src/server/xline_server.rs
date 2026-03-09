@@ -49,11 +49,6 @@ use crate::{
     header_gen::HeaderGenerator,
     id_gen::IdGenerator,
     metrics::Metrics,
-    rpc::{
-        AuthServer as RpcAuthServer, ClusterServer as RpcClusterServer, KvServer as RpcKvServer,
-        LeaseServer as RpcLeaseServer, LockServer as RpcLockServer,
-        MaintenanceServer as RpcMaintenanceServer, WatchServer as RpcWatchServer,
-    },
     state::State,
     storage::{
         AlarmStore, AuthStore, KvStore, LeaseStore,

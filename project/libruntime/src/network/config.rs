@@ -5,18 +5,12 @@ use libipam::range_set::RangeSet;
 use serde::{Deserialize, Serialize};
 use std::net::{IpAddr, Ipv4Addr};
 
-pub const CNI_VERSION: &str = "1.0.0";
-pub const STD_CONF_PATH: &str = "/etc/cni/net.d";
-
 pub const BRIDGE_PLUGIN_NAME: &str = "libbridge";
 pub const BRIDGE_CONF: &str = "rkl-standalone-bridge.conf";
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CliNetworkConfig {
-    /// default is 1.0.0
-    #[serde(default)]
-    pub cni_version: String,
     /// the `type` in JSON
     #[serde(rename = "type")]
     pub plugin: String,
@@ -116,7 +110,6 @@ impl Default for CliNetworkConfig {
         let set: RangeSet = vec![ip_range];
 
         Self {
-            cni_version: String::from(CNI_VERSION),
             plugin: String::from(BRIDGE_PLUGIN_NAME),
             name: Default::default(),
             bridge: Default::default(),
