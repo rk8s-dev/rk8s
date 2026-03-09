@@ -25,7 +25,8 @@ use std::sync::Arc;
 
 pub fn create_router(state: Arc<AppState>) -> Router<()> {
     // we need to handle both /v2 and /v2/
-    let router = Router::new()
+    #[allow(unused_mut)]
+    let mut router = Router::new()
         .route("/healthz", get(healthz))
         .route("/v2/", get(probe))
         .nest("/v2", v2::create_v2_router(state.clone()))
