@@ -61,6 +61,24 @@ use crate::{
     },
 };
 
+// helper used by both the server interceptor and auth_store.  Keep the logic
+// close to the place where it is used rather than pushing it into a shared
+// utility crate.
+fn parse_cn_from_cert(der: &[u8]) -> Option<String> {
+    if let Ok((_, cert)) = x509_parser::parse_x509_der(der) {
+        let subj = cert.subject().to_string();
+        // subject string looks like "C=XX, ST=YY, L=ZZ, O=..., CN=name"; we just
+        // split on commas and look for a CN= prefix.
+        for part in subj.split(',') {
+            let part = part.trim();
+            if let Some(rest) = part.strip_prefix("CN=") {
+                return Some(rest.to_string());
+            }
+        }
+    }
+    None
+}
+
 /// Rpc Server of curp protocol
 pub(crate) type CurpServer = Rpc<Command, CommandExecutor, State<Arc<CurpClient>>>;
 
@@ -294,7 +312,24 @@ impl XlineServer {
             auth_wrapper,
             curp_client,
         ) = self.init_servers(db, key_pair).await?;
-        let mut builder = Server::builder();
+
+
+        // interceptor that peeks at the TlsInfo extension and, if a peer
+        // certificate is present, stashes its common name in metadata so that
+        // auth_store::get_cn can read it without pulling in `tonic`.
+        let cn_interceptor = tonic::service::interceptor(|mut req: tonic::Request<_>| {
+            if let Some(tls_info) = req.extensions().get::<tonic::transport::server::TlsInfo>() {
+                if let Some(cert) = tls_info.peer_certs().get(0) {
+                    if let Some(cn) = parse_cn_from_cert(&cert.0) {
+                        // ignore errors, metadata key is short and ascii
+                        let _ = req.metadata_mut().insert("x-tls-cn", cn);
+                    }
+                }
+            }
+            Ok(req)
+        });
+
+        let mut builder = Server::builder().interceptor(cn_interceptor);
 
         if let Some(ref cfg) = self.server_tls_config {
             builder = builder.tls_config(cfg.clone())?;

@@ -56,6 +56,13 @@ pub trait Lease {
         &self,
         request: Request<LeaseLeasesRequest>,
     ) -> Result<XlineResponse<LeaseLeasesResponse>, Status>;
+
+    /// LeaseKeepAlive keeps a lease alive by streaming periodic keep-alive messages.
+    /// Clients must send keep-alive requests at regular intervals to prevent lease expiration.
+    async fn lease_keep_alive(
+        &self,
+        request: tonic::Request<tonic::Streaming<LeaseKeepAliveRequest>>,
+    ) -> Result<tonic::Response<KeepAliveStream>, Status>;
 }
 
 /// Default Lease Request Time
@@ -386,5 +393,30 @@ impl Lease for LeaseServer {
             }
         }
         Ok(tonic::Response::new(res))
+    }
+
+    /// `LeaseKeepAlive` keeps a lease alive by streaming periodic keep-alive messages.
+    /// Routes to the leader for processing or redirects to the leader if this node is a follower.
+    async fn lease_keep_alive(
+        &self,
+        request: tonic::Request<tonic::Streaming<LeaseKeepAliveRequest>>,
+    ) -> Result<tonic::Response<KeepAliveStream>, Status> {
+        debug!("Receive LeaseKeepAliveRequest stream");
+        let request_stream = request.into_inner();
+
+        if self.lease_storage.is_primary() {
+            let stream = self.leader_keep_alive(request_stream)?;
+            Ok(tonic::Response::new(stream))
+        } else {
+            let leader_id = self.client.fetch_leader_id(false).await?;
+            let leader_addrs = self.cluster_info.client_urls(leader_id).unwrap_or_else(|| {
+                unreachable!(
+                    "The address of leader {} not found in all_members {:?}",
+                    leader_id, self.cluster_info
+                )
+            });
+            let stream = self.follower_keep_alive(request_stream, &leader_addrs).await?;
+            Ok(tonic::Response::new(stream))
+        }
     }
 }
