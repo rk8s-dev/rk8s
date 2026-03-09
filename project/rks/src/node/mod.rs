@@ -167,8 +167,8 @@ pub struct Shared {
     pub local_manager: Arc<LocalManager>,
     pub vault: Option<Arc<Vault>>,
     pub node_registry: Arc<NodeRegistry>,
+    pub log_response_registry: Arc<LogResponseRegistry>,
 }
-pub log_response_registry: Arc<LogResponseRegistry>,
 
 impl Shared {
     pub fn new(

@@ -46,7 +46,12 @@ pub async fn dispatch_worker(
                 );
             }
         }
-        RksMessage::PodLogsChunk { ref namespace, ref pod_name, ref data, is_final } => {
+        RksMessage::PodLogsChunk {
+            ref namespace,
+            ref pod_name,
+            ref data,
+            is_final,
+        } => {
             if is_final {
                 info!(
                     target: "rks::node::worker_dispatch",
@@ -56,7 +61,11 @@ pub async fn dispatch_worker(
             let log_key = format!("{}/{}", namespace, pod_name);
             shared.log_response_registry.send(&log_key, msg).await;
         }
-        RksMessage::PodLogsError { ref namespace, ref pod_name, ref error } => {
+        RksMessage::PodLogsError {
+            ref namespace,
+            ref pod_name,
+            ref error,
+        } => {
             error!(
                 target: "rks::node::worker_dispatch",
                 "worker reported log error for {}/{}: {}", namespace, pod_name, error
@@ -574,7 +583,12 @@ pub async fn dispatch_user(
 
             loop {
                 match rx.recv().await {
-                    Some(RksMessage::PodLogsChunk { namespace, pod_name, data, is_final }) => {
+                    Some(RksMessage::PodLogsChunk {
+                        namespace,
+                        pod_name,
+                        data,
+                        is_final,
+                    }) => {
                         conn.send_msg(&RksMessage::PodLogsChunk {
                             namespace,
                             pod_name,
@@ -586,8 +600,17 @@ pub async fn dispatch_user(
                             break;
                         }
                     }
-                    Some(RksMessage::PodLogsError { namespace, pod_name, error }) => {
-                        conn.send_msg(&RksMessage::PodLogsError { namespace, pod_name, error }).await?;
+                    Some(RksMessage::PodLogsError {
+                        namespace,
+                        pod_name,
+                        error,
+                    }) => {
+                        conn.send_msg(&RksMessage::PodLogsError {
+                            namespace,
+                            pod_name,
+                            error,
+                        })
+                        .await?;
                         break;
                     }
                     Some(other) => {
