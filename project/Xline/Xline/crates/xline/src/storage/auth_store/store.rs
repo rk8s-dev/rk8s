@@ -1166,10 +1166,61 @@ impl AuthStore {
     }
 }
 
-/// Get common name from request
-fn get_cn<T>(_request: &xlinerpc::Request<T>) -> Option<String> {
-    // TODO: implement TLS certificate extraction for xlinerpc
+/// parse common name from a DER-encoded certificate.  Returns the first
+/// `CN=` attribute found in the subject string.  We deliberately keep this
+/// logic simple so that it can be re‑used both in unit tests and in the
+/// `init_router` interceptor below.
+fn parse_cn_from_cert(der: &[u8]) -> Option<String> {
+    if let Ok((_, cert)) = x509_parser::parse_x509_der(der) {
+        let subj = cert.subject().to_string();
+        // subject string looks like "C=XX, ST=YY, L=ZZ, O=..., CN=name"; we just
+        // split on commas and look for a CN= prefix.
+        for part in subj.split(',') {
+            let part = part.trim();
+            if let Some(rest) = part.strip_prefix("CN=") {
+                return Some(rest.to_string());
+            }
+        }
+    }
     None
+}
+
+/// Get common name from request metadata or TLS extension.
+fn get_cn<T>(request: &xlinerpc::Request<T>) -> Option<String> {
+    // We rely on the server interceptors to populate metadata with the
+    // client certificate's common name.  This avoids pulling `tonic` into the
+    // storage layer and keeps `xlinerpc` lean.
+    if let Some(bytes) = request.meta().get(b"x-tls-cn") {
+        if let Ok(s) = String::from_utf8(bytes.clone()) {
+            return Some(s);
+        }
+    }
+    None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use xlinerpc::Request;
+
+    #[test]
+    fn get_cn_reads_metadata() {
+        let mut req = Request::from_data("");
+        req.meta_mut().insert("x-tls-cn", "alice");
+        assert_eq!(get_cn(&req), Some("alice".to_string()));
+    }
+
+    #[test]
+    fn parse_cn_from_cert_works() {
+        // load a real client certificate from the fixtures; the CN for the
+        // u1 certificate is "u1" according to tls_test.
+        let path = format!("{}/../fixtures/u1_client.crt", env!("CARGO_MANIFEST_DIR"));
+        let pem = std::fs::read(&path).expect("failed to read cert");
+        let mut reader = &pem[..];
+        let certs = rustls_pemfile::certs(&mut reader).expect("failed to parse PEM");
+        assert!(!certs.is_empty());
+        assert_eq!(parse_cn_from_cert(&certs[0]), Some("u1".to_string()));
+    }
 }
 
 #[cfg(test)]

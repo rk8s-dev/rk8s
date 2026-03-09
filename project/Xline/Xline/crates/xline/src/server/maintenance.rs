@@ -63,6 +63,12 @@ pub trait Maintenance {
         request: xlinerpc::Request<HashKvRequest>,
     ) -> Result<xlinerpc::Response<HashKvResponse>, Status>;
 
+    /// Snapshot sends a snapshot of the entire backend from a member over a stream to a client.
+    async fn snapshot(
+        &self,
+        request: xlinerpc::Request<SnapshotRequest>,
+    ) -> Result<xlinerpc::Response<SnapshotStream>, Status>;
+
     /// MoveLeader requests current leader node to transfer its leadership to transferee.
     async fn move_leader(
         &self,
@@ -81,6 +87,9 @@ pub trait Maintenance {
 const MIN_PAGE_SIZE: u64 = 512;
 /// Snapshot chunk size
 pub(crate) const MAINTENANCE_SNAPSHOT_CHUNK_SIZE: u64 = 64 * 1024;
+
+/// Snapshot stream type alias
+type SnapshotStream = Pin<Box<dyn Stream<Item = Result<SnapshotResponse, Status>> + Send>>;
 
 /// Maintenance Server
 pub(crate) struct MaintenanceServer {
@@ -233,6 +242,14 @@ impl Maintenance for MaintenanceServer {
             compact_revision,
             // TODO: hash_revision was introduced in etcd 3.6, and xline is currently compatible with etcd 3.5
         }))
+    }
+
+    async fn snapshot(
+        &self,
+        _request: xlinerpc::Request<SnapshotRequest>,
+    ) -> Result<xlinerpc::Response<SnapshotStream>, Status> {
+        let stream = snapshot_stream(&self.header_gen, &self.db)?;
+        Ok(xlinerpc::Response::new(Box::pin(stream)))
     }
 
     async fn move_leader(
