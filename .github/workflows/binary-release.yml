@@ -4,9 +4,6 @@ on:
   push:
     tags:
       - 'v*' # Trigger when pushing tags starting with v, e.g., v1.0.0
-  pull_request:
-    branches:
-      - main
 
 jobs:
   build-and-upload:
