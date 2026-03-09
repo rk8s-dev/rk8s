@@ -9,8 +9,7 @@ jobs:
   build-and-upload:
     runs-on: ${{ matrix.target.runner }}
     strategy:
-      # TODO: remove this one just for test
-      fail-fast: false
+      fail-fast: true # if it is set to true, then one job failed the other jobs will be cancelled  together.
       matrix:
         component: [rkforge, distribution, rks, rkl, slayerfs]
         target:
@@ -75,7 +74,7 @@ jobs:
 
           echo "Building $BINARY_NAME for target ${{ matrix.target.rust }}..."
 
-          cargo build --release --target ${{ matrix.target.rust }} -p ${{ matrix.component }}
+          RUSTFLAGS="-C strip=symbols" cargo build --release --target ${{ matrix.target.rust }} -p ${{ matrix.component }}
 
           # Create build directory and copy binary
           mkdir -p ../build
@@ -104,6 +103,6 @@ jobs:
           fi
 
           # Upload binaries to R2
-          rclone copy ./build/ r2:${{ secrets.R2_BUCKET_NAME }}/releases/${{ github.ref_name }}/ -v
+          rclone copy ./build/ r2:${{ secrets.R2_BUCKET_NAME }}/rk8s/releases/${{ github.ref_name }}/ -v
 
           echo "Upload completed for ${{ matrix.component }}-${{ matrix.target.os }}-${{ matrix.target.arch }}"
