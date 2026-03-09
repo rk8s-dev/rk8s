@@ -16,7 +16,7 @@ jobs:
         component: [rkforge, distribution, rks, rkl, slayerfs]
         target:
           - { rust: x86_64-unknown-linux-gnu, os: linux, arch: amd64, runner: ubuntu-latest }
-          - { rust: aarch64-unknown-linux-gnu, os: linux, arch: arm64, runner: ubuntu-latest }
+          - { rust: aarch64-unknown-linux-gnu, os: linux, arch: arm64, runner: ubuntu-24.04-arm }
           - { rust: aarch64-apple-darwin, os: darwin, arch: arm64, runner: macos-latest }
 
     steps:
@@ -35,14 +35,6 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y build-essential clang lld pkg-config protobuf-compiler zstd
           sudo apt-get install -y seccomp libseccomp-dev libpython3-dev openssl libssl-dev
-
-      - name: Install cross-compilation tools for ARM64 Linux
-        if: matrix.target.rust == 'aarch64-unknown-linux-gnu'
-        run: |
-          sudo apt-get install -y gcc-aarch64-linux-gnu
-          sudo dpkg --add-architecture arm64
-          sudo apt-get update
-          sudo apt-get install -y libssl-dev:arm64 libseccomp-dev:arm64 zlib1g-dev:arm64
 
       - name: Install macOS dependencies
         if: matrix.target.os == 'darwin'
@@ -69,10 +61,6 @@ jobs:
 
       - name: Build Binary
         working-directory: ./project
-        env:
-          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
-          PKG_CONFIG_ALLOW_CROSS: 1
-          PKG_CONFIG_SYSROOT_DIR: /usr/aarch64-linux-gnu
         run: |
           VERSION=${GITHUB_REF_NAME}
           BINARY_NAME="${{ matrix.component }}-${{ matrix.target.os }}-${{ matrix.target.arch }}"
