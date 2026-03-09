@@ -7,27 +7,30 @@ on:
 
 jobs:
   build-and-upload:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.target.runner }}
     strategy:
       matrix:
-        # component: [rkforge, distribution, rks, rkl, slayerfs]
-        component: [rkforge, distribution, rks, rkl]
+        component: [rkforge, distribution, rks, rkl, slayerfs]
         target:
-          - { rust: x86_64-unknown-linux-gnu, os: linux, arch: amd64 }
-          - { rust: aarch64-unknown-linux-gnu, os: linux, arch: arm64 }
-          - { rust: aarch64-apple-darwin, os: darwin, arch: arm64 }
+          - { rust: x86_64-unknown-linux-gnu, os: linux, arch: amd64, runner: ubuntu-latest }
+          - { rust: aarch64-unknown-linux-gnu, os: linux, arch: arm64, runner: ubuntu-latest }
+          - { rust: aarch64-apple-darwin, os: darwin, arch: arm64, runner: macos-latest }
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Set up Rust
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+          target: ${{ matrix.target.rust }}
+
       - name: Install cross-compilation tools
-        if: matrix.target.rust != 'x86_64-unknown-linux-gnu'
+        if: matrix.target.rust == 'aarch64-unknown-linux-gnu'
         run: |
-          if [[ "${{ matrix.target.rust }}" == "aarch64-unknown-linux-gnu" ]]; then
-            sudo apt-get update
-            sudo apt-get install -y gcc-aarch64-linux-gnu
-          fi
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu
 
       - name: Cache cargo registry
         uses: actions/cache@v4
@@ -44,7 +47,7 @@ jobs:
       - name: Cache cargo build
         uses: actions/cache@v4
         with:
-          path: target
+          path: project/target
           key: ${{ runner.os }}-cargo-build-target-${{ matrix.target.rust }}-${{ hashFiles('**/Cargo.lock') }}
 
       - name: Build Binary
@@ -79,7 +82,11 @@ jobs:
           RCLONE_CONFIG_R2_ACL: private
         run: |
           # Install rclone
-          curl https://rclone.org/install.sh | sudo bash
+          if [[ "${{ matrix.target.os }}" == "darwin" ]]; then
+            brew install rclone
+          else
+            curl https://rclone.org/install.sh | sudo bash
+          fi
 
           # Upload binaries to R2
           rclone copy ./build/ r2:${{ secrets.R2_BUCKET_NAME }}/releases/${{ github.ref_name }}/ -v
