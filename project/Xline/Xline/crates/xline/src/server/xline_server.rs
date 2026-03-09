@@ -318,6 +318,8 @@ impl XlineServer {
         // certificate is present, stashes its common name in metadata so that
         // auth_store::get_cn can read it without pulling in `tonic`.
         let cn_interceptor = tonic::service::interceptor(|mut req: tonic::Request<_>| {
+            // Always remove any client-provided x-tls-cn to prevent spoofing
+            req.metadata_mut().remove("x-tls-cn");
             if let Some(tls_info) = req.extensions().get::<tonic::transport::server::TlsInfo>() {
                 if let Some(cert) = tls_info.peer_certs().get(0) {
                     if let Some(cn) = parse_cn_from_cert(&cert.0) {
