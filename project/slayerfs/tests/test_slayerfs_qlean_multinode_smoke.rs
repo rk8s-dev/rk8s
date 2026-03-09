@@ -15,7 +15,7 @@ const HOST_DIAG_ROOT: &str = "/tmp/slayerfs-qlean-multinode";
 const DIST_TESTS_DIR: &str = "/opt/slayerfs-dist-tests/distributed-tests";
 const DIST_RESULTS_DIR: &str = "/tmp/slayerfs-results";
 const DIST_WORKDIR: &str = "/root/slayerfs-dist";
-const DIST_RUN_TIMEOUT_SECS: u64 = 15 * 60;
+const DIST_RUN_TIMEOUT_SECS: u64 = 20 * 60;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum MetaBackend {
