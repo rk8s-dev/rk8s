@@ -1,0 +1,94 @@
+name: Build and Release to R2
+
+on:
+  push:
+    tags:
+      - 'v*' # Trigger when pushing tags starting with v, e.g., v1.0.0
+
+jobs:
+  build-and-upload:
+    runs-on: ${{ matrix.target.runner }}
+    strategy:
+      matrix:
+        component: [rkforge, distribution, rks, rkl, slayerfs]
+        target:
+          - { rust: x86_64-unknown-linux-gnu, os: linux, arch: amd64, runner: ubuntu-latest }
+          - { rust: aarch64-unknown-linux-gnu, os: linux, arch: arm64, runner: ubuntu-latest }
+          - { rust: aarch64-apple-darwin, os: darwin, arch: arm64, runner: macos-latest }
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Rust
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+          target: ${{ matrix.target.rust }}
+
+      - name: Install cross-compilation tools
+        if: matrix.target.rust == 'aarch64-unknown-linux-gnu'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/registry
+          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Cache cargo index
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/git
+          key: ${{ runner.os }}-cargo-index-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Cache cargo build
+        uses: actions/cache@v4
+        with:
+          path: project/target
+          key: ${{ runner.os }}-cargo-build-target-${{ matrix.target.rust }}-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Build Binary
+        working-directory: ./project
+        env:
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
+        run: |
+          VERSION=${GITHUB_REF_NAME}
+          BINARY_NAME="${{ matrix.component }}-${{ matrix.target.os }}-${{ matrix.target.arch }}"
+
+          echo "Building $BINARY_NAME for target ${{ matrix.target.rust }}..."
+
+          cargo build --release --target ${{ matrix.target.rust }} -p ${{ matrix.component }}
+
+          # Create build directory and copy binary
+          mkdir -p ../build
+          cp target/${{ matrix.target.rust }}/release/${{ matrix.component }} ../build/$BINARY_NAME
+
+          # Make binary executable
+          chmod +x ../build/$BINARY_NAME
+
+          echo "Built binary: $BINARY_NAME"
+          ls -lh ../build/$BINARY_NAME
+
+      - name: Upload to Cloudflare R2
+        env:
+          RCLONE_CONFIG_R2_TYPE: s3
+          RCLONE_CONFIG_R2_PROVIDER: Cloudflare
+          RCLONE_CONFIG_R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          RCLONE_CONFIG_R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          RCLONE_CONFIG_R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+          RCLONE_CONFIG_R2_ACL: private
+        run: |
+          # Install rclone
+          if [[ "${{ matrix.target.os }}" == "darwin" ]]; then
+            brew install rclone
+          else
+            curl https://rclone.org/install.sh | sudo bash
+          fi
+
+          # Upload binaries to R2
+          rclone copy ./build/ r2:${{ secrets.R2_BUCKET_NAME }}/releases/${{ github.ref_name }}/ -v
+
+          echo "Upload completed for ${{ matrix.component }}-${{ matrix.target.os }}-${{ matrix.target.arch }}"
