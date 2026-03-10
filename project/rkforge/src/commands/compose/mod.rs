@@ -39,6 +39,7 @@ pub mod spec;
 use clap::Args;
 
 // Common Args shared by commands
+
 #[derive(Args, Debug)]
 pub struct PsArgs {
     #[arg(long = "project-name", short, value_name = "PROJECT_NAME")]
