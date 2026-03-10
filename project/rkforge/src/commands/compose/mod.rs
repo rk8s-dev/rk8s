@@ -118,6 +118,7 @@ impl ComposeManager {
     }
 
     /// Restores the compose application state from persisted metadata.
+    /// 
     /// This is called during initialization to load information about
     /// previously created containers and volumes, enabling proper cleanup
     /// during `compose down` operations.
