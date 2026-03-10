@@ -265,7 +265,7 @@ impl QuicCurpGroup {
     /// Create a QUIC-based client
     pub async fn new_client(
         &self,
-    ) -> impl ClientApi<Error = tonic::Status, Cmd = TestCommand> + use<> {
+    ) -> impl ClientApi<Error = xlinerpc::status::Status, Cmd = TestCommand> + use<> {
         let addrs: Vec<String> = self.all_addrs().cloned().collect();
         ClientBuilder::new(ClientConfig::default(), true)
             .quic_transport_for_test(Arc::clone(&self.quic_client))

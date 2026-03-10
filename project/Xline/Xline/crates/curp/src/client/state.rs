@@ -9,11 +9,9 @@ use event_listener::Event;
 use futures::{Future, stream::FuturesUnordered};
 use rand::seq::IteratorRandom;
 use tokio::sync::RwLock;
-use tonic::Status;
 use tonic::transport::ClientTlsConfig;
 use tracing::{debug, info};
-// TODO: use our own status type
-// use xlinerpc::status::Status;
+use xlinerpc::status::Status;
 use crate::{
     members::ServerId,
     rpc::{

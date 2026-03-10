@@ -32,6 +32,7 @@
     // unused_crate_dependencies, the false positive case blocks us
     unused_extern_crates,
     unused_import_braces,
+    // unused_imports, // temporarily allow
     unused_lifetimes,
     unused_qualifications,
     unused_results,

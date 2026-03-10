@@ -7,20 +7,32 @@ use std::{
 use event_listener::Event;
 use tokio::sync::mpsc;
 use tokio_stream::{Stream, StreamExt, wrappers::ReceiverStream};
-use tonic::Status;
+use xlinerpc::Status;
 use tracing::{debug, warn};
 use utils::task_manager::{Listener, TaskManager, tasks::TaskName};
 use xlineapi::command::KeyRange;
-// TODO: use our own status type
-// use xlinerpc::status::Status;
 use crate::{
     header_gen::HeaderGenerator,
     rpc::{
-        RequestUnion, ResponseHeader, Watch, WatchCancelRequest, WatchCreateRequest,
+        RequestUnion, ResponseHeader, WatchCancelRequest, WatchCreateRequest,
         WatchProgressRequest, WatchRequest, WatchResponse,
     },
     storage::kvwatcher::{KvWatcher, KvWatcherOps, WatchEvent, WatchId, WatchIdGenerator},
 };
+
+/// Watch service trait
+#[async_trait::async_trait]
+pub trait Watch {
+    /// Watch watches for events happening or that have happened. Both input and output
+    /// are streams; the input stream is for creating and canceling watchers and the output
+    /// stream sends events. One watch RPC can watch on multiple key ranges, streaming events
+    /// for several watches at once. The entire event history can be watched starting from the
+    /// last compaction revision.
+    async fn watch(
+        &self,
+        request: xlinerpc::Request<tonic::Streaming<WatchRequest>>,
+    ) -> Result<xlinerpc::Response<Self::WatchStream>, Status>;
+}
 
 /// Default channel size
 pub(crate) const CHANNEL_SIZE: usize = 1024;
@@ -379,9 +391,9 @@ where
     }
 }
 
-#[tonic::async_trait]
+#[async_trait::async_trait]
 impl Watch for WatchServer {
-    ///Server streaming response type for the Watch method.
+    /// Server streaming response type for the Watch method.
     type WatchStream = ReceiverStream<Result<WatchResponse, Status>>;
 
     /// Watch watches for events happening or that have happened. Both input and output
@@ -391,8 +403,8 @@ impl Watch for WatchServer {
     /// last compaction revision.
     async fn watch(
         &self,
-        request: tonic::Request<tonic::Streaming<WatchRequest>>,
-    ) -> Result<tonic::Response<Self::WatchStream>, Status> {
+        request: xlinerpc::Request<tonic::Streaming<WatchRequest>>,
+    ) -> Result<xlinerpc::Response<Self::WatchStream>, Status> {
         debug!("Receive Watch Connection {:?}", request);
         let req_stream = request.into_inner();
         let (tx, rx) = mpsc::channel(CHANNEL_SIZE);
@@ -407,7 +419,7 @@ impl Watch for WatchServer {
                 n,
             )
         });
-        Ok(tonic::Response::new(ReceiverStream::new(rx)))
+        Ok(xlinerpc::Response::new(ReceiverStream::new(rx)))
     }
 }
 

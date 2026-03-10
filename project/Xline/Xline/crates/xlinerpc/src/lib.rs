@@ -9,6 +9,8 @@ pub mod envelope;
 pub mod request;
 pub mod response;
 pub mod status;
+pub mod commandpb;
+pub mod inner_messagepb;
 
 // Re-export commonly used types
 pub use codec::{BinaryCodec, Codec, DecodeError, EncodeError};

@@ -11,9 +11,7 @@ use curp_external_api::{
 use futures::Stream;
 use prost::Message;
 use serde::{Deserialize, Serialize};
-use tonic::{Code, Status};
-// TODO: use our own status type
-// use xlinerpc::status::{Code,Status};
+use xlinerpc::status::{Code, Status};
 pub(crate) use self::proto::{
     commandpb::CurpError as CurpErrorWrapper,
     inner_messagepb::{
@@ -285,13 +283,107 @@ pub(crate) trait InnerCurpService: Send + Sync + 'static {
     trivial_casts,
     unused_results
 )]
-mod proto {
+pub(crate) mod proto {
     pub(crate) mod commandpb {
-        tonic::include_proto!("commandpb");
+        // Import only message types
+        pub use xlinerpc::commandpb::types::*;
+        
+        // Define service trait in curp
+        pub mod protocol_server {
+            use super::*;
+            use std::pin::Pin;
+            use futures::Stream;
+            use tonic::{Request, Response, Status};
+            use tonic::server::NamedService;
+
+            /// Protocol service trait - matches curp server implementation
+            #[async_trait::async_trait]
+            pub trait Protocol: Send + Sync + 'static {
+                type ProposeStream: Stream<Item = Result<OpResponse, Status>> + Send + 'static;
+                type LeaseKeepAliveStream: Stream<Item = Result<LeaseKeepAliveMsg, Status>> + Send + 'static;
+
+                async fn propose(
+                    &self,
+                    request: Request<ProposeRequest>,
+                ) -> Result<Response<Self::ProposeStream>, Status>;
+
+                async fn record(
+                    &self,
+                    request: Request<RecordRequest>,
+                ) -> Result<Response<RecordResponse>, Status>;
+
+                async fn read_index(
+                    &self,
+                    request: Request<ReadIndexRequest>,
+                ) -> Result<Response<ReadIndexResponse>, Status>;
+
+                async fn shutdown(
+                    &self,
+                    request: Request<ShutdownRequest>,
+                ) -> Result<Response<ShutdownResponse>, Status>;
+
+                async fn propose_conf_change(
+                    &self,
+                    request: Request<ProposeConfChangeRequest>,
+                ) -> Result<Response<ProposeConfChangeResponse>, Status>;
+
+                async fn publish(
+                    &self,
+                    request: Request<PublishRequest>,
+                ) -> Result<Response<PublishResponse>, Status>;
+
+                async fn fetch_cluster(
+                    &self,
+                    request: Request<FetchClusterRequest>,
+                ) -> Result<Response<FetchClusterResponse>, Status>;
+
+                async fn fetch_read_state(
+                    &self,
+                    request: Request<FetchReadStateRequest>,
+                ) -> Result<Response<FetchReadStateResponse>, Status>;
+
+                async fn move_leader(
+                    &self,
+                    request: Request<MoveLeaderRequest>,
+                ) -> Result<Response<MoveLeaderResponse>, Status>;
+
+                async fn lease_keep_alive(
+                    &self,
+                    request: Request<tonic::Streaming<LeaseKeepAliveMsg>>,
+                ) -> Result<Response<Self::LeaseKeepAliveStream>, Status>;
+            }
+
+            #[derive(Debug, Clone)]
+            pub struct ProtocolServer<S> {
+                inner: std::sync::Arc<S>,
+            }
+
+            impl<S> ProtocolServer<S>
+            where
+                S: Protocol + Send + Sync + 'static,
+            {
+                pub fn new(service: S) -> Self {
+                    Self {
+                        inner: std::sync::Arc::new(service),
+                    }
+                }
+            }
+
+            impl<S> NamedService for ProtocolServer<S>
+            where
+                S: Protocol + Send + Sync + 'static,
+            {
+                const NAME: &'static str = "curp.Protocol";
+            }
+        }
+
+        pub mod protocol_client {
+            // Client implementation if needed
+        }
     }
 
     pub(crate) mod inner_messagepb {
-        tonic::include_proto!("inner_messagepb");
+        pub use xlinerpc::inner_messagepb::*;
     }
 }
 
@@ -1021,6 +1113,13 @@ impl From<CurpError> for Status {
         let details = CurpErrorWrapper { err: Some(err) }.encode_to_vec();
 
         Status::with_details(code, msg, details.into())
+    }
+}
+
+impl From<CurpError> for tonic::Status {
+    #[inline]
+    fn from(err: CurpError) -> Self {
+        Status::from(err).into()
     }
 }
 

@@ -10,9 +10,7 @@ use crate::{
     members::ServerId,
     rpc::{ConfChange, CurpError, FetchClusterResponse, Member, ReadState, Redirect},
 };
-use tonic::Status;
-// TODO: use our own status type
-// use xlinerpc::status::Status;
+use xlinerpc::status::Status;
 /// Backoff config
 #[derive(Debug, Clone)]
 enum BackoffConfig {

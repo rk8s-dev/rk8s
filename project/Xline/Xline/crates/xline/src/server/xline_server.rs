@@ -1,6 +1,7 @@
 use std::{sync::Arc, time::Duration};
 
 use tokio::fs;
+use tonic::metadata::MetadataValue;
 
 use anyhow::{Result, anyhow};
 use clippy_utilities::{NumericCast, OverflowArithmetic};
@@ -19,7 +20,7 @@ use tonic::transport::server::{Connected, Router};
 use tonic::transport::{Certificate, ClientTlsConfig, Identity, Server, ServerTlsConfig};
 use tracing::{info, warn};
 
-use tonic::Status;
+use tonic::{MetadataValue, Status};
 // TODO: use our own status type
 // use xlinerpc::status::Status;
 
@@ -49,11 +50,6 @@ use crate::{
     header_gen::HeaderGenerator,
     id_gen::IdGenerator,
     metrics::Metrics,
-    rpc::{
-        AuthServer as RpcAuthServer, ClusterServer as RpcClusterServer, KvServer as RpcKvServer,
-        LeaseServer as RpcLeaseServer, LockServer as RpcLockServer,
-        MaintenanceServer as RpcMaintenanceServer, WatchServer as RpcWatchServer,
-    },
     state::State,
     storage::{
         AlarmStore, AuthStore, KvStore, LeaseStore,
@@ -65,6 +61,15 @@ use crate::{
         lease_store::LeaseCollection,
     },
 };
+
+// helper used by both the server interceptor and auth_store.  Keep the logic
+// close to the place where it is used rather than pushing it into a shared
+// utility crate.
+fn parse_cn_from_cert(der: &[u8]) -> Option<String> {
+    x509_parser::parse_x509_der(der)
+        .ok()
+        .and_then(|(_, cert)| cert.subject().common_name().map(|s| s.to_string()))
+}
 
 /// Rpc Server of curp protocol
 pub(crate) type CurpServer = Rpc<Command, CommandExecutor, State<Arc<CurpClient>>>;
@@ -299,7 +304,37 @@ impl XlineServer {
             auth_wrapper,
             curp_client,
         ) = self.init_servers(db, key_pair).await?;
-        let mut builder = Server::builder();
+
+
+        // interceptor that peeks at the TlsInfo extension and, if a peer
+        // certificate is present, stashes its common name in metadata so that
+        // auth_store::get_cn can read it without pulling in `tonic`.
+        let cn_interceptor = tonic::service::interceptor(|mut req: tonic::Request<_>| {
+    // Always remove any client-provided x-tls-cn to prevent spoofing
+            req.metadata_mut().remove("x-tls-cn");
+            if let Some(tls_info) = req.extensions().get::<tonic::transport::server::TlsInfo>() {
+                if let Some(cert) = tls_info.peer_certs().get(0) {
+                    if let Some(cn) = parse_cn_from_cert(&cert.0) {
+                        match tonic::metadata::MetadataValue::from_str(&cn) {
+                            Ok(value) => {
+                                let _ = req.metadata_mut().insert("x-tls-cn", value);
+                            }
+                            Err(e) => {
+                                // Log warning messages, but continue processing the request
+                                tracing::warn!(
+                                    "Failed to parse CN '{}' as metadata value: {}. Skipping CN injection.",
+                                    cn,
+                                    e
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+            Ok(req)
+        });
+
+        let mut builder = Server::builder().interceptor(cn_interceptor);
 
         if let Some(ref cfg) = self.server_tls_config {
             builder = builder.tls_config(cfg.clone())?;

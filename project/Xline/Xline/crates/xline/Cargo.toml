@@ -67,11 +67,13 @@ tracing-subscriber = { workspace = true }
 utils = { path = "../utils" }
 uuid = { version = "1.10.0", features = ["v4"] }
 x509-certificate = "0.23.1"
+x509-parser = { workspace = true }
 xlineapi = { path = "../xlineapi" }
 xlinerpc = { path = "../xlinerpc"}
+http = "1.0"
+http-body = "1.0"
+tower-service = "0.3"
 
-[build-dependencies]
-tonic-build = { workspace = true }
 
 [dev-dependencies]
 etcd-client = { version = "0.14.0", features = ["tls"] }

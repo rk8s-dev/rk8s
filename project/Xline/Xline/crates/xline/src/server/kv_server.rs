@@ -10,25 +10,55 @@ use dashmap::DashMap;
 use event_listener::Event;
 use futures::future::Either;
 use tokio::time::timeout;
-use tonic::Status;
 use tracing::{debug, instrument};
-use xlineapi::{
-    AuthInfo, ResponseWrapper,
-    command::{Command, CurpClient},
-    request_validation::RequestValidator,
-};
-// TODO: use our own status type
-// use xlinerpc::status::{Code,Status};
+use xlineapi::Kv as GeneratedKv;
+use xlinerpc::{Request, Response as XlineResponse, Status};
+use xlineapi::{ResponseWrapper, ResponseHeader};
+use tonic::{Request as TonicRequest, Response as TonicResponse, Status as TonicStatus};
 
 use crate::{
     revision_check::RevisionCheck,
     rpc::{
-        CompactionRequest, CompactionResponse, DeleteRangeRequest, DeleteRangeResponse, Kv,
+        CompactionRequest, CompactionResponse, DeleteRangeRequest, DeleteRangeResponse,
         PutRequest, PutResponse, RangeRequest, RangeResponse, RequestWrapper, Response, ResponseOp,
         TxnRequest, TxnResponse,
     },
     storage::{AuthStore, KvStore},
 };
+
+/// KV service trait
+#[async_trait::async_trait]
+pub trait Kv {
+    /// Range gets the keys in the range from the key-value store.
+    async fn range(
+        &self,
+        request: Request<RangeRequest>,
+    ) -> Result<XlineResponse<RangeResponse>, Status>;
+
+    /// Put puts the given key into the key-value store.
+    async fn put(
+        &self,
+        request: Request<PutRequest>,
+    ) -> Result<XlineResponse<PutResponse>, Status>;
+
+    /// DeleteRange deletes the given range from the key-value store.
+    async fn delete_range(
+        &self,
+        request: Request<DeleteRangeRequest>,
+    ) -> Result<XlineResponse<DeleteRangeResponse>, Status>;
+
+    /// Txn processes multiple requests in a single transaction.
+    async fn txn(
+        &self,
+        request: Request<TxnRequest>,
+    ) -> Result<XlineResponse<TxnResponse>, Status>;
+
+    /// Compact compacts the event history in the etcd key-value store.
+    async fn compact(
+        &self,
+        request: Request<CompactionRequest>,
+    ) -> Result<XlineResponse<CompactionResponse>, Status>;
+}
 
 /// KV Server
 pub(crate) struct KvServer {
@@ -75,13 +105,44 @@ impl KvServer {
         }
     }
 
+    /// Update response header revision
+    fn update_header_revision(res: &mut Response, revision: i64) {
+        match res {
+            Response::ResponseRange(ref mut resp) => {
+                if let Some(ref mut header) = resp.header {
+                    header.revision = revision;
+                }
+            }
+            Response::ResponsePut(ref mut resp) => {
+                if let Some(ref mut header) = resp.header {
+                    header.revision = revision;
+                }
+            }
+            Response::ResponseDeleteRange(ref mut resp) => {
+                if let Some(ref mut header) = resp.header {
+                    header.revision = revision;
+                }
+            }
+            Response::ResponseTxn(ref mut resp) => {
+                if let Some(ref mut header) = resp.header {
+                    header.revision = revision;
+                }
+            }
+            Response::ResponseCompaction(ref mut resp) => {
+                if let Some(ref mut header) = resp.header {
+                    header.revision = revision;
+                }
+            }
+        }
+    }
+
     /// serializable execute request in current node
     #[allow(clippy::result_large_err)]
     fn do_serializable(&self, command: &Command) -> Result<Response, Status> {
         self.auth_storage
             .check_permission(command.request(), command.auth_info())?;
         let cmd_res = self.kv_storage.execute(command.request(), None)?;
-        Ok(Self::parse_response_op(cmd_res.into_inner().into()))
+        Ok(Self::parse_response_op(cmd_res.into_parts().0.into()))
     }
 
     /// Propose request and get result with fast/slow path
@@ -95,53 +156,66 @@ impl KvServer {
         let revision = sync_res
             .unwrap_or_else(|| unreachable!("sync response should always exist in slow path"))
             .revision();
-        let mut res = Self::parse_response_op(cmd_res.into_inner().into());
+        let mut res = Self::parse_response_op(cmd_res.into_parts().0.into());
         debug!("Get revision {:?}", revision);
         Self::update_header_revision(&mut res, revision);
         Ok(res)
     }
 
-    /// Update revision of `ResponseHeader`
-    pub(crate) fn update_header_revision(response: &mut Response, revision: i64) {
-        match *response {
-            Response::ResponseRange(ref mut res) => {
-                if let Some(header) = res.header.as_mut() {
-                    header.revision = revision;
-                }
-            }
-            Response::ResponsePut(ref mut res) => {
-                if let Some(header) = res.header.as_mut() {
-                    header.revision = revision;
-                }
-            }
-            Response::ResponseDeleteRange(ref mut res) => {
-                if let Some(header) = res.header.as_mut() {
-                    header.revision = revision;
-                }
-            }
-            Response::ResponseTxn(ref mut res) => {
-                if let Some(header) = res.header.as_mut() {
-                    header.revision = revision;
-                }
-                for resp in &mut res.responses {
-                    if let Some(re) = resp.response.as_mut() {
-                        Self::update_header_revision(re, revision);
-                    }
-                }
-            }
+    /// convert tonic request into xlinerpc request copying metadata
+    fn tonic_to_xline<Req>(&self, request: TonicRequest<Req>) -> Request<Req> {
+        let (body, metadata) = request.into_parts();
+        let mut xreq = Request::from_data(body);
+        for (key, value) in metadata.iter() {
+            xreq
+                .meta_mut()
+                .insert(key.as_bytes().to_vec(), value.as_bytes().to_vec());
         }
+        xreq
+    }
+
+    /// helper bridging tonic -> xlinerpc and back again
+    async fn handle_req_tonic<Req, Res>(
+        &self,
+        request: TonicRequest<Req>,
+    ) -> Result<TonicResponse<Res>, TonicStatus>
+    where
+        Req: Into<RequestWrapper> + Send + 'static,
+        Res: From<ResponseWrapper> + Send + 'static,
+    {
+        // convert tonic request to xlinerpc request and capture auth info
+        let xreq = self.tonic_to_xline(request);
+        let auth_info = self.auth_storage.try_get_auth_info_from_request(&xreq)?;
+
+        // propose through the new API which returns a plain `Response`
+        let proto_resp: Response = self.propose(xreq, auth_info).await?;
+
+        // translate proto message into wrapper enum so the generic `Res`
+        // conversion can still be used.
+        let res_wrapper = match proto_resp {
+            Response::ResponseRange(resp) => ResponseWrapper::RangeResponse(resp),
+            Response::ResponsePut(resp) => ResponseWrapper::PutResponse(resp),
+            Response::ResponseDeleteRange(resp) => ResponseWrapper::DeleteRangeResponse(resp),
+            Response::ResponseTxn(resp) => ResponseWrapper::TxnResponse(resp),
+            Response::ResponseCompaction(resp) => ResponseWrapper::CompactionResponse(resp),
+            _ => unreachable!("unexpected response kind {:?}", proto_resp),
+        };
+
+        let xresp = XlineResponse::new(res_wrapper.into());
+        let (res_data, _) = xresp.into_parts();
+        Ok(TonicResponse::new(res_data))
     }
 }
 
-#[tonic::async_trait]
+#[async_trait::async_trait]
 impl Kv for KvServer {
     /// Range gets the keys in the range from the key-value store.
     #[instrument(skip_all)]
     async fn range(
         &self,
-        request: tonic::Request<RangeRequest>,
-    ) -> Result<tonic::Response<RangeResponse>, Status> {
-        let range_req = request.get_ref();
+        request: Request<RangeRequest>,
+    ) -> Result<XlineResponse<RangeResponse>, Status> {
+        let range_req = request.data();
         range_req.validation()?;
         debug!("Receive grpc request: {}", range_req);
         range_req.check_revision(
@@ -151,14 +225,14 @@ impl Kv for KvServer {
         let auth_info = self.auth_storage.try_get_auth_info_from_request(&request)?;
         let is_serializable = range_req.serializable;
         let res = if is_serializable {
-            let cmd = Command::new_with_auth_info(request.into_inner().into(), auth_info);
+            let cmd = Command::new_with_auth_info(request.into_data().into(), auth_info);
             self.do_serializable(&cmd)?
         } else {
-            self.propose(request.into_inner(), auth_info).await?
+            self.propose(request.into_data(), auth_info).await?
         };
 
         if let Response::ResponseRange(response) = res {
-            Ok(tonic::Response::new(response))
+            Ok(XlineResponse::from_data(response))
         } else {
             unreachable!("Receive wrong response {res:?} for RangeRequest");
         }
@@ -171,15 +245,15 @@ impl Kv for KvServer {
     #[instrument(skip_all)]
     async fn put(
         &self,
-        request: tonic::Request<PutRequest>,
-    ) -> Result<tonic::Response<PutResponse>, Status> {
-        let put_req: &PutRequest = request.get_ref();
+        request: Request<PutRequest>,
+    ) -> Result<XlineResponse<PutResponse>, Status> {
+        let put_req = request.data();
         put_req.validation()?;
         debug!("Receive grpc request: {:?}", put_req);
         let auth_info = self.auth_storage.try_get_auth_info_from_request(&request)?;
-        let res = self.propose(request.into_inner(), auth_info).await?;
+        let res = self.propose(request.into_data(), auth_info).await?;
         if let Response::ResponsePut(response) = res {
-            Ok(tonic::Response::new(response))
+            Ok(XlineResponse::from_data(response))
         } else {
             unreachable!("Receive wrong response {res:?} for PutRequest");
         }
@@ -192,15 +266,15 @@ impl Kv for KvServer {
     #[instrument(skip_all)]
     async fn delete_range(
         &self,
-        request: tonic::Request<DeleteRangeRequest>,
-    ) -> Result<tonic::Response<DeleteRangeResponse>, Status> {
-        let delete_range_req = request.get_ref();
+        request: Request<DeleteRangeRequest>,
+    ) -> Result<XlineResponse<DeleteRangeResponse>, Status> {
+        let delete_range_req = request.data();
         delete_range_req.validation()?;
         debug!("Receive grpc request: {:?}", delete_range_req);
         let auth_info = self.auth_storage.try_get_auth_info_from_request(&request)?;
-        let res = self.propose(request.into_inner(), auth_info).await?;
+        let res = self.propose(request.into_data(), auth_info).await?;
         if let Response::ResponseDeleteRange(response) = res {
-            Ok(tonic::Response::new(response))
+            Ok(XlineResponse::from_data(response))
         } else {
             unreachable!("Receive wrong response {res:?} for DeleteRangeRequest");
         }
@@ -214,9 +288,9 @@ impl Kv for KvServer {
     #[instrument(skip_all)]
     async fn txn(
         &self,
-        request: tonic::Request<TxnRequest>,
-    ) -> Result<tonic::Response<TxnResponse>, Status> {
-        let txn_req = request.get_ref();
+        request: Request<TxnRequest>,
+    ) -> Result<XlineResponse<TxnResponse>, Status> {
+        let txn_req = request.data();
         txn_req.validation()?;
         debug!("Receive grpc request: {}", txn_req);
         txn_req.check_revision(
@@ -224,9 +298,9 @@ impl Kv for KvServer {
             self.kv_storage.revision(),
         )?;
         let auth_info = self.auth_storage.try_get_auth_info_from_request(&request)?;
-        let res = self.propose(request.into_inner(), auth_info).await?;
+        let res = self.propose(request.into_data(), auth_info).await?;
         if let Response::ResponseTxn(response) = res {
-            Ok(tonic::Response::new(response))
+            Ok(XlineResponse::from_data(response))
         } else {
             unreachable!("Receive wrong response {res:?} for TxnRequest");
         }
@@ -238,16 +312,16 @@ impl Kv for KvServer {
     #[instrument(skip_all)]
     async fn compact(
         &self,
-        request: tonic::Request<CompactionRequest>,
-    ) -> Result<tonic::Response<CompactionResponse>, Status> {
+        request: Request<CompactionRequest>,
+    ) -> Result<XlineResponse<CompactionResponse>, Status> {
         debug!("Receive CompactionRequest {:?}", request);
         let compacted_revision = self.kv_storage.compacted_revision();
         let current_revision = self.kv_storage.revision();
-        let req = request.get_ref();
+        let req = request.data();
         req.check_revision(compacted_revision, current_revision)?;
         let auth_info = self.auth_storage.try_get_auth_info_from_request(&request)?;
         let physical = req.physical;
-        let request = RequestWrapper::from(request.into_inner());
+        let request = RequestWrapper::from(request.into_data());
         let cmd = Command::new_with_auth_info(request, auth_info);
         let compact_id = self.next_compact_id.fetch_add(1, Ordering::Relaxed);
         let compact_physical_fut = if physical {
@@ -259,7 +333,7 @@ impl Kv for KvServer {
             Either::Right(async {})
         };
         let (cmd_res, _sync_res) = self.client.propose(&cmd, None, false).await??;
-        let resp = cmd_res.into_inner();
+        let (resp, _) = cmd_res.into_parts();
         if timeout(self.compact_timeout, compact_physical_fut)
             .await
             .is_err()
@@ -268,7 +342,7 @@ impl Kv for KvServer {
         }
 
         if let ResponseWrapper::CompactionResponse(response) = resp {
-            Ok(tonic::Response::new(response))
+            Ok(XlineResponse::from_data(response))
         } else {
             panic!("Receive wrong response {resp:?} for CompactionRequest");
         }

@@ -728,7 +728,6 @@ dependencies = [
  "parking_lot",
  "priority-queue",
  "prost",
- "prost-build",
  "rand 0.8.5",
  "rcgen",
  "rustls",
@@ -742,7 +741,6 @@ dependencies = [
  "tokio-stream",
  "tokio-util",
  "tonic",
- "tonic-build",
  "tower 0.4.13",
  "tracing",
  "tracing-subscriber",
@@ -4524,6 +4522,8 @@ dependencies = [
  "event-listener",
  "flume",
  "futures",
+ "http",
+ "http-body",
  "hyper",
  "itertools 0.13.0",
  "jsonwebtoken",
@@ -4553,8 +4553,8 @@ dependencies = [
  "tokio-util",
  "toml",
  "tonic",
- "tonic-build",
  "tonic-health",
+ "tower-service",
  "tracing",
  "tracing-appender",
  "tracing-opentelemetry",
@@ -4562,6 +4562,7 @@ dependencies = [
  "utils",
  "uuid",
  "x509-certificate",
+ "x509-parser",
  "xline-client",
  "xline-test-utils",
  "xlineapi",
@@ -4621,7 +4622,6 @@ dependencies = [
  "strum_macros",
  "thiserror 1.0.64",
  "tonic",
- "tonic-build",
  "utils",
  "xlinerpc",
 ]
@@ -4648,9 +4648,12 @@ name = "xlinerpc"
 version = "0.1.0"
 dependencies = [
  "bytes",
+ "futures",
+ "http",
  "prost",
  "thiserror 1.0.64",
  "tonic",
+ "tower-service",
 ]
 
 [[package]]
