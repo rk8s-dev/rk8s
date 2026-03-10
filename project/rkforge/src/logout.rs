@@ -1,9 +1,11 @@
 use crate::config::auth::AuthConfig;
+use crate::registry::parse_registry_host_arg;
 use clap::Parser;
 
 #[derive(Parser, Debug)]
 pub struct LogoutArgs {
-    /// URL of the distribution server
+    /// Registry host in `host[:port]` format.
+    #[arg(value_parser = parse_registry_host_arg)]
     url: Option<String>,
 }
 

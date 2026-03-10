@@ -47,9 +47,9 @@ impl Response {
     pub fn list_response(keys: &[String]) -> Self {
         let value = serde_json::to_value(keys);
         let mut resp = Response::new();
-        if value.is_ok() {
+        if let Ok(v) = value {
             resp.data = json!({
-                "keys": value.unwrap(),
+                "keys": v,
             })
             .as_object()
             .cloned();
@@ -60,10 +60,10 @@ impl Response {
     pub fn help_response(text: &str, see_also: &[String]) -> Self {
         let value = serde_json::to_value(see_also);
         let mut resp = Response::new();
-        if value.is_ok() {
+        if let Ok(v) = value {
             resp.data = json!({
                 "help": text.to_string(),
-                "see_also": value.unwrap(),
+                "see_also": v,
             })
             .as_object()
             .cloned();

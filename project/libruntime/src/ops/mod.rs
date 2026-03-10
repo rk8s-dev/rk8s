@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
 use anyhow::{Context, Result, anyhow, bail};
-use chrono::{DateTime, Local};
+use chrono::{DateTime, Local, Utc};
 use libcontainer::container::Container;
 use libcontainer::container::ContainerStatus;
 use libcontainer::container::builder::ContainerBuilder;
@@ -138,6 +138,98 @@ pub fn create(args: Create, root_path: PathBuf, systemd_cgroup: bool) -> Result<
         .validate_id()?
         .as_init(&args.bundle)
         .with_systemd(systemd_cgroup)
+        .with_detach(true)
+        .with_no_pivot(args.no_pivot)
+        .build()?;
+
+    Ok(())
+}
+
+/// Create a container and redirect its stdout/stderr to a CRI-format log file.
+/// Spawns a background thread that reads from the pipe and writes timestamped
+/// lines to `log_path` in the format:
+///   `<RFC3339Nano> stdout F <message>\n`
+pub fn create_with_log(args: Create, root_path: PathBuf, log_path: PathBuf) -> Result<()> {
+    use nix::unistd::pipe;
+    use std::io::BufRead;
+    use std::os::unix::io::{FromRawFd, IntoRawFd};
+
+    // Create pipes for stdout and stderr
+    let (stdout_r, stdout_w) = pipe()?;
+    let (stderr_r, stderr_w) = pipe()?;
+
+    // Ensure log directory exists
+    if let Some(parent) = log_path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+
+    let log_path_clone = log_path.clone();
+
+    // Spawn background thread to drain stdout pipe -> log file
+    std::thread::spawn(move || {
+        let reader = unsafe { std::fs::File::from_raw_fd(stdout_r.into_raw_fd()) };
+        let mut log_file = match fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&log_path_clone)
+        {
+            Ok(f) => f,
+            Err(e) => {
+                tracing::error!("failed to open log file {:?}: {e}", log_path_clone);
+                return;
+            }
+        };
+
+        let buf = std::io::BufReader::new(reader);
+        for line in buf.lines() {
+            match line {
+                Ok(l) => {
+                    let ts = Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Nanos, true);
+                    let _ = writeln!(log_file, "{ts} stdout F {l}");
+                }
+                Err(_) => break,
+            }
+        }
+    });
+
+    // Spawn background thread to drain stderr pipe -> same log file
+    std::thread::spawn(move || {
+        let reader = unsafe { std::fs::File::from_raw_fd(stderr_r.into_raw_fd()) };
+        let mut log_file = match fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&log_path)
+        {
+            Ok(f) => f,
+            Err(e) => {
+                tracing::error!("failed to open log file {:?}: {e}", log_path);
+                return;
+            }
+        };
+
+        let buf = std::io::BufReader::new(reader);
+        for line in buf.lines() {
+            match line {
+                Ok(l) => {
+                    let ts = Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Nanos, true);
+                    let _ = writeln!(log_file, "{ts} stderr F {l}");
+                }
+                Err(_) => break,
+            }
+        }
+    });
+
+    ContainerBuilder::new(args.container_id.clone(), SyscallType::default())
+        .with_executor(libcontainer::workload::default::DefaultExecutor {})
+        .with_pid_file(args.pid_file.as_ref())?
+        .with_console_socket(args.console_socket.as_ref())
+        .with_root_path(root_path)?
+        .with_preserved_fds(args.preserve_fds)
+        .with_stdout(stdout_w)
+        .with_stderr(stderr_w)
+        .validate_id()?
+        .as_init(&args.bundle)
+        .with_systemd(false)
         .with_detach(true)
         .with_no_pivot(args.no_pivot)
         .build()?;

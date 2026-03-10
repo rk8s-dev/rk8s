@@ -35,5 +35,5 @@ rust_library(
     ],
     rustc_flags = ["@$(location :nanorand-manifest[env_flags])"],
     visibility = ["PUBLIC"],
-    deps = ["//third-party/rust/crates/getrandom/0.2.16:getrandom"],
+    deps = ["//third-party/rust/crates/getrandom/0.2.17:getrandom"],
 )

@@ -170,8 +170,8 @@ impl AuthModule {
 
         mounts_router.router.unmount(&full_path)?;
 
-        if view.is_some() {
-            view.unwrap().clear().await?;
+        if let Some(v) = view {
+            v.clear().await?;
         }
 
         self.remove_auth_entry(&path).await?;
@@ -352,10 +352,10 @@ impl AuthModule {
                 }
 
                 if entry.hmac.is_empty()
-                    && hmac_key.is_some()
                     && hmac_level == MountEntryHMACLevel::Compat
+                    && let Some(key) = hmac_key
                 {
-                    entry.calc_hmac(hmac_key.unwrap())?;
+                    entry.calc_hmac(key)?;
                     need_persist = true;
                 }
             }

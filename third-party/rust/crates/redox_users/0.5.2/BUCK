@@ -26,8 +26,8 @@ rust_library(
     rustc_flags = ["@$(location :redox_users-manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/getrandom/0.2.16:getrandom",
-        "//third-party/rust/crates/libredox/0.1.10:libredox",
-        "//third-party/rust/crates/thiserror/2.0.17:thiserror",
+        "//third-party/rust/crates/getrandom/0.2.17:getrandom",
+        "//third-party/rust/crates/libredox/0.1.12:libredox",
+        "//third-party/rust/crates/thiserror/2.0.18:thiserror",
     ],
 )

@@ -27,8 +27,8 @@ rust_library(
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/crossbeam-channel/0.5.15:crossbeam-channel",
-        "//third-party/rust/crates/thiserror/2.0.17:thiserror",
-        "//third-party/rust/crates/time/0.3.44:time",
+        "//third-party/rust/crates/thiserror/2.0.18:thiserror",
+        "//third-party/rust/crates/time/0.3.47:time",
         "//third-party/rust/crates/tracing-subscriber/0.3.22:tracing-subscriber",
     ],
 )

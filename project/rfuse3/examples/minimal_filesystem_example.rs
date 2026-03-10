@@ -72,7 +72,7 @@ impl MinimalFileSystem {
 impl Filesystem for MinimalFileSystem {
     async fn init(&self, _req: Request) -> Result<ReplyInit> {
         info!("Filesystem initialization");
-        Ok(ReplyInit)
+        Ok(ReplyInit::default())
     }
 
     async fn destroy(&self, _req: Request) {

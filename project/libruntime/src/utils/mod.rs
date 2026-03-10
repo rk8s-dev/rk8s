@@ -196,6 +196,29 @@ pub fn determine_image_path<P: AsRef<Path>>(target: P) -> Result<ImageType> {
     Err(UtilsError::InvalidImagePath.into())
 }
 
+/// Only pull the image and return the configuration, bundle path, and layer paths, without executing mount+cp.
+/// Used for persistent overlay rootfs mounts.
+pub fn sync_handle_oci_image_no_copy(
+    puller: &impl ImagePuller,
+    image_ref: impl AsRef<str>,
+) -> Result<(ImageConfiguration, String, Vec<PathBuf>)> {
+    let (manifest_path, layers) = puller
+        .sync_pull_or_get_image(image_ref.as_ref())
+        .map_err(|e| anyhow!("failed to pull image: {e}"))?;
+
+    debug!("get manifest_path: {manifest_path:?}");
+    debug!("layers: {layers:?}");
+
+    let bundle_path = generate_unique_bundle_path();
+    let config = get_image_config(&manifest_path)?;
+
+    // Create bundle directory
+    std::fs::create_dir_all(&bundle_path)
+        .with_context(|| format!("Failed to create bundle directory: {bundle_path}"))?;
+
+    Ok((config, bundle_path, layers))
+}
+
 // Helper to handle image type and pulling
 pub async fn handle_image_typ(
     puller: &impl ImagePuller,

@@ -23,11 +23,16 @@ rust_library(
     crate = "crypto_common",
     crate_root = "vendor/src/lib.rs",
     edition = "2018",
-    features = ["std"],
+    features = [
+        "getrandom",
+        "rand_core",
+        "std",
+    ],
     rustc_flags = ["@$(location :crypto-common-manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/generic-array/0.14.7:generic-array",
+        "//third-party/rust/crates/rand_core/0.6.4:rand_core",
         "//third-party/rust/crates/typenum/1.19.0:typenum",
     ],
 )

@@ -31,12 +31,12 @@ rust_library(
     ],
     rustc_flags = ["@$(location :serde_with-manifest[env_flags])"],
     named_deps = {
-        "chrono_0_4": "//third-party/rust/crates/chrono/0.4.42:chrono",
+        "chrono_0_4": "//third-party/rust/crates/chrono/0.4.43:chrono",
         "indexmap_1": "//third-party/rust/crates/indexmap/1.9.3:indexmap",
-        "indexmap_2": "//third-party/rust/crates/indexmap/2.12.1:indexmap",
+        "indexmap_2": "//third-party/rust/crates/indexmap/2.13.0:indexmap",
         "schemars_0_9": "//third-party/rust/crates/schemars/0.9.0:schemars",
-        "schemars_1": "//third-party/rust/crates/schemars/1.1.0:schemars",
-        "time_0_3": "//third-party/rust/crates/time/0.3.44:time",
+        "schemars_1": "//third-party/rust/crates/schemars/1.2.1:schemars",
+        "time_0_3": "//third-party/rust/crates/time/0.3.47:time",
     },
     visibility = ["PUBLIC"],
     deps = [

@@ -798,6 +798,18 @@ pub enum RksMessage {
         status: PodStatus,
     },
 
+    // Log operations
+    GetPodLogs {
+        pod_name: String,
+        namespace: String,
+        container_name: Option<String>,
+        follow: bool,
+        tail_lines: i64,
+        since_time: Option<String>,
+        timestamps: bool,
+        previous: bool,
+    },
+
     //response
     Ack,
     Error(String),
@@ -817,6 +829,19 @@ pub enum RksMessage {
     // (Podname, Podip)
     SetPodip((String, String)),
     Certificate(IssueCertificateResponse),
+
+    // Log responses
+    PodLogsChunk {
+        namespace: String,
+        pod_name: String,
+        data: Vec<u8>,
+        is_final: bool,
+    },
+    PodLogsError {
+        namespace: String,
+        pod_name: String,
+        error: String,
+    },
 }
 
 impl std::fmt::Debug for RksMessage {
@@ -953,6 +978,42 @@ impl std::fmt::Debug for RksMessage {
                 ip, dns_port,
             ),
             Self::Certificate(_) => f.write_str("RksMessage::Certificate"),
+            Self::GetPodLogs {
+                pod_name,
+                namespace,
+                container_name,
+                follow,
+                tail_lines,
+                since_time: _,
+                timestamps,
+                previous,
+            } => write!(
+                f,
+                "RksMessage::GetPodLogs {{ pod_name: {}, namespace: {}, container: {:?}, follow: {}, tail: {}, timestamps: {}, previous: {} }}",
+                pod_name, namespace, container_name, follow, tail_lines, timestamps, previous
+            ),
+            Self::PodLogsChunk {
+                namespace,
+                pod_name,
+                data,
+                is_final,
+            } => write!(
+                f,
+                "RksMessage::PodLogsChunk {{ namespace: {}, pod_name: {}, bytes: {}, is_final: {} }}",
+                namespace,
+                pod_name,
+                data.len(),
+                is_final
+            ),
+            Self::PodLogsError {
+                namespace,
+                pod_name,
+                error,
+            } => write!(
+                f,
+                "RksMessage::PodLogsError {{ namespace: {}, pod_name: {}, error: {} }}",
+                namespace, pod_name, error
+            ),
         }
     }
 }
@@ -1155,6 +1216,55 @@ impl Display for RksMessage {
                 write!(f, "Set pod '{}' IP address to {}", pod_name, pod_ip)
             }
             Self::Certificate(_) => f.write_str("Certificate response received"),
+            Self::GetPodLogs {
+                pod_name,
+                namespace,
+                container_name,
+                follow,
+                ..
+            } => {
+                let container_info = container_name
+                    .as_ref()
+                    .map(|c| format!(" container '{}'", c))
+                    .unwrap_or_default();
+                let follow_info = if *follow { " (follow mode)" } else { "" };
+                write!(
+                    f,
+                    "Get logs for pod '{}' in namespace '{}'{}{}",
+                    pod_name, namespace, container_info, follow_info
+                )
+            }
+            Self::PodLogsChunk {
+                namespace,
+                pod_name,
+                data,
+                is_final,
+            } => {
+                if *is_final {
+                    write!(
+                        f,
+                        "Log chunk for {}/{}: {} bytes (final)",
+                        namespace,
+                        pod_name,
+                        data.len()
+                    )
+                } else {
+                    write!(
+                        f,
+                        "Log chunk for {}/{}: {} bytes",
+                        namespace,
+                        pod_name,
+                        data.len()
+                    )
+                }
+            }
+            Self::PodLogsError {
+                namespace,
+                pod_name,
+                error,
+            } => {
+                write!(f, "Log error for {}/{}: {}", namespace, pod_name, error)
+            }
         }
     }
 }

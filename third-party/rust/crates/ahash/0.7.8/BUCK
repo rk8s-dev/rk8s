@@ -32,15 +32,15 @@ rust_library(
     ],
     os_deps = {
         "linux": [
-            "//third-party/rust/crates/getrandom/0.2.16:getrandom",
+            "//third-party/rust/crates/getrandom/0.2.17:getrandom",
             "//third-party/rust/crates/once_cell/1.21.3:once_cell",
         ],
         "macos": [
-            "//third-party/rust/crates/getrandom/0.2.16:getrandom",
+            "//third-party/rust/crates/getrandom/0.2.17:getrandom",
             "//third-party/rust/crates/once_cell/1.21.3:once_cell",
         ],
         "windows": [
-            "//third-party/rust/crates/getrandom/0.2.16:getrandom",
+            "//third-party/rust/crates/getrandom/0.2.17:getrandom",
             "//third-party/rust/crates/once_cell/1.21.3:once_cell",
         ],
     },

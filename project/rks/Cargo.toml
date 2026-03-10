@@ -11,7 +11,7 @@ common = { workspace = true }
 libcni = { workspace = true }
 libscheduler = { workspace = true }
 libnetwork = { workspace = true }
-libvault = { workspace = true }
+libvault = { workspace = true, features = ["storage_xline"] }
 tokio = { workspace = true, features = ["full"] }
 serde = { workspace = true, features = ["derive"] }
 clap = { workspace = true, features = ["derive"] }

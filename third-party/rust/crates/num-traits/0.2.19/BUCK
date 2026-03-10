@@ -37,7 +37,7 @@ rust_library(
         "@$(location :num-traits-manifest[env_flags])",
     ],
     visibility = ["PUBLIC"],
-    deps = ["//third-party/rust/crates/libm/0.2.15:libm"],
+    deps = ["//third-party/rust/crates/libm/0.2.16:libm"],
 )
 
 rust_binary(

@@ -27,15 +27,15 @@ rust_library(
     os_deps = {
         "linux": [
             "//third-party/rust/crates/async-channel/2.5.0:async-channel",
-            "//third-party/rust/crates/async-lock/3.4.1:async-lock",
+            "//third-party/rust/crates/async-lock/3.4.2:async-lock",
             "//third-party/rust/crates/async-signal/0.2.13:async-signal",
             "//third-party/rust/crates/async-task/4.7.1:async-task",
-            "//third-party/rust/crates/rustix/1.1.2:rustix",
+            "//third-party/rust/crates/rustix/1.1.3:rustix",
         ],
         "macos": [
-            "//third-party/rust/crates/async-lock/3.4.1:async-lock",
+            "//third-party/rust/crates/async-lock/3.4.2:async-lock",
             "//third-party/rust/crates/async-signal/0.2.13:async-signal",
-            "//third-party/rust/crates/rustix/1.1.2:rustix",
+            "//third-party/rust/crates/rustix/1.1.3:rustix",
         ],
         "windows": [
             "//third-party/rust/crates/async-channel/2.5.0:async-channel",

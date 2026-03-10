@@ -38,12 +38,12 @@ rust_library(
         "@$(location :ring-manifest[env_flags])",
     ],
     os_deps = {
-        "macos": ["//third-party/rust/crates/libc/0.2.180:libc"],
+        "macos": ["//third-party/rust/crates/libc/0.2.182:libc"],
     },
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/cfg-if/1.0.4:cfg-if",
-        "//third-party/rust/crates/getrandom/0.2.16:getrandom",
+        "//third-party/rust/crates/getrandom/0.2.17:getrandom",
         "//third-party/rust/crates/untrusted/0.9.0:untrusted",
     ],
 )
@@ -63,7 +63,7 @@ rust_binary(
     ],
     rustc_flags = ["@$(location :ring-manifest[env_flags])"],
     visibility = [],
-    deps = ["//third-party/rust/crates/cc/1.2.49:cc"],
+    deps = ["//third-party/rust/crates/cc/1.2.56:cc"],
 )
 
 buildscript_run(

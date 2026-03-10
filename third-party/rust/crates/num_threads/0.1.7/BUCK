@@ -25,7 +25,7 @@ rust_library(
     edition = "2015",
     rustc_flags = ["@$(location :num_threads-manifest[env_flags])"],
     os_deps = {
-        "macos": ["//third-party/rust/crates/libc/0.2.180:libc"],
+        "macos": ["//third-party/rust/crates/libc/0.2.182:libc"],
     },
     visibility = ["PUBLIC"],
 )

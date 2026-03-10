@@ -81,7 +81,7 @@ impl CertBackendInner {
     ) -> Result<Option<Response>, RvError> {
         let config = self.get_config(req).await?;
         if config.is_none() {
-            return Err(RvError::ErrCredentailNotConfig);
+            return Err(RvError::ErrCredentialNotConfig);
         }
 
         if req.connection.is_none() {
@@ -177,7 +177,7 @@ impl CertBackendInner {
         let config = self
             .get_config(req)
             .await?
-            .ok_or(RvError::ErrCredentailNotConfig)?;
+            .ok_or(RvError::ErrCredentialNotConfig)?;
 
         if req.connection.is_none() {
             return Err(rv_error_response!("tls connection required"));

@@ -35,6 +35,6 @@ rust_library(
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/critical-section/1.2.0:critical-section",
-        "//third-party/rust/crates/portable-atomic/1.11.1:portable-atomic",
+        "//third-party/rust/crates/portable-atomic/1.13.1:portable-atomic",
     ],
 )

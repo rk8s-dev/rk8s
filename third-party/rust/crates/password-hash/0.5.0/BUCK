@@ -27,11 +27,12 @@ rust_library(
         "alloc",
         "default",
         "rand_core",
+        "std",
     ],
     rustc_flags = ["@$(location :password-hash-manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/base64ct/1.8.1:base64ct",
+        "//third-party/rust/crates/base64ct/1.8.3:base64ct",
         "//third-party/rust/crates/rand_core/0.6.4:rand_core",
         "//third-party/rust/crates/subtle/2.6.1:subtle",
     ],
