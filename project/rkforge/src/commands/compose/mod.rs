@@ -39,8 +39,6 @@ pub mod spec;
 use clap::Args;
 
 // Common Args shared by commands
-
-
 #[derive(Args, Debug)]
 pub struct PsArgs {
     #[arg(long = "project-name", short, value_name = "PROJECT_NAME")]
@@ -159,18 +157,14 @@ impl ComposeManager {
             })?;
             let id = container.id.clone();
             let netns_path = format!("/proc/{pid}/ns/net");
-            if Path::new(&netns_path).exists() {
-                self.teardown_network(netns_path, id)?;
-            } else {
-            if Path::new(&netns_path).exists() {
-                self.teardown_network(netns_path, id)?;
-            } else {
+            if !Path::new(&netns_path).exists() {
                 warn!(
                     "Failed to find {} file, skipping teardown, you may need to manually clean up the network namespace",
                     &netns_path
                 );
                 return Ok(());
             }
+            self.teardown_network(netns_path, id)?;
             remove_container(&self.root_path, container)?;
         }
 
