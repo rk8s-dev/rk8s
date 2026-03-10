@@ -146,7 +146,7 @@ impl ComposeManager {
 
         self.clean_up()
     }
-
+    // clean up all the containers and volumes in the compose application, and delete the project directory
     fn clean_up(&self) -> Result<()> {
         // delete container
         for container in &self.containers {
