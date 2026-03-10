@@ -1,17 +1,15 @@
 use std::collections::{HashMap, hash_map::Entry};
 
-use serde::{Deserialize, Serialize};
-use thiserror::Error;
-use tonic::{Code, Status};
-use utils::interval_map::{Interval, IntervalMap};
-use utils::lca_tree::LCATree;
-// TODO: use our own status type
-// use xlinerpc::status::{Code,Status};
 use crate::{
     AuthRoleAddRequest, AuthRoleGrantPermissionRequest, AuthUserAddRequest, DeleteRangeRequest,
     PutRequest, RangeRequest, Request, RequestOp, SortOrder, SortTarget, TxnRequest,
     interval::BytesAffine,
 };
+use serde::{Deserialize, Serialize};
+use thiserror::Error;
+use utils::interval_map::{Interval, IntervalMap};
+use utils::lca_tree::LCATree;
+use xlinerpc::status::{Code, Status};
 
 /// Default max txn ops
 const DEFAULT_MAX_TXN_OPS: usize = 128;
@@ -296,7 +294,7 @@ pub enum ValidationError {
 // In order to create an etcd-compatible API with Xline, it is necessary to return exact GRPC statuses to the etcd client.
 // Refer to `https://github.com/etcd-io/etcd/blob/main/api/v3rpc/rpctypes/error.go` for etcd's error parsing mechanism,
 // and refer to `https://github.com/etcd-io/etcd/blob/main/client/v3/doc.go` for how errors are handled by etcd client.
-impl From<ValidationError> for Status {
+impl From<ValidationError> for xlinerpc::Status {
     #[inline]
     fn from(err: ValidationError) -> Self {
         let (code, message) = match err {
@@ -342,6 +340,18 @@ impl From<ValidationError> for Status {
         };
 
         Status::new(code, message)
+    }
+}
+
+/// Bridge conversion: ValidationError → tonic::Status (via xlinerpc::Status)
+///
+/// This exists because xline server code returns `Result<_, tonic::Status>` and uses `?`
+/// on `ValidationError`. Will be removed when xline server migrates away from tonic.
+impl From<ValidationError> for tonic::Status {
+    #[inline]
+    fn from(err: ValidationError) -> Self {
+        let xlinerpc_status: Status = err.into();
+        xlinerpc_status.into()
     }
 }
 

@@ -1,13 +1,11 @@
 #![allow(clippy::arithmetic_side_effects)] // introduced by `strum_macros::EnumIter`
 
+use crate::{PbExecuteError, PbExecuteErrorOuter, PbRevisions, PbUserRole};
 use curp::cmd::{PbCodec, PbSerializeError};
 use prost::Message;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
-use tonic::{Code, Status};
-// TODO: use our status/code to replace this.
-// use xlinerpc::status::{Code,Status};
-use crate::{PbExecuteError, PbExecuteErrorOuter, PbRevisions, PbUserRole};
+use xlinerpc::status::{Code, Status};
 
 /// Error met when executing commands
 #[cfg_attr(test, derive(strum_macros::EnumIter))]
@@ -217,10 +215,7 @@ impl PbCodec for ExecuteError {
 }
 
 // The etcd client relies on GRPC error messages for error type interpretation.
-// In order to create an etcd-compatible API with Xline, it is necessary to return exact GRPC statuses to the etcd client.
-// Refer to `https://github.com/etcd-io/etcd/blob/main/api/v3rpc/rpctypes/error.go` for etcd's error parsing mechanism,
-// and refer to `https://github.com/etcd-io/etcd/blob/main/client/v3/doc.go` for how errors are handled by etcd client.
-impl From<ExecuteError> for Status {
+impl From<ExecuteError> for xlinerpc::Status {
     #[inline]
     fn from(err: ExecuteError) -> Self {
         let (code, message) = match err {
@@ -313,6 +308,18 @@ impl From<ExecuteError> for Status {
         };
 
         Status::new(code, message)
+    }
+}
+
+/// Bridge conversion: ExecuteError → tonic::Status (via xlinerpc::Status)
+///
+/// This exists because xline server code returns `Result<_, tonic::Status>` and uses `?`
+/// on `ExecuteError`. Will be removed when xline server migrates away from tonic.
+impl From<ExecuteError> for tonic::Status {
+    #[inline]
+    fn from(err: ExecuteError) -> Self {
+        let xlinerpc_status: Status = err.into();
+        xlinerpc_status.into()
     }
 }
 

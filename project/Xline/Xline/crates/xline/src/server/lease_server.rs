@@ -5,7 +5,7 @@ use clippy_utilities::NumericCast;
 use curp::members::ClusterInfo;
 use futures::stream::Stream;
 use tokio::time;
-use tonic::Status;
+use xlinerpc::{Request, Response as XlineResponse, Status, Streaming};
 use tonic::transport::{ClientTlsConfig, Endpoint};
 use tracing::{debug, warn};
 use utils::{
@@ -16,18 +16,55 @@ use xlineapi::{
     command::{Command, CommandResponse, CurpClient, SyncResponse},
     execute_error::ExecuteError,
 };
-// TODO: use our own status type
-// use xlinerpc::status::Status;
 use crate::{
     id_gen::IdGenerator,
     metrics,
     rpc::{
-        Lease, LeaseClient, LeaseGrantRequest, LeaseGrantResponse, LeaseKeepAliveRequest,
+        LeaseGrantRequest, LeaseGrantResponse, LeaseKeepAliveRequest,
         LeaseKeepAliveResponse, LeaseLeasesRequest, LeaseLeasesResponse, LeaseRevokeRequest,
         LeaseRevokeResponse, LeaseTimeToLiveRequest, LeaseTimeToLiveResponse, RequestWrapper,
     },
     storage::{AuthStore, LeaseStore},
 };
+use xlineapi::etcdserverpb::lease_server::Lease as GrpcLease;
+
+/// Lease service trait
+#[async_trait::async_trait]
+pub trait Lease {
+
+    /// LeaseGrant creates a lease which expires if the server does not receive a keepAlive
+    /// within a given time to live period. All keys attached to the lease will be expired and
+    /// deleted if the lease expires. Each expired key generates a delete event in the event history.
+    async fn lease_grant(
+        &self,
+        request: xlinerpc::Request<LeaseGrantRequest>,
+    ) -> Result<XlineResponse<LeaseGrantResponse>, Status>;
+
+    /// LeaseRevoke revokes a lease. All keys attached to the lease will expire and be deleted.
+    async fn lease_revoke(
+        &self,
+        request: xlinerpc::Request<LeaseRevokeRequest>,
+    ) -> Result<XlineResponse<LeaseRevokeResponse>, Status>;
+
+    /// LeaseTimeToLive retrieves lease information.
+    async fn lease_time_to_live(
+        &self,
+        request: xlinerpc::Request<LeaseTimeToLiveRequest>,
+    ) -> Result<XlineResponse<LeaseTimeToLiveResponse>, Status>;
+
+    /// LeaseLeases lists all existing leases.
+    async fn lease_leases(
+        &self,
+        request: xlinerpc::Request<LeaseLeasesRequest>,
+    ) -> Result<XlineResponse<LeaseLeasesResponse>, Status>;
+
+    /// LeaseKeepAlive keeps a lease alive by streaming periodic keep-alive messages.
+    /// Clients must send keep-alive requests at regular intervals to prevent lease expiration.
+    async fn lease_keep_alive(
+        &self,
+        request: Request<Streaming<LeaseKeepAliveRequest>>,
+    ) -> Result<XlineResponse<KeepAliveStream>, Status>;
+}
 
 /// Default Lease Request Time
 const DEFAULT_LEASE_REQUEST_TIME: Duration = Duration::from_millis(500);
@@ -97,14 +134,9 @@ impl LeaseServer {
                         let s = Arc::clone(&lease_server);
                         let token_option = lease_server.auth_storage.root_token();
                         async move {
-                            let mut request = tonic::Request::new(LeaseRevokeRequest { id });
+                            let mut request = Request::new(LeaseRevokeRequest { id });
                             if let Ok(token) = token_option {
-                                let _ignore = request.metadata_mut().insert(
-                                    "token",
-                                    token.parse().unwrap_or_else(|e| {
-                                        panic!("metadata value parse error: {e}")
-                                    }),
-                                );
+                                request.meta_mut().insert(b"token".to_vec(), token.as_bytes().to_vec());
                             }
                             if let Err(e) = s.lease_revoke(request).await {
                                 warn!("Failed to revoke expired leases: {}", e);
@@ -119,13 +151,14 @@ impl LeaseServer {
     /// Propose request and get result with fast/slow path
     async fn propose<T>(
         &self,
-        request: tonic::Request<T>,
+        request: Request<T>,
     ) -> Result<(CommandResponse, Option<SyncResponse>), Status>
     where
         T: Into<RequestWrapper>,
     {
         let auth_info = self.auth_storage.try_get_auth_info_from_request(&request)?;
-        let request = request.into_inner().into();
+        let (data, _) = request.into_parts();
+        let request = data.into();
         let cmd = Command::new_with_auth_info(request, auth_info);
         let res = self.client.propose(&cmd, None, false).await??;
         Ok(res)
@@ -139,7 +172,7 @@ impl LeaseServer {
     )] // Introduced by tokio::select!
     fn leader_keep_alive(
         &self,
-        mut request_stream: tonic::Streaming<LeaseKeepAliveRequest>,
+        mut request_stream: Streaming<LeaseKeepAliveRequest>,
     ) -> Result<KeepAliveStream, Status> {
         let shutdown_listener = self
             .task_manager
@@ -189,7 +222,7 @@ impl LeaseServer {
     #[allow(clippy::arithmetic_side_effects, clippy::ignored_unit_patterns)] // Introduced by tokio::select!
     async fn follower_keep_alive(
         &self,
-        mut request_stream: tonic::Streaming<LeaseKeepAliveRequest>,
+        mut request_stream: Streaming<LeaseKeepAliveRequest>,
         leader_addrs: &[String],
     ) -> Result<KeepAliveStream, Status> {
         let shutdown_listener = self
@@ -200,6 +233,8 @@ impl LeaseServer {
         let channel = tonic::transport::Channel::balance_list(endpoints.into_iter());
         let mut lease_client = LeaseClient::new(channel);
 
+        let mut tonic_stream = request_stream.into_inner();
+
         let redirect_stream = stream! {
             loop {
                 tokio::select! {
@@ -207,7 +242,7 @@ impl LeaseServer {
                         debug!("Lease keep alive shutdown");
                         break;
                     }
-                    res = request_stream.message() => {
+                    res = tonic_stream.message() => {
                         if let Ok(Some(keep_alive_req)) = res {
                             yield keep_alive_req;
                         } else {
@@ -245,23 +280,25 @@ fn build_endpoints(
 }
 
 #[tonic::async_trait]
-impl Lease for LeaseServer {
+impl GrpcLease for LeaseServer {
+    type LeaseKeepAliveStream = KeepAliveStream;
     /// `LeaseGrant` creates a lease which expires if the server does not receive a `keepAlive`
     /// within a given time to live period. All keys attached to the lease will be expired and
     /// deleted if the lease expires. Each expired key generates a delete event in the event history.
     async fn lease_grant(
         &self,
-        mut request: tonic::Request<LeaseGrantRequest>,
-    ) -> Result<tonic::Response<LeaseGrantResponse>, Status> {
+        request: Request<LeaseGrantRequest>,
+    ) -> Result<XlineResponse<LeaseGrantResponse>, Status> {
         debug!("Receive LeaseGrantRequest {:?}", request);
-        let lease_grant_req = request.get_mut();
+        let lease_grant_req = request.data_mut();
         if lease_grant_req.id == 0 {
             lease_grant_req.id = self.id_gen.next();
         }
 
         let (res, sync_res) = self.propose(request).await?;
 
-        let mut res: LeaseGrantResponse = res.into_inner().into();
+        let (mut res_wrapper, _) = res.into_parts();
+        let mut res: LeaseGrantResponse = res_wrapper.into();
         if let Some(sync_res) = sync_res {
             let revision = sync_res.revision();
             debug!("Get revision {:?} for LeaseGrantResponse", revision);
@@ -269,19 +306,20 @@ impl Lease for LeaseServer {
                 header.revision = revision;
             }
         }
-        Ok(tonic::Response::new(res))
+        Ok(XlineResponse::from_data(res))
     }
 
     /// `LeaseRevoke` revokes a lease. All keys attached to the lease will expire and be deleted.
     async fn lease_revoke(
         &self,
-        request: tonic::Request<LeaseRevokeRequest>,
-    ) -> Result<tonic::Response<LeaseRevokeResponse>, Status> {
+        request: Request<LeaseRevokeRequest>,
+    ) -> Result<XlineResponse<LeaseRevokeResponse>, Status> {
         debug!("Receive LeaseRevokeRequest {:?}", request);
 
         let (res, sync_res) = self.propose(request).await?;
 
-        let mut res: LeaseRevokeResponse = res.into_inner().into();
+        let (mut res_wrapper, _) = res.into_parts();
+        let mut res: LeaseRevokeResponse = res_wrapper.into();
         if let Some(sync_res) = sync_res {
             let revision = sync_res.revision();
             debug!("Get revision {:?} for LeaseRevokeResponse", revision);
@@ -290,53 +328,18 @@ impl Lease for LeaseServer {
             }
             metrics::get().lease_expired_total.add(1, &[]);
         }
-        Ok(tonic::Response::new(res))
-    }
-
-    /// Server streaming response type for the `LeaseKeepAlive` method.
-    type LeaseKeepAliveStream =
-        Pin<Box<dyn Stream<Item = Result<LeaseKeepAliveResponse, Status>> + Send>>;
-
-    /// `LeaseKeepAlive` keeps the lease alive by streaming keep alive requests from the client
-    /// to the server and streaming keep alive responses from the server to the client.
-    async fn lease_keep_alive(
-        &self,
-        request: tonic::Request<tonic::Streaming<LeaseKeepAliveRequest>>,
-    ) -> Result<tonic::Response<Self::LeaseKeepAliveStream>, Status> {
-        debug!("Receive LeaseKeepAliveRequest {:?}", request);
-        let request_stream = request.into_inner();
-        let stream = loop {
-            if self.lease_storage.is_primary() {
-                break self.leader_keep_alive(request_stream)?;
-            }
-            let leader_id = self.client.fetch_leader_id(false).await?;
-            // Given that a candidate server may become a leader when it won the election or
-            // a follower when it lost the election. Therefore we need to double check here.
-            // We can directly invoke leader_keep_alive when a candidate becomes a leader.
-            if !self.lease_storage.is_primary() {
-                let leader_addrs = self.cluster_info.client_urls(leader_id).unwrap_or_else(|| {
-                    unreachable!(
-                        "The address of leader {} not found in all_members {:?}",
-                        leader_id, self.cluster_info
-                    )
-                });
-                break self
-                    .follower_keep_alive(request_stream, &leader_addrs)
-                    .await?;
-            }
-        };
-        Ok(tonic::Response::new(stream))
+        Ok(XlineResponse::from_data(res))
     }
 
     /// `LeaseTimeToLive` retrieves lease information.
     async fn lease_time_to_live(
         &self,
-        request: tonic::Request<LeaseTimeToLiveRequest>,
-    ) -> Result<tonic::Response<LeaseTimeToLiveResponse>, Status> {
+        request: Request<LeaseTimeToLiveRequest>,
+    ) -> Result<XlineResponse<LeaseTimeToLiveResponse>, Status> {
         debug!("Receive LeaseTimeToLiveRequest {:?}", request);
         loop {
             if self.lease_storage.is_primary() {
-                let time_to_live_req = request.into_inner();
+                let (time_to_live_req, _) = request.into_parts();
 
                 self.lease_storage.wait_synced(time_to_live_req.id).await;
 
@@ -356,7 +359,7 @@ impl Lease for LeaseServer {
                     granted_ttl: lease.ttl().as_secs().numeric_cast(),
                     keys,
                 };
-                return Ok(tonic::Response::new(res));
+                return Ok(XlineResponse::from_data(res));
             }
             let leader_id = self.client.fetch_leader_id(false).await?;
             let leader_addrs = self.cluster_info.client_urls(leader_id).unwrap_or_else(|| {
@@ -369,7 +372,8 @@ impl Lease for LeaseServer {
                 let endpoints = build_endpoints(&leader_addrs, self.client_tls_config.as_ref())?;
                 let channel = tonic::transport::Channel::balance_list(endpoints.into_iter());
                 let mut lease_client = LeaseClient::new(channel);
-                return lease_client.lease_time_to_live(request).await;
+                let tonic_request = request.into();
+                return lease_client.lease_time_to_live(tonic_request).await;
             }
         }
     }
@@ -377,13 +381,14 @@ impl Lease for LeaseServer {
     /// `LeaseLeases` lists all existing leases.
     async fn lease_leases(
         &self,
-        request: tonic::Request<LeaseLeasesRequest>,
-    ) -> Result<tonic::Response<LeaseLeasesResponse>, Status> {
+        request: Request<LeaseLeasesRequest>,
+    ) -> Result<XlineResponse<LeaseLeasesResponse>, Status> {
         debug!("Receive LeaseLeasesRequest {:?}", request);
 
         let (res, sync_res) = self.propose(request).await?;
 
-        let mut res: LeaseLeasesResponse = res.into_inner().into();
+        let (mut res_wrapper, _) = res.into_parts();
+        let mut res: LeaseLeasesResponse = res_wrapper.into();
         if let Some(sync_res) = sync_res {
             let revision = sync_res.revision();
             debug!("Get revision {:?} for LeaseLeasesResponse", revision);
@@ -391,6 +396,32 @@ impl Lease for LeaseServer {
                 header.revision = revision;
             }
         }
-        Ok(tonic::Response::new(res))
+        Ok(XlineResponse::from_data(res))
+    }
+
+    /// `LeaseKeepAlive` keeps a lease alive by streaming periodic keep-alive messages.
+    /// Routes to the leader for processing or redirects to the leader if this node is a follower.
+    async fn lease_keep_alive(
+        &self,
+        request: Request<Streaming<LeaseKeepAliveRequest>>,
+    ) -> Result<XlineResponse<KeepAliveStream>, Status> {
+        debug!("Receive LeaseKeepAliveRequest stream");
+        
+        let request_stream = request.into_inner();
+        
+        if self.lease_storage.is_primary() {
+            let stream = self.leader_keep_alive(request_stream)?;
+            Ok(XlineResponse::new(stream))
+        } else {
+            let leader_id = self.client.fetch_leader_id(false).await?;
+            let leader_addrs = self.cluster_info.client_urls(leader_id).unwrap_or_else(|| {
+                unreachable!(
+                    "The address of leader {} not found in all_members {:?}",
+                    leader_id, self.cluster_info
+                )
+            });
+            let stream = self.follower_keep_alive(request_stream, &leader_addrs).await?;
+            Ok(XlineResponse::new(stream))
+        }
     }
 }

@@ -28,6 +28,7 @@ engine = { path = "../engine" }
 event-listener = { workspace = true }
 flume = { workspace = true }
 futures = { workspace = true }
+gm-quic = { git = "https://github.com/genmeta/gm-quic", rev = "4cbd9d93" }
 hyper = "1.0.0"
 itertools = { workspace = true }
 jsonwebtoken = { workspace = true }
@@ -52,6 +53,9 @@ pbkdf2 = { workspace = true }
 priority-queue = { workspace = true }
 prometheus = "0.13.4"
 prost = { workspace = true }
+rcgen = "0.13"
+rustls = { version = "0.23", default-features = false, features = ["std", "ring"] }
+rustls-pemfile = "2"
 serde = { workspace = true }
 sha2 = "0.10.6"
 tokio = { workspace = true }
@@ -67,11 +71,13 @@ tracing-subscriber = { workspace = true }
 utils = { path = "../utils" }
 uuid = { version = "1.10.0", features = ["v4"] }
 x509-certificate = "0.23.1"
+x509-parser = { version = "0.16", default-features = false }
 xlineapi = { path = "../xlineapi" }
 xlinerpc = { path = "../xlinerpc"}
+http = "1.0"
+http-body = "1.0"
+tower-service = "0.3"
 
-[build-dependencies]
-tonic-build = { workspace = true }
 
 [dev-dependencies]
 etcd-client = { version = "0.14.0", features = ["tls"] }

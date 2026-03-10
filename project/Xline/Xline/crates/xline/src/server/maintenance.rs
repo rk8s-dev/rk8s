@@ -7,20 +7,19 @@ use curp::{cmd::CommandExecutor as _, members::ClusterInfo, server::RawCurp};
 use engine::SnapshotApi;
 use futures::stream::Stream;
 use sha2::{Digest, Sha256};
-use tonic::Status;
+use xlinerpc::{Request, Response as XlineResponse, Status};
 use tracing::{debug, error};
 use xlineapi::{
     RequestWrapper,
     command::{Command, CommandResponse, CurpClient, SyncResponse},
+    maintenance_server::Maintenance as MaintenanceService,
 };
-// TODO: use our own status type
-// use xlinerpc::status::Status;
 use super::command::CommandExecutor;
 use crate::{
     header_gen::HeaderGenerator,
     rpc::{
         AlarmRequest, AlarmResponse, DefragmentRequest, DefragmentResponse, DowngradeRequest,
-        DowngradeResponse, HashKvRequest, HashKvResponse, HashRequest, HashResponse, Maintenance,
+        DowngradeResponse, HashKvRequest, HashKvResponse, HashRequest, HashResponse,
         MoveLeaderRequest, MoveLeaderResponse, SnapshotRequest, SnapshotResponse, StatusRequest,
         StatusResponse,
     },
@@ -32,6 +31,9 @@ use crate::{
 const MIN_PAGE_SIZE: u64 = 512;
 /// Snapshot chunk size
 pub(crate) const MAINTENANCE_SNAPSHOT_CHUNK_SIZE: u64 = 64 * 1024;
+
+/// Snapshot stream type alias
+type SnapshotStream = Pin<Box<dyn Stream<Item = Result<SnapshotResponse, Status>> + Send>>;
 
 /// Maintenance Server
 pub(crate) struct MaintenanceServer {
@@ -57,7 +59,7 @@ pub(crate) struct MaintenanceServer {
 
 impl MaintenanceServer {
     /// New `MaintenanceServer`
-    #[allow(clippy::too_many_arguments)] // Consistent with other servers
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         kv_store: Arc<KvStore>,
         auth_store: Arc<AuthStore>,
@@ -85,27 +87,36 @@ impl MaintenanceServer {
     /// Propose request and get result with fast/slow path
     async fn propose<T>(
         &self,
-        request: tonic::Request<T>,
+        request: xlinerpc::Request<T>,
     ) -> Result<(CommandResponse, Option<SyncResponse>), Status>
     where
         T: Into<RequestWrapper> + Debug,
     {
         let auth_info = self.auth_store.try_get_auth_info_from_request(&request)?;
-        let request = request.into_inner().into();
+        let (data, _) = request.into_parts();
+        let request = data.into();
         let cmd = Command::new_with_auth_info(request, auth_info);
         let res = self.client.propose(&cmd, None, false).await??;
         Ok(res)
     }
 }
 
-#[tonic::async_trait]
-impl Maintenance for MaintenanceServer {
+/// Implement the generated gRPC service trait
+#[async_trait::async_trait]
+impl MaintenanceService for MaintenanceServer {
+    type AlarmStream = Pin<Box<dyn Stream<Item = Result<AlarmResponse, Status>> + Send>>;
+    type StatusStream = Pin<Box<dyn Stream<Item = Result<StatusResponse, Status>> + Send>>;
+    type SnapshotStream = Pin<Box<dyn Stream<Item = Result<SnapshotResponse, Status>> + Send>>;
+
     async fn alarm(
         &self,
-        request: tonic::Request<AlarmRequest>,
-    ) -> Result<tonic::Response<AlarmResponse>, Status> {
-        let (res, sync_res) = self.propose(request).await?;
-        let mut res: AlarmResponse = res.into_inner().into();
+        request: Request<AlarmRequest>,
+    ) -> Result<XlineResponse<Self::AlarmStream>, Status> {
+        let (data, metadata) = request.into_parts();
+        let xline_request = Request::from_parts(data, metadata);
+        let (res, sync_res) = self.propose(xline_request).await?;
+        let (mut res_wrapper, _) = res.into_parts();
+        let mut res: AlarmResponse = res_wrapper.into();
         if let Some(sync_res) = sync_res {
             let revision = sync_res.revision();
             debug!("Get revision {:?} for AlarmResponse", revision);
@@ -113,13 +124,14 @@ impl Maintenance for MaintenanceServer {
                 header.revision = revision;
             }
         }
-        Ok(tonic::Response::new(res))
+        let stream = futures::stream::once(async move { Ok(res) });
+        Ok(XlineResponse::new(Box::pin(stream)))
     }
 
     async fn status(
         &self,
-        _request: tonic::Request<StatusRequest>,
-    ) -> Result<tonic::Response<StatusResponse>, Status> {
+        _request: Request<StatusRequest>,
+    ) -> Result<XlineResponse<Self::StatusStream>, Status> {
         let is_learner = self.cluster_info.self_member().is_learner;
         let (leader, term, _) = self.raw_curp.leader();
         let commit_index = self.raw_curp.commit_index();
@@ -142,7 +154,7 @@ impl Maintenance for MaintenanceServer {
             header: Some(self.header_gen.gen_header()),
             version: env!("CARGO_PKG_VERSION").to_owned(),
             db_size: size.numeric_cast(),
-            leader: leader.unwrap_or(0), // None means this member believes there is no leader
+            leader: leader.unwrap_or(0),
             raft_index: commit_index,
             raft_term: term,
             raft_applied_index: last_applied,
@@ -150,13 +162,14 @@ impl Maintenance for MaintenanceServer {
             db_size_in_use: size.numeric_cast(),
             is_learner,
         };
-        Ok(tonic::Response::new(response))
+        let stream = futures::stream::once(async move { Ok(response) });
+        Ok(XlineResponse::new(Box::pin(stream)))
     }
 
     async fn defragment(
         &self,
-        _request: tonic::Request<DefragmentRequest>,
-    ) -> Result<tonic::Response<DefragmentResponse>, Status> {
+        _request: Request<DefragmentRequest>,
+    ) -> Result<XlineResponse<DefragmentResponse>, Status> {
         Err(Status::unimplemented(
             "defragment is unimplemented".to_owned(),
         ))
@@ -164,54 +177,54 @@ impl Maintenance for MaintenanceServer {
 
     async fn hash(
         &self,
-        _request: tonic::Request<HashRequest>,
-    ) -> Result<tonic::Response<HashResponse>, Status> {
-        Ok(tonic::Response::new(HashResponse {
+        _request: Request<HashRequest>,
+    ) -> Result<XlineResponse<HashResponse>, Status> {
+        Ok(XlineResponse::new(HashResponse {
             header: Some(self.header_gen.gen_header()),
-            hash: self.db.hash()?,
+            hash: self.db.hash().map_err(|e| Status::internal(e.to_string()))?,
         }))
     }
 
     async fn hash_kv(
         &self,
-        request: tonic::Request<HashKvRequest>,
-    ) -> Result<tonic::Response<HashKvResponse>, Status> {
+        request: Request<HashKvRequest>,
+    ) -> Result<XlineResponse<HashKvResponse>, Status> {
         let revision = request.get_ref().revision;
-        let (hash, compact_revision, _hash_revision) = self.kv_store.hash_kv(revision)?;
-        Ok(tonic::Response::new(HashKvResponse {
+        let (hash, compact_revision, _hash_revision) = self.kv_store.hash_kv(revision)
+            .map_err(|e| Status::internal(e.to_string()))?;
+        Ok(XlineResponse::new(HashKvResponse {
             header: Some(self.header_gen.gen_header()),
             hash,
             compact_revision,
-            // TODO: hash_revision was introduced in etcd 3.6, and xline is currently compatible with etcd 3.5
         }))
     }
 
-    type SnapshotStream = Pin<Box<dyn Stream<Item = Result<SnapshotResponse, Status>> + Send>>;
-
     async fn snapshot(
         &self,
-        _request: tonic::Request<SnapshotRequest>,
-    ) -> Result<tonic::Response<Self::SnapshotStream>, Status> {
-        let stream = snapshot_stream(self.header_gen.as_ref(), self.db.as_ref())?;
-
-        Ok(tonic::Response::new(Box::pin(stream)))
+        _request: Request<SnapshotRequest>,
+    ) -> Result<XlineResponse<Self::SnapshotStream>, Status> {
+        let stream = snapshot_stream(&self.header_gen, &self.db)?;
+        // Need to convert xlinerpc Stream to tonic Streaming
+        Ok(XlineResponse::new(Box::pin(stream)))
     }
 
     async fn move_leader(
         &self,
-        request: tonic::Request<MoveLeaderRequest>,
-    ) -> Result<tonic::Response<MoveLeaderResponse>, Status> {
-        let node_id = request.into_inner().target_id;
-        self.client.move_leader(node_id).await?;
-        Ok(tonic::Response::new(MoveLeaderResponse {
+        request: Request<MoveLeaderRequest>,
+    ) -> Result<XlineResponse<MoveLeaderResponse>, Status> {
+        let (data, _metadata) = request.into_parts();
+        let node_id = data.target_id;
+        self.client.move_leader(node_id).await
+            .map_err(|e| Status::internal(e.to_string()))?;
+        Ok(XlineResponse::new(MoveLeaderResponse {
             header: Some(self.header_gen.gen_header()),
         }))
     }
 
     async fn downgrade(
         &self,
-        _request: tonic::Request<DowngradeRequest>,
-    ) -> Result<tonic::Response<DowngradeResponse>, Status> {
+        _request: Request<DowngradeRequest>,
+    ) -> Result<XlineResponse<DowngradeResponse>, Status> {
         Err(Status::unimplemented(
             "downgrade is unimplemented".to_owned(),
         ))

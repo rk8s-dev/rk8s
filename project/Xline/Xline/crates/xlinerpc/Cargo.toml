@@ -7,7 +7,14 @@ edition.workspace = true
 bytes = { workspace = true }
 prost = { workspace = true }
 thiserror = { workspace = true }
-tonic = { workspace = true }
+tonic = { workspace = true, optional = true }
+http = "1.0"
+tower-service = "0.3"
+futures = { workspace = true }
+
+[features]
+default = []
+tonic-compat = ["tonic"]
 
 [lints]
 workspace = true

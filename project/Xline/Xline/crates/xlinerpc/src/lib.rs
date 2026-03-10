@@ -3,12 +3,18 @@
 //! Provides Request/Response wrappers with metadata support and binary encoding.
 
 use std::collections::BTreeMap;
+use futures::Stream;
 
 pub mod codec;
 pub mod envelope;
 pub mod request;
 pub mod response;
 pub mod status;
+
+#[cfg(feature = "tonic-compat")]
+pub mod commandpb;
+#[cfg(feature = "tonic-compat")]
+pub mod inner_messagepb;
 
 // Re-export commonly used types
 pub use codec::{BinaryCodec, Codec, DecodeError, EncodeError};
@@ -17,12 +23,48 @@ pub use request::Request;
 pub use response::Response;
 pub use status::{Code, Status};
 
+// #[cfg(feature = "tonic-compat")]
+// pub use request::tonic_compat as request_tonic_compat;
+// #[cfg(feature = "tonic-compat")]
+// pub use response::tonic_compat as response_tonic_compat;
+
+#[cfg(feature = "tonic-compat")]
+pub use commandpb::*;
+
 /// Trait for types that can be converted into metadata bytes (keys or values)
-///
-/// This trait consolidates the conversion of various types into binary metadata.
 pub trait IntoMetadataBytes {
-    /// Convert into metadata bytes
     fn into_metadata_bytes(self) -> Vec<u8>;
+}
+
+#[cfg(feature = "tonic-compat")]
+pub struct Streaming<T> {
+    inner: tonic::Streaming<T>,
+}
+#[cfg(feature = "tonic-compat")]
+impl<T> Streaming<T> {
+    pub fn new(inner: tonic::Streaming<T>) -> Self {
+        Self { inner }
+    }
+    
+    pub async fn message(&mut self) -> Result<Option<T>, Status> {
+        self.inner.message().await.map_err(Into::into)
+    }
+
+    pub fn into_inner(self) -> tonic::Streaming<T> {
+        self.inner
+    }
+}
+#[cfg(feature = "tonic-compat")]
+impl<T> Stream for Streaming<T> {
+    type Item = Result<T, Status>;
+    
+    fn poll_next(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Self::Item>> {
+        use futures::StreamExt;
+        self.inner.poll_next_unpin(cx).map(|opt| opt.map(|r| r.map_err(Into::into)))
+    }
 }
 
 // Implement for common types
@@ -55,17 +97,12 @@ impl IntoMetadataBytes for Vec<u8> {
 }
 
 /// Metadata for RPC requests and responses
-/// Similar to tonic::MetadataMap but uses binary data internally
-/// In fact, the entry number is usually less than ten, and the key/value size is usually less than 128 bytes.
-/// Uses `BTreeMap` internally to guarantee deterministic iteration order during encoding.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct MetaData {
-    /// Key-value pairs for metadata (both binary)
     headers: BTreeMap<Vec<u8>, Vec<u8>>,
 }
 
 impl MetaData {
-    /// Create a new empty metadata
     #[must_use]
     #[inline]
     pub fn new() -> Self {
@@ -74,10 +111,6 @@ impl MetaData {
         }
     }
 
-    /// Create metadata with a single key-value pair
-    ///
-    /// # Panics
-    /// Panics if key or value exceeds 65535 bytes (codec limit)
     #[must_use]
     #[inline]
     pub fn with_entry<K, V>(key: K, value: V) -> Self
@@ -90,17 +123,6 @@ impl MetaData {
         meta
     }
 
-    /// Insert a key-value pair.
-    ///
-    /// # Panics
-    ///
-    /// Panics if any of the following preconditions are violated:
-    /// - Key exceeds 65535 bytes (`u16::MAX`)
-    /// - Value exceeds 65535 bytes (`u16::MAX`)
-    /// - Total entries would exceed 255 (`u8::MAX`)
-    ///
-    /// In practice these limits are never reached: metadata carries only a
-    /// handful of short RPC header fields.
     #[inline]
     pub fn insert<K, V>(&mut self, key: K, value: V)
     where
@@ -130,45 +152,34 @@ impl MetaData {
         );
     }
 
-    /// Get a value by key (returns binary data)
     #[must_use]
     #[inline]
     pub fn get<K: AsRef<[u8]>>(&self, key: K) -> Option<&[u8]> {
         self.headers.get(key.as_ref()).map(Vec::as_slice)
     }
 
-    /// Get a value by key as UTF-8 string
-    ///
-    /// # Errors
-    /// Returns error if the value is not valid UTF-8
     #[inline]
     pub fn get_str<K: AsRef<[u8]>>(&self, key: K) -> Option<Result<&str, std::str::Utf8Error>> {
         self.get(key).map(std::str::from_utf8)
     }
 
-    /// Remove a key-value pair
     #[inline]
     pub fn remove<K: AsRef<[u8]>>(&mut self, key: K) -> Option<Vec<u8>> {
         self.headers.remove(key.as_ref())
     }
 
-    /// Check if metadata is empty
     #[must_use]
     #[inline]
     pub fn is_empty(&self) -> bool {
         self.headers.is_empty()
     }
 
-    /// Get the number of entries
     #[must_use]
     #[inline]
     pub fn len(&self) -> usize {
         self.headers.len()
     }
 
-    /// Iterate over all entries as byte slices
-    ///
-    /// Iteration order is deterministic (sorted by key) due to `BTreeMap` storage.
     pub fn iter(&self) -> impl Iterator<Item = (&[u8], &[u8])> {
         self.headers
             .iter()
@@ -223,22 +234,18 @@ mod tests {
     #[test]
     fn test_metadata_binary_data() {
         let mut meta = MetaData::new();
-        // Insert binary data (not UTF-8)
         let key = vec![0u8, 1, 2, 3];
         let value = vec![255u8, 254, 253];
         meta.insert(key.clone(), value.clone());
 
         assert_eq!(meta.get(&key), Some(value.as_slice()));
-        // get_str should return Err for invalid UTF-8
         assert!(meta.get_str(&key).unwrap().is_err());
     }
 
     #[test]
     fn test_metadata_string_and_binary_mix() {
         let mut meta = MetaData::new();
-        // Insert string
         meta.insert("string-key", "string-value");
-        // Insert binary
         meta.insert(vec![0xffu8, 0xfe], vec![0x01, 0x02]);
 
         assert_eq!(meta.get("string-key"), Some(b"string-value".as_slice()));

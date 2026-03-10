@@ -176,40 +176,31 @@ pub mod execute_error;
 pub mod interval;
 pub mod request_validation;
 
+// Import manually implemented proto types from the xlinerpc crate
 #[allow(dead_code)]
-mod etcdserverpb {
-    tonic::include_proto!("etcdserverpb");
-}
+mod etcdserverpb;
+#[allow(dead_code)]
+mod authpb;
+#[allow(dead_code)]
+mod mvccpb;
+#[allow(dead_code)]
+mod v3lockpb;
+#[allow(dead_code)]
+mod leasepb;
+#[allow(dead_code)]
+mod errorpb;
+#[allow(dead_code)]
+mod commandpb;
 
-#[allow(dead_code)]
-mod authpb {
-    tonic::include_proto!("authpb");
-}
-
-#[allow(dead_code)]
-mod mvccpb {
-    tonic::include_proto!("mvccpb");
-}
-
-#[allow(dead_code)]
-mod v3lockpb {
-    tonic::include_proto!("v3lockpb");
-}
-
-#[allow(dead_code)]
-mod leasepb {
-    tonic::include_proto!("leasepb");
-}
-
-#[allow(dead_code)]
-mod commandpb {
-    tonic::include_proto!("commandpb");
-}
-
-#[allow(dead_code)]
-mod errorpb {
-    tonic::include_proto!("errorpb");
-}
+pub use self::{
+    etcdserverpb::*,
+    authpb::*,
+    mvccpb::*,
+    v3lockpb::*,
+    leasepb::*,
+    commandpb::*,
+    errorpb::*,
+};
 
 use std::fmt::Display;
 
@@ -254,31 +245,55 @@ pub use self::{
         SnapshotResponse, StatusRequest, StatusResponse, TxnRequest, TxnResponse,
         WatchCancelRequest, WatchCreateRequest, WatchProgressRequest, WatchRequest, WatchResponse,
         alarm_request::AlarmAction,
-        auth_client::AuthClient,
-        auth_server::{Auth, AuthServer},
-        cluster_client::ClusterClient,
-        cluster_server::{Cluster, ClusterServer},
         compare::{CompareResult, CompareTarget, TargetUnion},
-        kv_client::KvClient,
-        kv_server::{Kv, KvServer},
-        lease_client::LeaseClient,
-        lease_server::{Lease, LeaseServer},
-        maintenance_client::MaintenanceClient,
-        maintenance_server::{Maintenance, MaintenanceServer},
         range_request::{SortOrder, SortTarget},
         request_op::Request,
         response_op::Response,
-        watch_client::WatchClient,
         watch_request::RequestUnion,
-        watch_server::{Watch, WatchServer},
     },
     leasepb::Lease as PbLease,
     mvccpb::{Event, KeyValue, event::EventType},
     v3lockpb::{
         LockRequest, LockResponse, UnlockRequest, UnlockResponse,
-        lock_server::{Lock, LockServer},
     },
 };
+
+// service clients and servers are re-exported for downstream crates that
+// expect to access them directly (xline-client, xline-server, etc.).  The
+// `Rpc*` aliases preserve the historic names used in xline_server.rs.
+
+pub use etcdserverpb::auth_client::AuthClient;
+pub use etcdserverpb::auth_server::{Auth, AuthServer};
+
+pub use etcdserverpb::kv_client::KvClient;
+pub use etcdserverpb::kv_server::{Kv, KvServer};
+
+pub use etcdserverpb::watch_client::WatchClient;
+pub use etcdserverpb::watch_server::{Watch, WatchServer};
+
+pub use etcdserverpb::lease_client::LeaseClient;
+pub use etcdserverpb::lease_server::{Lease, LeaseServer};
+
+pub use v3lockpb::lock_client::LockClient;
+pub use v3lockpb::lock_server::{Lock, LockServer};
+
+pub use etcdserverpb::maintenance_client::MaintenanceClient;
+pub use etcdserverpb::maintenance_server::{Maintenance, MaintenanceServer};
+
+pub use etcdserverpb::cluster_client::ClusterClient;
+pub use etcdserverpb::cluster_server::{Cluster, ClusterServer};
+
+// backward‑compatible aliases matching names previously exported by the crate
+// so that `use xlineapi::RpcKvServer` etc continues to work without touching
+// every consumer.
+pub use etcdserverpb::kv_server::KvServer as RpcKvServer;
+pub use etcdserverpb::lock_server::LockServer as RpcLockServer;
+pub use etcdserverpb::lease_server::LeaseServer as RpcLeaseServer;
+pub use etcdserverpb::auth_server::AuthServer as RpcAuthServer;
+pub use etcdserverpb::watch_server::WatchServer as RpcWatchServer;
+pub use etcdserverpb::maintenance_server::MaintenanceServer as RpcMaintenanceServer;
+pub use etcdserverpb::cluster_server::ClusterServer as RpcClusterServer;
+
 
 impl User {
     /// Check if user has the given role

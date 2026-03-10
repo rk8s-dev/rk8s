@@ -32,6 +32,7 @@
     // unused_crate_dependencies, the false positive case blocks us
     unused_extern_crates,
     unused_import_braces,
+    // unused_imports, // temporarily allow
     unused_lifetimes,
     unused_qualifications,
     unused_results,
@@ -174,6 +175,11 @@ mod rpc {
 }
 /// Command conflict implementation
 mod conflict;
+/// Curp protocol service (Protocol trait + ProtocolServer).
+///
+/// Extracted from tonic_build codegen output. Message types resolve to
+/// `curp::rpc::*` via extern_path mapping. No build-time codegen required.
+pub(crate) mod curp_proto;
 /// Xline metrics
 pub mod metrics;
 /// restore module, only for test

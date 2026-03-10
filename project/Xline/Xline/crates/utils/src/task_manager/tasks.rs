@@ -1,6 +1,6 @@
 //  AFTER_SYNC     LEASE_KEEP_ALIVE
 //      |                  |
-//  KV_UPDATES      TONIC_SERVER
+//  KV_UPDATES      CURP_SERVER
 //       \        /      |
 //      WATCH_TASK  CONF_CHANGE
 //
@@ -40,7 +40,7 @@ enum_with_iter! {
     KvUpdates,
     WatchTask,
     LeaseKeepAlive,
-    TonicServer,
+    CurpServer,
     Election,
     SyncFollower,
     ConfChange,
@@ -61,7 +61,7 @@ impl TaskName {
             | TaskName::KvUpdates
             | TaskName::WatchTask
             | TaskName::LeaseKeepAlive
-            | TaskName::TonicServer
+            | TaskName::CurpServer
             | TaskName::Election
             | TaskName::SyncFollower
             | TaskName::ConfChange
@@ -77,7 +77,7 @@ impl TaskName {
 pub const ALL_EDGES: [(TaskName, TaskName); 5] = [
     (TaskName::AfterSync, TaskName::KvUpdates),
     (TaskName::KvUpdates, TaskName::WatchTask),
-    (TaskName::LeaseKeepAlive, TaskName::TonicServer),
-    (TaskName::TonicServer, TaskName::WatchTask),
-    (TaskName::TonicServer, TaskName::ConfChange),
+    (TaskName::LeaseKeepAlive, TaskName::CurpServer),
+    (TaskName::CurpServer, TaskName::WatchTask),
+    (TaskName::CurpServer, TaskName::ConfChange),
 ];

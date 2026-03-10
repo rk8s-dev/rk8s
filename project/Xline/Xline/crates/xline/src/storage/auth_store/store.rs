@@ -16,13 +16,13 @@ use pbkdf2::{
     Pbkdf2,
     password_hash::{PasswordHash, PasswordVerifier},
 };
-use tonic::Status;
 use utils::parking_lot_lock::RwLockMap;
 use xlineapi::{
     AuthInfo,
     command::{CommandResponse, KeyRange, SyncResponse},
     execute_error::ExecuteError,
 };
+use xlinerpc::status::Status;
 // TODO: use our own status type
 // use xlinerpc::status::Status;
 
@@ -128,17 +128,18 @@ impl AuthStore {
         }
     }
 
-    /// Try get auth info from tonic request
+    /// Try get auth info from request
     #[allow(clippy::result_large_err)]
     pub(crate) fn try_get_auth_info_from_request<T>(
         &self,
-        request: &tonic::Request<T>,
+        request: &xlinerpc::Request<T>,
     ) -> Result<Option<AuthInfo>, Status> {
         if !self.is_enabled() {
             return Ok(None);
         }
-        if let Some(token) = get_token(request.metadata()) {
-            let auth_info = self.verify(&token)?;
+        if let Some(token) = get_token(request.meta()) {
+            let auth_info = self.verify(&token)
+                .map_err(|e| Status::unauthenticated(e.to_string()))?;
             return Ok(Some(auth_info));
         }
         if let Some(cn) = get_cn(request) {
@@ -146,6 +147,25 @@ impl AuthStore {
                 username: cn,
                 auth_revision: self.revision(),
             };
+            return Ok(Some(auth_info));
+        }
+        Ok(None)
+    }
+
+    /// Try get auth info from an optional token string
+    ///
+    /// Used by `CurpService` implementations where only token-based auth is available
+    /// (no TLS peer certificate access).
+    #[allow(clippy::result_large_err)]
+    pub(crate) fn try_get_auth_info_from_token(
+        &self,
+        token: Option<&str>,
+    ) -> Result<Option<AuthInfo>, Status> {
+        if !self.is_enabled() {
+            return Ok(None);
+        }
+        if let Some(token) = token {
+            let auth_info = self.verify(token)?;
             return Ok(Some(auth_info));
         }
         Ok(None)
@@ -1166,13 +1186,53 @@ impl AuthStore {
         Arc::clone(&self.revision)
     }
 }
+/// Parse common name from a DER-encoded certificate.  Returns the first
+/// `CN=` attribute found in the subject string.  We deliberately keep this
+/// logic simple so that it can be re‑used both in unit tests and in the
+/// `init_router` interceptor below.
+#[cfg(test)]
+fn parse_cn_from_cert(der: &[u8]) -> Option<String> {
+    x509_parser::parse_x509_der(der)
+        .ok()
+        .and_then(|(_, cert)| cert.subject().common_name().map(|s| s.to_string()))
+}
 
-/// Get common name from tonic request
-fn get_cn<T>(request: &tonic::Request<T>) -> Option<String> {
-    let chain = request.peer_certs()?;
-    let cert_der = chain.first()?;
-    let cert = x509_certificate::X509Certificate::from_der(cert_der.as_ref()).ok()?;
-    cert.subject_common_name()
+/// Get common name from request metadata or TLS extension.
+fn get_cn<T>(request: &xlinerpc::Request<T>) -> Option<String> {
+    // We rely on the server interceptors to populate metadata with the
+    // client certificate's common name.  This avoids pulling `tonic` into the
+    // storage layer and keeps `xlinerpc` lean.
+    if let Some(bytes) = request.meta().get(b"x-tls-cn") {
+        if let Ok(s) = String::from_utf8(bytes.clone()) {
+            return Some(s);
+        }
+    }
+    None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use xlinerpc::Request;
+
+    #[test]
+    fn get_cn_reads_metadata() {
+        let mut req = Request::from_data("");
+        req.meta_mut().insert("x-tls-cn", "alice");
+        assert_eq!(get_cn(&req), Some("alice".to_string()));
+    }
+
+    #[test]
+    fn parse_cn_from_cert_works() {
+        // load a real client certificate from the fixtures; the CN for the
+        // u1 certificate is "u1" according to tls_test.
+        let path = format!("{}/../fixtures/u1_client.crt", env!("CARGO_MANIFEST_DIR"));
+        let pem = std::fs::read(&path).expect("failed to read cert");
+        let mut reader = &pem[..];
+        let certs = rustls_pemfile::certs(&mut reader).expect("failed to parse PEM");
+        assert!(!certs.is_empty());
+        assert_eq!(parse_cn_from_cert(&certs[0]), Some("u1".to_string()));
+    }
 }
 
 #[cfg(test)]
