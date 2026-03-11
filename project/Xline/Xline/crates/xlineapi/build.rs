@@ -1,5 +1,5 @@
 fn main() {
-    prost_build::Config::new()
+    tonic_build::configure()
         .type_attribute(".", "#[derive(serde::Deserialize, serde::Serialize)]")
         .compile_protos(
             &[

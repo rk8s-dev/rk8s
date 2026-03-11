@@ -345,6 +345,14 @@ impl From<ValidationError> for xlinerpc::Status {
     }
 }
 
+// retain direct conversion to tonic::Status for handlers still returning tonic
+impl From<ValidationError> for tonic::Status {
+    #[inline]
+    fn from(err: ValidationError) -> Self {
+        xlinerpc::Status::from(err).into()
+    }
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
