@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use utils::hash_password;
+use tracing::debug;
 use xlinerpc::{Request, Response as XlineResponse, Status};
 use xlineapi::{
     command::{Command, CommandResponse, CurpClient, SyncResponse},

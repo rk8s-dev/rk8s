@@ -10,6 +10,7 @@ use xlineapi::{
     AuthInfo, EventType,
     command::{Command, CommandResponse, CurpClient, KeyRange, SyncResponse},
     execute_error::ExecuteError,
+    WatchClient,
 };
 use crate::{
     id_gen::IdGenerator,

@@ -32,55 +32,55 @@ pub trait Maintenance {
     /// Alarm activates, deactivates, and queries alarms regarding cluster health.
     async fn alarm(
         &self,
-        request: xlinerpc::Request<AlarmRequest>,
-    ) -> Result<xlinerpc::Response<AlarmResponse>, Status>;
+        request: tonic::Request<AlarmRequest>,
+    ) -> Result<tonic::Response<AlarmResponse>, Status>;
 
     /// Status gets the status of the member.
     async fn status(
         &self,
-        request: xlinerpc::Request<StatusRequest>,
-    ) -> Result<xlinerpc::Response<StatusResponse>, Status>;
+        request: tonic::Request<StatusRequest>,
+    ) -> Result<tonic::Response<StatusResponse>, Status>;
 
     /// Defragment defragments a member's backend database to recover storage space.
     async fn defragment(
         &self,
-        request: xlinerpc::Request<DefragmentRequest>,
-    ) -> Result<xlinerpc::Response<DefragmentResponse>, Status>;
+        request: tonic::Request<DefragmentRequest>,
+    ) -> Result<tonic::Response<DefragmentResponse>, Status>;
 
     /// Hash computes the hash of whole backend keyspace,
     /// including key, lease, and other buckets in storage.
     /// This is designed for testing ONLY!
     async fn hash(
         &self,
-        request: xlinerpc::Request<HashRequest>,
-    ) -> Result<xlinerpc::Response<HashResponse>, Status>;
+        request: tonic::Request<HashRequest>,
+    ) -> Result<tonic::Response<HashResponse>, Status>;
 
     /// HashKV computes the hash of all MVCC keys up to a given revision.
     /// It only iterates through the KV event history and does not include items
     /// in the lease bucket. This is designed for testing ONLY!
     async fn hash_kv(
         &self,
-        request: xlinerpc::Request<HashKvRequest>,
-    ) -> Result<xlinerpc::Response<HashKvResponse>, Status>;
+        request: tonic::Request<HashKvRequest>,
+    ) -> Result<tonic::Response<HashKvResponse>, Status>;
 
     /// Snapshot sends a snapshot of the entire backend from a member over a stream to a client.
     async fn snapshot(
         &self,
-        request: xlinerpc::Request<SnapshotRequest>,
-    ) -> Result<xlinerpc::Response<SnapshotStream>, Status>;
+        request: tonic::Request<SnapshotRequest>,
+    ) -> Result<tonic::Response<SnapshotStream>, Status>;
 
     /// MoveLeader requests current leader node to transfer its leadership to transferee.
     async fn move_leader(
         &self,
-        request: xlinerpc::Request<MoveLeaderRequest>,
-    ) -> Result<xlinerpc::Response<MoveLeaderResponse>, Status>;
+        request: tonic::Request<MoveLeaderRequest>,
+    ) -> Result<tonic::Response<MoveLeaderResponse>, Status>;
 
     /// Downgrade requests downgrades, verifies feasibility or cancels downgrade
     /// on the cluster version.
     async fn downgrade(
         &self,
-        request: xlinerpc::Request<DowngradeRequest>,
-    ) -> Result<xlinerpc::Response<DowngradeResponse>, Status>;
+        request: tonic::Request<DowngradeRequest>,
+    ) -> Result<tonic::Response<DowngradeResponse>, Status>;
 }
 
 /// Minimum page size
@@ -160,8 +160,8 @@ impl MaintenanceServer {
 impl Maintenance for MaintenanceServer {
     async fn alarm(
         &self,
-        request: xlinerpc::Request<AlarmRequest>,
-    ) -> Result<xlinerpc::Response<AlarmResponse>, Status> {
+        request: tonic::Request<AlarmRequest>,
+    ) -> Result<tonic::Response<AlarmResponse>, Status> {
         let (res, sync_res) = self.propose(request).await?;
         let mut res: AlarmResponse = res.into_inner().into();
         if let Some(sync_res) = sync_res {
@@ -171,7 +171,7 @@ impl Maintenance for MaintenanceServer {
                 header.revision = revision;
             }
         }
-        Ok(xlinerpc::Response::new(res))
+        Ok(tonic::Response::new(res))
     }
 
     async fn status(

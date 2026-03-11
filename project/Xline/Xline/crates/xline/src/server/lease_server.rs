@@ -36,26 +36,26 @@ pub trait Lease {
     /// deleted if the lease expires. Each expired key generates a delete event in the event history.
     async fn lease_grant(
         &self,
-        request: Request<LeaseGrantRequest>,
-    ) -> Result<XlineResponse<LeaseGrantResponse>, Status>;
+        request: tonic::Request<LeaseGrantRequest>,
+    ) -> Result<tonic::Response<LeaseGrantResponse>, Status>;
 
     /// LeaseRevoke revokes a lease. All keys attached to the lease will expire and be deleted.
     async fn lease_revoke(
         &self,
-        request: Request<LeaseRevokeRequest>,
-    ) -> Result<XlineResponse<LeaseRevokeResponse>, Status>;
+        request: tonic::Request<LeaseRevokeRequest>,
+    ) -> Result<tonic::Response<LeaseRevokeResponse>, Status>;
 
     /// LeaseTimeToLive retrieves lease information.
     async fn lease_time_to_live(
         &self,
-        request: Request<LeaseTimeToLiveRequest>,
-    ) -> Result<XlineResponse<LeaseTimeToLiveResponse>, Status>;
+        request: tonic::Request<LeaseTimeToLiveRequest>,
+    ) -> Result<tonic::Response<LeaseTimeToLiveResponse>, Status>;
 
     /// LeaseLeases lists all existing leases.
     async fn lease_leases(
         &self,
-        request: Request<LeaseLeasesRequest>,
-    ) -> Result<XlineResponse<LeaseLeasesResponse>, Status>;
+        request: tonic::Request<LeaseLeasesRequest>,
+    ) -> Result<tonic::Response<LeaseLeasesResponse>, Status>;
 
     /// LeaseKeepAlive keeps a lease alive by streaming periodic keep-alive messages.
     /// Clients must send keep-alive requests at regular intervals to prevent lease expiration.
