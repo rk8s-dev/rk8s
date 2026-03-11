@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use async_stream::stream;
 use clippy_utilities::OverflowArithmetic;
-use tonic::Status;
+use xlinerpc::{Request, Response as XlineResponse, Status};
 use tonic::transport::{Channel, ClientTlsConfig, Endpoint};
 use tracing::debug;
 use utils::build_endpoint;
@@ -11,19 +11,40 @@ use xlineapi::{
     command::{Command, CommandResponse, CurpClient, KeyRange, SyncResponse},
     execute_error::ExecuteError,
 };
-// TODO: use our own status type
-// use xlinerpc::status::Status;
 use crate::{
     id_gen::IdGenerator,
     rpc::{
         Compare, CompareResult, CompareTarget, DeleteRangeRequest, DeleteRangeResponse,
-        LeaseGrantRequest, LeaseGrantResponse, Lock, LockRequest, LockResponse, PutRequest,
-        RangeRequest, RangeResponse, Request, RequestOp, RequestUnion, RequestWrapper, Response,
+        LeaseGrantRequest, LeaseGrantResponse, LockRequest, LockResponse, PutRequest,
+        RangeRequest, RangeResponse, RequestOp, RequestUnion, RequestWrapper, Response,
         ResponseHeader, SortOrder, SortTarget, TargetUnion, TxnRequest, TxnResponse, UnlockRequest,
-        UnlockResponse, WatchClient, WatchCreateRequest, WatchRequest,
+        UnlockResponse, WatchCreateRequest, WatchRequest,
     },
     storage::AuthStore,
 };
+
+/// Lock service trait
+#[async_trait::async_trait]
+pub trait Lock {
+    /// Lock acquires a distributed shared lock on a given named lock.
+    /// On success, it will return a unique key that exists so long as the
+    /// lock is held by the caller. This key can be used in conjunction with
+    /// transactions to safely ensure updates to etcd only occur while holding
+    /// lock ownership. The lock is held until Unlock is called on the key
+    /// or the lease associate with the owner expires.
+    async fn lock(
+        &self,
+        request: Request<LockRequest>,
+    ) -> Result<XlineResponse<LockResponse>, Status>;
+
+    /// Unlock takes a key returned by Lock and releases the hold on lock. The
+    /// next Lock caller waiting for the lock will then be woken up and given
+    /// ownership of the lock.
+    async fn unlock(
+        &self,
+        request: Request<UnlockRequest>,
+    ) -> Result<XlineResponse<UnlockResponse>, Status>;
+}
 
 /// Default session ttl
 const DEFAULT_SESSION_TTL: i64 = 60;
@@ -201,7 +222,7 @@ impl LockServer {
     }
 }
 
-#[tonic::async_trait]
+#[async_trait::async_trait]
 impl Lock for LockServer {
     /// Lock acquires a distributed shared lock on a given named lock.
     /// On success, it will return a unique key that exists so long as the
@@ -211,8 +232,8 @@ impl Lock for LockServer {
     /// lease associate with the owner expires.
     async fn lock(
         &self,
-        request: tonic::Request<LockRequest>,
-    ) -> Result<tonic::Response<LockResponse>, Status> {
+        request: Request<LockRequest>,
+    ) -> Result<XlineResponse<LockResponse>, Status> {
         debug!("Receive LockRequest {:?}", request);
         let auth_info = self.auth_store.try_get_auth_info_from_request(&request)?;
         let lock_req = request.into_inner();
@@ -277,7 +298,7 @@ impl Lock for LockServer {
             header,
             key: key.into_bytes(),
         };
-        Ok(tonic::Response::new(res))
+        Ok(XlineResponse::new(res))
     }
 
     /// Unlock takes a key returned by Lock and releases the hold on lock. The
@@ -285,11 +306,11 @@ impl Lock for LockServer {
     /// ownership of the lock.
     async fn unlock(
         &self,
-        request: tonic::Request<UnlockRequest>,
-    ) -> Result<tonic::Response<UnlockResponse>, Status> {
+        request: Request<UnlockRequest>,
+    ) -> Result<XlineResponse<UnlockResponse>, Status> {
         debug!("Receive UnlockRequest {:?}", request);
         let auth_info = self.auth_store.try_get_auth_info_from_request(&request)?;
         let header = self.delete_key(&request.get_ref().key, auth_info).await?;
-        Ok(tonic::Response::new(UnlockResponse { header }))
+        Ok(XlineResponse::new(UnlockResponse { header }))
     }
 }

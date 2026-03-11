@@ -7,20 +7,18 @@ use curp::{cmd::CommandExecutor as _, members::ClusterInfo, server::RawCurp};
 use engine::SnapshotApi;
 use futures::stream::Stream;
 use sha2::{Digest, Sha256};
-use tonic::Status;
+use xlinerpc::Status;
 use tracing::{debug, error};
 use xlineapi::{
     RequestWrapper,
     command::{Command, CommandResponse, CurpClient, SyncResponse},
 };
-// TODO: use our own status type
-// use xlinerpc::status::Status;
 use super::command::CommandExecutor;
 use crate::{
     header_gen::HeaderGenerator,
     rpc::{
         AlarmRequest, AlarmResponse, DefragmentRequest, DefragmentResponse, DowngradeRequest,
-        DowngradeResponse, HashKvRequest, HashKvResponse, HashRequest, HashResponse, Maintenance,
+        DowngradeResponse, HashKvRequest, HashKvResponse, HashRequest, HashResponse,
         MoveLeaderRequest, MoveLeaderResponse, SnapshotRequest, SnapshotResponse, StatusRequest,
         StatusResponse,
     },
@@ -28,10 +26,70 @@ use crate::{
     storage::{AlarmStore, AuthStore, KvStore, db::DB},
 };
 
+/// Maintenance service trait
+#[async_trait::async_trait]
+pub trait Maintenance {
+    /// Alarm activates, deactivates, and queries alarms regarding cluster health.
+    async fn alarm(
+        &self,
+        request: xlinerpc::Request<AlarmRequest>,
+    ) -> Result<xlinerpc::Response<AlarmResponse>, Status>;
+
+    /// Status gets the status of the member.
+    async fn status(
+        &self,
+        request: xlinerpc::Request<StatusRequest>,
+    ) -> Result<xlinerpc::Response<StatusResponse>, Status>;
+
+    /// Defragment defragments a member's backend database to recover storage space.
+    async fn defragment(
+        &self,
+        request: xlinerpc::Request<DefragmentRequest>,
+    ) -> Result<xlinerpc::Response<DefragmentResponse>, Status>;
+
+    /// Hash computes the hash of whole backend keyspace,
+    /// including key, lease, and other buckets in storage.
+    /// This is designed for testing ONLY!
+    async fn hash(
+        &self,
+        request: xlinerpc::Request<HashRequest>,
+    ) -> Result<xlinerpc::Response<HashResponse>, Status>;
+
+    /// HashKV computes the hash of all MVCC keys up to a given revision.
+    /// It only iterates through the KV event history and does not include items
+    /// in the lease bucket. This is designed for testing ONLY!
+    async fn hash_kv(
+        &self,
+        request: xlinerpc::Request<HashKvRequest>,
+    ) -> Result<xlinerpc::Response<HashKvResponse>, Status>;
+
+    /// Snapshot sends a snapshot of the entire backend from a member over a stream to a client.
+    async fn snapshot(
+        &self,
+        request: xlinerpc::Request<SnapshotRequest>,
+    ) -> Result<xlinerpc::Response<SnapshotStream>, Status>;
+
+    /// MoveLeader requests current leader node to transfer its leadership to transferee.
+    async fn move_leader(
+        &self,
+        request: xlinerpc::Request<MoveLeaderRequest>,
+    ) -> Result<xlinerpc::Response<MoveLeaderResponse>, Status>;
+
+    /// Downgrade requests downgrades, verifies feasibility or cancels downgrade
+    /// on the cluster version.
+    async fn downgrade(
+        &self,
+        request: xlinerpc::Request<DowngradeRequest>,
+    ) -> Result<xlinerpc::Response<DowngradeResponse>, Status>;
+}
+
 /// Minimum page size
 const MIN_PAGE_SIZE: u64 = 512;
 /// Snapshot chunk size
 pub(crate) const MAINTENANCE_SNAPSHOT_CHUNK_SIZE: u64 = 64 * 1024;
+
+/// Snapshot stream type alias
+type SnapshotStream = Pin<Box<dyn Stream<Item = Result<SnapshotResponse, Status>> + Send>>;
 
 /// Maintenance Server
 pub(crate) struct MaintenanceServer {
@@ -98,12 +156,12 @@ impl MaintenanceServer {
     }
 }
 
-#[tonic::async_trait]
+#[async_trait::async_trait]
 impl Maintenance for MaintenanceServer {
     async fn alarm(
         &self,
-        request: tonic::Request<AlarmRequest>,
-    ) -> Result<tonic::Response<AlarmResponse>, Status> {
+        request: xlinerpc::Request<AlarmRequest>,
+    ) -> Result<xlinerpc::Response<AlarmResponse>, Status> {
         let (res, sync_res) = self.propose(request).await?;
         let mut res: AlarmResponse = res.into_inner().into();
         if let Some(sync_res) = sync_res {
@@ -113,13 +171,13 @@ impl Maintenance for MaintenanceServer {
                 header.revision = revision;
             }
         }
-        Ok(tonic::Response::new(res))
+        Ok(xlinerpc::Response::new(res))
     }
 
     async fn status(
         &self,
-        _request: tonic::Request<StatusRequest>,
-    ) -> Result<tonic::Response<StatusResponse>, Status> {
+        _request: xlinerpc::Request<StatusRequest>,
+    ) -> Result<xlinerpc::Response<StatusResponse>, Status> {
         let is_learner = self.cluster_info.self_member().is_learner;
         let (leader, term, _) = self.raw_curp.leader();
         let commit_index = self.raw_curp.commit_index();
@@ -150,13 +208,13 @@ impl Maintenance for MaintenanceServer {
             db_size_in_use: size.numeric_cast(),
             is_learner,
         };
-        Ok(tonic::Response::new(response))
+        Ok(xlinerpc::Response::new(response))
     }
 
     async fn defragment(
         &self,
-        _request: tonic::Request<DefragmentRequest>,
-    ) -> Result<tonic::Response<DefragmentResponse>, Status> {
+        _request: xlinerpc::Request<DefragmentRequest>,
+    ) -> Result<xlinerpc::Response<DefragmentResponse>, Status> {
         Err(Status::unimplemented(
             "defragment is unimplemented".to_owned(),
         ))
@@ -164,9 +222,9 @@ impl Maintenance for MaintenanceServer {
 
     async fn hash(
         &self,
-        _request: tonic::Request<HashRequest>,
-    ) -> Result<tonic::Response<HashResponse>, Status> {
-        Ok(tonic::Response::new(HashResponse {
+        _request: xlinerpc::Request<HashRequest>,
+    ) -> Result<xlinerpc::Response<HashResponse>, Status> {
+        Ok(xlinerpc::Response::new(HashResponse {
             header: Some(self.header_gen.gen_header()),
             hash: self.db.hash()?,
         }))
@@ -174,11 +232,11 @@ impl Maintenance for MaintenanceServer {
 
     async fn hash_kv(
         &self,
-        request: tonic::Request<HashKvRequest>,
-    ) -> Result<tonic::Response<HashKvResponse>, Status> {
+        request: xlinerpc::Request<HashKvRequest>,
+    ) -> Result<xlinerpc::Response<HashKvResponse>, Status> {
         let revision = request.get_ref().revision;
         let (hash, compact_revision, _hash_revision) = self.kv_store.hash_kv(revision)?;
-        Ok(tonic::Response::new(HashKvResponse {
+        Ok(xlinerpc::Response::new(HashKvResponse {
             header: Some(self.header_gen.gen_header()),
             hash,
             compact_revision,
@@ -186,32 +244,29 @@ impl Maintenance for MaintenanceServer {
         }))
     }
 
-    type SnapshotStream = Pin<Box<dyn Stream<Item = Result<SnapshotResponse, Status>> + Send>>;
-
     async fn snapshot(
         &self,
-        _request: tonic::Request<SnapshotRequest>,
-    ) -> Result<tonic::Response<Self::SnapshotStream>, Status> {
-        let stream = snapshot_stream(self.header_gen.as_ref(), self.db.as_ref())?;
-
-        Ok(tonic::Response::new(Box::pin(stream)))
+        _request: xlinerpc::Request<SnapshotRequest>,
+    ) -> Result<xlinerpc::Response<SnapshotStream>, Status> {
+        let stream = snapshot_stream(&self.header_gen, &self.db)?;
+        Ok(xlinerpc::Response::new(Box::pin(stream)))
     }
 
     async fn move_leader(
         &self,
-        request: tonic::Request<MoveLeaderRequest>,
-    ) -> Result<tonic::Response<MoveLeaderResponse>, Status> {
+        request: xlinerpc::Request<MoveLeaderRequest>,
+    ) -> Result<xlinerpc::Response<MoveLeaderResponse>, Status> {
         let node_id = request.into_inner().target_id;
         self.client.move_leader(node_id).await?;
-        Ok(tonic::Response::new(MoveLeaderResponse {
+        Ok(xlinerpc::Response::new(MoveLeaderResponse {
             header: Some(self.header_gen.gen_header()),
         }))
     }
 
     async fn downgrade(
         &self,
-        _request: tonic::Request<DowngradeRequest>,
-    ) -> Result<tonic::Response<DowngradeResponse>, Status> {
+        _request: xlinerpc::Request<DowngradeRequest>,
+    ) -> Result<xlinerpc::Response<DowngradeResponse>, Status> {
         Err(Status::unimplemented(
             "downgrade is unimplemented".to_owned(),
         ))
