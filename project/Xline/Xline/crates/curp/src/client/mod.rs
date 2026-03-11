@@ -29,11 +29,9 @@ use futures::{StreamExt, stream::FuturesUnordered};
 use parking_lot::RwLock;
 use tokio::task::JoinHandle;
 use tonic::transport::ClientTlsConfig;
-use tonic::{Code, Status};
 use tracing::{debug, warn};
 use utils::{build_endpoint, config::ClientConfig};
-// TODO: use our own status type
-// use xlinerpc::status::{Code,Status};
+use xlinerpc::status::{Code, Status};
 
 use self::{
     retry::{Retry, RetryConfig},
@@ -331,7 +329,7 @@ impl ClientBuilder {
     pub async fn discover_from(mut self, addrs: Vec<String>) -> Result<Self, Status> {
         #[cfg(feature = "quic")]
         if matches!(self.transport, crate::rpc::TransportConfig::Quic(..)) {
-            return Err(tonic::Status::internal(
+            return Err(Status::internal(
                 "discover_from uses tonic transport; use quic_discover_from for QUIC",
             ));
         }

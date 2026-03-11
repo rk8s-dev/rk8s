@@ -11,9 +11,7 @@ use curp_external_api::{
 use futures::Stream;
 use prost::Message;
 use serde::{Deserialize, Serialize};
-use tonic::{Code, Status};
-// TODO: use our own status type
-// use xlinerpc::status::{Code,Status};
+use xlinerpc::status::{Code, Status};
 pub(crate) use self::proto::{
     commandpb::CurpError as CurpErrorWrapper,
     inner_messagepb::{
@@ -1021,6 +1019,13 @@ impl From<CurpError> for Status {
         let details = CurpErrorWrapper { err: Some(err) }.encode_to_vec();
 
         Status::with_details(code, msg, details.into())
+    }
+}
+
+impl From<CurpError> for tonic::Status {
+    #[inline]
+    fn from(err: CurpError) -> Self {
+        Status::from(err).into()
     }
 }
 
