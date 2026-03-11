@@ -19,11 +19,10 @@ itertools = { workspace = true }
 prost = { workspace = true }
 serde = { workspace = true }
 thiserror = { workspace = true }
-tonic = { workspace = true }
 utils = { path = "../utils" }
 
 [build-dependencies]
-tonic-build = { workspace = true }
+prost-build = { workspace = true }
 
 [dev-dependencies]
 strum = "0.26"
