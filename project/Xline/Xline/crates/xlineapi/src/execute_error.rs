@@ -4,9 +4,9 @@ use curp::cmd::{PbCodec, PbSerializeError};
 use prost::Message;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
-use tonic::{Code, Status};
 // TODO: use our status/code to replace this.
 // use xlinerpc::status::{Code,Status};
+use xlinerpc::Code;
 use crate::{PbExecuteError, PbExecuteErrorOuter, PbRevisions, PbUserRole};
 
 /// Error met when executing commands
@@ -217,10 +217,7 @@ impl PbCodec for ExecuteError {
 }
 
 // The etcd client relies on GRPC error messages for error type interpretation.
-// In order to create an etcd-compatible API with Xline, it is necessary to return exact GRPC statuses to the etcd client.
-// Refer to `https://github.com/etcd-io/etcd/blob/main/api/v3rpc/rpctypes/error.go` for etcd's error parsing mechanism,
-// and refer to `https://github.com/etcd-io/etcd/blob/main/client/v3/doc.go` for how errors are handled by etcd client.
-impl From<ExecuteError> for Status {
+impl From<ExecuteError> for xlinerpc::Status {
     #[inline]
     fn from(err: ExecuteError) -> Self {
         let (code, message) = match err {
@@ -312,7 +309,7 @@ impl From<ExecuteError> for Status {
             ExecuteError::DbError(_) => (Code::Internal, err.to_string()),
         };
 
-        Status::new(code, message)
+        xlinerpc::Status::new(code, message)
     }
 }
 
