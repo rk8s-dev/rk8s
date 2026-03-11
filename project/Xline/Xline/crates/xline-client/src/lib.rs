@@ -192,23 +192,6 @@ pub mod error;
 
 /// Perform a FetchCluster unary RPC via tonic's low-level Grpc client.
 ///
-/// Replaces the tonic_build-generated `ProtocolClient`. Uses the same gRPC path
-/// and `ProstCodec` so it is wire-compatible with the server's `ProtocolServer`.
-async fn fetch_cluster_from_channel(
-    channel: Channel,
-    req: curp::rpc::FetchClusterRequest,
-) -> Result<curp::rpc::FetchClusterResponse, tonic::Status> {
-    let mut grpc = tonic::client::Grpc::new(channel);
-    grpc.ready()
-        .await
-        .map_err(|e| tonic::Status::unknown(format!("Service was not ready: {e}")))?;
-    let path = http::uri::PathAndQuery::from_static("/commandpb.Protocol/FetchCluster");
-    let codec = tonic::codec::ProstCodec::default();
-    grpc.unary(tonic::Request::new(req), path, codec)
-        .await
-        .map(tonic::Response::into_inner)
-}
-
 /// Xline client
 #[derive(Clone, Debug)]
 pub struct Client {
@@ -259,39 +242,18 @@ impl Client {
             .collect();
         let channel = Self::build_channel(addrs.clone(), options.tls_config.as_ref()).await?;
 
-        // Use tonic FetchCluster to get peer URLs from the client-facing endpoint
-        let resp = fetch_cluster_from_channel(
-            channel.clone(),
-            curp::rpc::FetchClusterRequest {
-                linearizable: false,
-            },
-        )
-        .await
-        .map_err(|e| XlineClientBuildError::RpcError(e.to_string()))?;
-
-        // Extract peer URLs for QUIC curp communication
-        let peer_urls: std::collections::HashMap<u64, Vec<String>> = resp
-            .members
-            .iter()
-            .map(|m| (m.id, m.peer_urls.clone()))
-            .collect();
-        let leader_state = resp.leader_id.as_ref().map(|id| (u64::from(id), resp.term));
-        let cluster_version = resp.cluster_version;
-
         // Build QUIC client for curp peer communication
         let quic_client = Arc::new(Self::build_quic_client(&options)?);
 
+        // Use discover_from to connect via QUIC and discover cluster topology
         // Use is_raw_curp=true so state refresh uses peer URLs (not client URLs)
-        let mut builder = CurpClientBuilder::new(options.client_config, true)
-            .quic_transport(quic_client)
-            .cluster_version(cluster_version)
-            .all_members(peer_urls);
-
-        if let Some((leader_id, term)) = leader_state {
-            builder = builder.leader_state(leader_id, term);
-        }
-
-        let curp_client = Arc::new(builder.build::<Command>()?) as Arc<CurpClient>;
+        let curp_client = Arc::new(
+            CurpClientBuilder::new(options.client_config, true)
+                .quic_transport(quic_client)
+                .discover_from(addrs)
+                .await?
+                .build::<Command>()?,
+        ) as Arc<CurpClient>;
         let id_gen = Arc::new(lease_gen::LeaseIdGenerator::new());
 
         let token = match options.user {
