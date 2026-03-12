@@ -176,41 +176,14 @@ pub mod execute_error;
 pub mod interval;
 pub mod request_validation;
 
-// Modification: Include checked-in generated files from a fixed source path, no longer relying on OUT_DIR
-#[allow(dead_code)]
-mod etcdserverpb {
-    include!("generated/etcdserverpb.rs");
-}
-
-#[allow(dead_code)]
-mod authpb {
-    include!("generated/authpb.rs");
-}
-
-#[allow(dead_code)]
-mod mvccpb {
-    include!("generated/mvccpb.rs");
-}
-
-#[allow(dead_code)]
-mod v3lockpb {
-    include!("generated/v3lockpb.rs");
-}
-
-#[allow(dead_code)]
-mod leasepb {
-    include!("generated/leasepb.rs");
-}
-
-#[allow(dead_code)]
-mod commandpb {
-    include!("generated/commandpb.rs");
-}
-
-#[allow(dead_code)]
-mod errorpb {
-    include!("generated/errorpb.rs");
-}
+// Import manually implemented proto types from the xlinerpc crate
+pub use xlinerpc::etcdserverpb::*;
+pub use xlinerpc::authpb::*;
+pub use xlinerpc::mvccpb::*;
+pub use xlinerpc::v3lockpb::*;
+pub use xlinerpc::leasepb::*;
+pub use xlinerpc::commandpb::*;
+pub use xlinerpc::errorpb::*;
 
 use std::fmt::Display;
 

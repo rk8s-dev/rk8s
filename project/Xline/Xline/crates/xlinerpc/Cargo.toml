@@ -8,6 +8,9 @@ bytes = { workspace = true }
 prost = { workspace = true }
 thiserror = { workspace = true }
 tonic = { workspace = true }
+http = "1.0"
+tower-service = "0.3"
+futures = { workspace = true }
 
 [lints]
 workspace = true

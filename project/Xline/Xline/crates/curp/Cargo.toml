@@ -63,9 +63,6 @@ test-macros = { path = "../test-macros" }
 tracing-subscriber = { workspace = true, features = ["env-filter", "time"] }
 tracing-test = "0.2.4"
 
-[build-dependencies]
-prost-build = { workspace = true }
-tonic-build = { workspace = true }
 
 [features]
 client-metrics = []

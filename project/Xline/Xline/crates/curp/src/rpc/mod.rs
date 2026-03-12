@@ -283,13 +283,13 @@ pub(crate) trait InnerCurpService: Send + Sync + 'static {
     trivial_casts,
     unused_results
 )]
-mod proto {
+pub(crate) mod proto {
     pub(crate) mod commandpb {
-        tonic::include_proto!("commandpb");
+        pub use xlinerpc::commandpb::*;
     }
 
     pub(crate) mod inner_messagepb {
-        tonic::include_proto!("inner_messagepb");
+        pub use xlinerpc::inner_messagepb::*;
     }
 }
 
