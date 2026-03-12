@@ -129,6 +129,7 @@ impl KvServer {
         Self::update_header_revision(&mut res, revision);
         Ok(res)
     }
+}
 
 impl KvServer {
     /// convert tonic request into xlinerpc request copying metadata
@@ -153,14 +154,15 @@ impl KvServer {
         Res: From<ResponseWrapper> + Send + 'static,
     {
         let xreq = self.tonic_to_xline(request);
-        let xresp = self
-            .handle_req(xreq)
-            .await
-            .map_err(|e| TonicStatus::from(e))?;
+        let (cmd_res, sync_res) = self.propose(xreq).await?;
+        let (mut res_wrapper, _) = cmd_res.into_parts();
+        if let Some(sync_res) = sync_res {
+            res_wrapper.update_revision(sync_res.revision());
+        }
+        let xresp = XlineResponse::new(res_wrapper.into());
         let (res_data, _) = xresp.into_parts();
         Ok(TonicResponse::new(res_data))
     }
-}
 }
 
 #[async_trait::async_trait]

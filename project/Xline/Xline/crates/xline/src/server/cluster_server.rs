@@ -8,49 +8,17 @@ use curp::{
     },
 };
 use itertools::Itertools;
-use xlinerpc::{Request, Response as XlineResponse, Status};
+use xlinerpc::{Request, Status};
 use utils::timestamp;
 use xlineapi::{
-    Member, MemberAddRequest, MemberAddResponse, MemberListRequest, MemberListResponse,
+    Cluster as GeneratedCluster, Member, MemberAddRequest, MemberAddResponse, MemberListRequest, MemberListResponse,
     MemberPromoteRequest, MemberPromoteResponse, MemberRemoveRequest, MemberRemoveResponse,
     MemberUpdateRequest, MemberUpdateResponse, command::CurpClient,
 };
 
+use tonic::{Request as TonicRequest, Response as TonicResponse, Status as TonicStatus};
+
 use crate::header_gen::HeaderGenerator;
-
-/// Cluster service trait
-#[async_trait::async_trait]
-pub trait Cluster {
-    /// MemberAdd adds a new member to the cluster.
-    async fn member_add(
-        &self,
-        request: Request<MemberAddRequest>,
-    ) -> Result<XlineResponse<MemberAddResponse>, Status>;
-
-    /// MemberRemove removes a member from the cluster.
-    async fn member_remove(
-        &self,
-        request: Request<MemberRemoveRequest>,
-    ) -> Result<XlineResponse<MemberRemoveResponse>, Status>;
-
-    /// MemberUpdate updates a member in the cluster.
-    async fn member_update(
-        &self,
-        request: Request<MemberUpdateRequest>,
-    ) -> Result<XlineResponse<MemberUpdateResponse>, Status>;
-
-    /// MemberList lists all members in the cluster.
-    async fn member_list(
-        &self,
-        request: Request<MemberListRequest>,
-    ) -> Result<XlineResponse<MemberListResponse>, Status>;
-
-    /// MemberPromote promotes a learner to a voting member.
-    async fn member_promote(
-        &self,
-        request: Request<MemberPromoteRequest>,
-    ) -> Result<XlineResponse<MemberPromoteResponse>, Status>;
-}
 
 /// Cluster Server
 pub(crate) struct ClusterServer {
@@ -82,15 +50,46 @@ impl ClusterServer {
             })
             .collect())
     }
+
+    /// convert tonic request into xlinerpc request copying metadata
+    fn tonic_to_xline<Req>(&self, request: TonicRequest<Req>) -> Request<Req> {
+        let (body, metadata) = request.into_parts();
+        let mut xreq = Request::from_data(body);
+        for (key, value) in metadata.iter() {
+            xreq
+                .meta_mut()
+                .insert(key.as_bytes().to_vec(), value.as_bytes().to_vec());
+        }
+        xreq
+    }
+
+    /// helper bridging tonic -> xlinerpc and back again
+    async fn handle_req_tonic<Req, Res>(
+        &self,
+        request: TonicRequest<Req>,
+    ) -> Result<TonicResponse<Res>, TonicStatus>
+    where
+        Req: Into<MemberAddRequest> + Into<MemberRemoveRequest> + Into<MemberUpdateRequest> + Into<MemberListRequest> + Into<MemberPromoteRequest> + Send + 'static,
+        Res: From<MemberAddResponse> + From<MemberRemoveResponse> + From<MemberUpdateResponse> + From<MemberListResponse> + From<MemberPromoteResponse> + Send + 'static,
+    {
+        let xreq = self.tonic_to_xline(request);
+        let xresp = self
+            .handle_req(xreq)
+            .await
+            .map_err(|e| TonicStatus::from(e))?;
+        let (res_data, _) = xresp.into_parts();
+        Ok(TonicResponse::new(res_data))
+    }
 }
 
 #[async_trait::async_trait]
-impl Cluster for ClusterServer {
+impl GeneratedCluster for ClusterServer {
     async fn member_add(
         &self,
-        request: Request<MemberAddRequest>,
-    ) -> Result<XlineResponse<MemberAddResponse>, Status> {
-        let (req, _) = request.into_parts();
+        request: TonicRequest<MemberAddRequest>,
+    ) -> Result<TonicResponse<MemberAddResponse>, TonicStatus> {
+        let xreq = self.tonic_to_xline(request);
+        let (req, _) = xreq.into_parts();
         let change_type = if req.is_learner {
             i32::from(AddLearner)
         } else {
@@ -105,60 +104,71 @@ impl Cluster for ClusterServer {
                 node_id,
                 address: peer_url_ls,
             }])
-            .await?;
+            .await
+            .map_err(TonicStatus::from)?;
         let resp = MemberAddResponse {
             header: Some(self.header_gen.gen_header()),
             member: members.iter().find(|m| m.id == node_id).cloned(),
             members,
         };
-        Ok(XlineResponse::new(resp))
+        Ok(TonicResponse::new(resp))
     }
 
     async fn member_remove(
         &self,
-        request: Request<MemberRemoveRequest>,
-    ) -> Result<XlineResponse<MemberRemoveResponse>, Status> {
-        let (req, _) = request.into_parts();
+        request: TonicRequest<MemberRemoveRequest>,
+    ) -> Result<TonicResponse<MemberRemoveResponse>, TonicStatus> {
+        let xreq = self.tonic_to_xline(request);
+        let (req, _) = xreq.into_parts();
         let members = self
             .propose_conf_change(vec![ConfChange {
                 change_type: i32::from(Remove),
                 node_id: req.id,
                 address: vec![],
             }])
-            .await?;
+            .await
+            .map_err(TonicStatus::from)?;
         let resp = MemberRemoveResponse {
             header: Some(self.header_gen.gen_header()),
             members,
         };
-        Ok(XlineResponse::new(resp))
+        Ok(TonicResponse::new(resp))
     }
 
     async fn member_update(
         &self,
-        request: Request<MemberUpdateRequest>,
-    ) -> Result<XlineResponse<MemberUpdateResponse>, Status> {
-        let (req, _) = request.into_parts();
+        request: TonicRequest<MemberUpdateRequest>,
+    ) -> Result<TonicResponse<MemberUpdateResponse>, TonicStatus> {
+        let xreq = self.tonic_to_xline(request);
+        let (req, _) = xreq.into_parts();
         let members = self
             .propose_conf_change(vec![ConfChange {
                 change_type: i32::from(Update),
                 node_id: req.id,
                 address: req.peer_ur_ls,
             }])
-            .await?;
+            .await
+            .map_err(TonicStatus::from)?;
         let resp = MemberUpdateResponse {
             header: Some(self.header_gen.gen_header()),
             members,
         };
-        Ok(XlineResponse::new(resp))
+        Ok(TonicResponse::new(resp))
     }
 
     async fn member_list(
         &self,
-        request: Request<MemberListRequest>,
-    ) -> Result<XlineResponse<MemberListResponse>, Status> {
-        let (req, _) = request.into_parts();
+        request: TonicRequest<MemberListRequest>,
+    ) -> Result<TonicResponse<MemberListResponse>, TonicStatus> {
+        let xreq = self.tonic_to_xline(request);
+        let (req, _) = xreq.into_parts();
         let header = self.header_gen.gen_header();
-        let members = self.client.fetch_cluster(req.linearizable).await?.members;
+        let members = self
+            .client
+            .fetch_cluster(req.linearizable)
+            .await
+            .map_err(TonicStatus::from)?
+            .members;
         let resp = MemberListResponse {
             header: Some(header),
             members: members
@@ -172,25 +182,27 @@ impl Cluster for ClusterServer {
                 })
                 .collect(),
         };
-        Ok(XlineResponse::new(resp))
+        Ok(TonicResponse::new(resp))
     }
 
     async fn member_promote(
         &self,
-        request: Request<MemberPromoteRequest>,
-    ) -> Result<XlineResponse<MemberPromoteResponse>, Status> {
-        let (req, _) = request.into_parts();
+        request: TonicRequest<MemberPromoteRequest>,
+    ) -> Result<TonicResponse<MemberPromoteResponse>, TonicStatus> {
+        let xreq = self.tonic_to_xline(request);
+        let (req, _) = xreq.into_parts();
         let members = self
             .propose_conf_change(vec![ConfChange {
                 change_type: i32::from(Promote),
                 node_id: req.id,
                 address: vec![],
             }])
-            .await?;
+            .await
+            .map_err(TonicStatus::from)?;
         let resp = MemberPromoteResponse {
             header: Some(self.header_gen.gen_header()),
             members,
         };
-        Ok(XlineResponse::new(resp))
+        Ok(TonicResponse::new(resp))
     }
 }
