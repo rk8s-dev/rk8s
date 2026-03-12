@@ -164,7 +164,8 @@ impl AuthServer {
         T: Into<RequestWrapper>,
     {
         let auth_info = self.auth_store.try_get_auth_info_from_request(&request)?;
-        let request = request.into_inner().into();
+        let (data, _) = request.into_parts();
+        let request = data.into();
         let cmd = Command::new_with_auth_info(request, auth_info);
         let res = self.client.propose(&cmd, None, false).await??;
         Ok(res)
@@ -180,7 +181,7 @@ impl AuthServer {
         Res: From<ResponseWrapper>,
     {
         let (cmd_res, sync_res) = self.propose(request).await?;
-        let mut res_wrapper = cmd_res.into_inner();
+        let (mut res_wrapper, _) = cmd_res.into_parts();
         if let Some(sync_res) = sync_res {
             res_wrapper.update_revision(sync_res.revision());
         }
@@ -226,7 +227,7 @@ impl Auth for AuthServer {
         &self,
         mut request: Request<AuthUserAddRequest>,
     ) -> Result<XlineResponse<AuthUserAddResponse>, Status> {
-        let user_add_req = request.get_mut();
+        let user_add_req = request.data_mut();
         debug!("Receive AuthUserAddRequest {}", user_add_req);
         user_add_req.validation()?;
         let hashed_password = hash_password(user_add_req.password.as_bytes())
@@ -265,7 +266,7 @@ impl Auth for AuthServer {
         mut request: Request<AuthUserChangePasswordRequest>,
     ) -> Result<XlineResponse<AuthUserChangePasswordResponse>, Status> {
         debug!("Receive AuthUserChangePasswordRequest {:?}", request);
-        let user_change_password_req = request.get_mut();
+        let user_change_password_req = request.data_mut();
         let hashed_password = hash_password(user_change_password_req.password.as_bytes())
             .map_err(|err| Status::internal(format!("Failed to hash password: {err}")))?;
         user_change_password_req.hashed_password = hashed_password;
@@ -294,7 +295,7 @@ impl Auth for AuthServer {
         request: Request<AuthRoleAddRequest>,
     ) -> Result<XlineResponse<AuthRoleAddResponse>, Status> {
         debug!("Receive AuthRoleAddRequest {:?}", request);
-        request.get_ref().validation()?;
+        request.data().validation()?;
         self.handle_req(request).await
     }
 
@@ -328,9 +329,9 @@ impl Auth for AuthServer {
     ) -> Result<XlineResponse<AuthRoleGrantPermissionResponse>, Status> {
         debug!(
             "Receive AuthRoleGrantPermissionRequest {}",
-            request.get_ref()
+            request.data()
         );
-        request.get_ref().validation()?;
+        request.data().validation()?;
         self.handle_req(request).await
     }
 
@@ -340,7 +341,7 @@ impl Auth for AuthServer {
     ) -> Result<XlineResponse<AuthRoleRevokePermissionResponse>, Status> {
         debug!(
             "Receive AuthRoleRevokePermissionRequest {}",
-            request.get_ref()
+            request.data()
         );
         self.handle_req(request).await
     }

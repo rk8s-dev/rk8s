@@ -237,7 +237,7 @@ impl Lock for LockServer {
     ) -> Result<XlineResponse<LockResponse>, Status> {
         debug!("Receive LockRequest {:?}", request);
         let auth_info = self.auth_store.try_get_auth_info_from_request(&request)?;
-        let lock_req = request.into_inner();
+        let (lock_req, _) = request.into_parts();
         let lease_id = if lock_req.lease == 0 {
             self.lease_grant(auth_info.clone()).await?
         } else {
@@ -311,7 +311,7 @@ impl Lock for LockServer {
     ) -> Result<XlineResponse<UnlockResponse>, Status> {
         debug!("Receive UnlockRequest {:?}", request);
         let auth_info = self.auth_store.try_get_auth_info_from_request(&request)?;
-        let header = self.delete_key(&request.get_ref().key, auth_info).await?;
+        let header = self.delete_key(&request.data().key, auth_info).await?;
         Ok(XlineResponse::new(UnlockResponse { header }))
     }
 }

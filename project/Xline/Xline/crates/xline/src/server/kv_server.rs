@@ -113,7 +113,7 @@ impl KvServer {
         self.auth_storage
             .check_permission(command.request(), command.auth_info())?;
         let cmd_res = self.kv_storage.execute(command.request(), None)?;
-        Ok(Self::parse_response_op(cmd_res.into_inner().into()))
+        Ok(Self::parse_response_op(cmd_res.into_parts().0.into()))
     }
 
     /// Propose request and get result with fast/slow path
@@ -127,7 +127,7 @@ impl KvServer {
         let revision = sync_res
             .unwrap_or_else(|| unreachable!("sync response should always exist in slow path"))
             .revision();
-        let mut res = Self::parse_response_op(cmd_res.into_inner().into());
+        let mut res = Self::parse_response_op(cmd_res.into_parts().0.into());
         debug!("Get revision {:?}", revision);
         Self::update_header_revision(&mut res, revision);
         Ok(res)
@@ -291,7 +291,7 @@ impl Kv for KvServer {
             Either::Right(async {})
         };
         let (cmd_res, _sync_res) = self.client.propose(&cmd, None, false).await??;
-        let resp = cmd_res.into_inner();
+        let (resp, _) = cmd_res.into_parts();
         if timeout(self.compact_timeout, compact_physical_fut)
             .await
             .is_err()

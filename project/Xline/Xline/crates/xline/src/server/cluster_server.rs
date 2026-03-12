@@ -90,7 +90,7 @@ impl Cluster for ClusterServer {
         &self,
         request: Request<MemberAddRequest>,
     ) -> Result<XlineResponse<MemberAddResponse>, Status> {
-        let req = request.into_inner();
+        let (req, _) = request.into_parts();
         let change_type = if req.is_learner {
             i32::from(AddLearner)
         } else {
@@ -118,7 +118,7 @@ impl Cluster for ClusterServer {
         &self,
         request: Request<MemberRemoveRequest>,
     ) -> Result<XlineResponse<MemberRemoveResponse>, Status> {
-        let req = request.into_inner();
+        let (req, _) = request.into_parts();
         let members = self
             .propose_conf_change(vec![ConfChange {
                 change_type: i32::from(Remove),
@@ -137,7 +137,7 @@ impl Cluster for ClusterServer {
         &self,
         request: Request<MemberUpdateRequest>,
     ) -> Result<XlineResponse<MemberUpdateResponse>, Status> {
-        let req = request.into_inner();
+        let (req, _) = request.into_parts();
         let members = self
             .propose_conf_change(vec![ConfChange {
                 change_type: i32::from(Update),
@@ -156,7 +156,7 @@ impl Cluster for ClusterServer {
         &self,
         request: Request<MemberListRequest>,
     ) -> Result<XlineResponse<MemberListResponse>, Status> {
-        let req = request.into_inner();
+        let (req, _) = request.into_parts();
         let header = self.header_gen.gen_header();
         let members = self.client.fetch_cluster(req.linearizable).await?.members;
         let resp = MemberListResponse {
@@ -179,7 +179,7 @@ impl Cluster for ClusterServer {
         &self,
         request: Request<MemberPromoteRequest>,
     ) -> Result<XlineResponse<MemberPromoteResponse>, Status> {
-        let req = request.into_inner();
+        let (req, _) = request.into_parts();
         let members = self
             .propose_conf_change(vec![ConfChange {
                 change_type: i32::from(Promote),

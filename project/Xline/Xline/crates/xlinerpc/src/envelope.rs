@@ -84,6 +84,13 @@ impl<T: Message, Kind> Envelope<T, Kind> {
         (self.data, self.meta)
     }
 
+    /// Extract the payload, discarding metadata
+    #[must_use]
+    #[inline]
+    pub fn into_data(self) -> T {
+        self.data
+    }
+
     /// Encode to bytes using the default [`BinaryCodec`]
     ///
     /// # Errors
