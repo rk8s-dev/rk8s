@@ -19,7 +19,7 @@ use tonic::transport::server::{Connected, Router};
 use tonic::transport::{Certificate, ClientTlsConfig, Identity, Server, ServerTlsConfig};
 use tracing::{info, warn};
 
-use tonic::Status;
+use tonic::{MetadataValue, Status};
 // TODO: use our own status type
 // use xlinerpc::status::Status;
 

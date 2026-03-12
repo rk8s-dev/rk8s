@@ -3,6 +3,7 @@ use std::sync::Arc;
 use async_stream::stream;
 use clippy_utilities::OverflowArithmetic;
 use xlinerpc::{Request, Response as XlineResponse, Status};
+use tonic::{Request as TonicRequest, Response as TonicResponse, Status as TonicStatus};
 use tonic::transport::{Channel, ClientTlsConfig, Endpoint};
 use tracing::debug;
 use utils::build_endpoint;

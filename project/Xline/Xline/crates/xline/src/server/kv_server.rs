@@ -13,6 +13,7 @@ use tokio::time::timeout;
 use tracing::{debug, instrument};
 use xlineapi::Kv as GeneratedKv;
 use xlinerpc::{Request, Response as XlineResponse, Status};
+use xlineapi::ResponseWrapper;
 use tonic::{Request as TonicRequest, Response as TonicResponse, Status as TonicStatus};
 
 use crate::{
@@ -153,12 +154,24 @@ impl KvServer {
         Req: Into<RequestWrapper> + Send + 'static,
         Res: From<ResponseWrapper> + Send + 'static,
     {
+        // convert tonic request to xlinerpc request and capture auth info
         let xreq = self.tonic_to_xline(request);
-        let (cmd_res, sync_res) = self.propose(xreq).await?;
-        let (mut res_wrapper, _) = cmd_res.into_parts();
-        if let Some(sync_res) = sync_res {
-            res_wrapper.update_revision(sync_res.revision());
-        }
+        let auth_info = self.auth_storage.try_get_auth_info_from_request(&xreq)?;
+
+        // propose through the new API which returns a plain `Response`
+        let proto_resp: Response = self.propose(xreq, auth_info).await?;
+
+        // translate proto message into wrapper enum so the generic `Res`
+        // conversion can still be used.
+        let res_wrapper = match proto_resp {
+            Response::ResponseRange(resp) => ResponseWrapper::RangeResponse(resp),
+            Response::ResponsePut(resp) => ResponseWrapper::PutResponse(resp),
+            Response::ResponseDeleteRange(resp) => ResponseWrapper::DeleteRangeResponse(resp),
+            Response::ResponseTxn(resp) => ResponseWrapper::TxnResponse(resp),
+            Response::ResponseCompaction(resp) => ResponseWrapper::CompactionResponse(resp),
+            _ => unreachable!("unexpected response kind {:?}", proto_resp),
+        };
+
         let xresp = XlineResponse::new(res_wrapper.into());
         let (res_data, _) = xresp.into_parts();
         Ok(TonicResponse::new(res_data))

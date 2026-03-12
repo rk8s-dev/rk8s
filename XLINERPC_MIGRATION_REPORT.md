@@ -152,8 +152,8 @@ pub fn into_data(self) -> T {
 
 ### 已修改的文件
 - `project/Xline/Xline/crates/xline/src/server/auth_server.rs` - 7 处改动
-- `project/Xline/Xline/crates/xline/src/server/cluster_server.rs` - 5 处改动
-- `project/Xline/Xline/crates/xline/src/server/kv_server.rs` - 3 处改动
+- `project/Xline/Xline/crates/xline/src/server/cluster_server.rs` - 5 处改动 (现在所有 gRPC 方法通过一个统一的 handler 路由，解决了原来缺失 `handle_req` 导致的编译错误)
+- `project/Xline/Xline/crates/xline/src/server/kv_server.rs` - 3 处改动 (updated tonic bridge to match new propose signature and convert `Response` → `ResponseWrapper`)
 - `project/Xline/Xline/crates/xlinerpc/src/envelope.rs` - 1 处新增
 
 ### 需要后续修改的文件

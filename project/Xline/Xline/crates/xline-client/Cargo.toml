@@ -34,6 +34,9 @@ test-macros = { path = "../test-macros" }
 xline-test-utils = { path = "../xline-test-utils" }
 
 [build-dependencies]
+# tonic-build is carried for symmetry with xlineapi; clients no longer
+# need to compile proto definitions at build time. it can be removed
+# once the workspace build files are cleaned up.
 tonic-build = { workspace = true }
 
 [lints]

@@ -8,13 +8,105 @@ use curp::{
     },
 };
 use itertools::Itertools;
-use xlinerpc::{Request, Status};
+use tracing::debug;
+use xlinerpc::{Request, Response as XlineResponse, Status};
 use utils::timestamp;
 use xlineapi::{
     Cluster as GeneratedCluster, Member, MemberAddRequest, MemberAddResponse, MemberListRequest, MemberListResponse,
     MemberPromoteRequest, MemberPromoteResponse, MemberRemoveRequest, MemberRemoveResponse,
     MemberUpdateRequest, MemberUpdateResponse, command::CurpClient,
 };
+
+/// unified enum representing every supported cluster RPC request
+enum ClusterRequest {
+    Add(MemberAddRequest),
+    Remove(MemberRemoveRequest),
+    Update(MemberUpdateRequest),
+    List(MemberListRequest),
+    Promote(MemberPromoteRequest),
+}
+
+/// unified enum representing every supported cluster RPC response
+enum ClusterResponse {
+    Add(MemberAddResponse),
+    Remove(MemberRemoveResponse),
+    Update(MemberUpdateResponse),
+    List(MemberListResponse),
+    Promote(MemberPromoteResponse),
+}
+
+// conversions so that `handle_req_tonic` can remain generic
+impl From<MemberAddRequest> for ClusterRequest {
+    fn from(r: MemberAddRequest) -> Self {
+        ClusterRequest::Add(r)
+    }
+}
+impl From<MemberRemoveRequest> for ClusterRequest {
+    fn from(r: MemberRemoveRequest) -> Self {
+        ClusterRequest::Remove(r)
+    }
+}
+impl From<MemberUpdateRequest> for ClusterRequest {
+    fn from(r: MemberUpdateRequest) -> Self {
+        ClusterRequest::Update(r)
+    }
+}
+impl From<MemberListRequest> for ClusterRequest {
+    fn from(r: MemberListRequest) -> Self {
+        ClusterRequest::List(r)
+    }
+}
+impl From<MemberPromoteRequest> for ClusterRequest {
+    fn from(r: MemberPromoteRequest) -> Self {
+        ClusterRequest::Promote(r)
+    }
+}
+
+impl From<ClusterResponse> for MemberAddResponse {
+    fn from(r: ClusterResponse) -> Self {
+        if let ClusterResponse::Add(resp) = r {
+            resp
+        } else {
+            unreachable!("wrong response type for MemberAddResponse")
+        }
+    }
+}
+impl From<ClusterResponse> for MemberRemoveResponse {
+    fn from(r: ClusterResponse) -> Self {
+        if let ClusterResponse::Remove(resp) = r {
+            resp
+        } else {
+            unreachable!("wrong response type for MemberRemoveResponse")
+        }
+    }
+}
+impl From<ClusterResponse> for MemberUpdateResponse {
+    fn from(r: ClusterResponse) -> Self {
+        if let ClusterResponse::Update(resp) = r {
+            resp
+        } else {
+            unreachable!("wrong response type for MemberUpdateResponse")
+        }
+    }
+}
+impl From<ClusterResponse> for MemberListResponse {
+    fn from(r: ClusterResponse) -> Self {
+        if let ClusterResponse::List(resp) = r {
+            resp
+        } else {
+            unreachable!("wrong response type for MemberListResponse")
+        }
+    }
+}
+impl From<ClusterResponse> for MemberPromoteResponse {
+    fn from(r: ClusterResponse) -> Self {
+        if let ClusterResponse::Promote(resp) = r {
+            resp
+        } else {
+            unreachable!("wrong response type for MemberPromoteResponse")
+        }
+    }
+}
 
 use tonic::{Request as TonicRequest, Response as TonicResponse, Status as TonicStatus};
 
@@ -63,14 +155,108 @@ impl ClusterServer {
         xreq
     }
 
+    /// generic handler for typed cluster requests; called by the gRPC
+    /// methods so that all of them go through one place.
+    async fn handle_req(
+        &self,
+        request: Request<ClusterRequest>,
+    ) -> Result<XlineResponse<ClusterResponse>, Status> {
+        let (req, _) = request.into_parts();
+        match req {
+            ClusterRequest::Add(mut req) => {
+                let change_type = if req.is_learner {
+                    i32::from(AddLearner)
+                } else {
+                    i32::from(Add)
+                };
+                let peer_url_ls = req.peer_ur_ls.into_iter().sorted().collect_vec();
+                let node_id =
+                    ClusterInfo::calculate_member_id(peer_url_ls.clone(), "", Some(timestamp()));
+                let members = self
+                    .propose_conf_change(vec![ConfChange { change_type, node_id, address: peer_url_ls }])
+                    .await?;
+                let resp = MemberAddResponse {
+                    header: Some(self.header_gen.gen_header()),
+                    member: members.iter().find(|m| m.id == node_id).cloned(),
+                    members,
+                };
+                Ok(XlineResponse::new(ClusterResponse::Add(resp)))
+            }
+            ClusterRequest::Remove(req) => {
+                let members = self
+                    .propose_conf_change(vec![ConfChange {
+                        change_type: i32::from(Remove),
+                        node_id: req.id,
+                        address: vec![],
+                    }])
+                    .await?;
+                let resp = MemberRemoveResponse {
+                    header: Some(self.header_gen.gen_header()),
+                    members,
+                };
+                Ok(XlineResponse::new(ClusterResponse::Remove(resp)))
+            }
+            ClusterRequest::Update(req) => {
+                let members = self
+                    .propose_conf_change(vec![ConfChange {
+                        change_type: i32::from(Update),
+                        node_id: req.id,
+                        address: req.peer_ur_ls,
+                    }])
+                    .await?;
+                let resp = MemberUpdateResponse {
+                    header: Some(self.header_gen.gen_header()),
+                    members,
+                };
+                Ok(XlineResponse::new(ClusterResponse::Update(resp)))
+            }
+            ClusterRequest::List(req) => {
+                let header = self.header_gen.gen_header();
+                let members = self
+                    .client
+                    .fetch_cluster(req.linearizable)
+                    .await?
+                    .members;
+                let resp = MemberListResponse {
+                    header: Some(header),
+                    members: members
+                        .into_iter()
+                        .map(|member| Member {
+                            id: member.id,
+                            name: member.name,
+                            peer_ur_ls: member.peer_urls,
+                            client_ur_ls: member.client_urls,
+                            is_learner: member.is_learner,
+                        })
+                        .collect(),
+                };
+                Ok(XlineResponse::new(ClusterResponse::List(resp)))
+            }
+            ClusterRequest::Promote(req) => {
+                let members = self
+                    .propose_conf_change(vec![ConfChange {
+                        change_type: i32::from(Promote),
+                        node_id: req.id,
+                        address: vec![],
+                    }])
+                    .await?;
+                let resp = MemberPromoteResponse {
+                    header: Some(self.header_gen.gen_header()),
+                    members,
+                };
+                Ok(XlineResponse::new(ClusterResponse::Promote(resp)))
+            }
+        }
+    }
+
     /// helper bridging tonic -> xlinerpc and back again
     async fn handle_req_tonic<Req, Res>(
         &self,
         request: TonicRequest<Req>,
     ) -> Result<TonicResponse<Res>, TonicStatus>
     where
-        Req: Into<MemberAddRequest> + Into<MemberRemoveRequest> + Into<MemberUpdateRequest> + Into<MemberListRequest> + Into<MemberPromoteRequest> + Send + 'static,
-        Res: From<MemberAddResponse> + From<MemberRemoveResponse> + From<MemberUpdateResponse> + From<MemberListResponse> + From<MemberPromoteResponse> + Send + 'static,
+        Req: Into<ClusterRequest> + Send + 'static,
+        Res: From<ClusterResponse> + Send + 'static,
     {
         let xreq = self.tonic_to_xline(request);
         let xresp = self
@@ -78,7 +264,7 @@ impl ClusterServer {
             .await
             .map_err(|e| TonicStatus::from(e))?;
         let (res_data, _) = xresp.into_parts();
-        Ok(TonicResponse::new(res_data))
+        Ok(TonicResponse::new(res_data.into()))
     }
 }
 
@@ -88,121 +274,39 @@ impl GeneratedCluster for ClusterServer {
         &self,
         request: TonicRequest<MemberAddRequest>,
     ) -> Result<TonicResponse<MemberAddResponse>, TonicStatus> {
-        let xreq = self.tonic_to_xline(request);
-        let (req, _) = xreq.into_parts();
-        let change_type = if req.is_learner {
-            i32::from(AddLearner)
-        } else {
-            i32::from(Add)
-        };
-        let peer_url_ls = req.peer_ur_ls.into_iter().sorted().collect_vec();
-        // calculate node id based on addresses and current timestamp
-        let node_id = ClusterInfo::calculate_member_id(peer_url_ls.clone(), "", Some(timestamp()));
-        let members = self
-            .propose_conf_change(vec![ConfChange {
-                change_type,
-                node_id,
-                address: peer_url_ls,
-            }])
-            .await
-            .map_err(TonicStatus::from)?;
-        let resp = MemberAddResponse {
-            header: Some(self.header_gen.gen_header()),
-            member: members.iter().find(|m| m.id == node_id).cloned(),
-            members,
-        };
-        Ok(TonicResponse::new(resp))
+        debug!("Receive MemberAddRequest {:?}", request.get_ref());
+        self.handle_req_tonic(request).await
     }
 
     async fn member_remove(
         &self,
         request: TonicRequest<MemberRemoveRequest>,
     ) -> Result<TonicResponse<MemberRemoveResponse>, TonicStatus> {
-        let xreq = self.tonic_to_xline(request);
-        let (req, _) = xreq.into_parts();
-        let members = self
-            .propose_conf_change(vec![ConfChange {
-                change_type: i32::from(Remove),
-                node_id: req.id,
-                address: vec![],
-            }])
-            .await
-            .map_err(TonicStatus::from)?;
-        let resp = MemberRemoveResponse {
-            header: Some(self.header_gen.gen_header()),
-            members,
-        };
-        Ok(TonicResponse::new(resp))
+        debug!("Receive MemberRemoveRequest {:?}", request.get_ref());
+        self.handle_req_tonic(request).await
     }
 
     async fn member_update(
         &self,
         request: TonicRequest<MemberUpdateRequest>,
     ) -> Result<TonicResponse<MemberUpdateResponse>, TonicStatus> {
-        let xreq = self.tonic_to_xline(request);
-        let (req, _) = xreq.into_parts();
-        let members = self
-            .propose_conf_change(vec![ConfChange {
-                change_type: i32::from(Update),
-                node_id: req.id,
-                address: req.peer_ur_ls,
-            }])
-            .await
-            .map_err(TonicStatus::from)?;
-        let resp = MemberUpdateResponse {
-            header: Some(self.header_gen.gen_header()),
-            members,
-        };
-        Ok(TonicResponse::new(resp))
+        debug!("Receive MemberUpdateRequest {:?}", request.get_ref());
+        self.handle_req_tonic(request).await
     }
 
     async fn member_list(
         &self,
         request: TonicRequest<MemberListRequest>,
     ) -> Result<TonicResponse<MemberListResponse>, TonicStatus> {
-        let xreq = self.tonic_to_xline(request);
-        let (req, _) = xreq.into_parts();
-        let header = self.header_gen.gen_header();
-        let members = self
-            .client
-            .fetch_cluster(req.linearizable)
-            .await
-            .map_err(TonicStatus::from)?
-            .members;
-        let resp = MemberListResponse {
-            header: Some(header),
-            members: members
-                .into_iter()
-                .map(|member| Member {
-                    id: member.id,
-                    name: member.name,
-                    peer_ur_ls: member.peer_urls,
-                    client_ur_ls: member.client_urls,
-                    is_learner: member.is_learner,
-                })
-                .collect(),
-        };
-        Ok(TonicResponse::new(resp))
+        debug!("Receive MemberListRequest {:?}", request.get_ref());
+        self.handle_req_tonic(request).await
     }
 
     async fn member_promote(
         &self,
         request: TonicRequest<MemberPromoteRequest>,
     ) -> Result<TonicResponse<MemberPromoteResponse>, TonicStatus> {
-        let xreq = self.tonic_to_xline(request);
-        let (req, _) = xreq.into_parts();
-        let members = self
-            .propose_conf_change(vec![ConfChange {
-                change_type: i32::from(Promote),
-                node_id: req.id,
-                address: vec![],
-            }])
-            .await
-            .map_err(TonicStatus::from)?;
-        let resp = MemberPromoteResponse {
-            header: Some(self.header_gen.gen_header()),
-            members,
-        };
-        Ok(TonicResponse::new(resp))
+        debug!("Receive MemberPromoteRequest {:?}", request.get_ref());
+        self.handle_req_tonic(request).await
     }
 }
