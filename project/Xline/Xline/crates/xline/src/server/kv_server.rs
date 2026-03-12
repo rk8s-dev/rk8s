@@ -11,12 +11,9 @@ use event_listener::Event;
 use futures::future::Either;
 use tokio::time::timeout;
 use tracing::{debug, instrument};
-use xlineapi::{
-    AuthInfo, ResponseWrapper,
-    command::{Command, CurpClient},
-    request_validation::RequestValidator,
-};
+use xlineapi::Kv as GeneratedKv;
 use xlinerpc::{Request, Response as XlineResponse, Status};
+use tonic::{Request as TonicRequest, Response as TonicResponse, Status as TonicStatus};
 
 use crate::{
     revision_check::RevisionCheck,
@@ -133,36 +130,37 @@ impl KvServer {
         Ok(res)
     }
 
-    /// Update revision of `ResponseHeader`
-    pub(crate) fn update_header_revision(response: &mut Response, revision: i64) {
-        match *response {
-            Response::ResponseRange(ref mut res) => {
-                if let Some(header) = res.header.as_mut() {
-                    header.revision = revision;
-                }
-            }
-            Response::ResponsePut(ref mut res) => {
-                if let Some(header) = res.header.as_mut() {
-                    header.revision = revision;
-                }
-            }
-            Response::ResponseDeleteRange(ref mut res) => {
-                if let Some(header) = res.header.as_mut() {
-                    header.revision = revision;
-                }
-            }
-            Response::ResponseTxn(ref mut res) => {
-                if let Some(header) = res.header.as_mut() {
-                    header.revision = revision;
-                }
-                for resp in &mut res.responses {
-                    if let Some(re) = resp.response.as_mut() {
-                        Self::update_header_revision(re, revision);
-                    }
-                }
-            }
+impl KvServer {
+    /// convert tonic request into xlinerpc request copying metadata
+    fn tonic_to_xline<Req>(&self, request: TonicRequest<Req>) -> Request<Req> {
+        let (body, metadata) = request.into_parts();
+        let mut xreq = Request::from_data(body);
+        for (key, value) in metadata.iter() {
+            xreq
+                .meta_mut()
+                .insert(key.as_bytes().to_vec(), value.as_bytes().to_vec());
         }
+        xreq
     }
+
+    /// helper bridging tonic -> xlinerpc and back again
+    async fn handle_req_tonic<Req, Res>(
+        &self,
+        request: TonicRequest<Req>,
+    ) -> Result<TonicResponse<Res>, TonicStatus>
+    where
+        Req: Into<RequestWrapper> + Send + 'static,
+        Res: From<ResponseWrapper> + Send + 'static,
+    {
+        let xreq = self.tonic_to_xline(request);
+        let xresp = self
+            .handle_req(xreq)
+            .await
+            .map_err(|e| TonicStatus::from(e))?;
+        let (res_data, _) = xresp.into_parts();
+        Ok(TonicResponse::new(res_data))
+    }
+}
 }
 
 #[async_trait::async_trait]

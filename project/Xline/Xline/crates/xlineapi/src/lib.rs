@@ -271,8 +271,8 @@ pub use self::{
 // expect to access them directly (xline-client, xline-server, etc.).  The
 // `Rpc*` aliases preserve the historic names used in xline_server.rs.
 
-pub use authpb::auth_client::AuthClient;
-pub use authpb::auth_server::{Auth, AuthServer};
+pub use etcdserverpb::auth_client::AuthClient;
+pub use etcdserverpb::auth_server::{Auth, AuthServer};
 
 pub use etcdserverpb::kv_client::KvClient;
 pub use etcdserverpb::kv_server::{Kv, KvServer};

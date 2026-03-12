@@ -11,31 +11,6 @@ use xlineapi::{
 };
 use tonic::{Request as TonicRequest, Response as TonicResponse, Status as TonicStatus};
 
-/// Convert xlinerpc::Status to tonic::Status preserving status codes
-impl From<xlinerpc::Status> for TonicStatus {
-    fn from(status: xlinerpc::Status) -> Self {
-        match status.code() {
-            xlinerpc::Code::Ok => TonicStatus::ok(""),
-            xlinerpc::Code::Cancelled => TonicStatus::cancelled(status.message()),
-            xlinerpc::Code::Unknown => TonicStatus::unknown(status.message()),
-            xlinerpc::Code::InvalidArgument => TonicStatus::invalid_argument(status.message()),
-            xlinerpc::Code::DeadlineExceeded => TonicStatus::deadline_exceeded(status.message()),
-            xlinerpc::Code::NotFound => TonicStatus::not_found(status.message()),
-            xlinerpc::Code::AlreadyExists => TonicStatus::already_exists(status.message()),
-            xlinerpc::Code::PermissionDenied => TonicStatus::permission_denied(status.message()),
-            xlinerpc::Code::ResourceExhausted => TonicStatus::resource_exhausted(status.message()),
-            xlinerpc::Code::FailedPrecondition => TonicStatus::failed_precondition(status.message()),
-            xlinerpc::Code::Aborted => TonicStatus::aborted(status.message()),
-            xlinerpc::Code::OutOfRange => TonicStatus::out_of_range(status.message()),
-            xlinerpc::Code::Unimplemented => TonicStatus::unimplemented(status.message()),
-            xlinerpc::Code::Internal => TonicStatus::internal(status.message()),
-            xlinerpc::Code::Unavailable => TonicStatus::unavailable(status.message()),
-            xlinerpc::Code::DataLoss => TonicStatus::data_loss(status.message()),
-            xlinerpc::Code::Unauthenticated => TonicStatus::unauthenticated(status.message()),
-        }
-    }
-}
-
 
 use crate::{
     rpc::{
