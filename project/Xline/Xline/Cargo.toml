@@ -62,6 +62,7 @@ tracing-appender = "0.2"
 tracing-opentelemetry = "0.25.0"
 tracing-subscriber = { version = "0.3.16", features = ["env-filter"] }
 uuid = { version = "1.10.0", features = ["v4"] }
+x509-parser = "0.18.0"
 
 [workspace.package]
 edition = "2024"
