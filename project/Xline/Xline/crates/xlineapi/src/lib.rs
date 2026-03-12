@@ -283,17 +283,14 @@ pub use etcdserverpb::watch_server::{Watch, WatchServer};
 pub use etcdserverpb::lease_client::LeaseClient;
 pub use etcdserverpb::lease_server::{Lease, LeaseServer};
 
-pub use etcdserverpb::lock_client::LockClient;
-pub use etcdserverpb::lock_server::{Lock, LockServer};
+pub use v3lockpb::lock_client::LockClient;
+pub use v3lockpb::lock_server::{Lock, LockServer};
 
 pub use etcdserverpb::maintenance_client::MaintenanceClient;
 pub use etcdserverpb::maintenance_server::{Maintenance, MaintenanceServer};
 
 pub use etcdserverpb::cluster_client::ClusterClient;
 pub use etcdserverpb::cluster_server::{Cluster, ClusterServer};
-
-pub use etcdserverpb::election_client::ElectionClient;
-pub use etcdserverpb::election_server::{Election, ElectionServer};
 
 // backward‑compatible aliases matching names previously exported by the crate
 // so that `use xlineapi::RpcKvServer` etc continues to work without touching
