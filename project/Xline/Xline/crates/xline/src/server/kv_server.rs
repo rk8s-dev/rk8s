@@ -13,7 +13,7 @@ use tokio::time::timeout;
 use tracing::{debug, instrument};
 use xlineapi::Kv as GeneratedKv;
 use xlinerpc::{Request, Response as XlineResponse, Status};
-use xlineapi::ResponseWrapper;
+use xlineapi::{ResponseWrapper, ResponseHeader};
 use tonic::{Request as TonicRequest, Response as TonicResponse, Status as TonicStatus};
 
 use crate::{
@@ -105,6 +105,37 @@ impl KvServer {
         }
     }
 
+    /// Update response header revision
+    fn update_header_revision(res: &mut Response, revision: i64) {
+        match res {
+            Response::ResponseRange(ref mut resp) => {
+                if let Some(ref mut header) = resp.header {
+                    header.revision = revision;
+                }
+            }
+            Response::ResponsePut(ref mut resp) => {
+                if let Some(ref mut header) = resp.header {
+                    header.revision = revision;
+                }
+            }
+            Response::ResponseDeleteRange(ref mut resp) => {
+                if let Some(ref mut header) = resp.header {
+                    header.revision = revision;
+                }
+            }
+            Response::ResponseTxn(ref mut resp) => {
+                if let Some(ref mut header) = resp.header {
+                    header.revision = revision;
+                }
+            }
+            Response::ResponseCompaction(ref mut resp) => {
+                if let Some(ref mut header) = resp.header {
+                    header.revision = revision;
+                }
+            }
+        }
+    }
+
     /// serializable execute request in current node
     #[allow(clippy::result_large_err)]
     fn do_serializable(&self, command: &Command) -> Result<Response, Status> {
@@ -130,9 +161,7 @@ impl KvServer {
         Self::update_header_revision(&mut res, revision);
         Ok(res)
     }
-}
 
-impl KvServer {
     /// convert tonic request into xlinerpc request copying metadata
     fn tonic_to_xline<Req>(&self, request: TonicRequest<Req>) -> Request<Req> {
         let (body, metadata) = request.into_parts();

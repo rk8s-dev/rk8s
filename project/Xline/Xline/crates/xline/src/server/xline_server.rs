@@ -1,6 +1,7 @@
 use std::{sync::Arc, time::Duration};
 
 use tokio::fs;
+use tonic::metadata::MetadataValue;
 
 use anyhow::{Result, anyhow};
 use clippy_utilities::{NumericCast, OverflowArithmetic};
@@ -315,7 +316,11 @@ impl XlineServer {
                 if let Some(cert) = tls_info.peer_certs().get(0) {
                     if let Some(cn) = parse_cn_from_cert(&cert.0) {
                         // ignore errors, metadata key is short and ascii
-                        let _ = req.metadata_mut().insert("x-tls-cn", cn);
+                        // 修复：将 String 转换为 MetadataValue
+                        let _ = req.metadata_mut().insert(
+                            "x-tls-cn",
+                            tonic::metadata::MetadataValue::from_str(&cn).unwrap(),
+                        );
                     }
                 }
             }

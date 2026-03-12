@@ -176,39 +176,40 @@ pub mod execute_error;
 pub mod interval;
 pub mod request_validation;
 
+// Modification: Include checked-in generated files from a fixed source path, no longer relying on OUT_DIR
 #[allow(dead_code)]
 mod etcdserverpb {
-    include!(concat!(env!("OUT_DIR"), "/etcdserverpb.rs"));
+    include!("generated/etcdserverpb.rs");
 }
 
 #[allow(dead_code)]
 mod authpb {
-    include!(concat!(env!("OUT_DIR"), "/authpb.rs"));
+    include!("generated/authpb.rs");
 }
 
 #[allow(dead_code)]
 mod mvccpb {
-    include!(concat!(env!("OUT_DIR"), "/mvccpb.rs"));
+    include!("generated/mvccpb.rs");
 }
 
 #[allow(dead_code)]
 mod v3lockpb {
-    include!(concat!(env!("OUT_DIR"), "/v3lockpb.rs"));
+    include!("generated/v3lockpb.rs");
 }
 
 #[allow(dead_code)]
 mod leasepb {
-    include!(concat!(env!("OUT_DIR"), "/leasepb.rs"));
+    include!("generated/leasepb.rs");
 }
 
 #[allow(dead_code)]
 mod commandpb {
-    include!(concat!(env!("OUT_DIR"), "/commandpb.rs"));
+    include!("generated/commandpb.rs");
 }
 
 #[allow(dead_code)]
 mod errorpb {
-    include!(concat!(env!("OUT_DIR"), "/errorpb.rs"));
+    include!("generated/errorpb.rs");
 }
 
 use std::fmt::Display;

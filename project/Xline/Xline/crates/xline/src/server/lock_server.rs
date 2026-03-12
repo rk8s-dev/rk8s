@@ -1,7 +1,15 @@
 use std::sync::Arc;
+use std::task::{Context, Poll};
 
 use async_stream::stream;
+use bytes::Bytes;
 use clippy_utilities::OverflowArithmetic;
+use futures::future::BoxFuture;
+use http::{Request as HttpRequest, Response as HttpResponse};
+use http_body::Body;
+use tonic::body::BoxBody;
+use tonic::server::NamedService;
+use tower_service::Service as TowerService;
 use xlinerpc::{Request, Response as XlineResponse, Status};
 use tonic::{Request as TonicRequest, Response as TonicResponse, Status as TonicStatus};
 use tonic::transport::{Channel, ClientTlsConfig, Endpoint};
@@ -315,4 +323,101 @@ impl Lock for LockServer {
         let header = self.delete_key(&request.data().key, auth_info).await?;
         Ok(XlineResponse::new(UnlockResponse { header }))
     }
+}
+
+// ============================================================================
+// gRPC service wrapper - for manual registration to tonic::transport::Server
+// ============================================================================
+
+/// gRPC Lock Service Wrapper
+#[derive(Debug, Clone)]
+pub struct RpcLockServer<S> {
+    inner: Arc<S>,
+}
+
+impl<S> RpcLockServer<S>
+where
+    S: Lock + Send + Sync + 'static,
+{
+    /// Create a new RpcLockServer
+    pub fn new(service: S) -> Self {
+        Self {
+            inner: Arc::new(service),
+        }
+    }
+}
+
+impl<S> NamedService for RpcLockServer<S>
+where
+    S: Lock + Send + Sync + 'static,
+{
+    const NAME: &'static str = "xline.Lock";
+}
+
+impl<S> TowerService<HttpRequest<BoxBody>> for RpcLockServer<S>
+where
+    S: Lock + Send + Sync + 'static,
+{
+    type Response = HttpResponse<BoxBody>;
+    type Error = tonic::Status;
+    type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
+
+    fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        Poll::Ready(Ok(()))
+    }
+
+    fn call(&mut self, req: HttpRequest<BoxBody>) -> Self::Future {
+        let inner = Arc::clone(&self.inner);
+        Box::pin(async move {
+            let path = req.uri().path();
+            match path {
+                "/xline.Lock/Lock" => {
+                    let request = parse_request::<LockRequest>(req).await?;
+                    let response = inner.lock(request).await?;
+                    Ok(build_response(response))
+                }
+                "/xline.Lock/Unlock" => {
+                    let request = parse_request::<UnlockRequest>(req).await?;
+                    let response = inner.unlock(request).await?;
+                    Ok(build_response(response))
+                }
+                _ => Err(tonic::Status::unimplemented("Unknown method")),
+            }
+        })
+    }
+}
+
+// ============================================================================
+// helper function
+// ============================================================================
+
+/// Parse gRPC request
+async fn parse_request<T>(req: HttpRequest<BoxBody>) -> Result<TonicRequest<T>, tonic::Status>
+where
+    T: prost::Message + Default,
+{
+    let (parts, body) = req.into_parts();
+    let bytes = hyper::body::to_bytes(body)
+        .await
+        .map_err(|e| tonic::Status::internal(e.to_string()))?;
+    let message = T::decode(bytes.as_ref())
+        .map_err(|e| tonic::Status::internal(e.to_string()))?;
+    Ok(TonicRequest::from_parts(
+        tonic::MetadataMap::from_headers(parts.headers),
+        message,
+    ))
+}
+
+/// Build gRPC response
+fn build_response<T>(response: XlineResponse<T>) -> HttpResponse<BoxBody>
+where
+    T: prost::Message,
+{
+    let mut buf = Vec::new();
+    response.data().encode(&mut buf).unwrap();
+    HttpResponse::builder()
+        .status(200)
+        .header("content-type", "application/grpc")
+        .body(BoxBody::new(Bytes::from(buf)))
+        .unwrap()
 }

@@ -22,13 +22,6 @@ thiserror = { workspace = true }
 tonic = { workspace = true }
 utils = { path = "../utils" }
 
-[build-dependencies]
-prost-build = { workspace = true }
-# tonic-build is still used to regenerate the protobuf definitions; once
-# the generated code is checked in we can delete this dependency and
-# remove the entire build script. see XLINERPC_MIGRATION_REPORT.md for
-# status.
-tonic-build = { workspace = true }
 
 [dev-dependencies]
 strum = "0.26"
