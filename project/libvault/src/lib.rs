@@ -54,11 +54,25 @@ pub mod shamir;
 pub mod storage;
 pub mod utils;
 
-/// libvault version
+/// libvault crate version.
+///
+/// This constant reflects the crate package version from Cargo.toml and is
+/// useful for diagnostics and logging when embedding `libvault` into
+/// applications.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
+/// Main entry point for using the `libvault` crate programmatically.
+///
+/// `RustyVault` holds an `ArcSwap<Core>` which contains the operating state
+/// and runtime components (modules, storage backend, handlers) and a
+/// token cache for client authentication. The type is intentionally
+/// lightweight to allow cloning the inner `Arc` for concurrent usage.
 pub struct RustyVault {
+    /// Shared, atomically-updatable reference to the internal `Core`.
     pub core: ArcSwap<Core>,
+
+    /// Cached client token used for requests when an explicit token is not
+    /// provided. Stored in an `ArcSwap` to allow lock-free updates.
     pub token: ArcSwap<String>,
 }
 
@@ -121,10 +135,17 @@ impl RustyVault {
         })
     }
 
+    /// Initialize the vault with the provided `SealConfig`.
+    ///
+    /// This forwards to the `Core::init` implementation which performs the
+    /// necessary cryptographic initialization (generating KEK, master keys,
+    /// and initial state). Returns an `InitResult` describing the outcome.
     pub async fn init(&self, seal_config: &core::SealConfig) -> Result<core::InitResult, RvError> {
         self.core.load().init(seal_config).await
     }
 
+    /// This is a lightweight query that checks the stored state in `Core`. \
+    /// Returns whether the vault has already been initialized.
     pub async fn inited(&self) -> Result<bool, RvError> {
         self.core.load().inited().await
     }
@@ -139,6 +160,11 @@ impl RustyVault {
         Ok(false)
     }
 
+    /// Attempts to unseal the vault using a list of candidate unseal keys.
+    ///
+    /// Tries each supplied key in order and returns `Ok(true)` as soon as one
+    /// key successfully unseals the vault. If none succeed, returns `Ok(false)`.
+    ///
     /// Unseals the vault once and immediately generates new unseal keys.
     ///
     /// This is a high-level wrapper around the core's unseal_once method that provides
@@ -182,10 +208,16 @@ impl RustyVault {
         self.core.load().seal().await
     }
 
+    /// Seal the vault, wiping sensitive in-memory keys as needed.
+    ///
+    /// This instructs `Core` to transition into a sealed state where secret
+    /// material is protected until a successful unseal operation.
     pub fn set_token<S: Into<String>>(&self, token: S) {
         self.token.store(Arc::new(token.into()));
     }
 
+    /// Set the cached client token used for subsequent requests when an
+    /// explicit token is not provided to the API methods.
     pub async fn mount<S: Into<String>>(
         &self,
         token: Option<S>,
@@ -206,6 +238,9 @@ impl RustyVault {
         .await
     }
 
+    /// Mount a new secrets engine at `path` of the given `mount_type`.
+    ///
+    /// If `token` is `None`, the cached token from `set_token` will be used.
     pub async fn unmount<S: Into<String>>(
         &self,
         token: Option<S>,
@@ -219,6 +254,7 @@ impl RustyVault {
         .await
     }
 
+    /// Unmount a previously mounted secrets engine at `path`.
     pub async fn remount<S: Into<String>>(
         &self,
         token: Option<S>,
@@ -236,6 +272,7 @@ impl RustyVault {
             .await
     }
 
+    /// Remount a secrets engine from one path to another.
     pub async fn enable_auth<S: Into<String>>(
         &self,
         token: Option<S>,
@@ -256,6 +293,7 @@ impl RustyVault {
         .await
     }
 
+    /// Enable an authentication method at `path` with the given `auth_type`.
     pub async fn disable_auth<S: Into<String>>(
         &self,
         token: Option<S>,
@@ -269,6 +307,7 @@ impl RustyVault {
         .await
     }
 
+    /// Disable an authentication method at `path`.
     pub async fn login<S: Into<String>>(
         &self,
         path: S,
@@ -287,10 +326,19 @@ impl RustyVault {
         Ok((resp, login_success))
     }
 
+    /// Perform a login against an auth backend at `path` using `data`.
+    ///
+    /// On success the returned tuple contains the full `Response` and a
+    /// boolean indicating whether login succeeded; when credentials include
+    /// a client token it will also be cached in `RustyVault`.
     pub async fn request(&self, req: &mut Request) -> Result<Option<Response>, RvError> {
         self.core.load().handle_request(req).await
     }
 
+    /// Send a prepared logical `Request` to the core request handler.
+    ///
+    /// This is the low-level API for executing read/write/delete/list
+    /// operations when callers prefer to construct `Request` themselves.
     pub async fn read<S: Into<String>>(
         &self,
         token: Option<S>,
@@ -303,6 +351,7 @@ impl RustyVault {
         self.request(&mut req).await
     }
 
+    /// Read a secret at `path` using the provided or cached token.
     pub async fn write<S: Into<String>>(
         &self,
         token: Option<S>,
@@ -316,6 +365,7 @@ impl RustyVault {
         self.request(&mut req).await
     }
 
+    /// Write `data` to `path` using provided or cached token.
     pub async fn delete<S: Into<String>>(
         &self,
         token: Option<S>,
@@ -329,6 +379,7 @@ impl RustyVault {
         self.request(&mut req).await
     }
 
+    /// Delete data at `path` with optional request body.
     pub async fn list<S: Into<String>>(
         &self,
         token: Option<S>,

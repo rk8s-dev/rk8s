@@ -25,5 +25,5 @@ rust_library(
     edition = "2018",
     rustc_flags = ["@$(location :http-auth-manifest[env_flags])"],
     visibility = ["PUBLIC"],
-    deps = ["//third-party/rust/crates/memchr/2.7.6:memchr"],
+    deps = ["//third-party/rust/crates/memchr/2.8.0:memchr"],
 )

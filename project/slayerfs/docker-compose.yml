@@ -49,7 +49,7 @@ services:
     image: docker.io/library/postgres:15-alpine
     container_name: pgsql-slayerfs-test
     ports:
-      - "5432:5432"
+      - "15432:5432"
     # WARNING: Development-only credentials. Do NOT use these values in production or shared environments!
     environment:
       - POSTGRES_DB=database

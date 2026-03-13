@@ -1875,31 +1875,88 @@ impl Filesystem for PassthroughFs {
     async fn getlk(
         &self,
         _req: Request,
-        _inode: Inode,
-        _fh: u64,
+        inode: Inode,
+        fh: u64,
         _lock_owner: u64,
-        _start: u64,
-        _end: u64,
-        _type: u32,
-        _pid: u32,
+        start: u64,
+        end: u64,
+        r#type: u32,
+        pid: u32,
     ) -> Result<ReplyLock> {
-        Err(libc::ENOSYS.into())
+        if self.no_open.load(Ordering::Relaxed) {
+            return Err(enosys().into());
+        }
+
+        let data = self.handle_map.get(fh, inode).await?;
+        let mut flock = libc::flock {
+            l_type: r#type as libc::c_short,
+            l_whence: libc::SEEK_SET as libc::c_short,
+            l_start: start as libc::off_t,
+            l_len: if end == u64::MAX {
+                0 // 0 means until EOF
+            } else {
+                end.saturating_sub(start) as libc::off_t
+            },
+            l_pid: pid as libc::pid_t,
+        };
+
+        // SAFETY: We pass a valid fd and a valid pointer to flock.
+        let ret = unsafe { libc::fcntl(data.borrow_fd().as_raw_fd(), libc::F_GETLK, &mut flock) };
+        if ret < 0 {
+            return Err(io::Error::last_os_error().into());
+        }
+
+        Ok(ReplyLock {
+            start: flock.l_start as u64,
+            end: if flock.l_len == 0 {
+                u64::MAX
+            } else {
+                flock.l_start as u64 + flock.l_len as u64
+            },
+            r#type: flock.l_type as u32,
+            pid: flock.l_pid as u32,
+        })
     }
 
     #[allow(clippy::too_many_arguments)]
     async fn setlk(
         &self,
         _req: Request,
-        _inode: Inode,
-        _fh: u64,
+        inode: Inode,
+        fh: u64,
         _lock_owner: u64,
-        _start: u64,
-        _end: u64,
-        _type: u32,
-        _pid: u32,
-        _block: bool,
+        start: u64,
+        end: u64,
+        r#type: u32,
+        pid: u32,
+        block: bool,
     ) -> Result<()> {
-        Err(libc::ENOSYS.into())
+        if self.no_open.load(Ordering::Relaxed) {
+            return Err(enosys().into());
+        }
+
+        let data = self.handle_map.get(fh, inode).await?;
+        let flock = libc::flock {
+            l_type: r#type as libc::c_short,
+            l_whence: libc::SEEK_SET as libc::c_short,
+            l_start: start as libc::off_t,
+            l_len: if end == u64::MAX {
+                0 // 0 means until EOF
+            } else {
+                end.saturating_sub(start) as libc::off_t
+            },
+            l_pid: pid as libc::pid_t,
+        };
+
+        let cmd = if block { libc::F_SETLKW } else { libc::F_SETLK };
+
+        // SAFETY: We pass a valid fd and a valid pointer to flock.
+        let ret = unsafe { libc::fcntl(data.borrow_fd().as_raw_fd(), cmd, &flock) };
+        if ret < 0 {
+            return Err(io::Error::last_os_error().into());
+        }
+
+        Ok(())
     }
 
     /// check file access permissions. This will be called for the `access()` system call. If the

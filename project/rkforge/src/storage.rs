@@ -121,3 +121,12 @@ pub fn ultimate_blob_path(digest: impl AsRef<str>) -> anyhow::Result<PathBuf> {
     let digest = digest.as_ref();
     Ok(CONFIG.layers_store_root.join(digest.split_digest()?))
 }
+
+/// Read and parse a manifest from local storage by its digest.
+pub fn read_manifest(digest: &str) -> anyhow::Result<OciManifest> {
+    let path = ultimate_blob_path(digest)?;
+    let content = std::fs::read_to_string(&path)
+        .with_context(|| format!("Failed to read manifest at {}", path.display()))?;
+    serde_json::from_str(&content)
+        .with_context(|| format!("Failed to parse manifest from {}", path.display()))
+}

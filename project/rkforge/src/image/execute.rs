@@ -349,6 +349,12 @@ impl<P: AsRef<Path>> InstructionExt<P> for RunInstruction {
                 merged_envp.insert(key.clone(), value.clone());
             }
         }
+        if !ctx.ssh.is_empty() && !merged_envp.contains_key("SSH_AUTH_SOCK") {
+            merged_envp.insert(
+                "SSH_AUTH_SOCK".to_string(),
+                "/run/rkforge/ssh/ssh_agent.0".to_string(),
+            );
+        }
         let envp: Vec<String> = merged_envp
             .iter()
             .map(|(k, v)| format!("{k}={v}"))
@@ -360,6 +366,13 @@ impl<P: AsRef<Path>> InstructionExt<P> for RunInstruction {
             working_dir: ctx.image_config.working_dir.clone(),
             user: ctx.image_config.user.clone(),
             quiet: ctx.quiet,
+            add_hosts: ctx.add_hosts.to_vec(),
+            shm_size: ctx.shm_size,
+            ulimits: ctx.ulimits.to_vec(),
+            network_mode: ctx.network_mode,
+            cgroup_parent: ctx.cgroup_parent.clone(),
+            secrets: ctx.secrets.to_vec(),
+            ssh: ctx.ssh.to_vec(),
         };
         task.execute(ctx.mount_config)
     }
@@ -514,6 +527,7 @@ mod tests {
     use crate::{
         image::{
             BuildProgressMode,
+            build_runtime::BuildNetworkMode,
             config::{DEFAULT_ENV, ImageConfig},
             context::StageContext,
         },
@@ -576,6 +590,13 @@ ARG BASE=alpine
             no_cache: false,
             quiet: true,
             progress_mode: BuildProgressMode::Plain,
+            add_hosts: &[],
+            shm_size: None,
+            ulimits: &[],
+            network_mode: BuildNetworkMode::Default,
+            cgroup_parent: None,
+            secrets: &[],
+            ssh: &[],
         };
 
         arg_inst.execute(&mut ctx).unwrap();
@@ -617,6 +638,13 @@ ARG BASE=alpine
             no_cache: false,
             quiet: true,
             progress_mode: BuildProgressMode::Plain,
+            add_hosts: &[],
+            shm_size: None,
+            ulimits: &[],
+            network_mode: BuildNetworkMode::Default,
+            cgroup_parent: None,
+            secrets: &[],
+            ssh: &[],
         };
 
         arg_inst.execute(&mut ctx).unwrap();
@@ -654,6 +682,13 @@ ENV A=1 B=$A
             no_cache: false,
             quiet: true,
             progress_mode: BuildProgressMode::Plain,
+            add_hosts: &[],
+            shm_size: None,
+            ulimits: &[],
+            network_mode: BuildNetworkMode::Default,
+            cgroup_parent: None,
+            secrets: &[],
+            ssh: &[],
         };
 
         dockerfile

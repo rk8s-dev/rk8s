@@ -340,8 +340,9 @@ impl MountTable {
 
         entries.clear();
 
-        if hmac_level != MountEntryHMACLevel::None && hmac_key.is_some() {
-            let key = hmac_key.unwrap();
+        if hmac_level != MountEntryHMACLevel::None
+            && let Some(key) = hmac_key
+        {
             new_entries.retain(|_, me| {
                 let entry = me.read().unwrap();
                 match entry.verify_hmac(key) {
@@ -401,10 +402,10 @@ impl MountTable {
                 }
 
                 if entry.hmac.is_empty()
-                    && hmac_key.is_some()
                     && hmac_level == MountEntryHMACLevel::Compat
+                    && let Some(key) = hmac_key
                 {
-                    entry.calc_hmac(hmac_key.unwrap())?;
+                    entry.calc_hmac(key)?;
                     need_persist = true;
                 }
             }
@@ -588,8 +589,8 @@ impl Core {
 
         self.router.unmount(&path)?;
 
-        if view.is_some() {
-            view.unwrap().clear().await?;
+        if let Some(v) = view {
+            v.clear().await?;
         }
 
         self.remove_mount_entry(&path).await?;

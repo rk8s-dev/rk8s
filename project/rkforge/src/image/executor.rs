@@ -1,7 +1,12 @@
 use crate::{
     compressor::{LayerCompressionConfig, LayerCompressionResult, LayerCompressor},
     image::{
-        BLOBS, BuildProgressMode, config::ImageConfig, context::StageContext,
+        BLOBS, BuildProgressMode,
+        build_runtime::{
+            BuildHostEntry, BuildNetworkMode, BuildSecret, BuildSshAgent, BuildUlimit,
+        },
+        config::ImageConfig,
+        context::StageContext,
         stage_executor::StageExecutor,
     },
     oci_spec::{
@@ -42,6 +47,15 @@ pub struct Executor {
     pub quiet: bool,
     pub progress_mode: BuildProgressMode,
     pub cli_labels: HashMap<String, String>,
+    pub cli_annotations: HashMap<String, String>,
+    pub add_hosts: Vec<BuildHostEntry>,
+    pub shm_size: Option<u64>,
+    pub ulimits: Vec<BuildUlimit>,
+    pub network_mode: BuildNetworkMode,
+    pub cgroup_parent: Option<String>,
+    pub no_cache_filters: Vec<String>,
+    pub secrets: Vec<BuildSecret>,
+    pub ssh: Vec<BuildSshAgent>,
 
     pub compressor: Arc<dyn LayerCompressor + Send + Sync>,
 }
@@ -87,6 +101,15 @@ impl Executor {
             quiet: false,
             progress_mode: BuildProgressMode::Auto,
             cli_labels: HashMap::new(),
+            cli_annotations: HashMap::new(),
+            add_hosts: Vec::new(),
+            shm_size: None,
+            ulimits: Vec::new(),
+            network_mode: BuildNetworkMode::Default,
+            cgroup_parent: None,
+            no_cache_filters: Vec::new(),
+            secrets: Vec::new(),
+            ssh: Vec::new(),
             compressor,
         }
     }
@@ -112,6 +135,37 @@ impl Executor {
         self.cli_labels = labels;
     }
 
+    pub fn cli_annotations(&mut self, annotations: HashMap<String, String>) {
+        self.cli_annotations = annotations;
+    }
+
+    pub fn runtime_options(
+        &mut self,
+        add_hosts: Vec<BuildHostEntry>,
+        shm_size: Option<u64>,
+        ulimits: Vec<BuildUlimit>,
+        network_mode: BuildNetworkMode,
+        cgroup_parent: Option<String>,
+    ) {
+        self.add_hosts = add_hosts;
+        self.shm_size = shm_size;
+        self.ulimits = ulimits;
+        self.network_mode = network_mode;
+        self.cgroup_parent = cgroup_parent;
+    }
+
+    pub fn no_cache_filter(&mut self, filters: Vec<String>) {
+        self.no_cache_filters = filters;
+    }
+
+    pub fn secrets(&mut self, secrets: Vec<BuildSecret>) {
+        self.secrets = secrets;
+    }
+
+    pub fn ssh(&mut self, ssh: Vec<BuildSshAgent>) {
+        self.ssh = ssh;
+    }
+
     pub fn build_image(&mut self) -> Result<()> {
         self.execute_stages()?;
         // Apply CLI labels last so they override Dockerfile LABEL with the same key.
@@ -128,15 +182,80 @@ impl Executor {
         }
     }
 
+    fn is_stage_no_cache(
+        no_cache: bool,
+        no_cache_filters: &[String],
+        stage_name: Option<&str>,
+        stage_index: usize,
+    ) -> bool {
+        if no_cache {
+            return true;
+        }
+        if no_cache_filters.is_empty() {
+            return false;
+        }
+
+        let index = stage_index.to_string();
+        if no_cache_filters.iter().any(|filter| filter == &index) {
+            return true;
+        }
+        stage_name.is_some_and(|name| {
+            no_cache_filters
+                .iter()
+                .any(|filter| filter.eq_ignore_ascii_case(name))
+        })
+    }
+
+    fn validate_no_cache_filters(
+        no_cache_filters: &[String],
+        stages: &[(usize, Option<String>)],
+    ) -> Result<()> {
+        if no_cache_filters.is_empty() {
+            return Ok(());
+        }
+
+        let available = stages
+            .iter()
+            .map(|(index, name)| match name.as_deref() {
+                Some(name) => format!("{index} ({name})"),
+                None => index.to_string(),
+            })
+            .collect::<Vec<_>>()
+            .join(", ");
+
+        for filter in no_cache_filters {
+            let matched = stages.iter().any(|(index, name)| {
+                filter == &index.to_string()
+                    || name
+                        .as_deref()
+                        .is_some_and(|stage_name| filter.eq_ignore_ascii_case(stage_name))
+            });
+            if !matched {
+                bail!(
+                    "--no-cache-filter `{filter}` does not match any stage. Available stages: {available}"
+                );
+            }
+        }
+        Ok(())
+    }
+
     fn execute_stages(&mut self) -> Result<()> {
         let stages = self.dockerfile.stages();
         let progress_mode = Self::resolve_progress_mode(self.progress_mode);
         if stages.stages.is_empty() {
             bail!("No build stages found in Dockerfile");
         }
+        let stage_refs = stages
+            .stages
+            .iter()
+            .map(|stage| (stage.index, stage.name.clone()))
+            .collect::<Vec<_>>();
+        Self::validate_no_cache_filters(&self.no_cache_filters, &stage_refs)?;
         if self.no_cache && !self.quiet {
             println!("# no-cache enabled");
         }
+        let no_cache = self.no_cache;
+        let no_cache_filters = self.no_cache_filters.clone();
 
         let target_index = if let Some(target) = &self.target {
             stages
@@ -151,15 +270,26 @@ impl Executor {
             .into_iter()
             .take(target_index + 1)
             .try_for_each(|stage| {
+                let stage_name = stage.name.as_deref().unwrap_or("<unnamed>");
+                let stage_no_cache = Self::is_stage_no_cache(
+                    no_cache,
+                    &no_cache_filters,
+                    stage.name.as_deref(),
+                    stage.index,
+                );
                 if !self.quiet && progress_mode == BuildProgressMode::Plain {
-                    let stage_name = stage.name.as_deref().unwrap_or("<unnamed>");
                     println!("# stage {} ({stage_name})", stage.index);
                 } else if !self.quiet && progress_mode == BuildProgressMode::Tty {
-                    let stage_name = stage.name.as_deref().unwrap_or("<unnamed>");
                     println!(
                         "=> stage {} ({stage_name}) [{} instructions]",
                         stage.index,
                         stage.instructions.len()
+                    );
+                }
+                if stage_no_cache && !self.quiet {
+                    println!(
+                        "# no-cache enabled for stage {} ({stage_name})",
+                        stage.index
                     );
                 }
                 let ctx = StageContext {
@@ -170,9 +300,16 @@ impl Executor {
                     cli_build_args: &self.cli_build_args,
                     global_args: &self.global_args,
                     build_context: self.context.clone(),
-                    no_cache: self.no_cache,
+                    no_cache: stage_no_cache,
                     quiet: self.quiet,
                     progress_mode,
+                    add_hosts: &self.add_hosts,
+                    shm_size: self.shm_size,
+                    ulimits: &self.ulimits,
+                    network_mode: self.network_mode,
+                    cgroup_parent: self.cgroup_parent.clone(),
+                    secrets: &self.secrets,
+                    ssh: &self.ssh,
                 };
                 let mut stage_executor = StageExecutor::new(ctx, stage);
                 stage_executor.execute()
@@ -232,7 +369,9 @@ impl Executor {
                 .collect::<Vec<(u64, String)>>(),
         )?;
 
-        let image_index = OciImageIndex::default().reference_names(self.image_ref_names.clone());
+        let image_index = OciImageIndex::default()
+            .reference_names(self.image_ref_names.clone())
+            .descriptor_annotations(self.cli_annotations.clone());
         let oci_builder = OciBuilder::default()
             .image_dir(self.image_output_dir.clone())
             .oci_image_config(image_config)
@@ -240,5 +379,28 @@ impl Executor {
             .oci_image_index(image_index);
 
         oci_builder.build().context("Failed to build OCI metadata")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Executor;
+
+    #[test]
+    fn test_validate_no_cache_filters() {
+        let stages = vec![
+            (0, Some("base".to_string())),
+            (1, Some("builder".to_string())),
+            (2, None),
+        ];
+
+        Executor::validate_no_cache_filters(&["builder".to_string(), "2".to_string()], &stages)
+            .unwrap();
+
+        let err = Executor::validate_no_cache_filters(&["999".to_string()], &stages).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("--no-cache-filter `999` does not match any stage")
+        );
     }
 }

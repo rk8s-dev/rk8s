@@ -29,5 +29,5 @@ rust_library(
     ],
     rustc_flags = ["@$(location :atomic-manifest[env_flags])"],
     visibility = ["PUBLIC"],
-    deps = ["//third-party/rust/crates/bytemuck/1.24.0:bytemuck"],
+    deps = ["//third-party/rust/crates/bytemuck/1.25.0:bytemuck"],
 )

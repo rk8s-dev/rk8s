@@ -1,5 +1,6 @@
 use crate::api::xlinestore::XlineStore;
 use crate::commands::{create, delete};
+use crate::node::Shared;
 use chrono::Utc;
 use common::quic::RksConnection;
 use common::*;
@@ -12,6 +13,7 @@ pub async fn dispatch_worker(
     msg: RksMessage,
     conn: &RksConnection,
     xline_store: &Arc<XlineStore>,
+    shared: &Arc<Shared>,
 ) -> anyhow::Result<()> {
     match msg {
         RksMessage::Heartbeat { node_name, status } => {
@@ -44,6 +46,33 @@ pub async fn dispatch_worker(
                 );
             }
         }
+        RksMessage::PodLogsChunk {
+            ref namespace,
+            ref pod_name,
+            ref data,
+            is_final,
+        } => {
+            if is_final {
+                info!(
+                    target: "rks::node::worker_dispatch",
+                    "received final log chunk for {}/{} ({} bytes)", namespace, pod_name, data.len()
+                );
+            }
+            let log_key = format!("{}/{}", namespace, pod_name);
+            shared.log_response_registry.send(&log_key, msg).await;
+        }
+        RksMessage::PodLogsError {
+            ref namespace,
+            ref pod_name,
+            ref error,
+        } => {
+            error!(
+                target: "rks::node::worker_dispatch",
+                "worker reported log error for {}/{}: {}", namespace, pod_name, error
+            );
+            let log_key = format!("{}/{}", namespace, pod_name);
+            shared.log_response_registry.send(&log_key, msg).await;
+        }
         _ => warn!(
             target: "rks::node::worker_dispatch",
             "unknown or unexpected message from worker"
@@ -56,8 +85,9 @@ pub async fn dispatch_worker(
 pub async fn dispatch_user(
     msg: RksMessage,
     conn: &RksConnection,
-    xline_store: &Arc<XlineStore>,
+    shared: &Arc<Shared>,
 ) -> anyhow::Result<()> {
+    let xline_store = &shared.xline_store;
     match msg {
         RksMessage::CreatePod(pod_task) => {
             create::user_create(pod_task, xline_store, conn).await?;
@@ -462,6 +492,145 @@ pub async fn dispatch_user(
                     pod_namespace, pod_name
                 )))
                 .await?;
+            }
+        }
+        RksMessage::GetPodLogs {
+            pod_name,
+            namespace,
+            container_name,
+            follow,
+            tail_lines,
+            since_time,
+            timestamps,
+            previous,
+        } => {
+            info!(
+                target: "rks::node::user_dispatch",
+                "GetPodLogs received for Pod {}/{}", namespace, pod_name
+            );
+
+            // Query Xline to get pod spec and find assigned node
+            let pod = match xline_store.get_pod(&pod_name).await? {
+                Some(pod) => pod,
+                None => {
+                    conn.send_msg(&RksMessage::PodLogsError {
+                        namespace: namespace.clone(),
+                        pod_name: pod_name.clone(),
+                        error: format!("Pod {} not found", pod_name),
+                    })
+                    .await?;
+                    return Ok(());
+                }
+            };
+
+            let node_name = match &pod.spec.node_name {
+                Some(name) => name,
+                None => {
+                    conn.send_msg(&RksMessage::PodLogsError {
+                        namespace: namespace.clone(),
+                        pod_name: pod_name.clone(),
+                        error: format!("Pod {} is not assigned to any node yet", pod_name),
+                    })
+                    .await?;
+                    return Ok(());
+                }
+            };
+
+            // Look up node in NodeRegistry
+            let worker_session = match shared.node_registry.get(node_name).await {
+                Some(session) => session,
+                None => {
+                    conn.send_msg(&RksMessage::PodLogsError {
+                        namespace: namespace.clone(),
+                        pod_name: pod_name.clone(),
+                        error: format!("Worker node {} is not connected", node_name),
+                    })
+                    .await?;
+                    return Ok(());
+                }
+            };
+
+            // Register response channel and forward log request to worker node
+            let log_key = format!("{}/{}", namespace, pod_name);
+            let mut rx = shared.log_response_registry.register(log_key).await;
+
+            let log_request = RksMessage::GetPodLogs {
+                pod_name: pod_name.clone(),
+                namespace: namespace.clone(),
+                container_name: container_name.clone(),
+                follow,
+                tail_lines,
+                since_time: since_time.clone(),
+                timestamps,
+                previous,
+            };
+
+            if let Err(e) = worker_session.tx.send(log_request).await {
+                conn.send_msg(&RksMessage::PodLogsError {
+                    namespace: namespace.clone(),
+                    pod_name: pod_name.clone(),
+                    error: format!("Failed to forward log request to worker: {}", e),
+                })
+                .await?;
+                return Ok(());
+            }
+
+            info!(
+                target: "rks::node::user_dispatch",
+                "Forwarded log request for Pod {}/{} to worker node {}",
+                namespace, pod_name, node_name
+            );
+
+            loop {
+                match rx.recv().await {
+                    Some(RksMessage::PodLogsChunk {
+                        namespace,
+                        pod_name,
+                        data,
+                        is_final,
+                    }) => {
+                        conn.send_msg(&RksMessage::PodLogsChunk {
+                            namespace,
+                            pod_name,
+                            data,
+                            is_final,
+                        })
+                        .await?;
+                        if is_final {
+                            break;
+                        }
+                    }
+                    Some(RksMessage::PodLogsError {
+                        namespace,
+                        pod_name,
+                        error,
+                    }) => {
+                        conn.send_msg(&RksMessage::PodLogsError {
+                            namespace,
+                            pod_name,
+                            error,
+                        })
+                        .await?;
+                        break;
+                    }
+                    Some(other) => {
+                        warn!(
+                            target: "rks::node::user_dispatch",
+                            "unexpected message in log channel: {:?}", other
+                        );
+                    }
+                    None => {
+                        // Channel closed without final chunk
+                        conn.send_msg(&RksMessage::PodLogsChunk {
+                            namespace: namespace.clone(),
+                            pod_name: pod_name.clone(),
+                            data: vec![],
+                            is_final: true,
+                        })
+                        .await?;
+                        break;
+                    }
+                }
             }
         }
         _ => warn!(

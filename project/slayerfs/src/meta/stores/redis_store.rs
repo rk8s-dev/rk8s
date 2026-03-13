@@ -304,14 +304,10 @@ const CREATE_ENTRY_LUA: &str = r#"
     -- 5. Allocate new inode atomically
     local new_ino = redis.call('INCR', counter_key)
 
-    -- 6. Apply setgid inheritance
     local final_gid = gid
     local final_mode = default_mode
     if parent_has_setgid == 1 then
         final_gid = parent_gid
-        if kind == "Dir" then
-            final_mode = bit.bor(final_mode, 2048)  -- 0o2000 setgid bit
-        end
     end
 
     -- 7. Determine nlink based on kind
@@ -1709,9 +1705,8 @@ impl MetaStore for RedisMetaStore {
         let now = current_time();
 
         if let Some(mode) = req.mode {
-            // Preserve the existing file type bits while updating permission bits.
             let kind_bits = node.attr.mode & 0o170000;
-            node.attr.mode = kind_bits | (mode & 0o7777);
+            node.attr.mode = kind_bits | (mode & 0o777);
             ctime_update = true;
         }
 
@@ -2318,7 +2313,7 @@ mod tests {
     use crate::meta::config::Config;
     use crate::meta::config::{CacheConfig, ClientOptions, DatabaseConfig, DatabaseType};
     use crate::meta::file_lock::{FileLockQuery, FileLockRange, FileLockType};
-    use crate::meta::store::MetaError;
+    use crate::meta::store::{MetaError, SetAttrFlags, SetAttrRequest};
     use crate::meta::stores::RedisMetaStore;
     use serial_test::serial;
     use std::sync::Arc;
@@ -3763,5 +3758,84 @@ mod tests {
         let json = r#"{"value": 0}"#;
         let result: TestStruct = serde_json::from_str(json).unwrap();
         assert_eq!(result.value, 0);
+    }
+
+    #[serial]
+    #[tokio::test]
+    #[ignore]
+    async fn test_file_default_mode() {
+        let store = new_test_store().await;
+        let parent = store.root_ino();
+        let ino = store
+            .create_file(parent, "perm_file.txt".to_string())
+            .await
+            .unwrap();
+
+        let attr = store.stat(ino).await.unwrap().unwrap();
+        assert_eq!(attr.mode & 0o777, 0o644);
+    }
+
+    #[serial]
+    #[tokio::test]
+    #[ignore]
+    async fn test_directory_default_mode() {
+        let store = new_test_store().await;
+        let parent = store.root_ino();
+        let ino = store.mkdir(parent, "perm_dir".to_string()).await.unwrap();
+
+        let attr = store.stat(ino).await.unwrap().unwrap();
+        assert_eq!(attr.mode & 0o7777, 0o755);
+    }
+
+    #[serial]
+    #[tokio::test]
+    #[ignore]
+    async fn test_chmod_updates_mode() {
+        let store = new_test_store().await;
+        let parent = store.root_ino();
+        let ino = store
+            .create_file(parent, "chmod_test.txt".to_string())
+            .await
+            .unwrap();
+
+        let attr = store.chmod(ino, 0o755).await.unwrap();
+        assert_eq!(attr.mode & 0o777, 0o755);
+
+        let stat = store.stat(ino).await.unwrap().unwrap();
+        assert_eq!(stat.mode & 0o777, 0o755);
+    }
+
+    #[serial]
+    #[tokio::test]
+    #[ignore]
+    async fn test_set_attr_mode_strips_special_bits() {
+        let store = new_test_store().await;
+        let parent = store.root_ino();
+        let ino = store
+            .create_file(parent, "special_bits.txt".to_string())
+            .await
+            .unwrap();
+
+        let req = SetAttrRequest {
+            mode: Some(0o4755),
+            ..Default::default()
+        };
+        let attr = store
+            .set_attr(ino, &req, SetAttrFlags::empty())
+            .await
+            .unwrap();
+        assert_eq!(attr.mode & 0o7777, 0o755);
+
+        let stat = store.stat(ino).await.unwrap().unwrap();
+        assert_eq!(stat.mode & 0o7777, 0o755);
+    }
+
+    #[serial]
+    #[tokio::test]
+    #[ignore]
+    async fn test_chmod_nonexistent_inode() {
+        let store = new_test_store().await;
+        let result = store.chmod(999999, 0o644).await;
+        assert!(result.is_err(), "chmod on nonexistent inode should fail");
     }
 }

@@ -18,7 +18,15 @@ pub(crate) struct CacheSlice {
     config: Arc<WriteConfig>,
     len: u64,
     alloc_bytes: u64,
-    pages: Vec<Vec<Page>>,
+    pages: Vec<Option<Page>>,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct CacheSliceStats {
+    pub len: u64,
+    pub alloc_bytes: u64,
+    pub pages_total: usize,
+    pub pages_used: usize,
 }
 
 impl CacheSlice {
@@ -29,11 +37,19 @@ impl CacheSlice {
             "The block size must be a multiple of the page size"
         );
 
-        let blocks = config
-            .layout
-            .chunk_size
-            .div_ceil(config.layout.block_size as u64) as usize;
-        let pages = vec![Vec::new(); blocks];
+        let (chunk_size, block_size, page_size) = (
+            config.layout.chunk_size,
+            config.layout.block_size as u64,
+            config.page_size as u64,
+        );
+
+        let (blocks, pages_per_block) = (
+            chunk_size.div_ceil(block_size) as usize,
+            block_size.div_ceil(page_size) as usize,
+        );
+
+        let pages = vec![None; blocks * pages_per_block];
+
         Self {
             config,
             len: 0,
@@ -76,19 +92,32 @@ impl CacheSlice {
     pub(crate) fn write_at(&mut self, offset: u64, buf: &[u8]) -> anyhow::Result<()> {
         let mut cursor = Cursor::new(buf);
 
-        let chunk_size = self.config.layout.chunk_size;
-        let block_size = self.config.layout.block_size;
-        let page_size = self.config.page_size;
+        let (chunk_size, block_size, page_size, pages_per_block) = (
+            self.config.layout.chunk_size,
+            self.config.layout.block_size as u64,
+            self.config.page_size as u64,
+            self.pages_per_block(),
+        );
 
         let span = ChunkSpan::new(0, offset, buf.len() as u64);
-        for block_span in span.split_into::<BlockTag>(chunk_size, block_size as u64, true) {
-            let span = block_span.split_into::<PageTag>(block_size as u64, page_size as u64, true);
 
-            for page_span in span {
-                let page = &mut self.pages[block_span.index.as_usize()][page_span.index.as_usize()];
-                let end = (page_span.offset + page_span.len).as_usize();
+        for block_span in span.split_into::<BlockTag>(chunk_size, block_size, true) {
+            let page_spans = block_span.split_into::<PageTag>(block_size, page_size, true);
 
-                let slice = page.write_slice(page_span.offset.as_usize(), end)?;
+            for page_span in page_spans {
+                let (block_idx, page_idx) =
+                    (block_span.index.as_usize(), page_span.index.as_usize());
+
+                let (flat_idx, end) = (
+                    self.flat_index(block_idx, page_idx, pages_per_block),
+                    (page_span.offset + page_span.len).as_usize(),
+                );
+
+                let slice = {
+                    let page = self.ensure_page_mut(flat_idx, page_size as usize);
+                    page.write_slice(page_span.offset.as_usize(), end)?
+                };
+
                 cursor.read_exact(slice)?;
             }
         }
@@ -99,19 +128,20 @@ impl CacheSlice {
     /// Append a buffer behind the latest page. The buffer length must not exceed the remaining length.
     #[tracing::instrument(level = "trace", skip(self, buf), fields(len = buf.len()))]
     pub(crate) fn append(&mut self, buf: &[u8]) -> anyhow::Result<()> {
-        let max_len = self.config.layout.chunk_size;
-        let next_len = self.len + buf.len() as u64;
+        let (max_len, next_len) = (self.config.layout.chunk_size, self.len + buf.len() as u64);
+
         anyhow::ensure!(next_len <= max_len, "append exceeds chunk size");
 
-        let page_size = self.config.page_size as usize;
-        let mut position = 0;
-        let mut cursor = Cursor::new(buf);
+        let (page_size, mut position, mut cursor) =
+            (self.config.page_size as usize, 0usize, Cursor::new(buf));
 
         while position < buf.len() {
-            let (block_index, page_index, within_page) = self.next_write_slot();
-            let page = &mut self.pages[block_index][page_index];
-            let next_page = page.write_slice(within_page, page_size)?;
-            let read = cursor.read(next_page)?;
+            let (flat_idx, within_page) = self.next_write_slot_flat();
+
+            let read = {
+                let page = self.ensure_page_mut(flat_idx, page_size);
+                cursor.read(page.write_slice(within_page, page_size)?)?
+            };
 
             if read == 0 {
                 break;
@@ -120,6 +150,7 @@ impl CacheSlice {
             position += read;
             self.len += read as u64;
         }
+
         Ok(())
     }
 
@@ -135,30 +166,45 @@ impl CacheSlice {
         self.len == offset
     }
 
+    pub(crate) fn stats(&self) -> CacheSliceStats {
+        let pages_used = self.pages.iter().filter(|p| p.is_some()).count();
+        CacheSliceStats {
+            len: self.len,
+            alloc_bytes: self.alloc_bytes,
+            pages_total: self.pages.len(),
+            pages_used,
+        }
+    }
+
     pub(crate) fn freeze(&mut self) {
-        for block in &mut self.pages {
-            for page in block {
-                page.freeze();
-            }
+        for page in self.pages.iter_mut().flatten() {
+            page.freeze();
         }
     }
 
     pub(crate) fn freeze_blocks(&mut self, start: usize, end: usize) {
-        for block in self.pages[start..end].iter_mut() {
-            for page in block.iter_mut() {
-                page.freeze();
-            }
+        let pages_per_block = self.pages_per_block();
+
+        let (start_idx, end_idx) = (start * pages_per_block, end * pages_per_block);
+
+        for page in self.pages[start_idx..end_idx].iter_mut().flatten() {
+            page.freeze();
         }
     }
 
     pub fn release_block(&mut self, idx: Vec<usize>) -> u64 {
-        let page_size = self.config.page_size as u64;
-        let mut freed = 0;
+        let (page_size, pages_per_block, mut freed) =
+            (self.config.page_size as u64, self.pages_per_block(), 0);
 
-        for index in idx {
-            let pages = self.pages[index].len() as u64;
-            freed += pages * page_size;
-            self.pages[index].clear();
+        for block_idx in idx {
+            let range = self.block_page_range(block_idx, pages_per_block);
+
+            for page in self.pages[range].iter_mut() {
+                if page.is_some() {
+                    *page = None;
+                    freed += page_size;
+                }
+            }
         }
 
         self.alloc_bytes = self.alloc_bytes.saturating_sub(freed);
@@ -167,11 +213,9 @@ impl CacheSlice {
 
     pub(crate) fn release_all(&mut self) -> u64 {
         let freed = self.alloc_bytes;
-
-        for block in &mut self.pages {
-            block.clear();
+        for page in &mut self.pages {
+            *page = None;
         }
-
         self.alloc_bytes = 0;
         freed
     }
@@ -181,12 +225,13 @@ impl CacheSlice {
         start: usize,
         end: usize,
     ) -> anyhow::Result<Vec<(usize, Vec<Bytes>)>> {
-        let page_size = self.config.page_size as usize;
-        let block_size = self.config.layout.block_size as usize;
-        let pages_per_block = block_size / page_size;
+        let (page_size, block_size, pages_per_block) = (
+            self.config.page_size as usize,
+            self.config.layout.block_size as usize,
+            self.pages_per_block(),
+        );
 
-        let mut remaining = self.len.as_usize();
-        let skip = start * block_size;
+        let (mut remaining, skip) = (self.len.as_usize(), start * block_size);
         remaining = remaining.saturating_sub(skip);
 
         if remaining == 0 {
@@ -195,8 +240,7 @@ impl CacheSlice {
 
         let mut out = Vec::new();
 
-        for idx in start..end {
-            let block = &self.pages[idx];
+        for block_idx in start..end {
             let mut pages = Vec::new();
 
             for page_idx in 0..pages_per_block {
@@ -204,8 +248,12 @@ impl CacheSlice {
                     break;
                 }
 
-                let take = remaining.min(page_size);
-                if let Some(page) = block.get(page_idx) {
+                let (take, flat_idx) = (
+                    remaining.min(page_size),
+                    self.flat_index(block_idx, page_idx, pages_per_block),
+                );
+
+                if let Some(page) = self.pages[flat_idx].as_ref() {
                     let bytes = page.bytes()?;
                     pages.push(bytes.slice(0..take));
                 } else {
@@ -215,30 +263,53 @@ impl CacheSlice {
                 remaining -= take;
             }
 
-            out.push((idx, pages));
+            out.push((block_idx, pages));
         }
 
         Ok(out)
     }
 
-    /// Acquire the next writable slot (block, page, offset).
-    /// The returned slot belongs to a single page and never overlaps existing writes.
-    fn next_write_slot(&mut self) -> (usize, usize, usize) {
-        let page_size = self.config.page_size as usize;
-        let block_size = self.config.layout.block_size as usize;
+    fn next_write_slot_flat(&mut self) -> (usize, usize) {
+        let (page_size, block_size, pages_per_block, total) = (
+            self.config.page_size as usize,
+            self.config.layout.block_size as usize,
+            self.pages_per_block(),
+            self.len.as_usize(),
+        );
 
-        let total = self.len.as_usize();
-        let block_index = total / block_size;
-        let within_block = total % block_size;
-        let page_index = within_block / page_size;
-        let within_page = within_block % page_size;
+        let (block_index, within_block) = (total / block_size, total % block_size);
 
-        // Allocate a complete page
-        if self.pages[block_index].len() <= page_index {
-            self.pages[block_index].push(Page::new(page_size));
+        let (page_index, within_page) = (within_block / page_size, within_block % page_size);
+
+        let flat_idx = self.flat_index(block_index, page_index, pages_per_block);
+        (flat_idx, within_page)
+    }
+
+    fn pages_per_block(&self) -> usize {
+        (self.config.layout.block_size as usize).div_ceil(self.config.page_size as usize)
+    }
+
+    fn flat_index(&self, block_idx: usize, page_idx: usize, pages_per_block: usize) -> usize {
+        debug_assert_eq!(pages_per_block, self.pages_per_block());
+        block_idx * pages_per_block + page_idx
+    }
+
+    fn block_page_range(&self, block_idx: usize, pages_per_block: usize) -> std::ops::Range<usize> {
+        let (start, end) = (
+            block_idx * pages_per_block,
+            (block_idx + 1) * pages_per_block,
+        );
+
+        start..end
+    }
+
+    fn ensure_page_mut(&mut self, flat_idx: usize, page_size: usize) -> &mut Page {
+        if self.pages[flat_idx].is_none() {
+            self.pages[flat_idx] = Some(Page::new(page_size));
             self.alloc_bytes += page_size as u64;
         }
-        (block_index, page_index, within_page)
+
+        self.pages[flat_idx].as_mut().unwrap()
     }
 
     pub(crate) fn alloc_bytes(&self) -> u64 {
@@ -328,8 +399,8 @@ mod tests {
     }
 
     fn collect_all(slice: &mut CacheSlice) -> Vec<u8> {
-        let len = slice.len();
-        let block_size = slice.block_size() as u64;
+        let (len, block_size) = (slice.len(), slice.block_size() as u64);
+
         let end = if len == 0 {
             0
         } else {
@@ -346,46 +417,55 @@ mod tests {
 
     #[test]
     fn test_append_single_page() {
-        let mut slice = CacheSlice::new(config());
-        let data = patterned(512, 1);
+        let (mut slice, data) = (CacheSlice::new(config()), patterned(512, 1));
+
         slice.append(&data).unwrap();
         slice.freeze();
 
         assert_eq!(slice.len, data.len() as u64);
-        assert_eq!(slice.pages[0].len(), 1);
+        assert_eq!(slice.pages.iter().filter(|p| p.is_some()).count(), 1);
         assert_eq!(collect_all(&mut slice), data);
     }
 
     #[test]
     fn test_append_spans_pages() {
-        let mut slice = CacheSlice::new(config());
-        let data = patterned(1024 + 10, 3);
+        let (mut slice, data) = (CacheSlice::new(config()), patterned(1024 + 10, 3));
+
         slice.append(&data).unwrap();
         slice.freeze();
 
         assert_eq!(slice.len, data.len() as u64);
-        assert_eq!(slice.pages[0].len(), 2);
+        assert_eq!(slice.pages.iter().filter(|p| p.is_some()).count(), 2);
         assert_eq!(collect_all(&mut slice), data);
     }
 
     #[test]
     fn test_append_spans_blocks() {
-        let mut slice = CacheSlice::new(config());
-        let data = patterned(4 * 1024 + 512, 7);
+        let (mut slice, data) = (CacheSlice::new(config()), patterned(4 * 1024 + 512, 7));
+
         slice.append(&data).unwrap();
         slice.freeze();
 
-        let pages_per_block = 4;
-        assert_eq!(slice.pages[0].len(), pages_per_block);
-        assert_eq!(slice.pages[1].len(), 1);
+        let (block_size, page_size) = (
+            slice.config.layout.block_size as usize,
+            slice.config.page_size as usize,
+        );
+
+        let pages_per_block = block_size.div_ceil(page_size as usize) as usize;
+        assert_eq!(
+            slice.pages.iter().filter(|p| p.is_some()).count(),
+            pages_per_block + 1
+        );
         assert_eq!(collect_all(&mut slice), data);
     }
 
     #[test]
     fn test_append_multiple_calls() {
-        let mut slice = CacheSlice::new(config());
-        let first = patterned(600, 11);
-        let second = patterned(900, 23);
+        let (mut slice, first, second) = (
+            CacheSlice::new(config()),
+            patterned(600, 11),
+            patterned(900, 23),
+        );
 
         slice.append(&first).unwrap();
         slice.append(&second).unwrap();
@@ -400,9 +480,11 @@ mod tests {
 
     #[test]
     fn test_write_at() {
-        let mut slice = CacheSlice::new(config());
-        let first = patterned(600, 11);
-        let second = patterned(600, 23);
+        let (mut slice, first, second) = (
+            CacheSlice::new(config()),
+            patterned(600, 11),
+            patterned(600, 23),
+        );
 
         slice.append(&first).unwrap();
         slice.write_at(0, &second).unwrap();
@@ -416,18 +498,21 @@ mod tests {
 
     #[test]
     fn test_write_at_overwrite_middle() {
-        let mut slice = CacheSlice::new(config());
-        let data = patterned(1500, 5);
-        let patch = patterned(300, 200);
-        let offset = 700usize;
+        let (mut slice, data, patch, offset) = (
+            CacheSlice::new(config()),
+            patterned(1500, 5),
+            patterned(300, 200),
+            700usize,
+        );
 
         slice.append(&data).unwrap();
         slice.write_at(offset as u64, &patch).unwrap();
         slice.freeze();
 
         let mut expected = data.clone();
-        let start = offset;
-        let end = start + patch.len();
+
+        let (start, end) = (offset, offset + patch.len());
+
         expected[start..end].copy_from_slice(&patch);
 
         assert_eq!(slice.len, data.len() as u64);
@@ -436,18 +521,21 @@ mod tests {
 
     #[test]
     fn test_write_at_crosses_block_boundary() {
-        let mut slice = CacheSlice::new(config());
-        let data = patterned(4 * 1024 + 512, 9);
-        let patch = patterned(512, 77);
-        let offset = 4 * 1024 - 256;
+        let (mut slice, data, patch, offset) = (
+            CacheSlice::new(config()),
+            patterned(4 * 1024 + 512, 9),
+            patterned(512, 77),
+            4 * 1024 - 256,
+        );
 
         slice.append(&data).unwrap();
         slice.write_at(offset as u64, &patch).unwrap();
         slice.freeze();
 
         let mut expected = data.clone();
-        let start = offset;
-        let end = start + patch.len();
+
+        let (start, end) = (offset, offset + patch.len());
+
         expected[start..end].copy_from_slice(&patch);
 
         assert_eq!(slice.len, data.len() as u64);
@@ -456,8 +544,7 @@ mod tests {
 
     #[test]
     fn test_can_write_at_disallows_append_or_extend() {
-        let mut slice = CacheSlice::new(config());
-        let data = patterned(1024, 17);
+        let (mut slice, data) = (CacheSlice::new(config()), patterned(1024, 17));
 
         slice.append(&data).unwrap();
 
@@ -469,10 +556,13 @@ mod tests {
 
     #[test]
     fn test_append_then_write_at_overwrite_full() {
-        let mut slice = CacheSlice::new(config());
         let total = 16 * 1024;
-        let first = patterned(6000, 1);
-        let second = patterned(total - first.len(), 2);
+
+        let (mut slice, first, second) = (
+            CacheSlice::new(config()),
+            patterned(6000, 1),
+            patterned(total - 6000, 2),
+        );
 
         slice.append(&first).unwrap();
         slice.append(&second).unwrap();

@@ -59,6 +59,28 @@ pub struct SetAttrRequest {
     pub flags: Option<u32>,
 }
 
+/// Builds a `SetAttrRequest` for chmod-style updates.
+///
+/// SlayerFS currently supports only the standard `rwxrwxrwx` permission bits.
+/// setuid, setgid, and sticky bits are stripped before persistence.
+pub fn chmod_request(new_mode: u32) -> SetAttrRequest {
+    SetAttrRequest {
+        mode: Some(new_mode & 0o777),
+        ..Default::default()
+    }
+}
+
+/// Builds a `SetAttrRequest` for chown-style updates.
+///
+/// Either `uid` or `gid` may be `None` to leave it unchanged.
+pub fn chown_request(uid: Option<u32>, gid: Option<u32>) -> SetAttrRequest {
+    SetAttrRequest {
+        uid,
+        gid,
+        ..Default::default()
+    }
+}
+
 bitflags::bitflags! {
     /// Additional flags that control set-attribute semantics.
     #[derive(Debug)]
@@ -537,6 +559,34 @@ pub trait MetaStore: Send + Sync {
     ) -> Result<FileAttr, MetaError> {
         let _ = (ino, req, flags);
         Err(MetaError::NotImplemented)
+    }
+
+    /// Update only the permission bits of an inode.
+    ///
+    /// `new_mode` is masked to `0o777` before persistence — setuid (0o4000),
+    /// setgid (0o2000), and sticky (0o1000) bits are **intentionally stripped**
+    /// because SlayerFS does not implement the associated semantics.
+    ///
+    /// Returns the updated [`FileAttr`] on success, or `MetaError::NotFound`
+    /// if the inode does not exist.
+    async fn chmod(&self, ino: i64, new_mode: u32) -> Result<FileAttr, MetaError> {
+        let req = chmod_request(new_mode);
+        self.set_attr(ino, &req, SetAttrFlags::empty()).await
+    }
+
+    /// Change the owner and/or group of an inode.
+    ///
+    /// Either `uid` or `gid` may be `None` to leave that field unchanged.
+    /// Returns the updated [`FileAttr`] on success, or `MetaError::NotFound`
+    /// if the inode does not exist.
+    async fn chown(
+        &self,
+        ino: i64,
+        uid: Option<u32>,
+        gid: Option<u32>,
+    ) -> Result<FileAttr, MetaError> {
+        let req = chown_request(uid, gid);
+        self.set_attr(ino, &req, SetAttrFlags::empty()).await
     }
 
     async fn open(&self, ino: i64, flags: OpenFlags) -> Result<FileAttr, MetaError> {

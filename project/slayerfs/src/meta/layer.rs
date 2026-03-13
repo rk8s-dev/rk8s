@@ -5,7 +5,7 @@ use crate::meta::client::session::SessionInfo;
 use crate::meta::file_lock::{FileLockInfo, FileLockQuery, FileLockRange, FileLockType};
 use crate::meta::store::{
     AclRule, DirEntry, FileAttr, FileType, MetaError, OpenFlags, SetAttrFlags, SetAttrRequest,
-    StatFsSnapshot,
+    StatFsSnapshot, chmod_request, chown_request,
 };
 use crate::vfs::handles::DirHandle;
 
@@ -198,6 +198,29 @@ pub trait MetaLayer: Send + Sync {
         req: &SetAttrRequest,
         flags: SetAttrFlags,
     ) -> Result<FileAttr, MetaError>;
+
+    /// Update only the permission bits of an inode (chmod).
+    ///
+    /// The mode is masked to `0o777`; setuid/setgid/sticky bits are stripped.
+    /// Returns updated [`FileAttr`] or `MetaError::NotFound`.
+    async fn chmod(&self, ino: i64, new_mode: u32) -> Result<FileAttr, MetaError> {
+        let req = chmod_request(new_mode);
+        self.set_attr(ino, &req, SetAttrFlags::empty()).await
+    }
+
+    /// Change the owner and/or group of an inode (chown).
+    ///
+    /// Either `uid` or `gid` may be `None` to leave that field unchanged.
+    /// Returns updated [`FileAttr`] or `MetaError::NotFound`.
+    async fn chown(
+        &self,
+        ino: i64,
+        uid: Option<u32>,
+        gid: Option<u32>,
+    ) -> Result<FileAttr, MetaError> {
+        let req = chown_request(uid, gid);
+        self.set_attr(ino, &req, SetAttrFlags::empty()).await
+    }
 
     async fn open(&self, ino: i64, flags: OpenFlags) -> Result<FileAttr, MetaError>;
 

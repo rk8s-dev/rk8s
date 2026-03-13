@@ -31,6 +31,6 @@ rust_library(
         "//third-party/rust/crates/fastrand/2.3.0:fastrand",
         "//third-party/rust/crates/futures-lite/2.6.1:futures-lite",
         "//third-party/rust/crates/pin-project-lite/0.2.16:pin-project-lite",
-        "//third-party/rust/crates/slab/0.4.11:slab",
+        "//third-party/rust/crates/slab/0.4.12:slab",
     ],
 )

@@ -18,23 +18,24 @@ clippy-utilities = { workspace = true }
 curp = { path = "../curp" }
 futures = { workspace = true }
 getrandom = "0.2"
+gm-quic = { git = "https://github.com/genmeta/gm-quic", rev = "4cbd9d93" }
 http = "1.0"
 prost = { workspace = true }
+rustls = { version = "0.23", default-features = false, features = ["std", "ring"] }
+rustls-pemfile = "2"
 thiserror = { workspace = true }
 tokio = { workspace = true }
 tonic = { workspace = true }
 tower = { version = "0.4", features = ["discover"] }
+tracing = { workspace = true }
 utils = { path = "../utils" }
 xlineapi = { path = "../xlineapi" }
-xlinerpc = { path = "../xlinerpc"}
+xlinerpc = { path = "../xlinerpc", features = ["tonic-compat"] }
 
 [dev-dependencies]
 rand = "0.8.5"
 test-macros = { path = "../test-macros" }
 xline-test-utils = { path = "../xline-test-utils" }
-
-[build-dependencies]
-tonic-build = { workspace = true }
 
 [lints]
 workspace = true

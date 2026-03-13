@@ -3,13 +3,24 @@ use std::fmt::Display;
 use std::path::Path;
 use std::str::FromStr;
 
+#[derive(Clone, Debug)]
+pub struct S3Config {
+    pub bucket: String,
+    pub region: String,
+    pub endpoint: String,
+    pub access_key_id: String,
+    pub secret_access_key: String,
+    pub path_style: bool,
+    pub allow_http: bool,
+}
+
 #[allow(dead_code)]
 #[derive(Clone, Debug)]
 pub struct Config {
     pub host: String,
     pub port: u16,
 
-    pub storge_type: String,
+    pub storage_type: String,
     pub root_dir: String,
     pub registry_url: String,
     pub db_url: String,
@@ -19,6 +30,8 @@ pub struct Config {
 
     pub github_client_id: String,
     pub github_client_secret: String,
+
+    pub s3_config: Option<S3Config>,
 }
 
 fn must_set<T: FromStr + Display>(
@@ -53,21 +66,69 @@ fn must_set<T: FromStr + Display>(
 pub async fn validate_config(args: &Args) -> Config {
     let mut validation_errors = Vec::new();
 
-    let root_dir = Path::new(&args.root);
-    match tokio::fs::metadata(root_dir).await {
-        Ok(meta) => {
-            if !meta.is_dir() {
-                validation_errors.push(format!(
-                    "OCI_REGISTRY_ROOTDIR `{}` exists but is not a directory",
-                    args.root,
-                ));
+    let storage_type = args.storage.to_uppercase();
+
+    if storage_type == "FILESYSTEM" {
+        let root_dir = Path::new(&args.root);
+        match tokio::fs::metadata(root_dir).await {
+            Ok(meta) => {
+                if !meta.is_dir() {
+                    validation_errors.push(format!(
+                        "OCI_REGISTRY_ROOTDIR `{}` exists but is not a directory",
+                        args.root,
+                    ));
+                }
             }
+            Err(_) => validation_errors.push(format!(
+                "OCI_REGISTRY_ROOTDIR `{}` does not exist.",
+                args.root,
+            )),
         }
-        Err(_) => validation_errors.push(format!(
-            "OCI_REGISTRY_ROOTDIR `{}` does not exist.",
-            args.root,
-        )),
     }
+
+    let s3_config = if storage_type == "S3" {
+        let bucket = match &args.s3_bucket {
+            Some(b) if !b.is_empty() => b.clone(),
+            _ => {
+                validation_errors.push("OCI_REGISTRY_S3_BUCKET must be set for S3 storage".into());
+                String::new()
+            }
+        };
+        let access_key_id = match &args.s3_access_key_id {
+            Some(k) if !k.is_empty() => k.clone(),
+            _ => {
+                validation_errors
+                    .push("OCI_REGISTRY_S3_ACCESS_KEY_ID must be set for S3 storage".into());
+                String::new()
+            }
+        };
+        let secret_access_key = match &args.s3_secret_access_key {
+            Some(s) if !s.is_empty() => s.clone(),
+            _ => {
+                validation_errors
+                    .push("OCI_REGISTRY_S3_SECRET_ACCESS_KEY must be set for S3 storage".into());
+                String::new()
+            }
+        };
+
+        Some(S3Config {
+            bucket,
+            region: args.s3_region.clone(),
+            endpoint: args.s3_endpoint.clone().unwrap_or_default(),
+            access_key_id,
+            secret_access_key,
+            path_style: args.s3_path_style,
+            allow_http: args.s3_allow_http,
+        })
+    } else if storage_type != "FILESYSTEM" {
+        validation_errors.push(format!(
+            "Unsupported storage type: '{}'. Valid values: FILESYSTEM, S3",
+            storage_type
+        ));
+        None
+    } else {
+        None
+    };
 
     let jwt_secret = must_set(
         "JWT_SECRET",
@@ -105,7 +166,7 @@ pub async fn validate_config(args: &Args) -> Config {
     Config {
         host: args.host.clone(),
         port: args.port,
-        storge_type: args.storage.clone(),
+        storage_type,
         root_dir: args.root.clone(),
         registry_url: args.url.clone(),
         db_url,
@@ -113,5 +174,6 @@ pub async fn validate_config(args: &Args) -> Config {
         jwt_lifetime_secs,
         github_client_id: github_client_id.unwrap(),
         github_client_secret: github_client_secret.unwrap(),
+        s3_config,
     }
 }

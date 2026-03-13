@@ -29,8 +29,8 @@ rust_library(
     ],
     rustc_flags = ["@$(location :xattr-manifest[env_flags])"],
     os_deps = {
-        "linux": ["//third-party/rust/crates/rustix/1.1.2:rustix"],
-        "macos": ["//third-party/rust/crates/rustix/1.1.2:rustix"],
+        "linux": ["//third-party/rust/crates/rustix/1.1.3:rustix"],
+        "macos": ["//third-party/rust/crates/rustix/1.1.3:rustix"],
     },
     visibility = ["PUBLIC"],
 )

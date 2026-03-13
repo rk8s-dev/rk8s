@@ -111,3 +111,64 @@ fn list_print(pod_list: Vec<PodTask>) -> Result<()> {
     tab_writer.flush()?;
     Ok(())
 }
+
+#[allow(clippy::too_many_arguments)]
+pub async fn get_pod_logs(
+    pod_name: &str,
+    container: Option<&str>,
+    follow: bool,
+    tail: i64,
+    since: Option<&str>,
+    timestamps: bool,
+    previous: bool,
+    rks_addr: &str,
+    tls_cfg: TLSConnectionArgs,
+) -> Result<()> {
+    let cli = QUICClient::<Cli>::connect(rks_addr, &tls_cfg).await?;
+    info!("RKL connected to RKS at {rks_addr}");
+
+    // Send GetPodLogs request
+    cli.send_msg(&RksMessage::GetPodLogs {
+        pod_name: pod_name.to_string(),
+        namespace: "default".to_string(), // TODO: support namespace parameter
+        container_name: container.map(|s| s.to_string()),
+        follow,
+        tail_lines: tail,
+        since_time: since.map(|s| s.to_string()),
+        timestamps,
+        previous,
+    })
+    .await?;
+
+    // Receive log chunks and print to stdout
+    loop {
+        match cli.fetch_msg().await? {
+            RksMessage::PodLogsChunk {
+                namespace: _,
+                pod_name: _,
+                data,
+                is_final,
+            } => {
+                // Write log data directly to stdout
+                io::stdout().write_all(&data)?;
+                io::stdout().flush()?;
+
+                if is_final {
+                    break;
+                }
+            }
+            RksMessage::PodLogsError {
+                namespace: _,
+                pod_name: _,
+                error,
+            } => {
+                return Err(anyhow!("Failed to get logs: {}", error));
+            }
+            msg => {
+                return Err(anyhow!("Unexpected response: {:?}", msg));
+            }
+        }
+    }
+
+    Ok(())
+}

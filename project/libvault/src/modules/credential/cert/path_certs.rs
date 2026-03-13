@@ -390,8 +390,8 @@ impl CertBackendInner {
         let mut cert_entry = CertEntry::default();
 
         let entry = self.get_cert(req, &name).await?;
-        if entry.is_some() {
-            cert_entry = entry.unwrap();
+        if let Some(e) = entry {
+            cert_entry = e;
         } else {
             cert_entry.name.clone_from(&name);
         }

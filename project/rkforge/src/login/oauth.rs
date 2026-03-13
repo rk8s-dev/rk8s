@@ -1,12 +1,27 @@
-use crate::login::client_ref;
 use crate::login::types::{
     PollTokenErrorKind, PollTokenOk, PollTokenResponse, RequestCodeResponse,
 };
 use crate::utils::cli::RequestBuilderExt;
+use axum::http::HeaderMap;
+use once_cell::sync::OnceCell;
 use qrcode::QrCode;
 use qrcode::render::unicode;
+use reqwest::Client;
 use serde_json::json;
 use std::time::Duration;
+
+static GITHUB_CLIENT: OnceCell<Client> = OnceCell::new();
+
+fn github_client() -> anyhow::Result<&'static Client> {
+    GITHUB_CLIENT.get_or_try_init(|| {
+        let mut headers = HeaderMap::new();
+        headers.insert("Accept", "application/json".parse().unwrap());
+        Client::builder()
+            .default_headers(headers)
+            .build()
+            .map_err(Into::into)
+    })
+}
 
 #[derive(Default)]
 pub struct OAuthFlow {
@@ -34,7 +49,7 @@ impl OAuthFlow {
         let url = "https://github.com/login/device/code";
         let scope = "read:user";
 
-        client_ref()
+        github_client()?
             .post(url)
             .form(&json!({
                 "client_id": self.client_id,
@@ -55,7 +70,7 @@ impl OAuthFlow {
         loop {
             tokio::time::sleep(Duration::from_secs(sleep_secs)).await;
 
-            let res = client_ref()
+            let res = github_client()?
                 .post(url)
                 .form(&json!({
                     "client_id": self.client_id,

@@ -34,7 +34,7 @@ serde_yaml = { workspace = true }
 thiserror = { workspace = true }
 chrono = { workspace = true, features = ["serde"] }
 log = { workspace = true }
-rfuse3 = { version = "0.0.5", features = ["file-lock", "tokio-runtime", "unprivileged"], path = "../rfuse3" }
+rfuse3 = { version = "0.0.7", features = ["file-lock", "tokio-runtime", "unprivileged"], path = "../rfuse3" }
 etcd-client = { workspace = true }
 clap = { workspace = true, features = ["derive", "env"] }
 auto_impl = { workspace = true }

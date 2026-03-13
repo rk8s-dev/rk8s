@@ -901,7 +901,6 @@ impl EtcdMetaStore {
 
         let now = Utc::now().timestamp_nanos_opt().unwrap_or(0);
 
-        // Inherit gid from parent if parent has setgid bit set
         let parent_perm = &parent_meta.permission;
         let parent_has_setgid = (parent_perm.mode & 0o2000) != 0;
         let gid = if parent_has_setgid {
@@ -910,14 +909,7 @@ impl EtcdMetaStore {
             0
         };
 
-        // Directories inherit setgid bit from parent
-        let mode = if parent_has_setgid {
-            0o42755 // Directory with setgid bit
-        } else {
-            0o40755 // Regular directory
-        };
-
-        let dir_permission = Permission::new(mode, 0, gid);
+        let dir_permission = Permission::default_directory(0, gid);
         let entry_info = EtcdEntryInfo {
             is_file: false,
             size: None,
@@ -3187,7 +3179,7 @@ mod tests {
     use crate::meta::config::Config;
     use crate::meta::config::{CacheConfig, ClientOptions, DatabaseConfig, DatabaseType};
     use crate::meta::file_lock::{FileLockQuery, FileLockRange, FileLockType};
-    use crate::meta::store::MetaError;
+    use crate::meta::store::{MetaError, SetAttrFlags, SetAttrRequest};
     use crate::meta::stores::EtcdMetaStore;
     use serial_test::serial;
     use tokio::time;
@@ -3922,5 +3914,84 @@ mod tests {
         let lock_info = store2.get_plock(file_ino, &query).await.unwrap();
         assert_eq!(lock_info.lock_type, FileLockType::Write);
         assert_eq!(lock_info.pid, 5555);
+    }
+
+    #[serial]
+    #[tokio::test]
+    #[ignore]
+    async fn test_file_default_mode() {
+        let store = new_test_store().await;
+        let parent = store.root_ino();
+        let ino = store
+            .create_file(parent, "perm_file.txt".to_string())
+            .await
+            .unwrap();
+
+        let attr = store.stat(ino).await.unwrap().unwrap();
+        assert_eq!(attr.mode & 0o777, 0o644);
+    }
+
+    #[serial]
+    #[tokio::test]
+    #[ignore]
+    async fn test_directory_default_mode() {
+        let store = new_test_store().await;
+        let parent = store.root_ino();
+        let ino = store.mkdir(parent, "perm_dir".to_string()).await.unwrap();
+
+        let attr = store.stat(ino).await.unwrap().unwrap();
+        assert_eq!(attr.mode & 0o7777, 0o755);
+    }
+
+    #[serial]
+    #[tokio::test]
+    #[ignore]
+    async fn test_chmod_updates_mode() {
+        let store = new_test_store().await;
+        let parent = store.root_ino();
+        let ino = store
+            .create_file(parent, "chmod_test.txt".to_string())
+            .await
+            .unwrap();
+
+        let attr = store.chmod(ino, 0o755).await.unwrap();
+        assert_eq!(attr.mode & 0o777, 0o755);
+
+        let stat = store.stat(ino).await.unwrap().unwrap();
+        assert_eq!(stat.mode & 0o777, 0o755);
+    }
+
+    #[serial]
+    #[tokio::test]
+    #[ignore]
+    async fn test_set_attr_mode_strips_special_bits() {
+        let store = new_test_store().await;
+        let parent = store.root_ino();
+        let ino = store
+            .create_file(parent, "special_bits.txt".to_string())
+            .await
+            .unwrap();
+
+        let req = SetAttrRequest {
+            mode: Some(0o4755),
+            ..Default::default()
+        };
+        let attr = store
+            .set_attr(ino, &req, SetAttrFlags::empty())
+            .await
+            .unwrap();
+        assert_eq!(attr.mode & 0o7777, 0o755);
+
+        let stat = store.stat(ino).await.unwrap().unwrap();
+        assert_eq!(stat.mode & 0o7777, 0o755);
+    }
+
+    #[serial]
+    #[tokio::test]
+    #[ignore]
+    async fn test_chmod_nonexistent_inode() {
+        let store = new_test_store().await;
+        let result = store.chmod(999999, 0o644).await;
+        assert!(result.is_err(), "chmod on nonexistent inode should fail");
     }
 }

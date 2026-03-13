@@ -356,7 +356,23 @@ curl -u "username:password" "http://your-distribution-server.com/auth/token"
 # [[entries]]
 # pat = "your-token-here"
 # url = "your-distribution-server.com"
+#
+# # Optional: override image storage root
+# [image]
+# storage = "/data/rkforge"
 ```
+
+You can also configure the storage path from CLI:
+
+```sh
+rkforge config set image.storage /data/rkforge
+rkforge config get image.storage
+```
+
+`rkforge config set image.storage` accepts absolute paths and `~` / `~/...`.
+`~username/...` is not supported. `rkforge config get image.storage` prints the
+resolved effective path (for example, `~/data` is shown as `/home/<user>/data`).
+The same path rules apply when you edit `rkforge.toml` manually.
 
 Tokens expire after a configurable period (default: 1 hour). When a token expires, repeat the token retrieval process and update the configuration file.
 
@@ -427,6 +443,7 @@ Usage: rkforge <COMMAND>
 
 Commands:
   build   Build a container image from Dockerfile
+  config  Get or set rkforge configuration
   push    Push an image to specific distribution server
   pull    Pull an image from specific distribution server
   login   Login to distribution server

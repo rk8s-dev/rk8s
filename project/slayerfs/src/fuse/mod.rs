@@ -161,7 +161,7 @@ where
         let req = SetAttrRequest {
             uid: Some(uid),
             gid: Some(gid),
-            mode: mode.map(|bits| bits & 0o7777),
+            mode: mode.map(sanitize_special_mode_bits),
             ..Default::default()
         };
         if attr_request_is_empty(&req) {
@@ -361,6 +361,8 @@ where
 
     // Set attributes: delegate to metadata layer for mode/uid/gid/size/timestamps.
     // Permission checks are handled by the kernel (via default_permissions mount option).
+    //
+    // Security: setuid/setgid/sticky bits are stripped from mode changes.
     async fn setattr(
         &self,
         req: Request,
@@ -369,6 +371,7 @@ where
         set_attr: SetAttr,
     ) -> FuseResult<ReplyAttr> {
         debug!(unique = req.unique, ino, set_attr = ?set_attr, "fuse.setattr");
+
         let (meta_req, meta_flags) = fuse_setattr_to_meta(&set_attr);
 
         // If no attributes to set, just return current attributes
@@ -661,9 +664,9 @@ where
             }
         };
 
-        // Apply mode (preserve special bits)
+        // Apply mode after stripping special bits unsupported by SlayerFS.
         let Some(vattr) = self
-            .apply_new_entry_attrs(ino, req.uid, req.gid, Some(mode & 0o7777))
+            .apply_new_entry_attrs(ino, req.uid, req.gid, Some(mode))
             .await
         else {
             return Err(libc::ENOENT.into());
@@ -715,8 +718,8 @@ where
         }
         p.push_str(&name);
         let _ino = self.mkdir_p(&p).await.map_err(Errno::from)?;
-        // Preserve special bits (sticky, setuid, setgid) along with permission bits
-        let masked_mode = (mode & 0o7777) & !(umask & 0o777);
+        // Strip setuid/setgid/sticky, then apply the caller's umask.
+        let masked_mode = apply_creation_umask(mode, umask);
         let Some(vattr) = self
             .apply_new_entry_attrs(_ino, req.uid, req.gid, Some(masked_mode))
             .await
@@ -765,7 +768,7 @@ where
         p.push_str(&name);
         let ino = self.create_file(&p).await.map_err(Errno::from)?;
         let Some(vattr) = self
-            .apply_new_entry_attrs(ino, req.uid, req.gid, Some(mode & 0o7777))
+            .apply_new_entry_attrs(ino, req.uid, req.gid, Some(mode))
             .await
         else {
             return Err(libc::ENOENT.into());
@@ -1488,11 +1491,22 @@ fn timestamp_to_nanos(ts: Timestamp) -> i64 {
         .saturating_mul(NANOS_PER_SEC)
         .saturating_add(ts.nsec as i64)
 }
+
+fn sanitize_special_mode_bits(mode: u32) -> u32 {
+    mode & 0o777
+}
+
+fn apply_creation_umask(mode: u32, umask: u32) -> u32 {
+    sanitize_special_mode_bits(mode) & !(umask & 0o777)
+}
+
 fn fuse_setattr_to_meta(set_attr: &SetAttr) -> (SetAttrRequest, SetAttrFlags) {
     let mut req = SetAttrRequest::default();
     let flags = SetAttrFlags::empty();
     if let Some(mode) = set_attr.mode {
-        req.mode = Some(mode);
+        // Strip setuid (0o4000), setgid (0o2000), and sticky (0o1000) bits.
+        // SlayerFS does not implement the semantics behind these special bits.
+        req.mode = Some(sanitize_special_mode_bits(mode));
     }
     if let Some(uid) = set_attr.uid {
         req.uid = Some(uid);
@@ -1524,4 +1538,23 @@ fn attr_request_is_empty(req: &SetAttrRequest) -> bool {
         && req.mtime.is_none()
         && req.ctime.is_none()
         && req.flags.is_none()
+}
+
+#[cfg(test)]
+mod mode_sanitization_tests {
+    use super::{apply_creation_umask, sanitize_special_mode_bits};
+
+    #[test]
+    fn sanitize_special_mode_bits_drops_setuid_setgid_and_sticky() {
+        assert_eq!(sanitize_special_mode_bits(0o1777), 0o777);
+        assert_eq!(sanitize_special_mode_bits(0o2755), 0o755);
+        assert_eq!(sanitize_special_mode_bits(0o4755), 0o755);
+    }
+
+    #[test]
+    fn apply_creation_umask_runs_after_special_bit_stripping() {
+        assert_eq!(apply_creation_umask(0o1777, 0), 0o777);
+        assert_eq!(apply_creation_umask(0o1777, 0o022), 0o755);
+        assert_eq!(apply_creation_umask(0o4755, 0o022), 0o755);
+    }
 }

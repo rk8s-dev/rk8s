@@ -200,7 +200,7 @@ impl BenchmarkFs {
 impl Filesystem for BenchmarkFs {
     async fn init(&self, _req: Request) -> Result<ReplyInit> {
         info!("benchmark filesystem init");
-        Ok(ReplyInit)
+        Ok(ReplyInit::default())
     }
 
     async fn destroy(&self, _req: Request) {

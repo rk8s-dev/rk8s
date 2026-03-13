@@ -41,10 +41,10 @@ WORKDIR /app
         .instructions
         .iter()
         .find_map(|i| {
-            if let Instruction::Misc(misc) = i {
-                if misc.instruction.content.to_uppercase() == "WORKDIR" {
-                    return Some(extract_misc_argument(misc));
-                }
+            if let Instruction::Misc(misc) = i
+                && misc.instruction.content.eq_ignore_ascii_case("WORKDIR")
+            {
+                return Some(extract_misc_argument(misc));
             }
             None
         })
@@ -68,10 +68,10 @@ WORKDIR subdir
         .instructions
         .iter()
         .filter_map(|i| {
-            if let Instruction::Misc(misc) = i {
-                if misc.instruction.content.to_uppercase() == "WORKDIR" {
-                    return Some(extract_misc_argument(misc));
-                }
+            if let Instruction::Misc(misc) = i
+                && misc.instruction.content.eq_ignore_ascii_case("WORKDIR")
+            {
+                return Some(extract_misc_argument(misc));
             }
             None
         })
@@ -101,10 +101,10 @@ USER 1000:1000
         .instructions
         .iter()
         .filter_map(|i| {
-            if let Instruction::Misc(misc) = i {
-                if misc.instruction.content.to_uppercase() == "USER" {
-                    return Some(extract_misc_argument(misc));
-                }
+            if let Instruction::Misc(misc) = i
+                && misc.instruction.content.eq_ignore_ascii_case("USER")
+            {
+                return Some(extract_misc_argument(misc));
             }
             None
         })
@@ -132,10 +132,10 @@ SHELL ["/bin/sh", "-c"]
         .instructions
         .iter()
         .filter_map(|i| {
-            if let Instruction::Misc(misc) = i {
-                if misc.instruction.content.to_uppercase() == "SHELL" {
-                    return Some(extract_misc_argument(misc));
-                }
+            if let Instruction::Misc(misc) = i
+                && misc.instruction.content.eq_ignore_ascii_case("SHELL")
+            {
+                return Some(extract_misc_argument(misc));
             }
             None
         })
@@ -167,10 +167,10 @@ EXPOSE 8080 9090
         .instructions
         .iter()
         .filter_map(|i| {
-            if let Instruction::Misc(misc) = i {
-                if misc.instruction.content.to_uppercase() == "EXPOSE" {
-                    return Some(extract_misc_argument(misc));
-                }
+            if let Instruction::Misc(misc) = i
+                && misc.instruction.content.eq_ignore_ascii_case("EXPOSE")
+            {
+                return Some(extract_misc_argument(misc));
             }
             None
         })
@@ -202,10 +202,10 @@ VOLUME ["/var/lib/mysql", "/var/run/mysqld"]
         .instructions
         .iter()
         .filter_map(|i| {
-            if let Instruction::Misc(misc) = i {
-                if misc.instruction.content.to_uppercase() == "VOLUME" {
-                    return Some(extract_misc_argument(misc));
-                }
+            if let Instruction::Misc(misc) = i
+                && misc.instruction.content.eq_ignore_ascii_case("VOLUME")
+            {
+                return Some(extract_misc_argument(misc));
             }
             None
         })
@@ -239,10 +239,10 @@ STOPSIGNAL SIGINT
         .instructions
         .iter()
         .filter_map(|i| {
-            if let Instruction::Misc(misc) = i {
-                if misc.instruction.content.to_uppercase() == "STOPSIGNAL" {
-                    return Some(extract_misc_argument(misc));
-                }
+            if let Instruction::Misc(misc) = i
+                && misc.instruction.content.eq_ignore_ascii_case("STOPSIGNAL")
+            {
+                return Some(extract_misc_argument(misc));
             }
             None
         })

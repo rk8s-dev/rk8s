@@ -785,3 +785,283 @@ mod io_tests {
         }
     }
 }
+
+#[cfg(test)]
+mod permission_tests {
+    use super::*;
+    use crate::meta::store::{SetAttrFlags, SetAttrRequest};
+
+    /// Helper: create a VFS backed by an in-memory SQLite database.
+    async fn new_test_vfs() -> VFS<InMemoryBlockStore, impl MetaLayer> {
+        let layout = ChunkLayout::default();
+        let store = InMemoryBlockStore::new();
+        let meta_handle = create_meta_store_from_url("sqlite::memory:").await.unwrap();
+        let meta_store = meta_handle.store();
+        VFS::new(layout, store, meta_store).await.unwrap()
+    }
+
+    // -------------------------------------------------------------------
+    // Default permission tests
+    //
+    // NOTE: SlayerFS does not synchronize with the process umask; files and
+    // directories are created with hard-coded defaults (0644 / 0755).  The
+    // FUSE layer can override these with mode & umask at creation time, but
+    // at the VFS level the defaults below are expected.
+    // -------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn test_file_default_permission() {
+        let fs = new_test_vfs().await;
+        fs.mkdir_p("/perm").await.unwrap();
+        fs.create_file("/perm/f.txt").await.unwrap();
+
+        let attr = fs.stat("/perm/f.txt").await.unwrap();
+        // Default file mode: 0o100644 (S_IFREG | rw-r--r--)
+        // Permission bits (low 12 bits) should be 0o644.
+        assert_eq!(
+            attr.mode & 0o7777,
+            0o644,
+            "newly created file should have default permission 0644"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_directory_default_permission() {
+        let fs = new_test_vfs().await;
+        fs.mkdir_p("/perm_dir").await.unwrap();
+
+        let attr = fs.stat("/perm_dir").await.unwrap();
+        // Default directory mode: 0o040755 (S_IFDIR | rwxr-xr-x)
+        // Permission bits should be 0o755.
+        assert_eq!(
+            attr.mode & 0o7777,
+            0o755,
+            "newly created directory should have default permission 0755"
+        );
+    }
+
+    // -------------------------------------------------------------------
+    // chmod tests
+    // -------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn test_chmod_file_basic() {
+        let fs = new_test_vfs().await;
+        fs.mkdir_p("/chm").await.unwrap();
+        let ino = fs.create_file("/chm/a.txt").await.unwrap();
+
+        // Change to 0o755
+        let attr = fs.chmod(ino, 0o755).await.unwrap();
+        assert_eq!(
+            attr.mode & 0o777,
+            0o755,
+            "chmod should update permission bits"
+        );
+
+        // Verify stat also returns the new mode
+        let stat = fs.stat("/chm/a.txt").await.unwrap();
+        assert_eq!(
+            stat.mode & 0o777,
+            0o755,
+            "stat after chmod should reflect new permission"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_chmod_directory() {
+        let fs = new_test_vfs().await;
+        let ino = fs.mkdir_p("/chm_dir").await.unwrap();
+
+        let attr = fs.chmod(ino, 0o700).await.unwrap();
+        assert_eq!(attr.mode & 0o777, 0o700);
+
+        let stat = fs.stat("/chm_dir").await.unwrap();
+        assert_eq!(stat.mode & 0o777, 0o700);
+    }
+
+    #[tokio::test]
+    async fn test_chmod_strips_setuid_setgid_sticky() {
+        let fs = new_test_vfs().await;
+        fs.mkdir_p("/strip").await.unwrap();
+        let ino = fs.create_file("/strip/s.txt").await.unwrap();
+
+        // Pass mode with setuid (0o4000), setgid (0o2000), and sticky (0o1000)
+        let attr = fs.chmod(ino, 0o7755).await.unwrap();
+        // Only 0o755 should survive — special bits are stripped.
+        assert_eq!(
+            attr.mode & 0o7777,
+            0o755,
+            "setuid/setgid/sticky should be stripped by chmod"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_chmod_nonexistent_inode_returns_error() {
+        let fs = new_test_vfs().await;
+        let result = fs.chmod(999999, 0o644).await;
+        assert!(result.is_err(), "chmod on nonexistent inode should fail");
+    }
+
+    #[tokio::test]
+    async fn test_chmod_preserves_file_type_bits() {
+        let fs = new_test_vfs().await;
+        fs.mkdir_p("/ftype").await.unwrap();
+        let ino = fs.create_file("/ftype/f.txt").await.unwrap();
+
+        let before = fs.stat("/ftype/f.txt").await.unwrap();
+        let file_type_before = before.mode & 0o170000;
+
+        fs.chmod(ino, 0o777).await.unwrap();
+
+        let after = fs.stat("/ftype/f.txt").await.unwrap();
+        let file_type_after = after.mode & 0o170000;
+        assert_eq!(
+            file_type_before, file_type_after,
+            "chmod must not alter file type bits"
+        );
+    }
+
+    // -------------------------------------------------------------------
+    // set_attr mode change tests (integration with VFS.set_attr)
+    // -------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn test_set_attr_mode_change() {
+        let fs = new_test_vfs().await;
+        fs.mkdir_p("/sa").await.unwrap();
+        let ino = fs.create_file("/sa/x.txt").await.unwrap();
+
+        let req = SetAttrRequest {
+            mode: Some(0o600),
+            ..Default::default()
+        };
+        let attr = fs.set_attr(ino, &req, SetAttrFlags::empty()).await.unwrap();
+        assert_eq!(attr.mode & 0o777, 0o600);
+
+        let stat = fs.stat("/sa/x.txt").await.unwrap();
+        assert_eq!(stat.mode & 0o777, 0o600);
+    }
+
+    #[tokio::test]
+    async fn test_set_attr_mode_strips_special_bits_via_chmod_path() {
+        // When the chmod VFS method is used, special bits are stripped.
+        let fs = new_test_vfs().await;
+        fs.mkdir_p("/sa2").await.unwrap();
+        let ino = fs.create_file("/sa2/y.txt").await.unwrap();
+
+        let attr = fs.chmod(ino, 0o4755).await.unwrap();
+        assert_eq!(
+            attr.mode & 0o7777,
+            0o755,
+            "setuid bit should be stripped when using chmod"
+        );
+    }
+
+    // -------------------------------------------------------------------
+    // chown tests
+    // -------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn test_chown_file_uid_and_gid() {
+        let fs = new_test_vfs().await;
+        fs.mkdir_p("/own").await.unwrap();
+        let ino = fs.create_file("/own/f.txt").await.unwrap();
+
+        let attr = fs.chown(ino, Some(1000), Some(1000)).await.unwrap();
+        assert_eq!(attr.uid, 1000, "chown should update uid");
+        assert_eq!(attr.gid, 1000, "chown should update gid");
+
+        // Verify via stat
+        let stat = fs.stat("/own/f.txt").await.unwrap();
+        assert_eq!(stat.uid, 1000);
+        assert_eq!(stat.gid, 1000);
+    }
+
+    #[tokio::test]
+    async fn test_chown_uid_only() {
+        let fs = new_test_vfs().await;
+        fs.mkdir_p("/own2").await.unwrap();
+        let ino = fs.create_file("/own2/f.txt").await.unwrap();
+
+        let before = fs.stat("/own2/f.txt").await.unwrap();
+        let original_gid = before.gid;
+
+        let attr = fs.chown(ino, Some(2000), None).await.unwrap();
+        assert_eq!(attr.uid, 2000, "chown should update uid");
+        assert_eq!(attr.gid, original_gid, "gid should remain unchanged");
+    }
+
+    #[tokio::test]
+    async fn test_chown_gid_only() {
+        let fs = new_test_vfs().await;
+        fs.mkdir_p("/own3").await.unwrap();
+        let ino = fs.create_file("/own3/f.txt").await.unwrap();
+
+        let before = fs.stat("/own3/f.txt").await.unwrap();
+        let original_uid = before.uid;
+
+        let attr = fs.chown(ino, None, Some(3000)).await.unwrap();
+        assert_eq!(attr.uid, original_uid, "uid should remain unchanged");
+        assert_eq!(attr.gid, 3000, "chown should update gid");
+    }
+
+    #[tokio::test]
+    async fn test_chown_directory() {
+        let fs = new_test_vfs().await;
+        let ino = fs.mkdir_p("/own_dir").await.unwrap();
+
+        let attr = fs.chown(ino, Some(500), Some(500)).await.unwrap();
+        assert_eq!(attr.uid, 500);
+        assert_eq!(attr.gid, 500);
+
+        let stat = fs.stat("/own_dir").await.unwrap();
+        assert_eq!(stat.uid, 500);
+        assert_eq!(stat.gid, 500);
+    }
+
+    #[tokio::test]
+    async fn test_chown_nonexistent_inode_returns_error() {
+        let fs = new_test_vfs().await;
+        let result = fs.chown(999999, Some(1000), Some(1000)).await;
+        assert!(result.is_err(), "chown on nonexistent inode should fail");
+    }
+
+    #[tokio::test]
+    async fn test_chown_preserves_mode() {
+        let fs = new_test_vfs().await;
+        fs.mkdir_p("/own_mode").await.unwrap();
+        let ino = fs.create_file("/own_mode/f.txt").await.unwrap();
+
+        // Change mode first
+        fs.chmod(ino, 0o755).await.unwrap();
+
+        // Then change owner
+        let attr = fs.chown(ino, Some(1000), Some(1000)).await.unwrap();
+        assert_eq!(
+            attr.mode & 0o777,
+            0o755,
+            "chown should not alter permission bits"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_set_attr_chown_via_request() {
+        // Test chown via the SetAttrRequest path (simulates FUSE setattr)
+        let fs = new_test_vfs().await;
+        fs.mkdir_p("/sa_own").await.unwrap();
+        let ino = fs.create_file("/sa_own/f.txt").await.unwrap();
+
+        let req = SetAttrRequest {
+            uid: Some(1234),
+            gid: Some(5678),
+            ..Default::default()
+        };
+        let attr = fs.set_attr(ino, &req, SetAttrFlags::empty()).await.unwrap();
+        assert_eq!(attr.uid, 1234);
+        assert_eq!(attr.gid, 5678);
+
+        let stat = fs.stat("/sa_own/f.txt").await.unwrap();
+        assert_eq!(stat.uid, 1234);
+        assert_eq!(stat.gid, 5678);
+    }
+}

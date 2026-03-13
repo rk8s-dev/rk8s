@@ -33,12 +33,12 @@ rust_library(
     ],
     rustc_flags = ["@$(location :ssh-encoding-manifest[env_flags])"],
     named_deps = {
-        "base64": "//third-party/rust/crates/base64ct/1.8.1:base64ct",
+        "base64": "//third-party/rust/crates/base64ct/1.8.3:base64ct",
         "pem": "//third-party/rust/crates/pem-rfc7468/0.7.0:pem-rfc7468",
     },
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/bytes/1.11.0:bytes",
+        "//third-party/rust/crates/bytes/1.11.1:bytes",
         "//third-party/rust/crates/sha2/0.10.9:sha2",
     ],
 )

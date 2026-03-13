@@ -459,7 +459,6 @@ impl DatabaseMetaStore {
 
         let now = Utc::now().timestamp_nanos_opt().unwrap_or(0);
 
-        // Inherit gid from parent if parent has setgid bit set
         let parent_perm = parent_meta.permission();
         let parent_has_setgid = (parent_perm.mode & 0o2000) != 0;
         let gid = if parent_has_setgid {
@@ -468,14 +467,7 @@ impl DatabaseMetaStore {
             0
         };
 
-        // Directories inherit setgid bit from parent
-        let mode = if parent_has_setgid {
-            0o42755 // Directory with setgid bit
-        } else {
-            0o40755 // Regular directory
-        };
-
-        let dir_permission = Permission::new(mode, 0, gid);
+        let dir_permission = Permission::default_directory(0, gid);
         let access_meta = access_meta::ActiveModel {
             inode: Set(inode),
             permission: Set(dir_permission),
@@ -2075,7 +2067,7 @@ impl MetaStore for DatabaseMetaStore {
             let now = Self::now_nanos();
 
             if let Some(mode) = req.mode {
-                permission.chmod(mode);
+                permission.chmod(mode & 0o777);
                 ctime_update = true;
             }
 
@@ -2177,7 +2169,7 @@ impl MetaStore for DatabaseMetaStore {
             let mut create_time = dir.create_time;
 
             if let Some(mode) = req.mode {
-                permission.chmod(mode);
+                permission.chmod(mode & 0o777);
                 ctime_update = true;
             }
 
@@ -2845,7 +2837,7 @@ mod tests {
         Config {
             database: DatabaseConfig {
                 db_config: DatabaseType::Postgres {
-                    url: "postgres://slayerfs:slayerfs@127.0.0.1:5432/database".to_string(),
+                    url: "postgres://slayerfs:slayerfs@127.0.0.1:15432/database".to_string(),
                 },
             },
             cache: CacheConfig::default(),
@@ -3821,5 +3813,183 @@ mod tests {
         let lock_info = store2.get_plock(file_ino, &query).await.unwrap();
         assert_eq!(lock_info.lock_type, FileLockType::Write);
         assert_eq!(lock_info.pid, 5555);
+    }
+
+    // -------------------------------------------------------------------
+    // Permission / chmod tests
+    // -------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn test_file_default_mode() {
+        let store = new_test_store().await;
+        let parent = store.root_ino();
+        let ino = store
+            .create_file(parent, "perm_file.txt".to_string())
+            .await
+            .unwrap();
+
+        let attr = store.stat(ino).await.unwrap().unwrap();
+        // Default file mode: permission bits should be 0o644.
+        assert_eq!(
+            attr.mode & 0o777,
+            0o644,
+            "newly created file should have default permission 0644"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_directory_default_mode() {
+        let store = new_test_store().await;
+        let parent = store.root_ino();
+        let ino = store.mkdir(parent, "perm_dir".to_string()).await.unwrap();
+
+        let attr = store.stat(ino).await.unwrap().unwrap();
+        assert_eq!(
+            attr.mode & 0o7777,
+            0o755,
+            "newly created directory should have default permission 0755"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_chmod_updates_mode() {
+        let store = new_test_store().await;
+        let parent = store.root_ino();
+        let ino = store
+            .create_file(parent, "chmod_test.txt".to_string())
+            .await
+            .unwrap();
+
+        let attr = store.chmod(ino, 0o755).await.unwrap();
+        assert_eq!(attr.mode & 0o777, 0o755);
+
+        // Verify via stat
+        let stat = store.stat(ino).await.unwrap().unwrap();
+        assert_eq!(stat.mode & 0o777, 0o755);
+    }
+
+    #[tokio::test]
+    async fn test_chmod_strips_special_bits() {
+        let store = new_test_store().await;
+        let parent = store.root_ino();
+        let ino = store
+            .create_file(parent, "special_bits.txt".to_string())
+            .await
+            .unwrap();
+
+        // MetaStore::chmod strips setuid/setgid/sticky (masks to 0o777).
+        let attr = store.chmod(ino, 0o7755).await.unwrap();
+        assert_eq!(
+            attr.mode & 0o7777,
+            0o755,
+            "setuid/setgid/sticky should be stripped"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_chmod_nonexistent_inode() {
+        let store = new_test_store().await;
+        let result = store.chmod(999999, 0o644).await;
+        assert!(result.is_err(), "chmod on nonexistent inode should fail");
+    }
+
+    // -------------------------------------------------------------------
+    // chown tests
+    // -------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn test_chown_updates_uid_and_gid() {
+        let store = new_test_store().await;
+        let parent = store.root_ino();
+        let ino = store
+            .create_file(parent, "chown_test.txt".to_string())
+            .await
+            .unwrap();
+
+        let attr = store.chown(ino, Some(1000), Some(1000)).await.unwrap();
+        assert_eq!(attr.uid, 1000);
+        assert_eq!(attr.gid, 1000);
+
+        // Verify via stat
+        let stat = store.stat(ino).await.unwrap().unwrap();
+        assert_eq!(stat.uid, 1000);
+        assert_eq!(stat.gid, 1000);
+    }
+
+    #[tokio::test]
+    async fn test_chown_uid_only() {
+        let store = new_test_store().await;
+        let parent = store.root_ino();
+        let ino = store
+            .create_file(parent, "chown_uid.txt".to_string())
+            .await
+            .unwrap();
+
+        let before = store.stat(ino).await.unwrap().unwrap();
+        let original_gid = before.gid;
+
+        let attr = store.chown(ino, Some(2000), None).await.unwrap();
+        assert_eq!(attr.uid, 2000);
+        assert_eq!(attr.gid, original_gid, "gid should remain unchanged");
+    }
+
+    #[tokio::test]
+    async fn test_chown_gid_only() {
+        let store = new_test_store().await;
+        let parent = store.root_ino();
+        let ino = store
+            .create_file(parent, "chown_gid.txt".to_string())
+            .await
+            .unwrap();
+
+        let before = store.stat(ino).await.unwrap().unwrap();
+        let original_uid = before.uid;
+
+        let attr = store.chown(ino, None, Some(3000)).await.unwrap();
+        assert_eq!(attr.uid, original_uid, "uid should remain unchanged");
+        assert_eq!(attr.gid, 3000);
+    }
+
+    #[tokio::test]
+    async fn test_chown_preserves_mode() {
+        let store = new_test_store().await;
+        let parent = store.root_ino();
+        let ino = store
+            .create_file(parent, "chown_mode.txt".to_string())
+            .await
+            .unwrap();
+
+        // Change mode first
+        store.chmod(ino, 0o755).await.unwrap();
+
+        // Then change owner
+        let attr = store.chown(ino, Some(1000), Some(1000)).await.unwrap();
+        assert_eq!(
+            attr.mode & 0o777,
+            0o755,
+            "chown should not alter permission bits"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_chown_nonexistent_inode() {
+        let store = new_test_store().await;
+        let result = store.chown(999999, Some(1000), Some(1000)).await;
+        assert!(result.is_err(), "chown on nonexistent inode should fail");
+    }
+
+    #[tokio::test]
+    async fn test_chown_directory() {
+        let store = new_test_store().await;
+        let parent = store.root_ino();
+        let ino = store.mkdir(parent, "chown_dir".to_string()).await.unwrap();
+
+        let attr = store.chown(ino, Some(500), Some(500)).await.unwrap();
+        assert_eq!(attr.uid, 500);
+        assert_eq!(attr.gid, 500);
+
+        let stat = store.stat(ino).await.unwrap().unwrap();
+        assert_eq!(stat.uid, 500);
+        assert_eq!(stat.gid, 500);
     }
 }

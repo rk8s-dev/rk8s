@@ -33,11 +33,11 @@ rust_library(
     deps = [
         "//third-party/rust/crates/fixedbitset/0.5.7:fixedbitset",
         "//third-party/rust/crates/nix/0.29.0:nix",
-        "//third-party/rust/crates/oci-spec/0.8.3:oci-spec",
-        "//third-party/rust/crates/pathrs/0.2.2:pathrs",
+        "//third-party/rust/crates/oci-spec/0.8.4:oci-spec",
+        "//third-party/rust/crates/pathrs/0.2.3:pathrs",
         "//third-party/rust/crates/procfs/0.17.0:procfs",
         "//third-party/rust/crates/serde/1.0.228:serde",
-        "//third-party/rust/crates/thiserror/2.0.17:thiserror",
-        "//third-party/rust/crates/tracing/0.1.43:tracing",
+        "//third-party/rust/crates/thiserror/2.0.18:thiserror",
+        "//third-party/rust/crates/tracing/0.1.44:tracing",
     ],
 )

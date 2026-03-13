@@ -36,7 +36,7 @@ rust_library(
     deps = [
         "//third-party/rust/crates/async-trait/0.1.89:async-trait",
         "//third-party/rust/crates/cfg-if/1.0.4:cfg-if",
-        "//third-party/rust/crates/data-encoding/2.9.0:data-encoding",
+        "//third-party/rust/crates/data-encoding/2.10.0:data-encoding",
         "//third-party/rust/crates/enum-as-inner/0.6.1:enum-as-inner",
         "//third-party/rust/crates/futures-channel/0.3.31:futures-channel",
         "//third-party/rust/crates/futures-io/0.3.31:futures-io",
@@ -47,10 +47,10 @@ rust_library(
         "//third-party/rust/crates/rand/0.9.2:rand",
         "//third-party/rust/crates/ring/0.17.14:ring",
         "//third-party/rust/crates/serde/1.0.228:serde",
-        "//third-party/rust/crates/thiserror/2.0.17:thiserror",
+        "//third-party/rust/crates/thiserror/2.0.18:thiserror",
         "//third-party/rust/crates/tinyvec/1.10.0:tinyvec",
         "//third-party/rust/crates/tokio/1.49.0:tokio",
-        "//third-party/rust/crates/tracing/0.1.43:tracing",
-        "//third-party/rust/crates/url/2.5.7:url",
+        "//third-party/rust/crates/tracing/0.1.44:tracing",
+        "//third-party/rust/crates/url/2.5.8:url",
     ],
 )
