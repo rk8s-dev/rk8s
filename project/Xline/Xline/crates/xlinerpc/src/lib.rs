@@ -9,7 +9,9 @@ pub mod envelope;
 pub mod request;
 pub mod response;
 pub mod status;
+#[cfg(feature = "tonic-compat")]
 pub mod commandpb;
+#[cfg(feature = "tonic-compat")]
 pub mod inner_messagepb;
 
 // Re-export commonly used types
@@ -19,6 +21,8 @@ pub use request::Request;
 pub use response::Response;
 pub use status::{Code, Status};
 
+#[cfg(feature = "tonic-compat")]
+pub use commandpb::*;
 /// Trait for types that can be converted into metadata bytes (keys or values)
 ///
 /// This trait consolidates the conversion of various types into binary metadata.

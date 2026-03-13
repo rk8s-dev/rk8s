@@ -1,4 +1,8 @@
+
+#![cfg(feature = "tonic-compat")]
 //! Command protocol buffer types for CURP
+
+use tonic::{Request, Response, Status};
 
 pub mod types;
 

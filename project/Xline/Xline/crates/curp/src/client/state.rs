@@ -5,13 +5,9 @@ use std::{
     time::Duration,
 };
 
-use event_listener::Event;
-use futures::{Future, stream::FuturesUnordered};
-use rand::seq::IteratorRandom;
-use tokio::sync::RwLock;
+
 use tonic::transport::ClientTlsConfig;
-use tracing::{debug, info};
-use xlinerpc::status::Status;
+
 use crate::{
     members::ServerId,
     rpc::{

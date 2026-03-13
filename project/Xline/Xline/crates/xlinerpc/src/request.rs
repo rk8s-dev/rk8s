@@ -17,7 +17,7 @@ pub type Request<T> = Envelope<T, RequestKind>;
 #[cfg(feature = "tonic-compat")]
 pub mod tonic_compat {
     use super::*;
-    use crate::{Response, Status};
+    use crate::Response;
 
     /// Convert tonic::Request to xlinerpc::Request
     impl<T> From<tonic::Request<T>> for Request<T> {
@@ -52,26 +52,6 @@ pub mod tonic_compat {
             let mut tonic_req = tonic::Request::new(data);
             *tonic_req.metadata_mut() = tonic_metadata;
             tonic_req
-        }
-    }
-
-    /// Convert tonic::Status to xlinerpc::Status
-    impl From<tonic::Status> for Status {
-        fn from(status: tonic::Status) -> Self {
-            Status::new(
-                crate::Code::from_i32(status.code() as i32),
-                status.message().to_string(),
-            )
-        }
-    }
-
-    /// Convert xlinerpc::Status to tonic::Status
-    impl From<Status> for tonic::Status {
-        fn from(status: Status) -> Self {
-            tonic::Status::new(
-                tonic::Code::from_i32(status.code as i32),
-                status.message,
-            )
         }
     }
 
