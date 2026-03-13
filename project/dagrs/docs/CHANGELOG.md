@@ -27,7 +27,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Planned
 - **Visualization (REQ-005)**: Export DAG structure to DOT/Mermaid format (Scheduled for next release).
 
-## [0.6.0] - 2026-03-12
+## [0.6.0] - 2026-02-01
 
 ### Added
 - **Loop Node (REQ-001)**: Introduced `LoopNode` struct and `LoopCondition` trait to support controllable iterative loops. Added `FlowControl::Loop` instruction for execution flow management.
