@@ -32,6 +32,10 @@ fn main() {
         s -> a b,
         b -> a
     );
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("failed to create tokio runtime");
 
-    g.start().unwrap();
+    g.start_with_runtime(&runtime).unwrap();
 }
