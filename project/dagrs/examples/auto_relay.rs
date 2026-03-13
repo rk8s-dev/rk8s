@@ -19,6 +19,7 @@ impl MyNode {
     }
 }
 
+#[allow(deprecated)]
 fn main() {
     let mut node_table = NodeTable::default();
 

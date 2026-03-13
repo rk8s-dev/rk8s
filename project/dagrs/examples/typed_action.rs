@@ -61,6 +61,7 @@ impl TypedAction for Compute {
     }
 }
 
+#[allow(deprecated)]
 fn main() {
     env_logger::init();
 

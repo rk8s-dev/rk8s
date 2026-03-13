@@ -19,6 +19,7 @@ impl Action for HelloAction {
     }
 }
 
+#[allow(deprecated)]
 fn main() {
     // create an empty `NodeTable`
     let mut node_table = NodeTable::new();

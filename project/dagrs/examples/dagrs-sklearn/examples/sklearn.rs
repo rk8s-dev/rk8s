@@ -85,6 +85,7 @@ impl Action for RootAction {
     }
 }
 
+#[allow(deprecated)]
 fn main() {
     env_logger::init();
 

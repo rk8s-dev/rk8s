@@ -78,6 +78,7 @@ impl Condition for VerifyGT {
     }
 }
 
+#[allow(deprecated)]
 fn main() {
     // Initialization log.
     unsafe {

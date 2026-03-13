@@ -43,6 +43,7 @@ impl Action for Compute {
     }
 }
 
+#[allow(deprecated)]
 fn main() {
     // Initialization log.
     env_logger::init();

@@ -110,6 +110,7 @@ impl Action for ProcAction {
     }
 }
 
+#[allow(deprecated)]
 fn main() {
     unsafe {
         env::set_var("RUST_LOG", "info");

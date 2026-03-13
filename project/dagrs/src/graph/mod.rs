@@ -1083,8 +1083,20 @@ impl Graph {
 
     /// Executes a single DAG synchronously with an externally managed Tokio runtime.
     ///
-    /// This method blocks the current thread until execution completes, but it does
+    /// This is a legacy compatibility adapter for synchronous callers.
+    /// It blocks the current thread until execution completes, but it does
     /// not create or own the runtime.
+    ///
+    /// Prefer [`Graph::async_start`] in new code.
+    ///
+    /// # Deprecation
+    ///
+    /// This method is planned for removal in the next major version.
+    /// Migrate synchronous callers by moving graph execution into an async
+    /// context and awaiting [`Graph::async_start`].
+    #[deprecated(
+        note = "start_with_runtime() is a legacy sync adapter and will be removed in the next major version. Prefer async_start().await."
+    )]
     pub fn start_with_runtime(
         &mut self,
         runtime: &tokio::runtime::Runtime,
@@ -1791,6 +1803,7 @@ mod tests {
     /// Step 4: Run the graph and verify the output saved in the graph structure.
 
     #[test]
+    #[allow(deprecated)]
     fn test_graph_execution() {
         let mut graph = Graph::new();
         let mut node_table = NodeTable::new();
@@ -1849,6 +1862,7 @@ mod tests {
     ///
     /// Step 4: Run the graph and verify the conditional node fails as expected.
     #[test]
+    #[allow(deprecated)]
     fn test_conditional_execution() {
         let mut graph = Graph::new();
         let mut node_table = NodeTable::new();
@@ -1895,6 +1909,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(deprecated)]
     fn test_blocking_start_rejected_in_async_context() {
         let mut graph = Graph::new();
         let runtime = tokio::runtime::Builder::new_current_thread()

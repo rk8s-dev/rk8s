@@ -137,6 +137,7 @@ impl TypedAction for ReceiverAction {
     }
 }
 
+#[allow(deprecated)]
 fn main() {
     // Create a node table
     let mut node_table = NodeTable::new();
