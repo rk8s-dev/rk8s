@@ -130,7 +130,7 @@ mod test_default_node {
 
     impl HelloAction {
         pub fn new() -> Self {
-            Self::default()
+            Self
         }
     }
 
@@ -139,8 +139,8 @@ mod test_default_node {
     /// Step 1: create a [`DefaultNode`] with [`HelloAction`].
     ///
     /// Step 2: run the node and verify its output.
-    #[test]
-    fn create_default_node() {
+    #[tokio::test]
+    async fn create_default_node() {
         let node_name = "Test Node";
 
         let mut node_table = NodeTable::new();
@@ -154,9 +154,7 @@ mod test_default_node {
         assert_eq!(node_table.get(node_name).unwrap(), &node.id());
 
         let env = Arc::new(EnvVar::new(node_table));
-        let out = tokio::runtime::Runtime::new()
-            .unwrap()
-            .block_on(async { node.run(env).await.get_out().unwrap() });
+        let out = node.run(env).await.get_out().unwrap();
         let out: &String = out.get().unwrap();
         assert_eq!(out, "Hello world");
     }
