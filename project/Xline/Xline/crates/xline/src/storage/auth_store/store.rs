@@ -1190,6 +1190,7 @@ impl AuthStore {
 /// `CN=` attribute found in the subject string.  We deliberately keep this
 /// logic simple so that it can be re‑used both in unit tests and in the
 /// `init_router` interceptor below.
+#[cfg(test)]
 fn parse_cn_from_cert(der: &[u8]) -> Option<String> {
     x509_parser::parse_x509_der(der)
         .ok()

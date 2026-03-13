@@ -31,6 +31,10 @@ use utils::{
     task_manager::{TaskManager, tasks::TaskName},
 };
 use xlineapi::command::{Command, CurpClient};
+use xlineapi::{
+    RpcAuthServer, RpcClusterServer, RpcKvServer, RpcLeaseServer,
+    RpcLockServer, RpcMaintenanceServer, RpcWatchServer,
+};
 
 use super::{
     auth_server::AuthServer,

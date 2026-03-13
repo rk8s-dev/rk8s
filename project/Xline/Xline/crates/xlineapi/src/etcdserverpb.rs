@@ -938,6 +938,10 @@ pub mod kv_server {
     use super::*;
     use tonic::{Request, Response, Status};
     use tonic::server::NamedService;
+    use tonic::codegen::{http, Body, BoxFuture};
+    use tower_service::Service;
+    use std::task::{Context, Poll};
+    use std::sync::Arc;
 
     #[async_trait::async_trait]
     pub trait Kv: Send + Sync + 'static {
@@ -970,18 +974,75 @@ pub mod kv_server {
     {
         const NAME: &'static str = "etcdserverpb.KV";
     }
+
+    impl<S> Service<http::Request<tonic::body::BoxBody>> for KvServer<S>
+    where
+        S: Kv + Send + Sync + 'static,
+        S: 'static,
+    {
+        type Response = http::Response<tonic::body::BoxBody>;
+        type Error = http::Error;
+        type Future = BoxFuture<Self::Response, Self::Error>;
+
+        fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+            Poll::Ready(Ok(()))
+        }
+
+        fn call(&mut self, req: http::Request<tonic::body::BoxBody>) -> Self::Future {
+            let inner = Arc::clone(&self.inner);
+            Box::pin(async move {
+                let path = req.uri().path().to_string();
+                match path.as_str() {
+                    "/etcdserverpb.KV/Range" => {
+                        let msg = decode_request::<RangeRequest>(req).await?;
+                        let resp = inner.range(msg).await.map_err(status_to_http_error)?;
+                        Ok(encode_response(resp))
+                    }
+                    "/etcdserverpb.KV/Put" => {
+                        let msg = decode_request::<PutRequest>(req).await?;
+                        let resp = inner.put(msg).await.map_err(status_to_http_error)?;
+                        Ok(encode_response(resp))
+                    }
+                    "/etcdserverpb.KV/DeleteRange" => {
+                        let msg = decode_request::<DeleteRangeRequest>(req).await?;
+                        let resp = inner.delete_range(msg).await.map_err(status_to_http_error)?;
+                        Ok(encode_response(resp))
+                    }
+                    "/etcdserverpb.KV/Txn" => {
+                        let msg = decode_request::<TxnRequest>(req).await?;
+                        let resp = inner.txn(msg).await.map_err(status_to_http_error)?;
+                        Ok(encode_response(resp))
+                    }
+                    "/etcdserverpb.KV/Compaction" => {
+                        let msg = decode_request::<CompactionRequest>(req).await?;
+                        let resp = inner.compact(msg).await.map_err(status_to_http_error)?;
+                        Ok(encode_response(resp))
+                    }
+                    _ => {
+                        Ok(http::Response::builder()
+                            .status(http::StatusCode::NOT_FOUND)
+                            .body(tonic::body::BoxBody::default())
+                            .unwrap())
+                    }
+                }
+            })
+        }
+    }
 }
 
 pub mod watch_server {
     use super::*;
     use tonic::{Request, Response, Status};
     use tonic::server::NamedService;
+    use tonic::codegen::{http, Body, BoxFuture};
+    use tower_service::Service;
+    use std::task::{Context, Poll};
+    use std::sync::Arc;
     use futures::Stream;
 
     #[async_trait::async_trait]
     pub trait Watch: Send + Sync + 'static {
         type WatchStream: Stream<Item = Result<WatchResponse, Status>> + Send + 'static;
-
         async fn watch(&self, request: Request<tonic::Streaming<WatchRequest>>) -> Result<Response<Self::WatchStream>, Status>;
     }
 
@@ -1007,18 +1068,57 @@ pub mod watch_server {
     {
         const NAME: &'static str = "etcdserverpb.Watch";
     }
+
+    impl<S> Service<http::Request<tonic::body::BoxBody>> for WatchServer<S>
+    where
+        S: Watch + Send + Sync + 'static,
+        S: 'static,
+    {
+        type Response = http::Response<tonic::body::BoxBody>;
+        type Error = http::Error;
+        type Future = BoxFuture<Self::Response, Self::Error>;
+
+        fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+            Poll::Ready(Ok(()))
+        }
+
+        fn call(&mut self, req: http::Request<tonic::body::BoxBody>) -> Self::Future {
+            let inner = Arc::clone(&self.inner);
+            Box::pin(async move {
+                let path = req.uri().path().to_string();
+                match path.as_str() {
+                    "/etcdserverpb.Watch/Watch" => {
+                        // Streaming RPC requires special handling, returning not implemented here
+                        Ok(http::Response::builder()
+                            .status(http::StatusCode::UNIMPLEMENTED)
+                            .body(tonic::body::BoxBody::default())
+                            .unwrap())
+                    }
+                    _ => {
+                        Ok(http::Response::builder()
+                            .status(http::StatusCode::NOT_FOUND)
+                            .body(tonic::body::BoxBody::default())
+                            .unwrap())
+                    }
+                }
+            })
+        }
+    }
 }
 
 pub mod lease_server {
     use super::*;
     use tonic::{Request, Response, Status};
     use tonic::server::NamedService;
+    use tonic::codegen::{http, Body, BoxFuture};
+    use tower_service::Service;
+    use std::task::{Context, Poll};
+    use std::sync::Arc;
     use futures::Stream;
 
     #[async_trait::async_trait]
     pub trait Lease: Send + Sync + 'static {
         type LeaseKeepAliveStream: Stream<Item = Result<LeaseKeepAliveResponse, Status>> + Send + 'static;
-
         async fn lease_grant(&self, request: Request<LeaseGrantRequest>) -> Result<Response<LeaseGrantResponse>, Status>;
         async fn lease_revoke(&self, request: Request<LeaseRevokeRequest>) -> Result<Response<LeaseRevokeResponse>, Status>;
         async fn lease_keep_alive(&self, request: Request<tonic::Streaming<LeaseKeepAliveRequest>>) -> Result<Response<Self::LeaseKeepAliveStream>, Status>;
@@ -1048,12 +1148,71 @@ pub mod lease_server {
     {
         const NAME: &'static str = "etcdserverpb.Lease";
     }
+
+    impl<S> Service<http::Request<tonic::body::BoxBody>> for LeaseServer<S>
+    where
+        S: Lease + Send + Sync + 'static,
+        S: 'static,
+    {
+        type Response = http::Response<tonic::body::BoxBody>;
+        type Error = http::Error;
+        type Future = BoxFuture<Self::Response, Self::Error>;
+
+        fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+            Poll::Ready(Ok(()))
+        }
+
+        fn call(&mut self, req: http::Request<tonic::body::BoxBody>) -> Self::Future {
+            let inner = Arc::clone(&self.inner);
+            Box::pin(async move {
+                let path = req.uri().path().to_string();
+                match path.as_str() {
+                    "/etcdserverpb.Lease/LeaseGrant" => {
+                        let msg = decode_request::<LeaseGrantRequest>(req).await?;
+                        let resp = inner.lease_grant(msg).await.map_err(status_to_http_error)?;
+                        Ok(encode_response(resp))
+                    }
+                    "/etcdserverpb.Lease/LeaseRevoke" => {
+                        let msg = decode_request::<LeaseRevokeRequest>(req).await?;
+                        let resp = inner.lease_revoke(msg).await.map_err(status_to_http_error)?;
+                        Ok(encode_response(resp))
+                    }
+                    "/etcdserverpb.Lease/LeaseTimeToLive" => {
+                        let msg = decode_request::<LeaseTimeToLiveRequest>(req).await?;
+                        let resp = inner.lease_time_to_live(msg).await.map_err(status_to_http_error)?;
+                        Ok(encode_response(resp))
+                    }
+                    "/etcdserverpb.Lease/LeaseLeases" => {
+                        let msg = decode_request::<LeaseLeasesRequest>(req).await?;
+                        let resp = inner.lease_leases(msg).await.map_err(status_to_http_error)?;
+                        Ok(encode_response(resp))
+                    }
+                    "/etcdserverpb.Lease/LeaseKeepAlive" => {
+                        Ok(http::Response::builder()
+                            .status(http::StatusCode::UNIMPLEMENTED)
+                            .body(tonic::body::BoxBody::default())
+                            .unwrap())
+                    }
+                    _ => {
+                        Ok(http::Response::builder()
+                            .status(http::StatusCode::NOT_FOUND)
+                            .body(tonic::body::BoxBody::default())
+                            .unwrap())
+                    }
+                }
+            })
+        }
+    }
 }
 
 pub mod auth_server {
     use super::*;
     use tonic::{Request, Response, Status};
     use tonic::server::NamedService;
+    use tonic::codegen::{http, Body, BoxFuture};
+    use tower_service::Service;
+    use std::task::{Context, Poll};
+    use std::sync::Arc;
 
     #[async_trait::async_trait]
     pub trait Auth: Send + Sync + 'static {
@@ -1098,12 +1257,130 @@ pub mod auth_server {
     {
         const NAME: &'static str = "etcdserverpb.Auth";
     }
+
+    impl<S> Service<http::Request<tonic::body::BoxBody>> for AuthServer<S>
+    where
+        S: Auth + Send + Sync + 'static,
+        S: 'static,
+    {
+        type Response = http::Response<tonic::body::BoxBody>;
+        type Error = http::Error;
+        type Future = BoxFuture<Self::Response, Self::Error>;
+
+        fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+            Poll::Ready(Ok(()))
+        }
+
+        fn call(&mut self, req: http::Request<tonic::body::BoxBody>) -> Self::Future {
+            let inner = Arc::clone(&self.inner);
+            Box::pin(async move {
+                let path = req.uri().path().to_string();
+                match path.as_str() {
+                    "/etcdserverpb.Auth/AuthEnable" => {
+                        let msg = decode_request::<AuthEnableRequest>(req).await?;
+                        let resp = inner.auth_enable(msg).await.map_err(status_to_http_error)?;
+                        Ok(encode_response(resp))
+                    }
+                    "/etcdserverpb.Auth/AuthDisable" => {
+                        let msg = decode_request::<AuthDisableRequest>(req).await?;
+                        let resp = inner.auth_disable(msg).await.map_err(status_to_http_error)?;
+                        Ok(encode_response(resp))
+                    }
+                    "/etcdserverpb.Auth/Authenticate" => {
+                        let msg = decode_request::<AuthenticateRequest>(req).await?;
+                        let resp = inner.authenticate(msg).await.map_err(status_to_http_error)?;
+                        Ok(encode_response(resp))
+                    }
+                    "/etcdserverpb.Auth/UserAdd" => {
+                        let msg = decode_request::<AuthUserAddRequest>(req).await?;
+                        let resp = inner.user_add(msg).await.map_err(status_to_http_error)?;
+                        Ok(encode_response(resp))
+                    }
+                    "/etcdserverpb.Auth/UserGet" => {
+                        let msg = decode_request::<AuthUserGetRequest>(req).await?;
+                        let resp = inner.user_get(msg).await.map_err(status_to_http_error)?;
+                        Ok(encode_response(resp))
+                    }
+                    "/etcdserverpb.Auth/UserList" => {
+                        let msg = decode_request::<AuthUserListRequest>(req).await?;
+                        let resp = inner.user_list(msg).await.map_err(status_to_http_error)?;
+                        Ok(encode_response(resp))
+                    }
+                    "/etcdserverpb.Auth/UserDelete" => {
+                        let msg = decode_request::<AuthUserDeleteRequest>(req).await?;
+                        let resp = inner.user_delete(msg).await.map_err(status_to_http_error)?;
+                        Ok(encode_response(resp))
+                    }
+                    "/etcdserverpb.Auth/UserChangePassword" => {
+                        let msg = decode_request::<AuthUserChangePasswordRequest>(req).await?;
+                        let resp = inner.user_change_password(msg).await.map_err(status_to_http_error)?;
+                        Ok(encode_response(resp))
+                    }
+                    "/etcdserverpb.Auth/UserGrantRole" => {
+                        let msg = decode_request::<AuthUserGrantRoleRequest>(req).await?;
+                        let resp = inner.user_grant_role(msg).await.map_err(status_to_http_error)?;
+                        Ok(encode_response(resp))
+                    }
+                    "/etcdserverpb.Auth/UserRevokeRole" => {
+                        let msg = decode_request::<AuthUserRevokeRoleRequest>(req).await?;
+                        let resp = inner.user_revoke_role(msg).await.map_err(status_to_http_error)?;
+                        Ok(encode_response(resp))
+                    }
+                    "/etcdserverpb.Auth/RoleAdd" => {
+                        let msg = decode_request::<AuthRoleAddRequest>(req).await?;
+                        let resp = inner.role_add(msg).await.map_err(status_to_http_error)?;
+                        Ok(encode_response(resp))
+                    }
+                    "/etcdserverpb.Auth/RoleGet" => {
+                        let msg = decode_request::<AuthRoleGetRequest>(req).await?;
+                        let resp = inner.role_get(msg).await.map_err(status_to_http_error)?;
+                        Ok(encode_response(resp))
+                    }
+                    "/etcdserverpb.Auth/RoleList" => {
+                        let msg = decode_request::<AuthRoleListRequest>(req).await?;
+                        let resp = inner.role_list(msg).await.map_err(status_to_http_error)?;
+                        Ok(encode_response(resp))
+                    }
+                    "/etcdserverpb.Auth/RoleDelete" => {
+                        let msg = decode_request::<AuthRoleDeleteRequest>(req).await?;
+                        let resp = inner.role_delete(msg).await.map_err(status_to_http_error)?;
+                        Ok(encode_response(resp))
+                    }
+                    "/etcdserverpb.Auth/RoleGrantPermission" => {
+                        let msg = decode_request::<AuthRoleGrantPermissionRequest>(req).await?;
+                        let resp = inner.role_grant_permission(msg).await.map_err(status_to_http_error)?;
+                        Ok(encode_response(resp))
+                    }
+                    "/etcdserverpb.Auth/RoleRevokePermission" => {
+                        let msg = decode_request::<AuthRoleRevokePermissionRequest>(req).await?;
+                        let resp = inner.role_revoke_permission(msg).await.map_err(status_to_http_error)?;
+                        Ok(encode_response(resp))
+                    }
+                    "/etcdserverpb.Auth/AuthStatus" => {
+                        let msg = decode_request::<AuthStatusRequest>(req).await?;
+                        let resp = inner.auth_status(msg).await.map_err(status_to_http_error)?;
+                        Ok(encode_response(resp))
+                    }
+                    _ => {
+                        Ok(http::Response::builder()
+                            .status(http::StatusCode::NOT_FOUND)
+                            .body(tonic::body::BoxBody::default())
+                            .unwrap())
+                    }
+                }
+            })
+        }
+    }
 }
 
 pub mod maintenance_server {
     use super::*;
     use tonic::{Request, Response, Status};
     use tonic::server::NamedService;
+    use tonic::codegen::{http, Body, BoxFuture};
+    use tower_service::Service;
+    use std::task::{Context, Poll};
+    use std::sync::Arc;
     use futures::Stream;
 
     #[async_trait::async_trait]
@@ -1111,7 +1388,6 @@ pub mod maintenance_server {
         type AlarmStream: Stream<Item = Result<AlarmResponse, Status>> + Send + 'static;
         type StatusStream: Stream<Item = Result<StatusResponse, Status>> + Send + 'static;
         type SnapshotStream: Stream<Item = Result<SnapshotResponse, Status>> + Send + 'static;
-
         async fn alarm(&self, request: Request<AlarmRequest>) -> Result<Response<Self::AlarmStream>, Status>;
         async fn status(&self, request: Request<StatusRequest>) -> Result<Response<Self::StatusStream>, Status>;
         async fn hash(&self, request: Request<HashRequest>) -> Result<Response<HashResponse>, Status>;
@@ -1148,12 +1424,98 @@ pub mod maintenance_server {
     {
         const NAME: &'static str = "etcdserverpb.Maintenance";
     }
+
+    impl<S> Service<http::Request<tonic::body::BoxBody>> for MaintenanceServer<S>
+    where
+        S: Maintenance + Send + Sync + 'static,
+        S: 'static,
+    {
+        type Response = http::Response<tonic::body::BoxBody>;
+        type Error = http::Error;
+        type Future = BoxFuture<Self::Response, Self::Error>;
+
+        fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+            Poll::Ready(Ok(()))
+        }
+
+        fn call(&mut self, req: http::Request<tonic::body::BoxBody>) -> Self::Future {
+            let inner = Arc::clone(&self.inner);
+            Box::pin(async move {
+                let path = req.uri().path().to_string();
+                match path.as_str() {
+                    "/etcdserverpb.Maintenance/Hash" => {
+                        let msg = decode_request::<HashRequest>(req).await?;
+                        let resp = inner.hash(msg).await.map_err(status_to_http_error)?;
+                        Ok(encode_response(resp))
+                    }
+                    "/etcdserverpb.Maintenance/HashKv" => {
+                        let msg = decode_request::<HashKvRequest>(req).await?;
+                        let resp = inner.hash_kv(msg).await.map_err(status_to_http_error)?;
+                        Ok(encode_response(resp))
+                    }
+                    "/etcdserverpb.Maintenance/MoveLeader" => {
+                        let msg = decode_request::<MoveLeaderRequest>(req).await?;
+                        let resp = inner.move_leader(msg).await.map_err(status_to_http_error)?;
+                        Ok(encode_response(resp))
+                    }
+                    "/etcdserverpb.Maintenance/Defragment" => {
+                        let msg = decode_request::<DefragmentRequest>(req).await?;
+                        let resp = inner.defragment(msg).await.map_err(status_to_http_error)?;
+                        Ok(encode_response(resp))
+                    }
+                    "/etcdserverpb.Maintenance/MemberList" => {
+                        let msg = decode_request::<MemberListRequest>(req).await?;
+                        let resp = inner.member_list(msg).await.map_err(status_to_http_error)?;
+                        Ok(encode_response(resp))
+                    }
+                    "/etcdserverpb.Maintenance/MemberAdd" => {
+                        let msg = decode_request::<MemberAddRequest>(req).await?;
+                        let resp = inner.member_add(msg).await.map_err(status_to_http_error)?;
+                        Ok(encode_response(resp))
+                    }
+                    "/etcdserverpb.Maintenance/MemberRemove" => {
+                        let msg = decode_request::<MemberRemoveRequest>(req).await?;
+                        let resp = inner.member_remove(msg).await.map_err(status_to_http_error)?;
+                        Ok(encode_response(resp))
+                    }
+                    "/etcdserverpb.Maintenance/MemberUpdate" => {
+                        let msg = decode_request::<MemberUpdateRequest>(req).await?;
+                        let resp = inner.member_update(msg).await.map_err(status_to_http_error)?;
+                        Ok(encode_response(resp))
+                    }
+                    "/etcdserverpb.Maintenance/MemberPromote" => {
+                        let msg = decode_request::<MemberPromoteRequest>(req).await?;
+                        let resp = inner.member_promote(msg).await.map_err(status_to_http_error)?;
+                        Ok(encode_response(resp))
+                    }
+                    "/etcdserverpb.Maintenance/Alarm" |
+                    "/etcdserverpb.Maintenance/Status" |
+                    "/etcdserverpb.Maintenance/Snapshot" => {
+                        Ok(http::Response::builder()
+                            .status(http::StatusCode::UNIMPLEMENTED)
+                            .body(tonic::body::BoxBody::default())
+                            .unwrap())
+                    }
+                    _ => {
+                        Ok(http::Response::builder()
+                            .status(http::StatusCode::NOT_FOUND)
+                            .body(tonic::body::BoxBody::default())
+                            .unwrap())
+                    }
+                }
+            })
+        }
+    }
 }
 
 pub mod cluster_server {
     use super::*;
     use tonic::{Request, Response, Status};
     use tonic::server::NamedService;
+    use tonic::codegen::{http, Body, BoxFuture};
+    use tower_service::Service;
+    use std::task::{Context, Poll};
+    use std::sync::Arc;
 
     #[async_trait::async_trait]
     pub trait Cluster: Send + Sync + 'static {
@@ -1185,6 +1547,60 @@ pub mod cluster_server {
         S: Cluster + Send + Sync + 'static,
     {
         const NAME: &'static str = "etcdserverpb.Cluster";
+    }
+
+    impl<S> Service<http::Request<tonic::body::BoxBody>> for ClusterServer<S>
+    where
+        S: Cluster + Send + Sync + 'static,
+        S: 'static,
+    {
+        type Response = http::Response<tonic::body::BoxBody>;
+        type Error = http::Error;
+        type Future = BoxFuture<Self::Response, Self::Error>;
+
+        fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+            Poll::Ready(Ok(()))
+        }
+
+        fn call(&mut self, req: http::Request<tonic::body::BoxBody>) -> Self::Future {
+            let inner = Arc::clone(&self.inner);
+            Box::pin(async move {
+                let path = req.uri().path().to_string();
+                match path.as_str() {
+                    "/etcdserverpb.Cluster/MemberList" => {
+                        let msg = decode_request::<MemberListRequest>(req).await?;
+                        let resp = inner.member_list(msg).await.map_err(status_to_http_error)?;
+                        Ok(encode_response(resp))
+                    }
+                    "/etcdserverpb.Cluster/MemberAdd" => {
+                        let msg = decode_request::<MemberAddRequest>(req).await?;
+                        let resp = inner.member_add(msg).await.map_err(status_to_http_error)?;
+                        Ok(encode_response(resp))
+                    }
+                    "/etcdserverpb.Cluster/MemberRemove" => {
+                        let msg = decode_request::<MemberRemoveRequest>(req).await?;
+                        let resp = inner.member_remove(msg).await.map_err(status_to_http_error)?;
+                        Ok(encode_response(resp))
+                    }
+                    "/etcdserverpb.Cluster/MemberUpdate" => {
+                        let msg = decode_request::<MemberUpdateRequest>(req).await?;
+                        let resp = inner.member_update(msg).await.map_err(status_to_http_error)?;
+                        Ok(encode_response(resp))
+                    }
+                    "/etcdserverpb.Cluster/MemberPromote" => {
+                        let msg = decode_request::<MemberPromoteRequest>(req).await?;
+                        let resp = inner.member_promote(msg).await.map_err(status_to_http_error)?;
+                        Ok(encode_response(resp))
+                    }
+                    _ => {
+                        Ok(http::Response::builder()
+                            .status(http::StatusCode::NOT_FOUND)
+                            .body(tonic::body::BoxBody::default())
+                            .unwrap())
+                    }
+                }
+            })
+        }
     }
 }
 
@@ -1334,4 +1750,61 @@ pub mod cluster_client {
             }
         }
     }
+}
+
+// ============================================================================
+// Helper Functions
+// ============================================================================
+
+/// Helper Function: Decode Request
+async fn decode_request<T: prost::Message + Default>(
+    mut req: http::Request<tonic::body::BoxBody>,
+) -> Result<Request<T>, http::Error> {
+    use http_body::Body;
+    use bytes::Buf;
+
+    let body = req.body_mut();
+    let mut buf = Vec::new();
+    while let Some(chunk) = body.data().await {
+        let chunk = chunk.map_err(|_| http::Error::new(Box::new(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            "body error",
+        ))))?;
+        buf.extend_from_slice(chunk.chunk());
+    }
+
+    let msg = T::decode(&buf[..]).map_err(|_| http::Error::new(Box::new(std::io::Error::new(
+        std::io::ErrorKind::Other,
+        "decode error",
+    ))))?;
+
+    let (parts, _) = req.into_parts();
+    Ok(Request::from_parts(parts, msg))
+}
+
+/// Helper function: Encode response
+fn encode_response<T: prost::Message>(resp: Response<T>) -> http::Response<tonic::body::BoxBody> {
+    use http_body_util::Full;
+    use bytes::Bytes;
+
+    let (metadata, msg, _extensions) = resp.into_parts();
+    let mut buf = Vec::new();
+    msg.encode(&mut buf).unwrap();
+
+    let mut http_resp = http::Response::builder()
+        .status(http::StatusCode::OK)
+        .header("content-type", "application/grpc")
+        .body(tonic::body::BoxBody::new(Full::new(Bytes::from(buf))))
+        .unwrap();
+
+    *http_resp.headers_mut() = metadata.into_headers();
+    http_resp
+}
+
+/// Helper function: Convert Status to http::Error
+fn status_to_http_error(status: Status) -> http::Error {
+    http::Error::new(Box::new(std::io::Error::new(
+        std::io::ErrorKind::Other,
+        status.message(),
+    )))
 }
