@@ -391,13 +391,11 @@ where
     }
 }
 
-#[tonic::async_trait]
-impl Watch for WatchServer {
-    ///Server streaming response type for the Watch method.
-    type WatchStream = ReceiverStream<Result<WatchResponse, Status>>;
-
 #[async_trait::async_trait]
 impl Watch for WatchServer {
+    /// Server streaming response type for the Watch method.
+    type WatchStream = ReceiverStream<Result<WatchResponse, Status>>;
+
     /// Watch watches for events happening or that have happened. Both input and output
     /// are streams; the input stream is for creating and canceling watchers and the output
     /// stream sends events. One watch RPC can watch on multiple key ranges, streaming events
@@ -423,7 +421,6 @@ impl Watch for WatchServer {
         });
         Ok(xlinerpc::Response::new(ReceiverStream::new(rx)))
     }
-}
 }
 
 #[cfg(test)]

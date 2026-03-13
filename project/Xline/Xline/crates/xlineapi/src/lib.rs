@@ -177,13 +177,28 @@ pub mod interval;
 pub mod request_validation;
 
 // Import manually implemented proto types from the xlinerpc crate
-pub use xlinerpc::etcdserverpb::*;
-pub use xlinerpc::authpb::*;
-pub use xlinerpc::mvccpb::*;
-pub use xlinerpc::v3lockpb::*;
-pub use xlinerpc::leasepb::*;
-pub use xlinerpc::commandpb::*;
-pub use xlinerpc::errorpb::*;
+#[allow(dead_code)]
+mod etcdserverpb;
+#[allow(dead_code)]
+mod authpb;
+#[allow(dead_code)]
+mod mvccpb;
+#[allow(dead_code)]
+mod v3lockpb;
+#[allow(dead_code)]
+mod leasepb;
+#[allow(dead_code)]
+mod errorpb;
+
+pub use self::{
+    etcdserverpb::*,
+    authpb::*,
+    mvccpb::*,
+    v3lockpb::*,
+    leasepb::*,
+    commandpb::*,
+    errorpb::*,
+};
 
 use std::fmt::Display;
 
