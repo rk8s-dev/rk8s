@@ -283,8 +283,8 @@ impl fmt::Display for Status {
 
 impl Error for Status {}
 
-// TODO: remove this after curp and xline-api build without tonic.
-// Conversion from tonic::Status
+// Conversion from/to tonic::Status (only available with tonic-compat feature)
+#[cfg(feature = "tonic-compat")]
 impl From<tonic::Status> for Status {
     fn from(s: tonic::Status) -> Self {
         let code = Code::from_i32(s.code() as i32);
@@ -293,6 +293,7 @@ impl From<tonic::Status> for Status {
     }
 }
 
+#[cfg(feature = "tonic-compat")]
 impl From<Status> for tonic::Status {
     fn from(s: Status) -> Self {
         let code = tonic::Code::from(s.code as i32);

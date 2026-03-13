@@ -1,10 +1,8 @@
 use curp::cmd::Command as CurpCommand;
 use thiserror::Error;
-use tonic::Status;
 use tonic::transport::Error;
 use xlineapi::{command::Command, execute_error::ExecuteError};
-// TODO: use our own status type
-// use xlinerpc::status::Status;
+use xlinerpc::status::Status;
 /// The result type for `xline-client`
 pub type Result<T> = std::result::Result<T, XlineClientError<Command>>;
 
@@ -44,6 +42,13 @@ impl From<Status> for XlineClientBuildError {
     #[inline]
     fn from(e: Status) -> Self {
         Self::RpcError(e.to_string())
+    }
+}
+
+impl From<curp::rpc::CurpError> for XlineClientBuildError {
+    #[inline]
+    fn from(e: curp::rpc::CurpError) -> Self {
+        Self::RpcError(format!("{e:?}"))
     }
 }
 
@@ -100,6 +105,15 @@ impl From<Status> for XlineClientError<Command> {
     #[inline]
     fn from(e: Status) -> Self {
         Self::RpcError(e.to_string())
+    }
+}
+
+impl From<tonic::Status> for XlineClientError<Command> {
+    #[inline]
+    fn from(e: tonic::Status) -> Self {
+        // Convert tonic::Status → xlinerpc::Status → XlineClientError
+        let s: Status = e.into();
+        Self::from(s)
     }
 }
 

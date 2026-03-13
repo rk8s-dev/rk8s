@@ -1,5 +1,6 @@
 #![allow(clippy::arithmetic_side_effects)] // introduced by `strum_macros::EnumIter`
 
+use crate::{PbExecuteError, PbExecuteErrorOuter, PbRevisions, PbUserRole};
 use curp::cmd::{PbCodec, PbSerializeError};
 use prost::Message;
 use serde::{Deserialize, Serialize};
@@ -310,6 +311,18 @@ impl From<ExecuteError> for xlinerpc::Status {
         };
 
         xlinerpc::Status::new(code, message)
+    }
+}
+
+/// Bridge conversion: ExecuteError → tonic::Status (via xlinerpc::Status)
+///
+/// This exists because xline server code returns `Result<_, tonic::Status>` and uses `?`
+/// on `ExecuteError`. Will be removed when xline server migrates away from tonic.
+impl From<ExecuteError> for tonic::Status {
+    #[inline]
+    fn from(err: ExecuteError) -> Self {
+        let xlinerpc_status: Status = err.into();
+        xlinerpc_status.into()
     }
 }
 
