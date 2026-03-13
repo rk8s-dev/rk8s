@@ -327,19 +327,11 @@ impl ClientBuilder {
     /// Return `Status` for connection failure or some server errors.
     #[inline]
     pub async fn discover_from(mut self, addrs: Vec<String>) -> Result<Self, Status> {
-        #[cfg(feature = "quic")]
-        if matches!(self.transport, crate::rpc::TransportConfig::Quic(..)) {
-            return Err(Status::internal(
-                "discover_from uses tonic transport; use quic_discover_from for QUIC",
-            ));
-        }
-        /// Sleep duration in secs when the cluster is unavailable
         const DISCOVER_SLEEP_DURATION: u64 = 1;
         loop {
-            match self.try_discover_from(&addrs).await {
+            match self.try_discover_from(&addrs).await {  // 调用内部方法
                 Ok(()) => return Ok(self),
                 Err(e) if matches!(e.code(), Code::Unavailable) => {
-                    warn!("cluster is unavailable, sleep for {DISCOVER_SLEEP_DURATION} secs");
                     tokio::time::sleep(Duration::from_secs(DISCOVER_SLEEP_DURATION)).await;
                 }
                 Err(e) => return Err(e),
@@ -375,7 +367,6 @@ impl ClientBuilder {
             })
             .collect();
         let mut err = Status::invalid_argument("addrs is empty");
-        // find the first one return `FetchClusterResponse`
         while let Some(r) = futs.next().await {
             match r {
                 Ok(r) => {
