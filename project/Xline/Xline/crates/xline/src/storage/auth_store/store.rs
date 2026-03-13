@@ -22,6 +22,7 @@ use xlineapi::{
     command::{CommandResponse, KeyRange, SyncResponse},
     execute_error::ExecuteError,
 };
+use xlinerpc::status::Status;
 // TODO: use our own status type
 // use xlinerpc::status::Status;
 
@@ -132,12 +133,13 @@ impl AuthStore {
     pub(crate) fn try_get_auth_info_from_request<T>(
         &self,
         request: &xlinerpc::Request<T>,
-    ) -> Result<Option<AuthInfo>, XlineStatus> {
+    ) -> Result<Option<AuthInfo>, Status> {
         if !self.is_enabled() {
             return Ok(None);
         }
         if let Some(token) = get_token(request.meta()) {
-            let auth_info = self.verify(&token)?;
+            let auth_info = self.verify(&token)
+                .map_err(|e| Status::unauthenticated(e.to_string()))?;
             return Ok(Some(auth_info));
         }
         if let Some(cn) = get_cn(request) {

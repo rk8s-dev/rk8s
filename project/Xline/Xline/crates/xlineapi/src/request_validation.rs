@@ -1,12 +1,5 @@
 use std::collections::{HashMap, hash_map::Entry};
 
-use serde::{Deserialize, Serialize};
-use thiserror::Error;
-// TODO: use our own status type
-// use xlinerpc::status::{Code,Status};
-use xlinerpc::Code;
-use utils::interval_map::{Interval, IntervalMap};
-use utils::lca_tree::LCATree;
 use crate::{
     AuthRoleAddRequest, AuthRoleGrantPermissionRequest, AuthUserAddRequest, DeleteRangeRequest,
     PutRequest, RangeRequest, Request, RequestOp, SortOrder, SortTarget, TxnRequest,
