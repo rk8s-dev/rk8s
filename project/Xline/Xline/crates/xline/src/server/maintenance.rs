@@ -108,7 +108,8 @@ impl MaintenanceService for MaintenanceServer {
         &self,
         request: tonic::Request<AlarmRequest>,
     ) -> Result<tonic::Response<AlarmResponse>, tonic::Status> {
-        let xline_request = xlinerpc::Request::from(request);
+        let (data, metadata) = request.into_parts();
+        let xline_request = xlinerpc::Request::from_parts(data, metadata);
         let (res, sync_res) = self.propose(xline_request).await?;
         let (mut res_wrapper, _) = res.into_parts();
         let mut res: AlarmResponse = res_wrapper.into();
@@ -205,8 +206,8 @@ impl MaintenanceService for MaintenanceServer {
         &self,
         request: tonic::Request<MoveLeaderRequest>,
     ) -> Result<tonic::Response<MoveLeaderResponse>, tonic::Status> {
-        let (req, _) = request.into_parts();
-        let node_id = req.target_id;
+        let (data, _metadata) = request.into_parts();
+        let node_id = data.target_id;
         self.client.move_leader(node_id).await
             .map_err(|e| tonic::Status::internal(e.to_string()))?;
         Ok(tonic::Response::new(MoveLeaderResponse {

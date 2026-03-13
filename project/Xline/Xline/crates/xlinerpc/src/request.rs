@@ -13,6 +13,83 @@ pub struct RequestKind;
 /// [`crate::Response`].
 pub type Request<T> = Envelope<T, RequestKind>;
 
+
+#[cfg(feature = "tonic-compat")]
+pub mod tonic_compat {
+    use super::*;
+    use crate::{Response, Status};
+
+    /// Convert tonic::Request to xlinerpc::Request
+    impl<T> From<tonic::Request<T>> for Request<T> {
+        fn from(req: tonic::Request<T>) -> Self {
+            let (data, metadata, _extensions) = req.into_parts();
+            let mut xline_metadata = crate::MetaData::new();
+            for (key, value) in metadata.iter() {
+                if let Ok(v) = value.to_bytes() {
+                    xline_metadata.insert(key.as_str(), String::from_utf8_lossy(&v).as_ref());
+                }
+            }
+            Request::new(data, xline_metadata)
+        }
+    }
+
+    /// Convert xlinerpc::Request to tonic::Request
+    impl<T> From<Request<T>> for tonic::Request<T> {
+        fn from(req: Request<T>) -> Self {
+            let (data, metadata) = req.into_parts();
+            let mut tonic_metadata = tonic::metadata::MetadataMap::new();
+            for (key, value) in metadata.iter() {
+                if let (Ok(key_str), Ok(val_str)) = (
+                    std::str::from_utf8(key.as_bytes()),
+                    std::str::from_utf8(value),
+                ) {
+                    let _ = tonic_metadata.insert(
+                        tonic::metadata::MetadataKey::from_bytes(key.as_bytes()).unwrap(),
+                        val_str.parse().unwrap_or_default(),
+                    );
+                }
+            }
+            let mut tonic_req = tonic::Request::new(data);
+            *tonic_req.metadata_mut() = tonic_metadata;
+            tonic_req
+        }
+    }
+
+    /// Convert tonic::Status to xlinerpc::Status
+    impl From<tonic::Status> for Status {
+        fn from(status: tonic::Status) -> Self {
+            Status::new(
+                crate::Code::from_i32(status.code() as i32),
+                status.message().to_string(),
+            )
+        }
+    }
+
+    /// Convert xlinerpc::Status to tonic::Status
+    impl From<Status> for tonic::Status {
+        fn from(status: Status) -> Self {
+            tonic::Status::new(
+                tonic::Code::from_i32(status.code as i32),
+                status.message,
+            )
+        }
+    }
+
+    /// Convert tonic::Response to xlinerpc::Response
+    impl<T> From<tonic::Response<T>> for Response<T> {
+        fn from(resp: tonic::Response<T>) -> Self {
+            Response::from_data(resp.into_inner())
+        }
+    }
+
+    /// Convert xlinerpc::Response to tonic::Response
+    impl<T> From<Response<T>> for tonic::Response<T> {
+        fn from(resp: Response<T>) -> Self {
+            tonic::Response::new(resp.into_data())
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use prost::Message;

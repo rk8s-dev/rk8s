@@ -71,7 +71,7 @@ tracing-subscriber = { workspace = true }
 utils = { path = "../utils" }
 uuid = { version = "1.10.0", features = ["v4"] }
 x509-certificate = "0.23.1"
-x509-parser = { workspace = true }
+x509-parser = { version = "0.16", default-features = false }
 xlineapi = { path = "../xlineapi" }
 xlinerpc = { path = "../xlinerpc"}
 http = "1.0"

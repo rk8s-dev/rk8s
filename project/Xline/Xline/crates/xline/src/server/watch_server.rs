@@ -23,6 +23,8 @@ use crate::{
 /// Watch service trait
 #[async_trait::async_trait]
 pub trait Watch {
+    /// Server streaming response type for the Watch method.
+    type WatchStream: Stream<Item = Result<WatchResponse, Status>> + Send + 'static;
     /// Watch watches for events happening or that have happened. Both input and output
     /// are streams; the input stream is for creating and canceling watchers and the output
     /// stream sends events. One watch RPC can watch on multiple key ranges, streaming events
@@ -406,7 +408,8 @@ impl Watch for WatchServer {
         request: xlinerpc::Request<tonic::Streaming<WatchRequest>>,
     ) -> Result<xlinerpc::Response<Self::WatchStream>, Status> {
         debug!("Receive Watch Connection {:?}", request);
-        let req_stream = request.into_inner();
+        let req_stream = request.into_data();
+        
         let (tx, rx) = mpsc::channel(CHANNEL_SIZE);
         self.task_manager.spawn(TaskName::WatchTask, |n| {
             Self::task(

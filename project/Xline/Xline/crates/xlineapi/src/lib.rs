@@ -189,6 +189,8 @@ mod v3lockpb;
 mod leasepb;
 #[allow(dead_code)]
 mod errorpb;
+#[allow(dead_code)]
+mod commandpb;
 
 pub use self::{
     etcdserverpb::*,

@@ -144,6 +144,7 @@ impl ClusterServer {
     }
 
     /// convert tonic request into xlinerpc request copying metadata
+    #[allow(dead_code)]
     fn tonic_to_xline<Req>(&self, request: TonicRequest<Req>) -> Request<Req> {
         let (body, metadata) = request.into_parts();
         let mut xreq = Request::from_data(body);
@@ -258,14 +259,21 @@ impl ClusterServer {
         Req: Into<ClusterRequest> + Send + 'static,
         Res: From<ClusterResponse> + Send + 'static,
     {
-        let xreq = self.tonic_to_xline(request);
+        let (body, metadata) = request.into_parts();
+        let cluster_req: ClusterRequest = body.into();
+        let mut xreq = Request::from_data(cluster_req);
+        for (key, value) in metadata.iter() {
+            xreq
+                .meta_mut()
+                .insert(key.as_bytes().to_vec(), value.as_bytes().to_vec());
+        }
         let xresp = self
             .handle_req(xreq)
             .await
             .map_err(|e| TonicStatus::from(e))?;
         let (res_data, _) = xresp.into_parts();
         Ok(TonicResponse::new(res_data.into()))
-    }
+}
 }
 
 #[async_trait::async_trait]
