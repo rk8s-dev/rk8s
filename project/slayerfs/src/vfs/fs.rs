@@ -343,6 +343,34 @@ where
         Arc::clone(&self.core.meta_layer)
     }
 
+    fn file_handle(&self, fh: u64) -> Option<Arc<FileHandle<S, M>>> {
+        self.state.handles.get(fh)
+    }
+
+    fn file_handle_required(&self, fh: u64) -> Result<Arc<FileHandle<S, M>>, VfsError> {
+        self.file_handle(fh).ok_or(VfsError::StaleNetworkFileHandle)
+    }
+
+    fn file_handles_for_inode(&self, ino: i64) -> Vec<Arc<FileHandle<S, M>>> {
+        self.state
+            .handles
+            .handles_for(ino)
+            .into_iter()
+            .filter_map(|fh| self.file_handle(fh))
+            .collect()
+    }
+
+    fn dir_handle(&self, fh: u64) -> Option<Arc<DirHandle>> {
+        self.state.handles.get_dir(fh)
+    }
+
+    fn release_dir_handle_required(&self, fh: u64) -> Result<Arc<DirHandle>, VfsError> {
+        self.state
+            .handles
+            .release_dir(fh)
+            .ok_or(VfsError::StaleNetworkFileHandle)
+    }
+
     pub(crate) fn inode_size_cached(&self, ino: i64) -> Option<u64> {
         self.state.inodes.get(&ino).map(|inode| inode.file_size())
     }
@@ -1365,12 +1393,10 @@ where
     /// Truncate/extend file size by inode (metadata only; holes are read as zeros).
     /// Shrinking does not eagerly reclaim block data.
     pub async fn truncate_inode(&self, ino: i64, size: u64) -> Result<(), VfsError> {
-        let fhs = self.state.handles.handles_for(ino);
-        let mut guards = Vec::with_capacity(fhs.len());
-        for fh in fhs {
-            if let Some(handle) = self.state.handles.get(fh) {
-                guards.push(handle.lock_write().await);
-            }
+        let handles = self.file_handles_for_inode(ino);
+        let mut guards = Vec::with_capacity(handles.len());
+        for handle in handles {
+            guards.push(handle.lock_write().await);
         }
 
         self.state.writer.flush_if_exists(ino as u64).await;
@@ -1434,12 +1460,7 @@ where
     /// Returns `VfsError::NotFound` when the inode does not exist.
     #[tracing::instrument(level = "trace", skip(self), fields(ino, new_mode))]
     pub async fn chmod(&self, ino: i64, new_mode: u32) -> Result<FileAttr, VfsError> {
-        let attr = self
-            .core
-            .meta_layer
-            .chmod(ino, new_mode)
-            .await
-            .map_err(VfsError::from)?;
+        let attr = self.meta_chmod(ino, new_mode).await?;
 
         self.state.modified.touch(ino).await;
         self.state.handles.update_attr_for_inode(ino, &attr);
@@ -1458,12 +1479,7 @@ where
         uid: Option<u32>,
         gid: Option<u32>,
     ) -> Result<FileAttr, VfsError> {
-        let attr = self
-            .core
-            .meta_layer
-            .chown(ino, uid, gid)
-            .await
-            .map_err(VfsError::from)?;
+        let attr = self.meta_chown(ino, uid, gid).await?;
 
         self.state.modified.touch(ino).await;
         self.state.handles.update_attr_for_inode(ino, &attr);
@@ -1483,11 +1499,7 @@ where
             return Ok(Vec::new());
         }
 
-        let handle = self
-            .state
-            .handles
-            .get(fh)
-            .ok_or(VfsError::StaleNetworkFileHandle)?;
+        let handle = self.file_handle_required(fh)?;
         if !handle.flags.read {
             return Err(VfsError::PermissionDenied {
                 path: PathHint::none(),
@@ -1507,11 +1519,7 @@ where
             return Ok(0);
         }
 
-        let handle = self
-            .state
-            .handles
-            .get(fh)
-            .ok_or(VfsError::StaleNetworkFileHandle)?;
+        let handle = self.file_handle_required(fh)?;
 
         if !handle.flags.write {
             return Err(VfsError::PermissionDenied {
@@ -1616,11 +1624,7 @@ where
     /// Release a previously allocated file handle.
     pub async fn close(&self, fh: u64) -> Result<(), VfsError> {
         // Note that we cannot hold the lock during the entire function, because `handle.flush()` is a I/O operation.
-        let handle = self
-            .state
-            .handles
-            .get(fh)
-            .ok_or(VfsError::StaleNetworkFileHandle)?;
+        let handle = self.file_handle_required(fh)?;
 
         tracing::trace!(
             fh,
@@ -1664,11 +1668,7 @@ where
     /// Shared implementation for flush and fsync: conditionally flushes pending writes
     /// and updates timestamps. Returns the inode number for logging by the caller.
     async fn flush_and_sync_handle(&self, fh: u64) -> Result<i64, VfsError> {
-        let handle = self
-            .state
-            .handles
-            .get(fh)
-            .ok_or(VfsError::StaleNetworkFileHandle)?;
+        let handle = self.file_handle_required(fh)?;
 
         if handle.flags.write {
             handle.flush().await.map_err(|_| VfsError::Other)?;
@@ -1680,11 +1680,7 @@ where
 
     /// Flush pending writes for a file handle.
     pub async fn flush(&self, fh: u64) -> Result<(), VfsError> {
-        let handle = self
-            .state
-            .handles
-            .get(fh)
-            .ok_or(VfsError::StaleNetworkFileHandle)?;
+        let handle = self.file_handle_required(fh)?;
 
         tracing::trace!(
             fh,
@@ -1699,11 +1695,7 @@ where
 
     /// Sync file content (fsync): flush pending writes.
     pub async fn fsync(&self, fh: u64, _datasync: bool) -> Result<(), VfsError> {
-        let handle = self
-            .state
-            .handles
-            .get(fh)
-            .ok_or(VfsError::StaleNetworkFileHandle)?;
+        let handle = self.file_handle_required(fh)?;
 
         tracing::trace!(
             fh,
@@ -1729,11 +1721,7 @@ where
 
     /// Close a directory handle
     pub fn closedir(&self, fh: u64) -> Result<(), VfsError> {
-        let handle = self
-            .state
-            .handles
-            .release_dir(fh)
-            .ok_or(VfsError::StaleNetworkFileHandle)?;
+        let handle = self.release_dir_handle_required(fh)?;
 
         tracing::info!(
             "release dir handle: fh={}, ino={}, entries={}",
@@ -1758,17 +1746,17 @@ where
 
     /// Read directory entries by handle with pagination
     pub fn readdir(&self, fh: u64, offset: u64) -> Option<Vec<DirEntry>> {
-        let handle = self.state.handles.get_dir(fh)?;
+        let handle = self.dir_handle(fh)?;
+
         Some(handle.get_entries(offset))
     }
 
     /// Update cached information about a handle (e.g. last observed offset).
     pub(crate) fn touch_handle_offset(&self, fh: u64, offset: u64) -> Result<(), VfsError> {
-        self.state
-            .handles
-            .get(fh)
-            .map(|handle| handle.update_offset(offset))
-            .ok_or(VfsError::StaleNetworkFileHandle)
+        let handle = self.file_handle_required(fh)?;
+        handle.update_offset(offset);
+
+        Ok(())
     }
 
     /// List all open handles for an inode.

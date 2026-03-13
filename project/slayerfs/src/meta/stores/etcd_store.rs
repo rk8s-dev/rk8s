@@ -51,11 +51,31 @@ enum EtcdTxnWriteOp {
     Delete,
 }
 
+/// Snapshot of a key captured during one transaction attempt.
+///
+/// `mod_revision == 0` means the key did not exist when it was read or
+/// baselined. Commit turns that into `Compare::version(key, Equal, 0)`.
 struct EtcdTxnReadSlot {
     value: Option<Vec<u8>>,
     mod_revision: i64,
 }
 
+/// In-memory optimistic transaction context for a single `EtcdTxn::run` attempt.
+///
+/// Typical usage is:
+/// - read with `get`/`exists` or the typed helpers;
+/// - stage mutations with `set`/`delete`;
+/// - return `Ok(..)` from the closure and let `EtcdTxn` commit atomically.
+///
+/// Important semantics:
+/// - read-your-own-write: a staged `set` is immediately visible to later `get`;
+/// - no partial persistence: writes stay local until `commit`;
+/// - blind writes are protected too: keys written without a prior read are baselined
+///   before commit so CAS still guards them.
+///
+/// Prefer `get_typed`/`set_typed` for values serialized through
+/// `crate::meta::serialization`, and `get_typed_json`/`set_typed_json` for the
+/// legacy JSON-encoded etcd records still used in this store.
 pub(crate) struct EtcdTxnCtx<'a> {
     client: &'a EtcdClient,
     reads: HashMap<String, EtcdTxnReadSlot>,
@@ -93,6 +113,10 @@ impl<'a> EtcdTxnCtx<'a> {
         Ok(slot)
     }
 
+    /// Reads a key using the transaction snapshot.
+    ///
+    /// If the key has already been written in this attempt, this returns the staged
+    /// value instead of going back to etcd.
     pub async fn get(&mut self, key: impl AsRef<str>) -> Result<Option<Vec<u8>>, MetaError> {
         let key = key.as_ref();
 
@@ -122,6 +146,8 @@ impl<'a> EtcdTxnCtx<'a> {
         self.set_with_options(key, value, None);
     }
 
+    /// Stages a put operation with optional etcd put options (for example lease
+    /// attachment for session-scoped keys).
     pub fn set_with_options(
         &mut self,
         key: impl Into<String>,
@@ -236,6 +262,10 @@ impl<'a> EtcdTxnCtx<'a> {
         Ok(())
     }
 
+    /// Builds a single etcd transaction from the recorded read set and write set.
+    ///
+    /// Returns `Ok(true)` when the CAS succeeds, `Ok(false)` when another writer won
+    /// the race and the caller should retry, and `Err(..)` for real execution errors.
     async fn commit(&mut self) -> Result<bool, MetaError> {
         self.ensure_baselines_for_blind_writes().await?;
 
@@ -279,6 +309,29 @@ impl<'a> EtcdTxnCtx<'a> {
     }
 }
 
+/// Retryable etcd transaction runner built on optimistic concurrency control.
+///
+/// New write-side code should generally use this instead of hand-writing
+/// `Txn::new()...when(...).and_then(...)` blocks. Put all reads and staged writes in
+/// the closure, and let `run` retry the whole closure on CAS failure.
+///
+/// Example:
+/// ```ignore
+/// let out = EtcdTxn::new(&self.client)
+///     .max_retries(10)
+///     .run(|tx| {
+///         Box::pin(async move {
+///             let mut entry: MyType = tx.get_typed_json(&key).await?
+///                 .ok_or(MetaError::NotFound(ino))?;
+///
+///             entry.counter += 1;
+///             tx.set_typed_json(&key, &entry)?;
+///
+///             Ok(entry.counter)
+///         })
+///     })
+///     .await?;
+/// ```
 pub(crate) struct EtcdTxn<'a> {
     client: &'a EtcdClient,
     max_retries: u64,
@@ -297,6 +350,11 @@ impl<'a> EtcdTxn<'a> {
         self
     }
 
+    /// Executes the transaction closure with automatic retry on CAS conflicts.
+    ///
+    /// The closure must be self-contained and retry-safe: it may run multiple times,
+    /// so avoid irreversible side effects inside it. Only etcd reads via `tx` and
+    /// in-memory staging should happen in the closure body.
     pub(crate) async fn run<R, F>(&self, mut task: F) -> Result<R, MetaError>
     where
         F: for<'task> FnMut(
@@ -1234,13 +1292,20 @@ impl EtcdMetaStore {
                     let current = tx.get(&key).await?;
 
                     let (updated, ret) = if let Some(raw) = current {
-                        let current: T = crate::meta::serialization::deserialize_meta(&raw)?;
+                        let current = serde_json::from_slice(&raw).map_err(|e| {
+                            MetaError::Internal(format!(
+                                "Failed to deserialize JSON value for key {key}: {e}"
+                            ))
+                        })?;
+
                         f(current)?
                     } else {
                         init()?
                     };
 
-                    let updated = crate::meta::serialization::serialize_meta(&updated)?;
+                    let updated = serde_json::to_vec(&updated)
+                        .map_err(|e| MetaError::Internal(e.to_string()))?;
+
                     tx.set_with_options(key, updated, options);
 
                     Ok(ret)

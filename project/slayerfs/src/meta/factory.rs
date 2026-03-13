@@ -89,6 +89,7 @@ where
         Ok(MetaHandle { store, layer })
     }
 }
+
 /// Convenience function to create MetaStore from path
 #[allow(dead_code)]
 pub async fn create_meta_store(
