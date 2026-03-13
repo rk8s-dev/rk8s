@@ -1298,59 +1298,10 @@ pub mod maintenance_server {
                         let resp = inner.hash(msg).await.map_err(status_to_http_error)?;
                         Ok(encode_response(resp))
                     }
-                    "/etcdserverpb.Maintenance/HashKv" => {
-                        let msg = decode_request::<HashKvRequest>(req).await?;
-                        let resp = inner.hash_kv(msg).await.map_err(status_to_http_error)?;
-                        Ok(encode_response(resp))
-                    }
-                    "/etcdserverpb.Maintenance/MoveLeader" => {
-                        let msg = decode_request::<MoveLeaderRequest>(req).await?;
-                        let resp = inner.move_leader(msg).await.map_err(status_to_http_error)?;
-                        Ok(encode_response(resp))
-                    }
-                    "/etcdserverpb.Maintenance/Defragment" => {
-                        let msg = decode_request::<DefragmentRequest>(req).await?;
-                        let resp = inner.defragment(msg).await.map_err(status_to_http_error)?;
-                        Ok(encode_response(resp))
-                    }
-                    "/etcdserverpb.Maintenance/MemberList" => {
-                        let msg = decode_request::<MemberListRequest>(req).await?;
-                        let resp = inner.member_list(msg).await.map_err(status_to_http_error)?;
-                        Ok(encode_response(resp))
-                    }
-                    "/etcdserverpb.Maintenance/MemberAdd" => {
-                        let msg = decode_request::<MemberAddRequest>(req).await?;
-                        let resp = inner.member_add(msg).await.map_err(status_to_http_error)?;
-                        Ok(encode_response(resp))
-                    }
-                    "/etcdserverpb.Maintenance/MemberRemove" => {
-                        let msg = decode_request::<MemberRemoveRequest>(req).await?;
-                        let resp = inner.member_remove(msg).await.map_err(status_to_http_error)?;
-                        Ok(encode_response(resp))
-                    }
-                    "/etcdserverpb.Maintenance/MemberUpdate" => {
-                        let msg = decode_request::<MemberUpdateRequest>(req).await?;
-                        let resp = inner.member_update(msg).await.map_err(status_to_http_error)?;
-                        Ok(encode_response(resp))
-                    }
-                    "/etcdserverpb.Maintenance/MemberPromote" => {
-                        let msg = decode_request::<MemberPromoteRequest>(req).await?;
-                        let resp = inner.member_promote(msg).await.map_err(status_to_http_error)?;
-                        Ok(encode_response(resp))
-                    }
-                    "/etcdserverpb.Maintenance/Alarm" |
-                    "/etcdserverpb.Maintenance/Status" |
-                    "/etcdserverpb.Maintenance/Snapshot" => {
-                        Ok(http::Response::builder()
-                            .status(http::StatusCode::UNIMPLEMENTED)
-                            .header("grpc-status", "12")
-                            .header("grpc-message", "Streaming RPC: Use direct registration in xline_server.rs")
-                            .body(tonic::body::BoxBody::default())
-                            .unwrap())
-                    }
                     _ => {
                         Ok(http::Response::builder()
                             .status(http::StatusCode::NOT_FOUND)
+                            .header("content-type", "application/grpc")
                             .body(tonic::body::BoxBody::default())
                             .unwrap())
                     }
@@ -1464,6 +1415,7 @@ pub mod kv_client {
     use super::*;
     use tonic::transport::Channel;
     use tonic::client::GrpcService;
+    use tonic::{Request, Response, Status};
 
     pub struct KvClient<T> {
         inner: tonic::client::Grpc<T>,
@@ -1481,6 +1433,110 @@ pub mod kv_client {
                 inner: tonic::client::Grpc::new(channel),
             }
         }
+
+        /// Range gets the keys in the range from the key-value store.
+        pub async fn range(
+            &mut self,
+            request: impl tonic::IntoRequest<RangeRequest>,
+        ) -> Result<Response<RangeResponse>, Status> {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| Status::unknown(format!("Service was not ready: {}", e)))?;
+            let codec = tonic::codec::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static("/etcdserverpb.KV/Range");
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(GrpcMethod::new("etcdserverpb.KV", "Range"));
+            self.inner.unary(req, path, codec).await
+        }
+
+        /// Put puts the given key into the key-value store.
+        pub async fn put(
+            &mut self,
+            request: impl tonic::IntoRequest<PutRequest>,
+        ) -> Result<Response<PutResponse>, Status> {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| Status::unknown(format!("Service was not ready: {}", e)))?;
+            let codec = tonic::codec::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static("/etcdserverpb.KV/Put");
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(GrpcMethod::new("etcdserverpb.KV", "Put"));
+            self.inner.unary(req, path, codec).await
+        }
+
+        /// DeleteRange deletes the given range from the key-value store.
+        pub async fn delete_range(
+            &mut self,
+            request: impl tonic::IntoRequest<DeleteRangeRequest>,
+        ) -> Result<Response<DeleteRangeResponse>, Status> {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| Status::unknown(format!("Service was not ready: {}", e)))?;
+            let codec = tonic::codec::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static("/etcdserverpb.KV/DeleteRange");
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(GrpcMethod::new("etcdserverpb.KV", "DeleteRange"));
+            self.inner.unary(req, path, codec).await
+        }
+
+        /// Txn processes multiple requests in a single transaction.
+        pub async fn txn(
+            &mut self,
+            request: impl tonic::IntoRequest<TxnRequest>,
+        ) -> Result<Response<TxnResponse>, Status> {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| Status::unknown(format!("Service was not ready: {}", e)))?;
+            let codec = tonic::codec::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static("/etcdserverpb.KV/Txn");
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(GrpcMethod::new("etcdserverpb.KV", "Txn"));
+            self.inner.unary(req, path, codec).await
+        }
+
+        /// Compact compacts the event history in the etcd key-value store.
+        pub async fn compact(
+            &mut self,
+            request: impl tonic::IntoRequest<CompactionRequest>,
+        ) -> Result<Response<CompactionResponse>, Status> {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| Status::unknown(format!("Service was not ready: {}", e)))?;
+            let codec = tonic::codec::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static("/etcdserverpb.KV/Compaction");
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(GrpcMethod::new("etcdserverpb.KV", "Compaction"));
+            self.inner.unary(req, path, codec).await
+        }
+    }
+
+    impl<T: Clone> KvClient<T> {
+        pub fn with_interceptor<F>(
+            self,
+            interceptor: F,
+        ) -> KvClient<tonic::service::interceptor::InterceptedService<T, F>>
+        where
+            F: tonic::service::Interceptor,
+            T: tonic::client::GrpcService<tonic::body::BoxBody>,
+            T::Error: Into<tonic::codegen::StdError>,
+            T::ResponseBody: http_body::Body<Data = bytes::Bytes> + Send + 'static,
+            <T::ResponseBody as http_body::Body>::Error: Into<tonic::codegen::StdError> + Send,
+        {
+            KvClient::new(tonic::service::interceptor::InterceptedService::new(
+                self.inner.into_inner(),
+                interceptor,
+            ))
+        }
     }
 }
 
@@ -1488,6 +1544,9 @@ pub mod watch_client {
     use super::*;
     use tonic::transport::Channel;
     use tonic::client::GrpcService;
+    use tonic::{Request, Response, Status};
+    use futures::Stream;
+    use futures::StreamExt;
 
     pub struct WatchClient<T> {
         inner: tonic::client::Grpc<T>,
@@ -1505,6 +1564,46 @@ pub mod watch_client {
                 inner: tonic::client::Grpc::new(channel),
             }
         }
+
+        /// Watch watches for events happening or that have happened.
+        pub async fn watch(
+            &mut self,
+            request: impl tonic::IntoStreamingRequest<Message = WatchRequest>,
+        ) -> Result<Response<impl Stream<Item = Result<WatchResponse, Status>> + Send + 'static>, Status>
+        {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| Status::unknown(format!("Service was not ready: {}", e)))?;
+            let codec = tonic::codec::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static("/etcdserverpb.Watch/Watch");
+            let mut req = request.into_streaming_request();
+            req.extensions_mut()
+                .insert(GrpcMethod::new("etcdserverpb.Watch", "Watch"));
+            let resp = self.inner.streaming(req, path, codec).await?;
+            Ok(resp.map_inner(|stream| {
+                Box::pin(stream.map(|item| item.map_err(Into::into))) as Box<dyn Stream<Item = Result<WatchResponse, Status>> + Send>
+            }))
+        }
+    }
+
+    impl<T: Clone> WatchClient<T> {
+        pub fn with_interceptor<F>(
+            self,
+            interceptor: F,
+        ) -> WatchClient<tonic::service::interceptor::InterceptedService<T, F>>
+        where
+            F: tonic::service::Interceptor,
+            T: tonic::client::GrpcService<tonic::body::BoxBody>,
+            T::Error: Into<tonic::codegen::StdError>,
+            T::ResponseBody: http_body::Body<Data = bytes::Bytes> + Send + 'static,
+            <T::ResponseBody as http_body::Body>::Error: Into<tonic::codegen::StdError> + Send,
+        {
+            WatchClient::new(tonic::service::interceptor::InterceptedService::new(
+                self.inner.into_inner(),
+                interceptor,
+            ))
+        }
     }
 }
 
@@ -1512,6 +1611,9 @@ pub mod lease_client {
     use super::*;
     use tonic::transport::Channel;
     use tonic::client::GrpcService;
+    use tonic::{Request, Response, Status};
+    use futures::Stream;
+    use futures::StreamExt;
 
     pub struct LeaseClient<T> {
         inner: tonic::client::Grpc<T>,
@@ -1529,6 +1631,114 @@ pub mod lease_client {
                 inner: tonic::client::Grpc::new(channel),
             }
         }
+
+        /// LeaseGrant creates a lease which expires if the server does not receive a keepAlive.
+        pub async fn lease_grant(
+            &mut self,
+            request: impl tonic::IntoRequest<LeaseGrantRequest>,
+        ) -> Result<Response<LeaseGrantResponse>, Status> {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| Status::unknown(format!("Service was not ready: {}", e)))?;
+            let codec = tonic::codec::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static("/etcdserverpb.Lease/LeaseGrant");
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(GrpcMethod::new("etcdserverpb.Lease", "LeaseGrant"));
+            self.inner.unary(req, path, codec).await
+        }
+
+        /// LeaseRevoke revokes a lease.
+        pub async fn lease_revoke(
+            &mut self,
+            request: impl tonic::IntoRequest<LeaseRevokeRequest>,
+        ) -> Result<Response<LeaseRevokeResponse>, Status> {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| Status::unknown(format!("Service was not ready: {}", e)))?;
+            let codec = tonic::codec::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static("/etcdserverpb.Lease/LeaseRevoke");
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(GrpcMethod::new("etcdserverpb.Lease", "LeaseRevoke"));
+            self.inner.unary(req, path, codec).await
+        }
+
+        /// LeaseKeepAlive keeps a lease alive by streaming periodic keep-alive messages.
+        pub async fn lease_keep_alive(
+            &mut self,
+            request: impl tonic::IntoStreamingRequest<Message = LeaseKeepAliveRequest>,
+        ) -> Result<Response<impl Stream<Item = Result<LeaseKeepAliveResponse, Status>> + Send + 'static>, Status>
+        {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| Status::unknown(format!("Service was not ready: {}", e)))?;
+            let codec = tonic::codec::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static("/etcdserverpb.Lease/LeaseKeepAlive");
+            let mut req = request.into_streaming_request();
+            req.extensions_mut()
+                .insert(GrpcMethod::new("etcdserverpb.Lease", "LeaseKeepAlive"));
+            let resp = self.inner.streaming(req, path, codec).await?;
+            Ok(resp.map_inner(|stream| {
+                Box::pin(stream.map(|item| item.map_err(Into::into))) as Box<dyn Stream<Item = Result<LeaseKeepAliveResponse, Status>> + Send>
+            }))
+        }
+
+        /// LeaseTimeToLive retrieves lease information.
+        pub async fn lease_time_to_live(
+            &mut self,
+            request: impl tonic::IntoRequest<LeaseTimeToLiveRequest>,
+        ) -> Result<Response<LeaseTimeToLiveResponse>, Status> {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| Status::unknown(format!("Service was not ready: {}", e)))?;
+            let codec = tonic::codec::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static("/etcdserverpb.Lease/LeaseTimeToLive");
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(GrpcMethod::new("etcdserverpb.Lease", "LeaseTimeToLive"));
+            self.inner.unary(req, path, codec).await
+        }
+
+        /// LeaseLeases lists all existing leases.
+        pub async fn lease_leases(
+            &mut self,
+            request: impl tonic::IntoRequest<LeaseLeasesRequest>,
+        ) -> Result<Response<LeaseLeasesResponse>, Status> {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| Status::unknown(format!("Service was not ready: {}", e)))?;
+            let codec = tonic::codec::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static("/etcdserverpb.Lease/LeaseLeases");
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(GrpcMethod::new("etcdserverpb.Lease", "LeaseLeases"));
+            self.inner.unary(req, path, codec).await
+        }
+    }
+
+    impl<T: Clone> LeaseClient<T> {
+        pub fn with_interceptor<F>(
+            self,
+            interceptor: F,
+        ) -> LeaseClient<tonic::service::interceptor::InterceptedService<T, F>>
+        where
+            F: tonic::service::Interceptor,
+            T: tonic::client::GrpcService<tonic::body::BoxBody>,
+            T::Error: Into<tonic::codegen::StdError>,
+            T::ResponseBody: http_body::Body<Data = bytes::Bytes> + Send + 'static,
+            <T::ResponseBody as http_body::Body>::Error: Into<tonic::codegen::StdError> + Send,
+        {
+            LeaseClient::new(tonic::service::interceptor::InterceptedService::new(
+                self.inner.into_inner(),
+                interceptor,
+            ))
+        }
     }
 }
 
@@ -1536,6 +1746,7 @@ pub mod auth_client {
     use super::*;
     use tonic::transport::Channel;
     use tonic::client::GrpcService;
+    use tonic::{Request, Response, Status};
 
     pub struct AuthClient<T> {
         inner: tonic::client::Grpc<T>,
@@ -1553,6 +1764,314 @@ pub mod auth_client {
                 inner: tonic::client::Grpc::new(channel),
             }
         }
+
+        /// AuthEnable enables authentication.
+        pub async fn auth_enable(
+            &mut self,
+            request: impl tonic::IntoRequest<AuthEnableRequest>,
+        ) -> Result<Response<AuthEnableResponse>, Status> {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| Status::unknown(format!("Service was not ready: {}", e)))?;
+            let codec = tonic::codec::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static("/etcdserverpb.Auth/AuthEnable");
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(GrpcMethod::new("etcdserverpb.Auth", "AuthEnable"));
+            self.inner.unary(req, path, codec).await
+        }
+
+        /// AuthDisable disables authentication.
+        pub async fn auth_disable(
+            &mut self,
+            request: impl tonic::IntoRequest<AuthDisableRequest>,
+        ) -> Result<Response<AuthDisableResponse>, Status> {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| Status::unknown(format!("Service was not ready: {}", e)))?;
+            let codec = tonic::codec::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static("/etcdserverpb.Auth/AuthDisable");
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(GrpcMethod::new("etcdserverpb.Auth", "AuthDisable"));
+            self.inner.unary(req, path, codec).await
+        }
+
+        /// Authenticate processes an authenticate request.
+        pub async fn authenticate(
+            &mut self,
+            request: impl tonic::IntoRequest<AuthenticateRequest>,
+        ) -> Result<Response<AuthenticateResponse>, Status> {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| Status::unknown(format!("Service was not ready: {}", e)))?;
+            let codec = tonic::codec::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static("/etcdserverpb.Auth/Authenticate");
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(GrpcMethod::new("etcdserverpb.Auth", "Authenticate"));
+            self.inner.unary(req, path, codec).await
+        }
+
+        /// UserAdd adds a new user.
+        pub async fn user_add(
+            &mut self,
+            request: impl tonic::IntoRequest<AuthUserAddRequest>,
+        ) -> Result<Response<AuthUserAddResponse>, Status> {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| Status::unknown(format!("Service was not ready: {}", e)))?;
+            let codec = tonic::codec::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static("/etcdserverpb.Auth/UserAdd");
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(GrpcMethod::new("etcdserverpb.Auth", "UserAdd"));
+            self.inner.unary(req, path, codec).await
+        }
+
+        /// UserGet gets detailed user information.
+        pub async fn user_get(
+            &mut self,
+            request: impl tonic::IntoRequest<AuthUserGetRequest>,
+        ) -> Result<Response<AuthUserGetResponse>, Status> {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| Status::unknown(format!("Service was not ready: {}", e)))?;
+            let codec = tonic::codec::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static("/etcdserverpb.Auth/UserGet");
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(GrpcMethod::new("etcdserverpb.Auth", "UserGet"));
+            self.inner.unary(req, path, codec).await
+        }
+
+        /// UserList gets a list of all users.
+        pub async fn user_list(
+            &mut self,
+            request: impl tonic::IntoRequest<AuthUserListRequest>,
+        ) -> Result<Response<AuthUserListResponse>, Status> {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| Status::unknown(format!("Service was not ready: {}", e)))?;
+            let codec = tonic::codec::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static("/etcdserverpb.Auth/UserList");
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(GrpcMethod::new("etcdserverpb.Auth", "UserList"));
+            self.inner.unary(req, path, codec).await
+        }
+
+        /// UserDelete deletes a specified user.
+        pub async fn user_delete(
+            &mut self,
+            request: impl tonic::IntoRequest<AuthUserDeleteRequest>,
+        ) -> Result<Response<AuthUserDeleteResponse>, Status> {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| Status::unknown(format!("Service was not ready: {}", e)))?;
+            let codec = tonic::codec::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static("/etcdserverpb.Auth/UserDelete");
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(GrpcMethod::new("etcdserverpb.Auth", "UserDelete"));
+            self.inner.unary(req, path, codec).await
+        }
+
+        /// UserChangePassword changes the password of a specified user.
+        pub async fn user_change_password(
+            &mut self,
+            request: impl tonic::IntoRequest<AuthUserChangePasswordRequest>,
+        ) -> Result<Response<AuthUserChangePasswordResponse>, Status> {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| Status::unknown(format!("Service was not ready: {}", e)))?;
+            let codec = tonic::codec::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static("/etcdserverpb.Auth/UserChangePassword");
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(GrpcMethod::new("etcdserverpb.Auth", "UserChangePassword"));
+            self.inner.unary(req, path, codec).await
+        }
+
+        /// UserGrantRole grants a role to a specified user.
+        pub async fn user_grant_role(
+            &mut self,
+            request: impl tonic::IntoRequest<AuthUserGrantRoleRequest>,
+        ) -> Result<Response<AuthUserGrantRoleResponse>, Status> {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| Status::unknown(format!("Service was not ready: {}", e)))?;
+            let codec = tonic::codec::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static("/etcdserverpb.Auth/UserGrantRole");
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(GrpcMethod::new("etcdserverpb.Auth", "UserGrantRole"));
+            self.inner.unary(req, path, codec).await
+        }
+
+        /// UserRevokeRole revokes a role from a specified user.
+        pub async fn user_revoke_role(
+            &mut self,
+            request: impl tonic::IntoRequest<AuthUserRevokeRoleRequest>,
+        ) -> Result<Response<AuthUserRevokeRoleResponse>, Status> {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| Status::unknown(format!("Service was not ready: {}", e)))?;
+            let codec = tonic::codec::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static("/etcdserverpb.Auth/UserRevokeRole");
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(GrpcMethod::new("etcdserverpb.Auth", "UserRevokeRole"));
+            self.inner.unary(req, path, codec).await
+        }
+
+        /// RoleAdd adds a new role.
+        pub async fn role_add(
+            &mut self,
+            request: impl tonic::IntoRequest<AuthRoleAddRequest>,
+        ) -> Result<Response<AuthRoleAddResponse>, Status> {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| Status::unknown(format!("Service was not ready: {}", e)))?;
+            let codec = tonic::codec::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static("/etcdserverpb.Auth/RoleAdd");
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(GrpcMethod::new("etcdserverpb.Auth", "RoleAdd"));
+            self.inner.unary(req, path, codec).await
+        }
+
+        /// RoleGet gets detailed role information.
+        pub async fn role_get(
+            &mut self,
+            request: impl tonic::IntoRequest<AuthRoleGetRequest>,
+        ) -> Result<Response<AuthRoleGetResponse>, Status> {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| Status::unknown(format!("Service was not ready: {}", e)))?;
+            let codec = tonic::codec::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static("/etcdserverpb.Auth/RoleGet");
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(GrpcMethod::new("etcdserverpb.Auth", "RoleGet"));
+            self.inner.unary(req, path, codec).await
+        }
+
+        /// RoleList gets lists of all roles.
+        pub async fn role_list(
+            &mut self,
+            request: impl tonic::IntoRequest<AuthRoleListRequest>,
+        ) -> Result<Response<AuthRoleListResponse>, Status> {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| Status::unknown(format!("Service was not ready: {}", e)))?;
+            let codec = tonic::codec::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static("/etcdserverpb.Auth/RoleList");
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(GrpcMethod::new("etcdserverpb.Auth", "RoleList"));
+            self.inner.unary(req, path, codec).await
+        }
+
+        /// RoleDelete deletes a specified role.
+        pub async fn role_delete(
+            &mut self,
+            request: impl tonic::IntoRequest<AuthRoleDeleteRequest>,
+        ) -> Result<Response<AuthRoleDeleteResponse>, Status> {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| Status::unknown(format!("Service was not ready: {}", e)))?;
+            let codec = tonic::codec::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static("/etcdserverpb.Auth/RoleDelete");
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(GrpcMethod::new("etcdserverpb.Auth", "RoleDelete"));
+            self.inner.unary(req, path, codec).await
+        }
+
+        /// RoleGrantPermission grants a permission of a specified key or range to a specified role.
+        pub async fn role_grant_permission(
+            &mut self,
+            request: impl tonic::IntoRequest<AuthRoleGrantPermissionRequest>,
+        ) -> Result<Response<AuthRoleGrantPermissionResponse>, Status> {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| Status::unknown(format!("Service was not ready: {}", e)))?;
+            let codec = tonic::codec::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static("/etcdserverpb.Auth/RoleGrantPermission");
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(GrpcMethod::new("etcdserverpb.Auth", "RoleGrantPermission"));
+            self.inner.unary(req, path, codec).await
+        }
+
+        /// RoleRevokePermission revokes a key or range permission of a specified role.
+        pub async fn role_revoke_permission(
+            &mut self,
+            request: impl tonic::IntoRequest<AuthRoleRevokePermissionRequest>,
+        ) -> Result<Response<AuthRoleRevokePermissionResponse>, Status> {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| Status::unknown(format!("Service was not ready: {}", e)))?;
+            let codec = tonic::codec::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static("/etcdserverpb.Auth/RoleRevokePermission");
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(GrpcMethod::new("etcdserverpb.Auth", "RoleRevokePermission"));
+            self.inner.unary(req, path, codec).await
+        }
+
+        /// AuthStatus displays the current authentication status.
+        pub async fn auth_status(
+            &mut self,
+            request: impl tonic::IntoRequest<AuthStatusRequest>,
+        ) -> Result<Response<AuthStatusResponse>, Status> {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| Status::unknown(format!("Service was not ready: {}", e)))?;
+            let codec = tonic::codec::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static("/etcdserverpb.Auth/AuthStatus");
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(GrpcMethod::new("etcdserverpb.Auth", "AuthStatus"));
+            self.inner.unary(req, path, codec).await
+        }
+    }
+
+    impl<T: Clone> AuthClient<T> {
+        pub fn with_interceptor<F>(
+            self,
+            interceptor: F,
+        ) -> AuthClient<tonic::service::interceptor::InterceptedService<T, F>>
+        where
+            F: tonic::service::Interceptor,
+            T: tonic::client::GrpcService<tonic::body::BoxBody>,
+            T::Error: Into<tonic::codegen::StdError>,
+            T::ResponseBody: http_body::Body<Data = bytes::Bytes> + Send + 'static,
+            <T::ResponseBody as http_body::Body>::Error: Into<tonic::codegen::StdError> + Send,
+        {
+            AuthClient::new(tonic::service::interceptor::InterceptedService::new(
+                self.inner.into_inner(),
+                interceptor,
+            ))
+        }
     }
 }
 
@@ -1560,6 +2079,9 @@ pub mod maintenance_client {
     use super::*;
     use tonic::transport::Channel;
     use tonic::client::GrpcService;
+    use tonic::{Request, Response, Status};
+    use futures::Stream;
+    use futures::StreamExt;
 
     pub struct MaintenanceClient<T> {
         inner: tonic::client::Grpc<T>,
@@ -1577,6 +2099,241 @@ pub mod maintenance_client {
                 inner: tonic::client::Grpc::new(channel),
             }
         }
+
+        /// Alarm gets or clears alarms.
+        pub async fn alarm(
+            &mut self,
+            request: impl tonic::IntoRequest<AlarmRequest>,
+        ) -> Result<Response<impl Stream<Item = Result<AlarmResponse, Status>> + Send + 'static>, Status>
+        {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| Status::unknown(format!("Service was not ready: {}", e)))?;
+            let codec = tonic::codec::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static("/etcdserverpb.Maintenance/Alarm");
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(GrpcMethod::new("etcdserverpb.Maintenance", "Alarm"));
+            let resp = self.inner.server_streaming(req, path, codec).await?;
+            Ok(resp.map_inner(|stream| {
+                Box::pin(stream.map(|item| item.map_err(Into::into))) as Box<dyn Stream<Item = Result<AlarmResponse, Status>> + Send>
+            }))
+        }
+
+        /// Status gets the status of the member.
+        pub async fn status(
+            &mut self,
+            request: impl tonic::IntoRequest<StatusRequest>,
+        ) -> Result<Response<impl Stream<Item = Result<StatusResponse, Status>> + Send + 'static>, Status>
+        {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| Status::unknown(format!("Service was not ready: {}", e)))?;
+            let codec = tonic::codec::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static("/etcdserverpb.Maintenance/Status");
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(GrpcMethod::new("etcdserverpb.Maintenance", "Status"));
+            let resp = self.inner.server_streaming(req, path, codec).await?;
+            Ok(resp.map_inner(|stream| {
+                Box::pin(stream.map(|item| item.map_err(Into::into))) as Box<dyn Stream<Item = Result<StatusResponse, Status>> + Send>
+            }))
+        }
+
+        /// Hash computes the hash of the KV's states.
+        pub async fn hash(
+            &mut self,
+            request: impl tonic::IntoRequest<HashRequest>,
+        ) -> Result<Response<HashResponse>, Status> {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| Status::unknown(format!("Service was not ready: {}", e)))?;
+            let codec = tonic::codec::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static("/etcdserverpb.Maintenance/Hash");
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(GrpcMethod::new("etcdserverpb.Maintenance", "Hash"));
+            self.inner.unary(req, path, codec).await
+        }
+
+        /// HashKV computes the hash of all MVCC keys up to a given revision.
+        pub async fn hash_kv(
+            &mut self,
+            request: impl tonic::IntoRequest<HashKvRequest>,
+        ) -> Result<Response<HashKvResponse>, Status> {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| Status::unknown(format!("Service was not ready: {}", e)))?;
+            let codec = tonic::codec::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static("/etcdserverpb.Maintenance/HashKV");
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(GrpcMethod::new("etcdserverpb.Maintenance", "HashKV"));
+            self.inner.unary(req, path, codec).await
+        }
+
+        /// Snapshot sends a snapshot of the entire backend from a member over a stream to a client.
+        pub async fn snapshot(
+            &mut self,
+            request: impl tonic::IntoRequest<SnapshotRequest>,
+        ) -> Result<Response<impl Stream<Item = Result<SnapshotResponse, Status>> + Send + 'static>, Status>
+        {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| Status::unknown(format!("Service was not ready: {}", e)))?;
+            let codec = tonic::codec::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static("/etcdserverpb.Maintenance/Snapshot");
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(GrpcMethod::new("etcdserverpb.Maintenance", "Snapshot"));
+            let resp = self.inner.server_streaming(req, path, codec).await?;
+            Ok(resp.map_inner(|stream| {
+                Box::pin(stream.map(|item| item.map_err(Into::into))) as Box<dyn Stream<Item = Result<SnapshotResponse, Status>> + Send>
+            }))
+        }
+
+        /// MoveLeader requests current leader node to transfer its leadership to transferee.
+        pub async fn move_leader(
+            &mut self,
+            request: impl tonic::IntoRequest<MoveLeaderRequest>,
+        ) -> Result<Response<MoveLeaderResponse>, Status> {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| Status::unknown(format!("Service was not ready: {}", e)))?;
+            let codec = tonic::codec::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static("/etcdserverpb.Maintenance/MoveLeader");
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(GrpcMethod::new("etcdserverpb.Maintenance", "MoveLeader"));
+            self.inner.unary(req, path, codec).await
+        }
+
+        /// Defragment defragments a member's backend database to recover storage space.
+        pub async fn defragment(
+            &mut self,
+            request: impl tonic::IntoRequest<DefragmentRequest>,
+        ) -> Result<Response<DefragmentResponse>, Status> {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| Status::unknown(format!("Service was not ready: {}", e)))?;
+            let codec = tonic::codec::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static("/etcdserverpb.Maintenance/Defragment");
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(GrpcMethod::new("etcdserverpb.Maintenance", "Defragment"));
+            self.inner.unary(req, path, codec).await
+        }
+
+        /// MemberList lists all the members in the cluster.
+        pub async fn member_list(
+            &mut self,
+            request: impl tonic::IntoRequest<MemberListRequest>,
+        ) -> Result<Response<MemberListResponse>, Status> {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| Status::unknown(format!("Service was not ready: {}", e)))?;
+            let codec = tonic::codec::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static("/etcdserverpb.Maintenance/MemberList");
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(GrpcMethod::new("etcdserverpb.Maintenance", "MemberList"));
+            self.inner.unary(req, path, codec).await
+        }
+
+        /// MemberAdd adds a member into the cluster.
+        pub async fn member_add(
+            &mut self,
+            request: impl tonic::IntoRequest<MemberAddRequest>,
+        ) -> Result<Response<MemberAddResponse>, Status> {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| Status::unknown(format!("Service was not ready: {}", e)))?;
+            let codec = tonic::codec::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static("/etcdserverpb.Maintenance/MemberAdd");
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(GrpcMethod::new("etcdserverpb.Maintenance", "MemberAdd"));
+            self.inner.unary(req, path, codec).await
+        }
+
+        /// MemberRemove removes a member from the cluster.
+        pub async fn member_remove(
+            &mut self,
+            request: impl tonic::IntoRequest<MemberRemoveRequest>,
+        ) -> Result<Response<MemberRemoveResponse>, Status> {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| Status::unknown(format!("Service was not ready: {}", e)))?;
+            let codec = tonic::codec::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static("/etcdserverpb.Maintenance/MemberRemove");
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(GrpcMethod::new("etcdserverpb.Maintenance", "MemberRemove"));
+            self.inner.unary(req, path, codec).await
+        }
+
+        /// MemberUpdate updates a member in the cluster.
+        pub async fn member_update(
+            &mut self,
+            request: impl tonic::IntoRequest<MemberUpdateRequest>,
+        ) -> Result<Response<MemberUpdateResponse>, Status> {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| Status::unknown(format!("Service was not ready: {}", e)))?;
+            let codec = tonic::codec::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static("/etcdserverpb.Maintenance/MemberUpdate");
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(GrpcMethod::new("etcdserverpb.Maintenance", "MemberUpdate"));
+            self.inner.unary(req, path, codec).await
+        }
+
+        /// MemberPromote promotes a member from raft learner (non-voting) to raft voting member.
+        pub async fn member_promote(
+            &mut self,
+            request: impl tonic::IntoRequest<MemberPromoteRequest>,
+        ) -> Result<Response<MemberPromoteResponse>, Status> {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| Status::unknown(format!("Service was not ready: {}", e)))?;
+            let codec = tonic::codec::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static("/etcdserverpb.Maintenance/MemberPromote");
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(GrpcMethod::new("etcdserverpb.Maintenance", "MemberPromote"));
+            self.inner.unary(req, path, codec).await
+        }
+    }
+
+    impl<T: Clone> MaintenanceClient<T> {
+        pub fn with_interceptor<F>(
+            self,
+            interceptor: F,
+        ) -> MaintenanceClient<tonic::service::interceptor::InterceptedService<T, F>>
+        where
+            F: tonic::service::Interceptor,
+            T: tonic::client::GrpcService<tonic::body::BoxBody>,
+            T::Error: Into<tonic::codegen::StdError>,
+            T::ResponseBody: http_body::Body<Data = bytes::Bytes> + Send + 'static,
+            <T::ResponseBody as http_body::Body>::Error: Into<tonic::codegen::StdError> + Send,
+        {
+            MaintenanceClient::new(tonic::service::interceptor::InterceptedService::new(
+                self.inner.into_inner(),
+                interceptor,
+            ))
+        }
     }
 }
 
@@ -1584,6 +2341,7 @@ pub mod cluster_client {
     use super::*;
     use tonic::transport::Channel;
     use tonic::client::GrpcService;
+    use tonic::{Request, Response, Status};
 
     pub struct ClusterClient<T> {
         inner: tonic::client::Grpc<T>,
@@ -1601,14 +2359,142 @@ pub mod cluster_client {
                 inner: tonic::client::Grpc::new(channel),
             }
         }
+
+        /// MemberList lists all the members in the cluster.
+        pub async fn member_list(
+            &mut self,
+            request: impl tonic::IntoRequest<MemberListRequest>,
+        ) -> Result<Response<MemberListResponse>, Status> {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| Status::unknown(format!("Service was not ready: {}", e)))?;
+            let codec = tonic::codec::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static("/etcdserverpb.Cluster/MemberList");
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(GrpcMethod::new("etcdserverpb.Cluster", "MemberList"));
+            self.inner.unary(req, path, codec).await
+        }
+
+        /// MemberAdd adds a member into the cluster.
+        pub async fn member_add(
+            &mut self,
+            request: impl tonic::IntoRequest<MemberAddRequest>,
+        ) -> Result<Response<MemberAddResponse>, Status> {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| Status::unknown(format!("Service was not ready: {}", e)))?;
+            let codec = tonic::codec::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static("/etcdserverpb.Cluster/MemberAdd");
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(GrpcMethod::new("etcdserverpb.Cluster", "MemberAdd"));
+            self.inner.unary(req, path, codec).await
+        }
+
+        /// MemberRemove removes a member from the cluster.
+        pub async fn member_remove(
+            &mut self,
+            request: impl tonic::IntoRequest<MemberRemoveRequest>,
+        ) -> Result<Response<MemberRemoveResponse>, Status> {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| Status::unknown(format!("Service was not ready: {}", e)))?;
+            let codec = tonic::codec::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static("/etcdserverpb.Cluster/MemberRemove");
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(GrpcMethod::new("etcdserverpb.Cluster", "MemberRemove"));
+            self.inner.unary(req, path, codec).await
+        }
+
+        /// MemberUpdate updates a member in the cluster.
+        pub async fn member_update(
+            &mut self,
+            request: impl tonic::IntoRequest<MemberUpdateRequest>,
+        ) -> Result<Response<MemberUpdateResponse>, Status> {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| Status::unknown(format!("Service was not ready: {}", e)))?;
+            let codec = tonic::codec::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static("/etcdserverpb.Cluster/MemberUpdate");
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(GrpcMethod::new("etcdserverpb.Cluster", "MemberUpdate"));
+            self.inner.unary(req, path, codec).await
+        }
+
+        /// MemberPromote promotes a member from raft learner (non-voting) to raft voting member.
+        pub async fn member_promote(
+            &mut self,
+            request: impl tonic::IntoRequest<MemberPromoteRequest>,
+        ) -> Result<Response<MemberPromoteResponse>, Status> {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| Status::unknown(format!("Service was not ready: {}", e)))?;
+            let codec = tonic::codec::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static("/etcdserverpb.Cluster/MemberPromote");
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(GrpcMethod::new("etcdserverpb.Cluster", "MemberPromote"));
+            self.inner.unary(req, path, codec).await
+        }
+    }
+
+    impl<T: Clone> ClusterClient<T> {
+        pub fn with_interceptor<F>(
+            self,
+            interceptor: F,
+        ) -> ClusterClient<tonic::service::interceptor::InterceptedService<T, F>>
+        where
+            F: tonic::service::Interceptor,
+            T: tonic::client::GrpcService<tonic::body::BoxBody>,
+            T::Error: Into<tonic::codegen::StdError>,
+            T::ResponseBody: http_body::Body<Data = bytes::Bytes> + Send + 'static,
+            <T::ResponseBody as http_body::Body>::Error: Into<tonic::codegen::StdError> + Send,
+        {
+            ClusterClient::new(tonic::service::interceptor::InterceptedService::new(
+                self.inner.into_inner(),
+                interceptor,
+            ))
+        }
     }
 }
 
 // ============================================================================
+// Helper Types
+// ============================================================================
+
+/// gRPC method descriptor for client calls
+#[derive(Debug, Clone)]
+pub struct GrpcMethod {
+    pub package: &'static str,
+    pub service: &'static str,
+    pub method: &'static str,
+}
+
+impl GrpcMethod {
+    pub fn new(service: &'static str, method: &'static str) -> Self {
+        Self {
+            package: "etcdserverpb",
+            service,
+            method,
+        }
+    }
+}
+// ============================================================================
 // Helper Functions
 // ============================================================================
 
-/// Helper Function: Decode Request
+const GRPC_FRAME_HEADER_LEN: usize = 5;
+
+/// Helper Function: Decode gRPC framed request
+/// 
 async fn decode_request<T: prost::Message + Default>(
     mut req: http::Request<tonic::body::BoxBody>,
 ) -> Result<Request<T>, http::Error> {
@@ -1625,28 +2511,72 @@ async fn decode_request<T: prost::Message + Default>(
         buf.extend_from_slice(chunk.chunk());
     }
 
-    let msg = T::decode(&buf[..]).map_err(|_| http::Error::new(Box::new(std::io::Error::new(
-        std::io::ErrorKind::Other,
-        "decode error",
+    if buf.len() < GRPC_FRAME_HEADER_LEN {
+        return Err(http::Error::new(Box::new(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!(
+                "gRPC frame too short: expected at least {} bytes, got {}",
+                GRPC_FRAME_HEADER_LEN,
+                buf.len()
+            ),
+        ))));
+    }
+
+    let compression_flag = buf[0];
+    if compression_flag != 0 {
+        return Err(http::Error::new(Box::new(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("Compression not supported: flag={}", compression_flag),
+        ))));
+    }
+
+    let message_len = u32::from_be_bytes([buf[1], buf[2], buf[3], buf[4]]) as usize;
+
+    if buf.len() != GRPC_FRAME_HEADER_LEN + message_len {
+        return Err(http::Error::new(Box::new(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!(
+                "gRPC frame length mismatch: header says {} bytes, body has {} bytes",
+                message_len,
+                buf.len() - GRPC_FRAME_HEADER_LEN
+            ),
+        ))));
+    }
+
+    let message_bytes = &buf[GRPC_FRAME_HEADER_LEN..];
+    let msg = T::decode(message_bytes).map_err(|e| http::Error::new(Box::new(std::io::Error::new(
+        std::io::ErrorKind::InvalidData,
+        format!("decode error: {}", e),
     ))))?;
 
     let (parts, _) = req.into_parts();
     Ok(Request::from_parts(parts, msg))
 }
 
-/// Helper function: Encode response
+/// Helper function: Encode gRPC framed response
+
 fn encode_response<T: prost::Message>(resp: Response<T>) -> http::Response<tonic::body::BoxBody> {
     use http_body_util::Full;
-    use bytes::Bytes;
+    use bytes::{Bytes, BytesMut, BufMut};
 
     let (metadata, msg, _extensions) = resp.into_parts();
-    let mut buf = Vec::new();
-    msg.encode(&mut buf).unwrap();
+    
+    let mut message_buf = Vec::new();
+    msg.encode(&mut message_buf).unwrap();
+    let message_len = message_buf.len();
+
+    let mut frame = BytesMut::with_capacity(GRPC_FRAME_HEADER_LEN + message_len);
+    
+    frame.put_u8(0);
+    
+    frame.put_u32(message_len as u32);
+    
+    frame.extend_from_slice(&message_buf);
 
     let mut http_resp = http::Response::builder()
         .status(http::StatusCode::OK)
         .header("content-type", "application/grpc")
-        .body(tonic::body::BoxBody::new(Full::new(Bytes::from(buf))))
+        .body(tonic::body::BoxBody::new(Full::new(frame.freeze())))
         .unwrap();
 
     *http_resp.headers_mut() = metadata.into_headers();
@@ -1659,4 +2589,29 @@ fn status_to_http_error(status: Status) -> http::Error {
         std::io::ErrorKind::Other,
         status.message(),
     )))
+}
+
+/// Helper function: Encode gRPC status trailers
+pub fn encode_grpc_trailers(status: &Status) -> http::HeaderMap {
+    use http::header::{HeaderMap, HeaderName};
+    
+    let mut trailers = HeaderMap::new();
+    
+    trailers.insert(
+        HeaderName::from_static("grpc-status"),
+        status.code().to_string().parse().unwrap(),
+    );
+    
+    if !status.message().is_empty() {
+        let encoded_message = percent_encoding::percent_encode(
+            status.message().as_bytes(),
+            percent_encoding::NON_ALPHANUMERIC,
+        );
+        trailers.insert(
+            HeaderName::from_static("grpc-message"),
+            encoded_message.to_string().parse().unwrap(),
+        );
+    }
+    
+    trailers
 }
