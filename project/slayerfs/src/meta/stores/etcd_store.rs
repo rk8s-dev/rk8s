@@ -1215,30 +1215,39 @@ impl EtcdMetaStore {
             "Pool exhausted, allocating new batch from etcd"
         );
 
-        let (allocated_id, next_start, pool_end) = self
-            .atomic_update(
-                counter_key,
-                |current_id: i64| {
-                    let next_etcd_id = current_id
-                        .checked_add(BATCH_SIZE)
-                        .ok_or_else(|| MetaError::Internal("ID counter overflow".to_string()))?;
-                    Ok((next_etcd_id, (current_id, current_id + 1, next_etcd_id)))
-                },
-                || {
-                    let next_etcd_id = FIRST_ALLOCATED_ID
-                        .checked_add(BATCH_SIZE)
-                        .ok_or_else(|| MetaError::Internal("ID counter overflow".to_string()))?;
-                    Ok((
-                        next_etcd_id,
-                        (FIRST_ALLOCATED_ID, FIRST_ALLOCATED_ID + 1, next_etcd_id),
-                    ))
-                },
-                10,
-                &None,
-            )
+        let counter_key = counter_key.to_string();
+
+        let (allocated_id, next_start, pool_end) = EtcdTxn::new(&self.client)
+            .max_retries(10)
+            .run(|tx| {
+                let counter_key = counter_key.clone();
+
+                Box::pin(async move {
+                    let current_id = tx.get_typed_json::<i64>(&counter_key).await?;
+
+                    let (current_id, next_etcd_id) = if let Some(current_id) = current_id {
+                        let next_etcd_id = current_id.checked_add(BATCH_SIZE).ok_or_else(|| {
+                            MetaError::Internal("ID counter overflow".to_string())
+                        })?;
+
+                        (current_id, next_etcd_id)
+                    } else {
+                        let next_etcd_id =
+                            FIRST_ALLOCATED_ID.checked_add(BATCH_SIZE).ok_or_else(|| {
+                                MetaError::Internal("ID counter overflow".to_string())
+                            })?;
+
+                        (FIRST_ALLOCATED_ID, next_etcd_id)
+                    };
+
+                    tx.set_typed_json(&counter_key, &next_etcd_id)?;
+
+                    Ok((current_id, current_id + 1, next_etcd_id))
+                })
+            })
             .await?;
 
-        self.id_pools.update(counter_key, next_start, pool_end);
+        self.id_pools.update(&counter_key, next_start, pool_end);
 
         let elapsed = start.elapsed();
         info!(
@@ -1251,67 +1260,6 @@ impl EtcdMetaStore {
         );
 
         Ok(allocated_id)
-    }
-
-    /// Optimistic concurrency helper for etcd keys.
-    ///
-    /// `f` runs when the key exists and returns the new persisted value plus a payload `R` derived
-    /// from the old state. `init` lazily provides the same tuple when the key is absent to avoid a
-    /// separate create path. Both closures can error so domain-level failures propagate cleanly.
-    /// Retries use exponential backoff on compare failures.
-    #[tracing::instrument(
-        level = "trace",
-        skip(self, f, init, options),
-        fields(key, max_retries)
-    )]
-    async fn atomic_update<F, I, T, R>(
-        &self,
-        key: &str,
-        f: F,
-        init: I,
-        max_retries: u64,
-        options: &Option<PutOptions>,
-    ) -> Result<R, MetaError>
-    where
-        F: Fn(T) -> Result<(T, R), MetaError> + Sync,
-        I: Fn() -> Result<(T, R), MetaError> + Sync,
-        T: Serialize + DeserializeOwned,
-    {
-        let key = key.to_string();
-        let options = options.clone();
-
-        EtcdTxn::new(&self.client)
-            .max_retries(max_retries)
-            .run(|tx| {
-                let key = key.clone();
-                let options = options.clone();
-                let f = &f;
-                let init = &init;
-
-                Box::pin(async move {
-                    let current = tx.get(&key).await?;
-
-                    let (updated, ret) = if let Some(raw) = current {
-                        let current = serde_json::from_slice(&raw).map_err(|e| {
-                            MetaError::Internal(format!(
-                                "Failed to deserialize JSON value for key {key}: {e}"
-                            ))
-                        })?;
-
-                        f(current)?
-                    } else {
-                        init()?
-                    };
-
-                    let updated = serde_json::to_vec(&updated)
-                        .map_err(|e| MetaError::Internal(e.to_string()))?;
-
-                    tx.set_with_options(key, updated, options);
-
-                    Ok(ret)
-                })
-            })
-            .await
     }
 
     /// Get a clone of the etcd client (for Watch Worker)
@@ -1411,24 +1359,26 @@ impl EtcdMetaStore {
     ) -> Result<(), MetaError> {
         let key = Self::etcd_children_key(parent_ino);
 
-        self.atomic_update(
-            &key,
-            |dir: EtcdDirChildren| {
-                let mut children = dir.children;
-                updater(&mut children);
-                Ok((EtcdDirChildren::new(parent_ino, children), ()))
-            },
-            || {
-                let mut children = HashMap::new();
-                updater(&mut children);
-                Ok((EtcdDirChildren::new(parent_ino, children), ()))
-            },
-            max_retries as u64,
-            &None,
-        )
-        .await
-        .map(|_| ())
-        .map_err(|e| MetaError::Internal(format!("Update parent children failed: {e}")))
+        EtcdTxn::new(&self.client)
+            .max_retries(max_retries as u64)
+            .run(|tx| {
+                let key = key.clone();
+                let updater = &updater;
+
+                Box::pin(async move {
+                    let dir = tx.get_typed_json::<EtcdDirChildren>(&key).await?;
+
+                    let mut children = dir.map(|dir| dir.children).unwrap_or_default();
+                    updater(&mut children);
+
+                    let dir = EtcdDirChildren::new(parent_ino, children);
+                    tx.set_typed_json(&key, &dir)?;
+
+                    Ok(())
+                })
+            })
+            .await
+            .map_err(|e| MetaError::Internal(format!("Update parent children failed: {e}")))
     }
 
     /// Check file is existing
@@ -1463,123 +1413,117 @@ impl EtcdMetaStore {
 
         match lock_type {
             FileLockType::UnLock => {
-                // Unlock file
-                self.atomic_update(
-                    &key,
-                    |mut plocks: Vec<EtcdPlock>| {
-                        // Find the lock record for this owner and sid
-                        let pos = plocks
-                            .iter()
-                            .position(|p| p.sid == *sid && p.owner == owner);
+                EtcdTxn::new(&self.client)
+                    .max_retries(10)
+                    .run(|tx| {
+                        let key = key.clone();
+                        let put_options = put_options.clone();
 
-                        if let Some(pos) = pos {
-                            let plock = &mut plocks[pos];
-                            let records: Vec<PlockRecord> = plock.records.clone();
-                            if records.is_empty() {
-                                // Remove this plock entry if no records
-                                plocks.remove(pos);
-                                return Ok((plocks, ()));
+                        Box::pin(async move {
+                            let mut plocks = tx
+                                .get_typed_json::<Vec<EtcdPlock>>(&key)
+                                .await?
+                                .unwrap_or_default();
+
+                            if let Some(pos) = plocks
+                                .iter()
+                                .position(|p| p.sid == *sid && p.owner == owner)
+                            {
+                                let records = plocks[pos].records.clone();
+
+                                if records.is_empty() {
+                                    plocks.remove(pos);
+                                } else {
+                                    let new_records = PlockRecord::update_locks(records, *new_lock);
+
+                                    if new_records.is_empty() {
+                                        plocks.remove(pos);
+                                    } else {
+                                        plocks[pos].records = new_records;
+                                    }
+                                }
                             }
 
-                            // Update locks with new unlock request
-                            let new_records = PlockRecord::update_locks(records, *new_lock);
+                            tx.set_with_options(
+                                key,
+                                serde_json::to_vec(&plocks)
+                                    .map_err(|e| MetaError::Internal(e.to_string()))?,
+                                put_options,
+                            );
 
-                            if new_records.is_empty() {
-                                // Remove this plock entry if no records after update
-                                plocks.remove(pos);
-                                return Ok((plocks, ()));
-                            }
-
-                            // Update the records
-                            plock.records = new_records;
-                        }
-
-                        Ok((plocks, ()))
-                    },
-                    || Ok((vec![], ())), // No existing locks, nothing to unlock
-                    10,
-                    &put_options,
-                )
-                .await
+                            Ok(())
+                        })
+                    })
+                    .await
             }
             _ => {
-                // Lock request (ReadLock or WriteLock)
-                self.atomic_update(
-                    &key,
-                    |mut plocks: Vec<EtcdPlock>| {
-                        // Build a hashmap of locks for easier lookup
-                        let mut locks = HashMap::new();
-                        for item in &plocks {
-                            let key = (item.sid, item.owner);
-                            locks.insert(key, item.records.clone());
-                        }
+                EtcdTxn::new(&self.client)
+                    .max_retries(10)
+                    .run(|tx| {
+                        let key = key.clone();
+                        let put_options = put_options.clone();
 
-                        let lkey = (*sid, owner);
+                        Box::pin(async move {
+                            let mut plocks = tx
+                                .get_typed_json::<Vec<EtcdPlock>>(&key)
+                                .await?
+                                .unwrap_or_default();
 
-                        // Check for conflicts with other owners/sessions
-                        let mut conflict_found = false;
-                        for ((sid, _owner), records_vec) in &locks {
-                            if (*sid, owner) == lkey {
-                                continue;
+                            let mut locks = HashMap::new();
+                            for item in &plocks {
+                                let key = (item.sid, item.owner);
+                                locks.insert(key, item.records.clone());
                             }
 
-                            let ls: Vec<PlockRecord> = records_vec.clone(); // EtcdPlock already stores Vec<PlockRecord>
-                            conflict_found = PlockRecord::check_conflict(&lock_type, &range, &ls);
-                            if conflict_found {
-                                break;
+                            let lock_key = (*sid, owner);
+
+                            for ((lock_sid, _), records) in &locks {
+                                if (*lock_sid, owner) == lock_key {
+                                    continue;
+                                }
+
+                                if PlockRecord::check_conflict(&lock_type, &range, records) {
+                                    return Err(MetaError::LockConflict {
+                                        inode,
+                                        owner,
+                                        range,
+                                    });
+                                }
                             }
-                        }
 
-                        if conflict_found {
-                            return Err(MetaError::LockConflict {
-                                inode,
-                                owner,
-                                range,
-                            });
-                        }
+                            let records = locks.get(&lock_key).cloned().unwrap_or_default();
+                            let records = PlockRecord::update_locks(records, *new_lock);
 
-                        // Get existing locks for this owner/session
-                        let ls = locks.get(&lkey).cloned().unwrap_or_default();
-
-                        // Update locks with new request
-                        let ls = PlockRecord::update_locks(ls, *new_lock);
-
-                        // Check if we need to update the record
-                        if locks.get(&lkey).map(|r| r != &ls).unwrap_or(true) {
-                            // Find existing plock entry and update it, or add new one
-                            if let Some(plock) = plocks
-                                .iter_mut()
-                                .find(|p| p.sid == *sid && p.owner == owner)
+                            if locks
+                                .get(&lock_key)
+                                .map(|existing| existing != &records)
+                                .unwrap_or(true)
                             {
-                                plock.records = ls;
-                            } else {
-                                let new_plock = EtcdPlock {
-                                    sid: *sid,
-                                    owner,
-                                    records: ls,
-                                };
-                                plocks.push(new_plock);
+                                if let Some(plock) = plocks
+                                    .iter_mut()
+                                    .find(|p| p.sid == *sid && p.owner == owner)
+                                {
+                                    plock.records = records;
+                                } else {
+                                    plocks.push(EtcdPlock {
+                                        sid: *sid,
+                                        owner,
+                                        records,
+                                    });
+                                }
                             }
-                        }
 
-                        Ok((plocks, ()))
-                    },
-                    || {
-                        // No existing locks, create new one
-                        let ls = PlockRecord::update_locks(vec![], *new_lock);
+                            tx.set_with_options(
+                                key,
+                                serde_json::to_vec(&plocks)
+                                    .map_err(|e| MetaError::Internal(e.to_string()))?,
+                                put_options,
+                            );
 
-                        let new_plock = EtcdPlock {
-                            sid: *sid,
-                            owner,
-                            records: ls,
-                        };
-
-                        Ok((vec![new_plock], ()))
-                    },
-                    10,
-                    &put_options,
-                )
-                .await
+                            Ok(())
+                        })
+                    })
+                    .await
             }
         }
     }
@@ -2646,75 +2590,98 @@ impl MetaStore for EtcdMetaStore {
     #[tracing::instrument(level = "trace", skip(self), fields(ino, size))]
     async fn set_file_size(&self, ino: i64, size: u64) -> Result<(), MetaError> {
         let reverse_key = Self::etcd_reverse_key(ino);
-        self.atomic_update(
-            &reverse_key,
-            |mut entry_info: EtcdEntryInfo| {
-                if !entry_info.is_file {
-                    return Err(MetaError::Internal(
-                        "Cannot set size for directory".to_string(),
-                    ));
-                }
 
-                entry_info.size = Some(size as i64);
-                entry_info.modify_time = chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0);
-                Ok((entry_info, ()))
-            },
-            || Err(MetaError::NotFound(ino)),
-            10,
-            &None,
-        )
-        .await
-        .map(|_| ())
-    }
+        EtcdTxn::new(&self.client)
+            .max_retries(10)
+            .run(|tx| {
+                let reverse_key = reverse_key.clone();
 
-    #[tracing::instrument(level = "trace", skip(self), fields(ino, size))]
-    async fn extend_file_size(&self, ino: i64, size: u64) -> Result<(), MetaError> {
-        let reverse_key = Self::etcd_reverse_key(ino);
-        self.atomic_update(
-            &reverse_key,
-            |mut entry_info: EtcdEntryInfo| {
-                if !entry_info.is_file {
-                    return Err(MetaError::Internal(
-                        "Cannot set size for directory".to_string(),
-                    ));
-                }
+                Box::pin(async move {
+                    let mut entry_info: EtcdEntryInfo = tx
+                        .get_typed_json(&reverse_key)
+                        .await?
+                        .ok_or(MetaError::NotFound(ino))?;
 
-                let current = entry_info.size.unwrap_or(0) as u64;
-                if size > current {
-                    entry_info.size = Some(size as i64);
-                    entry_info.modify_time = chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0);
-                }
-                Ok((entry_info, ()))
-            },
-            || Err(MetaError::NotFound(ino)),
-            10,
-            &None,
-        )
-        .await
-        .map(|_| ())
-    }
-
-    #[tracing::instrument(level = "trace", skip(self), fields(ino, size, chunk_size))]
-    async fn truncate(&self, ino: i64, size: u64, chunk_size: u64) -> Result<(), MetaError> {
-        let reverse_key = Self::etcd_reverse_key(ino);
-        let old_size = self
-            .atomic_update(
-                &reverse_key,
-                |mut entry_info: EtcdEntryInfo| {
                     if !entry_info.is_file {
                         return Err(MetaError::Internal(
                             "Cannot set size for directory".to_string(),
                         ));
                     }
+
+                    entry_info.size = Some(size as i64);
+                    entry_info.modify_time = chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0);
+                    tx.set_typed_json(reverse_key, &entry_info)?;
+
+                    Ok(())
+                })
+            })
+            .await
+    }
+
+    #[tracing::instrument(level = "trace", skip(self), fields(ino, size))]
+    async fn extend_file_size(&self, ino: i64, size: u64) -> Result<(), MetaError> {
+        let reverse_key = Self::etcd_reverse_key(ino);
+
+        EtcdTxn::new(&self.client)
+            .max_retries(10)
+            .run(|tx| {
+                let reverse_key = reverse_key.clone();
+
+                Box::pin(async move {
+                    let mut entry_info: EtcdEntryInfo = tx
+                        .get_typed_json(&reverse_key)
+                        .await?
+                        .ok_or(MetaError::NotFound(ino))?;
+
+                    if !entry_info.is_file {
+                        return Err(MetaError::Internal(
+                            "Cannot set size for directory".to_string(),
+                        ));
+                    }
+
+                    let current = entry_info.size.unwrap_or(0) as u64;
+                    if size > current {
+                        entry_info.size = Some(size as i64);
+                        entry_info.modify_time =
+                            chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0);
+                        tx.set_typed_json(reverse_key, &entry_info)?;
+                    }
+
+                    Ok(())
+                })
+            })
+            .await
+    }
+
+    #[tracing::instrument(level = "trace", skip(self), fields(ino, size, chunk_size))]
+    async fn truncate(&self, ino: i64, size: u64, chunk_size: u64) -> Result<(), MetaError> {
+        let reverse_key = Self::etcd_reverse_key(ino);
+
+        let old_size = EtcdTxn::new(&self.client)
+            .max_retries(10)
+            .run(|tx| {
+                let reverse_key = reverse_key.clone();
+
+                Box::pin(async move {
+                    let mut entry_info: EtcdEntryInfo = tx
+                        .get_typed_json(&reverse_key)
+                        .await?
+                        .ok_or(MetaError::NotFound(ino))?;
+
+                    if !entry_info.is_file {
+                        return Err(MetaError::Internal(
+                            "Cannot set size for directory".to_string(),
+                        ));
+                    }
+
                     let prev = entry_info.size.unwrap_or(0) as u64;
                     entry_info.size = Some(size as i64);
                     entry_info.modify_time = chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0);
-                    Ok((entry_info, prev))
-                },
-                || Err(MetaError::NotFound(ino)),
-                10,
-                &None,
-            )
+                    tx.set_typed_json(reverse_key, &entry_info)?;
+
+                    Ok(prev)
+                })
+            })
             .await?;
 
         self.prune_slices_for_truncate(ino, size, old_size, chunk_size)
@@ -2881,19 +2848,20 @@ impl MetaStore for EtcdMetaStore {
     async fn append_slice(&self, chunk_id: u64, slice: SliceDesc) -> Result<(), MetaError> {
         let key = key_for_slice(chunk_id);
 
-        // Note that `slice` is `Copy`.
-        self.atomic_update(
-            &key,
-            |mut source: Vec<SliceDesc>| {
-                source.push(slice);
-                Ok((source, ()))
-            },
-            || Ok((vec![slice], ())),
-            10,
-            &None,
-        )
-        .await
-        .map(|_| ())
+        EtcdTxn::new(&self.client)
+            .max_retries(10)
+            .run(|tx| {
+                let key = key.clone();
+
+                Box::pin(async move {
+                    let mut source: Vec<SliceDesc> = tx.get_typed(&key).await?.unwrap_or_default();
+                    source.push(slice);
+                    tx.set_typed(key, &source)?;
+
+                    Ok(())
+                })
+            })
+            .await
     }
 
     async fn write(
@@ -3009,24 +2977,31 @@ impl MetaStore for EtcdMetaStore {
     }
     #[tracing::instrument(level = "trace", skip(self), fields(lock_name = ?lock_name))]
     async fn get_global_lock(&self, lock_name: LockName) -> bool {
-        let result = self
-            .atomic_update::<_, _, i64, bool>(
-                &lock_name.to_string(),
-                |old| {
+        let lock_key = lock_name.to_string();
+        let result = EtcdTxn::new(&self.client)
+            .max_retries(3)
+            .run(|tx| {
+                let lock_key = lock_key.clone();
+
+                Box::pin(async move {
                     let now = Utc::now().timestamp_millis();
-                    if now > old + Duration::seconds(7).num_milliseconds() {
-                        Ok((now, true))
+                    let current = tx.get_typed_json::<i64>(&lock_key).await?;
+
+                    let (updated, acquired) = if let Some(current) = current {
+                        if now > current + Duration::seconds(7).num_milliseconds() {
+                            (now, true)
+                        } else {
+                            (current, false)
+                        }
                     } else {
-                        Ok((old, false))
-                    }
-                },
-                || {
-                    let now = Utc::now().timestamp_millis();
-                    Ok((now, true))
-                },
-                3,
-                &None,
-            )
+                        (now, true)
+                    };
+
+                    tx.set_typed_json(&lock_key, &updated)?;
+
+                    Ok(acquired)
+                })
+            })
             .await;
 
         match result {
