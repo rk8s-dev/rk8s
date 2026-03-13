@@ -2,6 +2,7 @@
 
 use std::{sync::Arc, time::Duration};
 
+use crate::common::curp_group::{CurpGroup, DEFAULT_SHUTDOWN_TIMEOUT};
 use clippy_utilities::NumericCast;
 use curp::{
     client::{ClientApi, ClientBuilder},
@@ -17,11 +18,8 @@ use rand::{Rng, thread_rng};
 use test_macros::abort_on_panic;
 use tokio::net::TcpListener;
 use tokio_stream::StreamExt;
-use tonic::Code;
 use utils::{config::ClientConfig, timestamp};
-// TODO: use our own status type
-// use xlinerpc::status::Code;
-use crate::common::curp_group::{CurpGroup, DEFAULT_SHUTDOWN_TIMEOUT, FetchClusterRequest};
+use xlinerpc::status::Code;
 
 #[tokio::test(flavor = "multi_thread")]
 #[abort_on_panic]
@@ -526,14 +524,7 @@ async fn check_new_node(is_learner: bool) {
     sleep_millis(500).await; // wait new node publish it's name to cluster
 
     // 3. fetch and check cluster from new node
-    let mut new_connect = group.get_connect(&node_id).await;
-    let res = new_connect
-        .fetch_cluster(tonic::Request::new(FetchClusterRequest {
-            linearizable: false,
-        }))
-        .await
-        .unwrap()
-        .into_inner();
+    let res = group.fetch_cluster_from_node(&node_id).await;
     assert_eq!(res.members.len(), 4);
     assert!(
         res.members

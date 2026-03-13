@@ -74,7 +74,6 @@ macro_rules! define_method_ids {
         /// All defined method IDs (for testing completeness).
         /// Not part of the stable public API.
         #[doc(hidden)]
-        #[cfg(any(test, feature = "quic-test"))]
         pub const ALL_METHOD_IDS: &[MethodId] = &[
             $( MethodId::$variant, )*
         ];
@@ -525,7 +524,6 @@ impl<W: AsyncWrite + Unpin> FrameWriter<W> {
 
 /// Test-only: write a raw u16 method ID header (bypasses `MethodId` type safety).
 #[doc(hidden)]
-#[cfg(feature = "quic-test")]
 impl<W: AsyncWrite + Unpin> FrameWriter<W> {
     /// Write a raw u16 method ID + metadata. Used to test unknown-method error path.
     #[doc(hidden)]

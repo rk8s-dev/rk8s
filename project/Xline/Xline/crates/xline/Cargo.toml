@@ -28,6 +28,7 @@ engine = { path = "../engine" }
 event-listener = { workspace = true }
 flume = { workspace = true }
 futures = { workspace = true }
+gm-quic = { git = "https://github.com/genmeta/gm-quic", rev = "4cbd9d93" }
 hyper = "1.0.0"
 itertools = { workspace = true }
 jsonwebtoken = { workspace = true }
@@ -52,6 +53,9 @@ pbkdf2 = { workspace = true }
 priority-queue = { workspace = true }
 prometheus = "0.13.4"
 prost = { workspace = true }
+rcgen = "0.13"
+rustls = { version = "0.23", default-features = false, features = ["std", "ring"] }
+rustls-pemfile = "2"
 serde = { workspace = true }
 sha2 = "0.10.6"
 tokio = { workspace = true }

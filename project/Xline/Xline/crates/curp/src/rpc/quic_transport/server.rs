@@ -60,6 +60,19 @@ where
         }
     }
 
+    /// Create a new QUIC gRPC server with a custom external service implementation.
+    ///
+    /// This allows wrapping the external `CurpService` (e.g., with an auth layer)
+    /// while keeping the internal Raft protocol handled by `Rpc` directly.
+    #[inline]
+    pub fn new_with_service(external_service: impl CurpService, rpc: Rpc<C, CE, RC>) -> Self {
+        Self {
+            service: Arc::new(external_service),
+            inner_service: Arc::new(rpc),
+            _phantom: PhantomData,
+        }
+    }
+
     /// Start serving on the given listeners
     ///
     /// This method runs the accept loop and dispatches incoming streams

@@ -28,7 +28,6 @@ use itertools::Itertools;
 use opentelemetry::KeyValue;
 use parking_lot::{Mutex, RwLock, RwLockUpgradableReadGuard, RwLockWriteGuard};
 use tokio::sync::{broadcast, oneshot};
-use tonic::transport::ClientTlsConfig;
 use tracing::{
     debug, error,
     log::{Level, log_enabled},
@@ -62,8 +61,8 @@ use crate::{
     response::ResponseSender,
     role_change::RoleChange,
     rpc::{
-        ConfChange, ConfChangeType, CurpError, IdSet, Member, PoolEntry, ProposeId, PublishRequest,
-        ReadState, Redirect,
+        self, ConfChange, ConfChangeType, CurpError, IdSet, Member, PoolEntry, ProposeId,
+        PublishRequest, ReadState, Redirect,
         connect::{InnerConnectApi, InnerConnectApiWrapper},
     },
     server::{
@@ -130,9 +129,8 @@ pub(super) struct RawCurpArgs<C: Command, RC: RoleChange> {
     connects: DashMap<ServerId, InnerConnectApiWrapper>,
     /// curp storage
     curp_storage: Arc<DB<C>>,
-    /// client tls config
-    #[builder(default)]
-    client_tls_config: Option<ClientTlsConfig>,
+    /// Transport configuration for creating new connections
+    transport: rpc::TransportConfig,
     /// Last applied index
     #[builder(setter(strip_option), default)]
     last_applied: Option<LogIndex>,
@@ -176,7 +174,7 @@ impl<C: Command, RC: RoleChange> RawCurpBuilder<C, RC> {
             .role_change(args.role_change)
             .connects(args.connects)
             .curp_storage(args.curp_storage)
-            .client_tls_config(args.client_tls_config)
+            .transport(args.transport)
             .spec_pool(args.spec_pool)
             .uncommitted_pool(args.uncommitted_pool)
             .as_tx(args.as_tx)
@@ -307,8 +305,8 @@ struct Context<C: Command, RC: RoleChange> {
     cluster_info: Arc<ClusterInfo>,
     /// Config
     cfg: Arc<CurpConfig>,
-    /// Client tls config
-    client_tls_config: Option<ClientTlsConfig>,
+    /// Transport configuration for creating new connections
+    transport: rpc::TransportConfig,
     /// Cmd board for tracking the cmd sync results
     cb: CmdBoardRef<C>,
     /// The lease manager
@@ -402,9 +400,9 @@ impl<C: Command, RC: RoleChange> ContextBuilder<C, RC> {
                 Some(value) => value,
                 None => return Err(ContextBuilderError::UninitializedField("curp_storage")),
             },
-            client_tls_config: match self.client_tls_config.take() {
+            transport: match self.transport.take() {
                 Some(value) => value,
-                None => return Err(ContextBuilderError::UninitializedField("client_tls_config")),
+                None => return Err(ContextBuilderError::UninitializedField("transport")),
             },
             spec_pool: match self.spec_pool.take() {
                 Some(value) => value,
@@ -1636,9 +1634,9 @@ impl<C: Command, RC: RoleChange> RawCurp<C, RC> {
         lm_w.bypass(client_id);
     }
 
-    /// Get client tls config
-    pub(super) fn client_tls_config(&self) -> Option<&ClientTlsConfig> {
-        self.ctx.client_tls_config.as_ref()
+    /// Get transport config
+    pub(super) fn transport(&self) -> &rpc::TransportConfig {
+        &self.ctx.transport
     }
 }
 

@@ -27,7 +27,10 @@ ARG APP_GROUP=appgroup
 ARG UID=1001
 ARG GID=1001
 
-RUN groupadd -g $GID $APP_GROUP && \
+RUN apt-get update && apt-get install -y \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/* \
+    && groupadd -g $GID $APP_GROUP && \
     useradd -u $UID -g $APP_GROUP -s /bin/sh -m $APP_USER
 
 COPY --from=builder /app/target/ /tmp/target/

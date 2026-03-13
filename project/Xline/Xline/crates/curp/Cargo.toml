@@ -43,12 +43,13 @@ tokio-util = { workspace = true }
 tonic = { workspace = true, features = ["transport", "tls"] }
 tower = { version = "0.4.13", features = ["filter"] }
 tracing = { version = "0.1.37", features = ["std", "log", "attributes"] }
+tracing-opentelemetry = { workspace = true }
 utils = { path = "../utils", version = "0.1.0" }
 xlinerpc = { path = "../xlinerpc"}
 
 # QUIC dependencies
-gm-quic = { git = "https://github.com/genmeta/gm-quic", rev = "4cbd9d93", optional = true }
-rustls = { version = "0.23", default-features = false, features = ["std", "ring"], optional = true }
+gm-quic = { git = "https://github.com/genmeta/gm-quic", rev = "4cbd9d93" }
+rustls = { version = "0.23", default-features = false, features = ["std", "ring"] }
 
 [dev-dependencies]
 anyhow = { workspace = true }
@@ -65,8 +66,6 @@ tracing-test = "0.2.4"
 
 [features]
 client-metrics = []
-quic = ["gm-quic", "rustls"]
-quic-test = ["quic"]
 
 [lints]
 workspace = true

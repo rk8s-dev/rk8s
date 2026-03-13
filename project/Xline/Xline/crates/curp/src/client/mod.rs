@@ -21,7 +21,7 @@ mod state;
 #[cfg(test)]
 mod tests;
 
-use std::{collections::HashMap, fmt::Debug, ops::Deref, sync::Arc, time::Duration};
+use std::{collections::HashMap, fmt::Debug, ops::Deref, sync::Arc};
 
 use async_trait::async_trait;
 use curp_external_api::cmd::Command;
@@ -41,8 +41,8 @@ use self::{
 use crate::{
     members::ServerId,
     rpc::{
-        ConfChange, FetchClusterRequest, FetchClusterResponse, Member, ProposeId, Protocol,
-        ReadState, protocol_client::ProtocolClient,
+        ConfChange, CurpService, FetchClusterRequest, FetchClusterResponse, Member, ProposeId,
+        ReadState,
     },
     tracker::Tracker,
 };
@@ -199,7 +199,7 @@ trait LeaderStateUpdate {
 }
 
 /// Client builder to build a client
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 #[allow(clippy::module_name_repetitions)] // better than just Builder
 pub struct ClientBuilder {
     /// initial cluster version
@@ -212,16 +212,14 @@ pub struct ClientBuilder {
     leader_state: Option<(ServerId, u64)>,
     /// client configuration
     config: ClientConfig,
-    /// Client tls config
-    tls_config: Option<ClientTlsConfig>,
-    /// Transport configuration (default: Tonic)
-    transport: crate::rpc::transport::TransportConfig,
+    /// Transport configuration (QUIC)
+    transport: Option<crate::rpc::transport::TransportConfig>,
 }
 
 /// A client builder with bypass with local server
 #[derive(Debug, Clone)]
 #[allow(clippy::module_name_repetitions)] // same as above
-pub struct ClientBuilderWithBypass<P: Protocol> {
+pub struct ClientBuilderWithBypass<P: CurpService> {
     /// inner builder
     inner: ClientBuilder,
     /// local server id
@@ -238,14 +236,17 @@ impl ClientBuilder {
         Self {
             is_raw_curp,
             config,
-            ..ClientBuilder::default()
+            cluster_version: None,
+            all_members: None,
+            leader_state: None,
+            transport: None,
         }
     }
 
     /// Set the local server to bypass `gRPC` request
     #[inline]
     #[must_use]
-    pub fn bypass<P: Protocol>(
+    pub fn bypass<P: CurpService>(
         self,
         local_server_id: ServerId,
         local_server: P,
@@ -281,23 +282,14 @@ impl ClientBuilder {
         self
     }
 
-    /// Set the tls config
-    #[inline]
-    #[must_use]
-    pub fn tls_config(mut self, tls_config: Option<ClientTlsConfig>) -> Self {
-        self.tls_config = tls_config;
-        self
-    }
-
-    /// Use QUIC transport (default is tonic gRPC)
-    #[cfg(feature = "quic")]
+    /// Use QUIC transport
     #[inline]
     #[must_use]
     pub fn quic_transport(mut self, quic_client: Arc<gm_quic::prelude::QuicClient>) -> Self {
-        self.transport = crate::rpc::transport::TransportConfig::Quic(
-            quic_client,
-            crate::rpc::quic_transport::channel::DnsFallback::Disabled,
-        );
+        self.transport = Some(crate::rpc::transport::TransportConfig {
+            client: quic_client,
+            dns_fallback: crate::rpc::quic_transport::channel::DnsFallback::Disabled,
+        });
         self
     }
 
@@ -306,17 +298,17 @@ impl ClientBuilder {
     /// When DNS resolution fails for a hostname, falls back to 127.0.0.1
     /// with the original hostname as SNI. Only use this for testing with
     /// fake hostnames like "s0.test".
-    #[cfg(all(feature = "quic", any(test, feature = "quic-test")))]
+    #[doc(hidden)]
     #[inline]
     #[must_use]
     pub fn quic_transport_for_test(
         mut self,
         quic_client: Arc<gm_quic::prelude::QuicClient>,
     ) -> Self {
-        self.transport = crate::rpc::transport::TransportConfig::Quic(
-            quic_client,
-            crate::rpc::quic_transport::channel::DnsFallback::LocalhostForTest,
-        );
+        self.transport = Some(crate::rpc::transport::TransportConfig {
+            client: quic_client,
+            dns_fallback: crate::rpc::quic_transport::channel::DnsFallback::LocalhostForTest,
+        });
         self
     }
 
@@ -395,24 +387,18 @@ impl ClientBuilder {
     /// # Errors
     ///
     /// Return `CurpError` for connection failure or some server errors.
-    #[cfg(feature = "quic")]
     #[inline]
-    pub async fn quic_discover_from(
+    pub async fn discover_from(
         mut self,
         addrs: Vec<String>,
     ) -> Result<Self, crate::rpc::CurpError> {
         use crate::rpc::{CurpError, MethodId, quic_transport::channel::QuicChannel};
 
-        let (quic_client, dns_fallback) = match self.transport {
-            crate::rpc::transport::TransportConfig::Quic(ref c, fallback) => {
-                (Arc::clone(c), fallback)
-            }
-            _ => {
-                return Err(CurpError::internal(
-                    "quic_discover_from requires quic_transport to be set",
-                ));
-            }
-        };
+        let transport = self.transport.as_ref().ok_or_else(|| {
+            CurpError::internal("discover_from requires quic_transport to be set")
+        })?;
+        let quic_client = Arc::clone(&transport.client);
+        let dns_fallback = transport.dns_fallback;
 
         let propose_timeout = *self.config.propose_timeout();
         let mut futs: FuturesUnordered<_> = addrs
@@ -422,7 +408,6 @@ impl ClientBuilder {
                 let addr = addr.clone();
                 async move {
                     let channel = match dns_fallback {
-                        #[cfg(any(test, feature = "quic-test"))]
                         crate::rpc::quic_transport::channel::DnsFallback::LocalhostForTest => {
                             QuicChannel::connect_single_for_test(&addr, client).await?
                         }
@@ -454,7 +439,7 @@ impl ClientBuilder {
                     self.all_members = if self.is_raw_curp {
                         Some(r.into_peer_urls())
                     } else {
-                        Some(Self::quic_ensure_no_empty_address(r.into_client_urls())?)
+                        Some(Self::ensure_no_empty_address(r.into_client_urls())?)
                     };
                     return Ok(self);
                 }
@@ -464,9 +449,8 @@ impl ClientBuilder {
         Err(err)
     }
 
-    /// Ensures that no server has an empty list of addresses (QUIC variant)
-    #[cfg(feature = "quic")]
-    fn quic_ensure_no_empty_address(
+    /// Ensures that no server has an empty list of addresses
+    fn ensure_no_empty_address(
         urls: HashMap<ServerId, Vec<String>>,
     ) -> Result<HashMap<ServerId, Vec<String>>, crate::rpc::CurpError> {
         (!urls.values().any(Vec::is_empty))
@@ -474,23 +458,17 @@ impl ClientBuilder {
             .ok_or(crate::rpc::CurpError::internal("cluster not published"))
     }
 
-    /// Ensures that no server has an empty list of addresses.
-    #[allow(clippy::result_large_err)]
-    fn ensure_no_empty_address(
-        urls: HashMap<ServerId, Vec<String>>,
-    ) -> Result<HashMap<ServerId, Vec<String>>, Status> {
-        (!urls.values().any(Vec::is_empty))
-            .then_some(urls)
-            .ok_or(Status::unavailable("cluster not published"))
-    }
-
     /// Init state builder
     fn init_state_builder(&self) -> StateBuilder {
+        let transport = self
+            .transport
+            .clone()
+            .unwrap_or_else(|| panic!("transport must be set before building client"));
         let mut builder = StateBuilder::new(
             self.all_members.clone().unwrap_or_else(|| {
                 unreachable!("must set the initial members or discover from some endpoints")
             }),
-            self.tls_config.clone(),
+            transport,
         );
         if let Some(version) = self.cluster_version {
             builder.set_cluster_version(version);
@@ -499,7 +477,6 @@ impl ClientBuilder {
             builder.set_leader_state(id, term);
         }
         builder.set_is_raw_curp(self.is_raw_curp);
-        builder.set_transport(self.transport.clone());
         builder
     }
 
@@ -541,7 +518,7 @@ impl ClientBuilder {
     ///
     /// # Errors
     ///
-    /// Return `tonic::transport::Error` for connection failure.
+    /// Return error for connection failure.
     #[inline]
     #[allow(clippy::result_large_err)]
     pub fn build<C: Command>(
@@ -559,12 +536,12 @@ impl ClientBuilder {
     }
 }
 
-impl<P: Protocol> ClientBuilderWithBypass<P> {
+impl<P: CurpService> ClientBuilderWithBypass<P> {
     /// Build the client with local server
     ///
     /// # Errors
     ///
-    /// Return `tonic::transport::Error` for connection failure.
+    /// Return error for connection failure.
     #[inline]
     #[allow(clippy::result_large_err)]
     pub fn build<C: Command>(self) -> Result<impl ClientApi<Error = Status, Cmd = C>, Status> {

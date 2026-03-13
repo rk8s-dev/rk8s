@@ -120,7 +120,7 @@ fn fd_used_count() -> anyhow::Result<u64> {
         proc_fd_type: u32,
     }
 
-    extern "C" {
+    unsafe extern "C" {
         /// From undocumented `libproc.h`
         #[allow(unused)] // ??
         fn proc_pidinfo(
@@ -138,7 +138,7 @@ fn fd_used_count() -> anyhow::Result<u64> {
     if buffer_size_bytes < 0 {
         return Err(anyhow!("invoke proc_pidinfo failed"));
     }
-    let fds_buffer_length: usize = buffer_size_bytes as usize / std::mem::size_of::<proc_fd_info>();
+    let fds_buffer_length: usize = buffer_size_bytes as usize / size_of::<proc_fd_info>();
     let mut buf: Vec<proc_fd_info> = vec![proc_fd_info::default(); fds_buffer_length];
     buf.shrink_to_fit();
     let actual_buffer_size_bytes = unsafe {
@@ -156,7 +156,7 @@ fn fd_used_count() -> anyhow::Result<u64> {
     if actual_buffer_size_bytes >= buffer_size_bytes {
         return Err(anyhow!("allocated buffer too small"));
     }
-    buf.truncate(actual_buffer_size_bytes as usize / std::mem::size_of::<proc_fd_info>());
+    buf.truncate(actual_buffer_size_bytes as usize / size_of::<proc_fd_info>());
     Ok(buf.len() as u64)
 }
 
