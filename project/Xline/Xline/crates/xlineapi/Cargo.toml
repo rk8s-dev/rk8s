@@ -19,7 +19,7 @@ itertools = { workspace = true }
 prost = { workspace = true }
 serde = { workspace = true }
 thiserror = { workspace = true }
-tonic = { workspace = true }
+tonic = { workspace = true, features = ["codegen"] }
 utils = { path = "../utils" }
 futures = { workspace = true }
 http = "1.0"

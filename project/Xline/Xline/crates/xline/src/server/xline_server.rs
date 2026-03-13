@@ -349,12 +349,7 @@ impl XlineServer {
             curp_client,
         ) = self.init_servers(db, key_pair).await?;
 
-
-        // interceptor that peeks at the TlsInfo extension and, if a peer
-        // certificate is present, stashes its common name in metadata so that
-        // auth_store::get_cn can read it without pulling in `tonic`.
         let cn_interceptor = tonic::service::interceptor(|mut req: tonic::Request<_>| {
-    // Always remove any client-provided x-tls-cn to prevent spoofing
             req.metadata_mut().remove("x-tls-cn");
             if let Some(tls_info) = req.extensions().get::<tonic::transport::server::TlsInfo>() {
                 if let Some(cert) = tls_info.peer_certs().get(0) {
@@ -364,7 +359,6 @@ impl XlineServer {
                                 let _ = req.metadata_mut().insert("x-tls-cn", value);
                             }
                             Err(e) => {
-                                // Log warning messages, but continue processing the request
                                 tracing::warn!(
                                     "Failed to parse CN '{}' as metadata value: {}. Skipping CN injection.",
                                     cn,
@@ -383,6 +377,7 @@ impl XlineServer {
         if let Some(ref cfg) = self.server_tls_config {
             builder = builder.tls_config(cfg.clone())?;
         }
+
         let xline_router = builder
             .add_service(RpcLockServer::new(lock_server))
             .add_service(RpcKvServer::new(kv_server))
@@ -392,9 +387,6 @@ impl XlineServer {
             .add_service(RpcMaintenanceServer::new(maintenance_server))
             .add_service(RpcClusterServer::new(cluster_server))
             .add_service(ProtocolServer::new(auth_wrapper.clone()));
-
-        // Curp peer communication uses QUIC, with AuthWrapper for token-based auth
-        let quic_server = QuicGrpcServer::new_with_service(auth_wrapper, curp_server);
 
         let xline_router = {
             let (mut reporter, health_server) = tonic_health::server::health_reporter();

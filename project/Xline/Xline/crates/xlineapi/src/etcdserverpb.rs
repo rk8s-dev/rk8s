@@ -1031,89 +1031,17 @@ pub mod kv_server {
 }
 
 pub mod watch_server {
-    use super::*;
-    use tonic::{Request, Response, Status};
-    use tonic::server::NamedService;
-    use tonic::codegen::{http, Body, BoxFuture};
-    use tower_service::Service;
-    use std::task::{Context, Poll};
-    use std::sync::Arc;
-    use futures::Stream;
-
     #[async_trait::async_trait]
     pub trait Watch: Send + Sync + 'static {
         type WatchStream: Stream<Item = Result<WatchResponse, Status>> + Send + 'static;
-        async fn watch(&self, request: Request<tonic::Streaming<WatchRequest>>) -> Result<Response<Self::WatchStream>, Status>;
-    }
-
-    #[derive(Debug, Clone)]
-    pub struct WatchServer<S> {
-        inner: std::sync::Arc<S>,
-    }
-
-    impl<S> WatchServer<S>
-    where
-        S: Watch + Send + Sync + 'static,
-    {
-        pub fn new(service: S) -> Self {
-            Self {
-                inner: std::sync::Arc::new(service),
-            }
-        }
-    }
-
-    impl<S> NamedService for WatchServer<S>
-    where
-        S: Watch + Send + Sync + 'static,
-    {
-        const NAME: &'static str = "etcdserverpb.Watch";
-    }
-
-    impl<S> Service<http::Request<tonic::body::BoxBody>> for WatchServer<S>
-    where
-        S: Watch + Send + Sync + 'static,
-        S: 'static,
-    {
-        type Response = http::Response<tonic::body::BoxBody>;
-        type Error = http::Error;
-        type Future = BoxFuture<Self::Response, Self::Error>;
-
-        fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-            Poll::Ready(Ok(()))
-        }
-
-        fn call(&mut self, req: http::Request<tonic::body::BoxBody>) -> Self::Future {
-            let inner = Arc::clone(&self.inner);
-            Box::pin(async move {
-                let path = req.uri().path().to_string();
-                match path.as_str() {
-                    "/etcdserverpb.Watch/Watch" => {
-                        // Streaming RPC requires special handling, returning not implemented here
-                        Ok(http::Response::builder()
-                            .status(http::StatusCode::UNIMPLEMENTED)
-                            .body(tonic::body::BoxBody::default())
-                            .unwrap())
-                    }
-                    _ => {
-                        Ok(http::Response::builder()
-                            .status(http::StatusCode::NOT_FOUND)
-                            .body(tonic::body::BoxBody::default())
-                            .unwrap())
-                    }
-                }
-            })
-        }
+        async fn watch(&self, request: Request<tonic::Streaming<WatchRequest>>) 
+            -> Result<Response<Self::WatchStream>, Status>;
     }
 }
 
 pub mod lease_server {
     use super::*;
     use tonic::{Request, Response, Status};
-    use tonic::server::NamedService;
-    use tonic::codegen::{http, Body, BoxFuture};
-    use tower_service::Service;
-    use std::task::{Context, Poll};
-    use std::sync::Arc;
     use futures::Stream;
 
     #[async_trait::async_trait]
@@ -1124,84 +1052,6 @@ pub mod lease_server {
         async fn lease_keep_alive(&self, request: Request<tonic::Streaming<LeaseKeepAliveRequest>>) -> Result<Response<Self::LeaseKeepAliveStream>, Status>;
         async fn lease_time_to_live(&self, request: Request<LeaseTimeToLiveRequest>) -> Result<Response<LeaseTimeToLiveResponse>, Status>;
         async fn lease_leases(&self, request: Request<LeaseLeasesRequest>) -> Result<Response<LeaseLeasesResponse>, Status>;
-    }
-
-    #[derive(Debug, Clone)]
-    pub struct LeaseServer<S> {
-        inner: std::sync::Arc<S>,
-    }
-
-    impl<S> LeaseServer<S>
-    where
-        S: Lease + Send + Sync + 'static,
-    {
-        pub fn new(service: S) -> Self {
-            Self {
-                inner: std::sync::Arc::new(service),
-            }
-        }
-    }
-
-    impl<S> NamedService for LeaseServer<S>
-    where
-        S: Lease + Send + Sync + 'static,
-    {
-        const NAME: &'static str = "etcdserverpb.Lease";
-    }
-
-    impl<S> Service<http::Request<tonic::body::BoxBody>> for LeaseServer<S>
-    where
-        S: Lease + Send + Sync + 'static,
-        S: 'static,
-    {
-        type Response = http::Response<tonic::body::BoxBody>;
-        type Error = http::Error;
-        type Future = BoxFuture<Self::Response, Self::Error>;
-
-        fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-            Poll::Ready(Ok(()))
-        }
-
-        fn call(&mut self, req: http::Request<tonic::body::BoxBody>) -> Self::Future {
-            let inner = Arc::clone(&self.inner);
-            Box::pin(async move {
-                let path = req.uri().path().to_string();
-                match path.as_str() {
-                    "/etcdserverpb.Lease/LeaseGrant" => {
-                        let msg = decode_request::<LeaseGrantRequest>(req).await?;
-                        let resp = inner.lease_grant(msg).await.map_err(status_to_http_error)?;
-                        Ok(encode_response(resp))
-                    }
-                    "/etcdserverpb.Lease/LeaseRevoke" => {
-                        let msg = decode_request::<LeaseRevokeRequest>(req).await?;
-                        let resp = inner.lease_revoke(msg).await.map_err(status_to_http_error)?;
-                        Ok(encode_response(resp))
-                    }
-                    "/etcdserverpb.Lease/LeaseTimeToLive" => {
-                        let msg = decode_request::<LeaseTimeToLiveRequest>(req).await?;
-                        let resp = inner.lease_time_to_live(msg).await.map_err(status_to_http_error)?;
-                        Ok(encode_response(resp))
-                    }
-                    "/etcdserverpb.Lease/LeaseLeases" => {
-                        let msg = decode_request::<LeaseLeasesRequest>(req).await?;
-                        let resp = inner.lease_leases(msg).await.map_err(status_to_http_error)?;
-                        Ok(encode_response(resp))
-                    }
-                    "/etcdserverpb.Lease/LeaseKeepAlive" => {
-                        Ok(http::Response::builder()
-                            .status(http::StatusCode::UNIMPLEMENTED)
-                            .body(tonic::body::BoxBody::default())
-                            .unwrap())
-                    }
-                    _ => {
-                        Ok(http::Response::builder()
-                            .status(http::StatusCode::NOT_FOUND)
-                            .body(tonic::body::BoxBody::default())
-                            .unwrap())
-                    }
-                }
-            })
-        }
     }
 }
 
@@ -1493,6 +1343,8 @@ pub mod maintenance_server {
                     "/etcdserverpb.Maintenance/Snapshot" => {
                         Ok(http::Response::builder()
                             .status(http::StatusCode::UNIMPLEMENTED)
+                            .header("grpc-status", "12")
+                            .header("grpc-message", "Streaming RPC: Use direct registration in xline_server.rs")
                             .body(tonic::body::BoxBody::default())
                             .unwrap())
                     }

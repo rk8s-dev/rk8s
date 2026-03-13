@@ -20,21 +20,7 @@ use crate::{
     storage::kvwatcher::{KvWatcher, KvWatcherOps, WatchEvent, WatchId, WatchIdGenerator},
 };
 
-/// Watch service trait
-#[async_trait::async_trait]
-pub trait Watch {
-    /// Server streaming response type for the Watch method.
-    type WatchStream: Stream<Item = Result<WatchResponse, Status>> + Send + 'static;
-    /// Watch watches for events happening or that have happened. Both input and output
-    /// are streams; the input stream is for creating and canceling watchers and the output
-    /// stream sends events. One watch RPC can watch on multiple key ranges, streaming events
-    /// for several watches at once. The entire event history can be watched starting from the
-    /// last compaction revision.
-    async fn watch(
-        &self,
-        request: xlinerpc::Request<tonic::Streaming<WatchRequest>>,
-    ) -> Result<xlinerpc::Response<Self::WatchStream>, Status>;
-}
+use xlineapi::watch_server::Watch as GrpcWatch;
 
 /// Default channel size
 pub(crate) const CHANNEL_SIZE: usize = 1024;
@@ -394,21 +380,14 @@ where
 }
 
 #[async_trait::async_trait]
-impl Watch for WatchServer {
-    /// Server streaming response type for the Watch method.
+impl GrpcWatch for WatchServer {
     type WatchStream = ReceiverStream<Result<WatchResponse, Status>>;
-
-    /// Watch watches for events happening or that have happened. Both input and output
-    /// are streams; the input stream is for creating and canceling watchers and the output
-    /// stream sends events. One watch RPC can watch on multiple key ranges, streaming events
-    /// for several watches at once. The entire event history can be watched starting from the
-    /// last compaction revision.
     async fn watch(
         &self,
-        request: xlinerpc::Request<tonic::Streaming<WatchRequest>>,
-    ) -> Result<xlinerpc::Response<Self::WatchStream>, Status> {
+        request: Request<tonic::Streaming<WatchRequest>>,
+    ) -> Result<Response<Self::WatchStream>, Status> {
         debug!("Receive Watch Connection {:?}", request);
-        let req_stream = request.into_data();
+        let req_stream = request.into_inner();
         
         let (tx, rx) = mpsc::channel(CHANNEL_SIZE);
         self.task_manager.spawn(TaskName::WatchTask, |n| {
@@ -422,7 +401,7 @@ impl Watch for WatchServer {
                 n,
             )
         });
-        Ok(xlinerpc::Response::new(ReceiverStream::new(rx)))
+        Ok(Response::new(ReceiverStream::new(rx)))
     }
 }
 

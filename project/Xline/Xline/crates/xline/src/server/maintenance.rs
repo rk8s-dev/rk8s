@@ -104,10 +104,14 @@ impl MaintenanceServer {
 /// Implement the generated gRPC service trait
 #[async_trait::async_trait]
 impl MaintenanceService for MaintenanceServer {
+    type AlarmStream = Pin<Box<dyn Stream<Item = Result<AlarmResponse, Status>> + Send>>;
+    type StatusStream = Pin<Box<dyn Stream<Item = Result<StatusResponse, Status>> + Send>>;
+    type SnapshotStream = Pin<Box<dyn Stream<Item = Result<SnapshotResponse, Status>> + Send>>;
+
     async fn alarm(
         &self,
         request: tonic::Request<AlarmRequest>,
-    ) -> Result<tonic::Response<AlarmResponse>, tonic::Status> {
+    ) -> Result<tonic::Response<Self::AlarmStream>, tonic::Status> {
         let (data, metadata) = request.into_parts();
         let xline_request = xlinerpc::Request::from_parts(data, metadata);
         let (res, sync_res) = self.propose(xline_request).await?;
@@ -120,13 +124,14 @@ impl MaintenanceService for MaintenanceServer {
                 header.revision = revision;
             }
         }
-        Ok(tonic::Response::new(res))
+        let stream = futures::stream::once(async move { Ok(res) });
+        Ok(tonic::Response::new(Box::pin(stream)))
     }
 
     async fn status(
         &self,
         _request: tonic::Request<StatusRequest>,
-    ) -> Result<tonic::Response<StatusResponse>, tonic::Status> {
+    ) -> Result<tonic::Response<Self::StatusStream>, tonic::Status> {
         let is_learner = self.cluster_info.self_member().is_learner;
         let (leader, term, _) = self.raw_curp.leader();
         let commit_index = self.raw_curp.commit_index();
@@ -157,7 +162,8 @@ impl MaintenanceService for MaintenanceServer {
             db_size_in_use: size.numeric_cast(),
             is_learner,
         };
-        Ok(tonic::Response::new(response))
+        let stream = futures::stream::once(async move { Ok(response) });
+        Ok(tonic::Response::new(Box::pin(stream)))
     }
 
     async fn defragment(
@@ -196,10 +202,10 @@ impl MaintenanceService for MaintenanceServer {
     async fn snapshot(
         &self,
         _request: tonic::Request<SnapshotRequest>,
-    ) -> Result<tonic::Response<tonic::codec::Streaming<SnapshotResponse>>, tonic::Status> {
+    ) -> Result<tonic::Response<Self::SnapshotStream>, tonic::Status> {
         let stream = snapshot_stream(&self.header_gen, &self.db)?;
         // Need to convert xlinerpc Stream to tonic Streaming
-        Ok(tonic::Response::new(tonic::codec::Streaming::from_stream(stream)))
+        Ok(tonic::Response::new(Box::pin(stream)))
     }
 
     async fn move_leader(
