@@ -27,8 +27,7 @@ use crate::{
     storage::{AuthStore, LeaseStore},
 };
 use xlineapi::etcdserverpb::lease_server::Lease as GrpcLease;
-let tonic_req: tonic::Request<LeaseTimeToLiveRequest> = request.into();
-let xline_resp: Response<LeaseTimeToLiveResponse> = tonic_resp.into();
+
 /// Lease service trait
 #[async_trait::async_trait]
 pub trait Lease {

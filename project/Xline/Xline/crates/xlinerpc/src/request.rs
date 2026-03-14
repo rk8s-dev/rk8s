@@ -11,12 +11,13 @@ pub type Request<T> = Envelope<T, RequestKind>;
 impl<T> Request<T> {
     /// Get mutable reference to data
     pub fn data_mut(&mut self) -> &mut T {
-        self.data_mut()
+        self.0.data_mut()  
+        Envelope::data_mut(self) 
     }
 
-    /// Get inner data (consuming the request)
     pub fn into_inner(self) -> T {
-        self.into_data()
+        let (data, _metadata) = self.into_parts();
+        data
     }
 }
 

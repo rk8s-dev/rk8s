@@ -4,7 +4,6 @@
 
 use std::collections::BTreeMap;
 use futures::Stream;
-use tonic::Status;
 
 pub mod codec;
 pub mod envelope;
@@ -37,10 +36,11 @@ pub trait IntoMetadataBytes {
     fn into_metadata_bytes(self) -> Vec<u8>;
 }
 
+#[cfg(feature = "tonic-compat")]
 pub struct Streaming<T> {
     inner: tonic::Streaming<T>,
 }
-
+#[cfg(feature = "tonic-compat")]
 impl<T> Streaming<T> {
     pub fn new(inner: tonic::Streaming<T>) -> Self {
         Self { inner }
@@ -54,7 +54,7 @@ impl<T> Streaming<T> {
         self.inner
     }
 }
-
+#[cfg(feature = "tonic-compat")]
 impl<T> Stream for Streaming<T> {
     type Item = Result<T, Status>;
     

@@ -11,7 +11,8 @@ pub type Response<T> = Envelope<T, ResponseKind>;
 impl<T> Response<T> {
     /// Get inner data (consuming the response)
     pub fn into_inner(self) -> T {
-        self.into_data()
+        let (data, _metadata) = self.into_parts();
+        data
     }
 }
 
