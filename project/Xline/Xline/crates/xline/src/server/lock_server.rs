@@ -11,7 +11,6 @@ use tonic::body::BoxBody;
 use tonic::server::NamedService;
 use tower_service::Service as TowerService;
 use xlinerpc::{Request, Response as XlineResponse, Status};
-use tonic::{Request as TonicRequest, Response as TonicResponse, Status as TonicStatus};
 use tonic::transport::{Channel, ClientTlsConfig, Endpoint};
 use tracing::debug;
 use utils::build_endpoint;
@@ -359,7 +358,7 @@ where
     S: Lock + Send + Sync + 'static,
 {
     type Response = HttpResponse<BoxBody>;
-    type Error = tonic::Status;
+    type Error = Status;
     type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
     fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
@@ -392,19 +391,25 @@ where
 // ============================================================================
 
 /// Parse gRPC request
-async fn parse_request<T>(req: HttpRequest<BoxBody>) -> Result<TonicRequest<T>, tonic::Status>
+async fn parse_request<T>(req: HttpRequest<BoxBody>) -> Result<TonicRequest<T>, Status>
 where
     T: prost::Message + Default,
 {
     let (parts, body) = req.into_parts();
     let bytes = hyper::body::to_bytes(body)
         .await
-        .map_err(|e| tonic::Status::internal(e.to_string()))?;
+        .map_err(|e| Status::internal(e.to_string()))?;
     let message = T::decode(bytes.as_ref())
-        .map_err(|e| tonic::Status::internal(e.to_string()))?;
-    Ok(TonicRequest::from_parts(
-        tonic::MetadataMap::from_headers(parts.headers),
+        .map_err(|e| Status::internal(e.to_string()))?;
+    let mut metadata = MetaData::new();
+    for (key, value) in parts.headers.iter() {
+        if let Ok(value_str) = value.to_str() {
+            metadata.insert(key.as_str().as_bytes(), value_str.as_bytes());
+        }
+    }
+    Ok(Request::new(
         message,
+        metadata,
     ))
 }
 

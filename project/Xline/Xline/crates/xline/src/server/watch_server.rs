@@ -7,7 +7,7 @@ use std::{
 use event_listener::Event;
 use tokio::sync::mpsc;
 use tokio_stream::{Stream, StreamExt, wrappers::ReceiverStream};
-use xlinerpc::Status;
+use xlinerpc::{Request, Response as XlineResponse, Status, Streaming};
 use tracing::{debug, warn};
 use utils::task_manager::{Listener, TaskManager, tasks::TaskName};
 use xlineapi::command::KeyRange;
@@ -384,8 +384,8 @@ impl GrpcWatch for WatchServer {
     type WatchStream = ReceiverStream<Result<WatchResponse, Status>>;
     async fn watch(
         &self,
-        request: Request<tonic::Streaming<WatchRequest>>,
-    ) -> Result<Response<Self::WatchStream>, Status> {
+        request: Request<Streaming<WatchRequest>>,
+    ) -> Result<XlineResponse<Self::WatchStream>, Status> {
         debug!("Receive Watch Connection {:?}", request);
         let req_stream = request.into_inner();
         
@@ -401,7 +401,7 @@ impl GrpcWatch for WatchServer {
                 n,
             )
         });
-        Ok(Response::new(ReceiverStream::new(rx)))
+        Ok(XlineResponse::new(ReceiverStream::new(rx)))
     }
 }
 

@@ -936,7 +936,7 @@ pub struct AlarmResponse {
 
 pub mod kv_server {
     use super::*;
-    use tonic::{Request, Response, Status};
+    use xlinerpc::{Request, Response, Status};
     use tonic::server::NamedService;
     use tonic::codegen::{http, Body, BoxFuture};
     use tower_service::Service;
@@ -1032,7 +1032,7 @@ pub mod kv_server {
 
 pub mod watch_server {
     use super::*;
-    use tonic::{Request, Response, Status};
+    use xlinerpc::{Request, Response, Status, Streaming};  // xlinerpc 类型
     use tonic::server::NamedService;
     use tonic::codegen::{http, Body, BoxFuture};
     use tower_service::Service;
@@ -1043,7 +1043,8 @@ pub mod watch_server {
     #[async_trait::async_trait]
     pub trait Watch: Send + Sync + 'static {
         type WatchStream: Stream<Item = Result<WatchResponse, Status>> + Send + 'static;
-        async fn watch(&self, request: Request<tonic::Streaming<WatchRequest>>) 
+        
+        async fn watch(&self, request: Request<Streaming<WatchRequest>>) 
             -> Result<Response<Self::WatchStream>, Status>;
     }
 
@@ -1099,21 +1100,15 @@ pub mod watch_server {
 
 
 pub mod lease_server {
-    use super::*;
-    use tonic::{Request, Response, Status};
-    use tonic::server::NamedService;
-    use tonic::codegen::{http, Body, BoxFuture};
-    use tower_service::Service;
-    use std::task::{Context, Poll};
-    use std::sync::Arc;
-    use futures::Stream;
-
+    use xlinerpc::{Request, Response, Status, Streaming};
+    
     #[async_trait::async_trait]
     pub trait Lease: Send + Sync + 'static {
         type LeaseKeepAliveStream: Stream<Item = Result<LeaseKeepAliveResponse, Status>> + Send + 'static;
+        
         async fn lease_grant(&self, request: Request<LeaseGrantRequest>) -> Result<Response<LeaseGrantResponse>, Status>;
         async fn lease_revoke(&self, request: Request<LeaseRevokeRequest>) -> Result<Response<LeaseRevokeResponse>, Status>;
-        async fn lease_keep_alive(&self, request: Request<tonic::Streaming<LeaseKeepAliveRequest>>) -> Result<Response<Self::LeaseKeepAliveStream>, Status>;
+        async fn lease_keep_alive(&self, request: Request<Streaming<LeaseKeepAliveRequest>>) -> Result<Response<Self::LeaseKeepAliveStream>, Status>;
         async fn lease_time_to_live(&self, request: Request<LeaseTimeToLiveRequest>) -> Result<Response<LeaseTimeToLiveResponse>, Status>;
         async fn lease_leases(&self, request: Request<LeaseLeasesRequest>) -> Result<Response<LeaseLeasesResponse>, Status>;
     }
@@ -1205,7 +1200,7 @@ pub mod lease_server {
 
 pub mod auth_server {
     use super::*;
-    use tonic::{Request, Response, Status};
+    use xlinerpc::{Request, Response, Status};
     use tonic::server::NamedService;
     use tonic::codegen::{http, Body, BoxFuture};
     use tower_service::Service;
@@ -1373,7 +1368,7 @@ pub mod auth_server {
 
 pub mod maintenance_server {
     use super::*;
-    use tonic::{Request, Response, Status};
+    use xlinerpc::{Request, Response, Status};
     use tonic::server::NamedService;
     use tonic::codegen::{http, Body, BoxFuture};
     use tower_service::Service;
@@ -1383,19 +1378,18 @@ pub mod maintenance_server {
 
     #[async_trait::async_trait]
     pub trait Maintenance: Send + Sync + 'static {
-        async fn alarm(&self, request: Request<AlarmRequest>) -> Result<Response<AlarmResponse>, Status>;
-        async fn status(&self, request: Request<StatusRequest>) -> Result<Response<StatusResponse>, Status>;
+        type AlarmStream: Stream<Item = Result<AlarmResponse, Status>> + Send + 'static;
+        type StatusStream: Stream<Item = Result<StatusResponse, Status>> + Send + 'static;
+        type SnapshotStream: Stream<Item = Result<SnapshotResponse, Status>> + Send + 'static;
+
+        async fn alarm(&self, request: Request<AlarmRequest>) -> Result<Response<Self::AlarmStream>, Status>;
+        async fn status(&self, request: Request<StatusRequest>) -> Result<Response<Self::StatusStream>, Status>;
+        async fn defragment(&self, request: Request<DefragmentRequest>) -> Result<Response<DefragmentResponse>, Status>;
         async fn hash(&self, request: Request<HashRequest>) -> Result<Response<HashResponse>, Status>;
         async fn hash_kv(&self, request: Request<HashKvRequest>) -> Result<Response<HashKvResponse>, Status>;
-        type SnapshotStream: Stream<Item = Result<SnapshotResponse, Status>> + Send + 'static;
         async fn snapshot(&self, request: Request<SnapshotRequest>) -> Result<Response<Self::SnapshotStream>, Status>;
         async fn move_leader(&self, request: Request<MoveLeaderRequest>) -> Result<Response<MoveLeaderResponse>, Status>;
-        async fn defragment(&self, request: Request<DefragmentRequest>) -> Result<Response<DefragmentResponse>, Status>;
-        async fn member_list(&self, request: Request<MemberListRequest>) -> Result<Response<MemberListResponse>, Status>;
-        async fn member_add(&self, request: Request<MemberAddRequest>) -> Result<Response<MemberAddResponse>, Status>;
-        async fn member_remove(&self, request: Request<MemberRemoveRequest>) -> Result<Response<MemberRemoveResponse>, Status>;
-        async fn member_update(&self, request: Request<MemberUpdateRequest>) -> Result<Response<MemberUpdateResponse>, Status>;
-        async fn member_promote(&self, request: Request<MemberPromoteRequest>) -> Result<Response<MemberPromoteResponse>, Status>;
+        async fn downgrade(&self, request: Request<DowngradeRequest>) -> Result<Response<DowngradeResponse>, Status>;
     }
 
     #[derive(Debug, Clone)]
@@ -1516,7 +1510,7 @@ pub mod maintenance_server {
 
 pub mod cluster_server {
     use super::*;
-    use tonic::{Request, Response, Status};
+    use xlinerpc::{Request, Response, Status};
     use tonic::server::NamedService;
     use tonic::codegen::{http, Body, BoxFuture};
     use tower_service::Service;
@@ -1525,10 +1519,10 @@ pub mod cluster_server {
 
     #[async_trait::async_trait]
     pub trait Cluster: Send + Sync + 'static {
-        async fn member_list(&self, request: Request<MemberListRequest>) -> Result<Response<MemberListResponse>, Status>;
         async fn member_add(&self, request: Request<MemberAddRequest>) -> Result<Response<MemberAddResponse>, Status>;
         async fn member_remove(&self, request: Request<MemberRemoveRequest>) -> Result<Response<MemberRemoveResponse>, Status>;
         async fn member_update(&self, request: Request<MemberUpdateRequest>) -> Result<Response<MemberUpdateResponse>, Status>;
+        async fn member_list(&self, request: Request<MemberListRequest>) -> Result<Response<MemberListResponse>, Status>;
         async fn member_promote(&self, request: Request<MemberPromoteRequest>) -> Result<Response<MemberPromoteResponse>, Status>;
     }
 

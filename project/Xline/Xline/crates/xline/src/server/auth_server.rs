@@ -9,7 +9,6 @@ use xlineapi::{
     request_validation::RequestValidator,
     Auth as GeneratedAuth,
 };
-use tonic::{Request as TonicRequest, Response as TonicResponse, Status as TonicStatus};
 
 
 use crate::{
@@ -124,40 +123,40 @@ impl AuthServer {
 impl GeneratedAuth for AuthServer {
     async fn auth_enable(
         &self,
-        request: TonicRequest<AuthEnableRequest>,
-    ) -> Result<TonicResponse<AuthEnableResponse>, TonicStatus> {
+        request: Request<AuthEnableRequest>,
+    ) -> Result<XlineResponse<AuthEnableResponse>, Status> {
         debug!("Receive AuthEnableRequest {:?}", request);
-        self.handle_req_tonic(request).await
+        self.handle_req(request).await
     }
 
     async fn auth_disable(
         &self,
-        request: TonicRequest<AuthDisableRequest>,
-    ) -> Result<TonicResponse<AuthDisableResponse>, TonicStatus> {
+        request: Request<AuthDisableRequest>,
+    ) -> Result<XlineResponse<AuthDisableResponse>, Status> {
         debug!("Receive AuthDisableRequest {:?}", request);
-        self.handle_req_tonic(request).await
+        self.handle_req(request).await
     }
 
     async fn auth_status(
         &self,
-        request: TonicRequest<AuthStatusRequest>,
-    ) -> Result<TonicResponse<AuthStatusResponse>, TonicStatus> {
+        request: Request<AuthStatusRequest>,
+    ) -> Result<XlineResponse<AuthStatusResponse>, Status> {
         debug!("Receive AuthStatusRequest {:?}", request);
-        self.handle_req_tonic(request).await
+        self.handle_req(request).await
     }
 
     async fn authenticate(
         &self,
-        request: TonicRequest<AuthenticateRequest>,
-    ) -> Result<TonicResponse<AuthenticateResponse>, TonicStatus> {
+        request: Request<AuthenticateRequest>,
+    ) -> Result<XlineResponse<AuthenticateResponse>, Status> {
         debug!("Receive AuthenticateRequest {:?}", request);
-        self.handle_req_tonic(request).await
+        self.handle_req(request).await
     }
 
     async fn user_add(
         &self,
-        request: TonicRequest<AuthUserAddRequest>,
-    ) -> Result<TonicResponse<AuthUserAddResponse>, TonicStatus> {
+        request: Request<AuthUserAddRequest>,
+    ) -> Result<XlineResponse<AuthUserAddResponse>, Status> {
         let mut xreq = self.tonic_to_xline(request);
         let user_add_req = xreq.data_mut();
         debug!("Receive AuthUserAddRequest {}", user_add_req);
@@ -176,32 +175,32 @@ impl GeneratedAuth for AuthServer {
 
     async fn user_get(
         &self,
-        request: TonicRequest<AuthUserGetRequest>,
-    ) -> Result<TonicResponse<AuthUserGetResponse>, TonicStatus> {
+        request: Request<AuthUserGetRequest>,
+    ) -> Result<XlineResponse<AuthUserGetResponse>, Status> {
         debug!("Receive AuthUserGetRequest {:?}", request);
-        self.handle_req_tonic(request).await
+        self.handle_req(request).await
     }
 
     async fn user_list(
         &self,
-        request: TonicRequest<AuthUserListRequest>,
-    ) -> Result<TonicResponse<AuthUserListResponse>, TonicStatus> {
+        request: Request<AuthUserListRequest>,
+    ) -> Result<XlineResponse<AuthUserListResponse>, Status> {
         debug!("Receive AuthUserListRequest {:?}", request);
-        self.handle_req_tonic(request).await
+        self.handle_req(request).await
     }
 
     async fn user_delete(
         &self,
-        request: TonicRequest<AuthUserDeleteRequest>,
-    ) -> Result<TonicResponse<AuthUserDeleteResponse>, TonicStatus> {
+        request: Request<AuthUserDeleteRequest>,
+    ) -> Result<XlineResponse<AuthUserDeleteResponse>, Status> {
         debug!("Receive AuthUserDeleteRequest {:?}", request);
-        self.handle_req_tonic(request).await
+        self.handle_req(request).await
     }
 
     async fn user_change_password(
         &self,
-        request: TonicRequest<AuthUserChangePasswordRequest>,
-    ) -> Result<TonicResponse<AuthUserChangePasswordResponse>, TonicStatus> {
+        request: Request<AuthUserChangePasswordRequest>,
+    ) -> Result<XlineResponse<AuthUserChangePasswordResponse>, Status> {
         debug!("Receive AuthUserChangePasswordRequest {:?}", request);
         let mut xreq = self.tonic_to_xline(request);
         let user_change_password_req = xreq.data_mut();
@@ -219,24 +218,24 @@ impl GeneratedAuth for AuthServer {
 
     async fn user_grant_role(
         &self,
-        request: TonicRequest<AuthUserGrantRoleRequest>,
-    ) -> Result<TonicResponse<AuthUserGrantRoleResponse>, TonicStatus> {
+        request: Request<AuthUserGrantRoleRequest>,
+    ) -> Result<XlineResponse<AuthUserGrantRoleResponse>, Status> {
         debug!("Receive AuthUserGrantRoleRequest {:?}", request);
-        self.handle_req_tonic(request).await
+        self.handle_req(request).await
     }
 
     async fn user_revoke_role(
         &self,
-        request: TonicRequest<AuthUserRevokeRoleRequest>,
-    ) -> Result<TonicResponse<AuthUserRevokeRoleResponse>, TonicStatus> {
+        request: Request<AuthUserRevokeRoleRequest>,
+    ) -> Result<XlineResponse<AuthUserRevokeRoleResponse>, Status> {
         debug!("Receive AuthUserRevokeRoleRequest {:?}", request);
-        self.handle_req_tonic(request).await
+        self.handle_req(request).await
     }
 
     async fn role_add(
         &self,
-        request: TonicRequest<AuthRoleAddRequest>,
-    ) -> Result<TonicResponse<AuthRoleAddResponse>, TonicStatus> {
+        request: Request<AuthRoleAddRequest>,
+    ) -> Result<XlineResponse<AuthRoleAddResponse>, Status> {
         debug!("Receive AuthRoleAddRequest {:?}", request);
         let mut xreq = self.tonic_to_xline(request);
         xreq.data().validation()?;
@@ -250,32 +249,32 @@ impl GeneratedAuth for AuthServer {
 
     async fn role_get(
         &self,
-        request: TonicRequest<AuthRoleGetRequest>,
-    ) -> Result<TonicResponse<AuthRoleGetResponse>, TonicStatus> {
+        request: Request<AuthRoleGetRequest>,
+    ) -> Result<XlineResponse<AuthRoleGetResponse>, Status> {
         debug!("Receive AuthRoleGetRequest {:?}", request);
-        self.handle_req_tonic(request).await
+        self.handle_req(request).await
     }
 
     async fn role_list(
         &self,
-        request: TonicRequest<AuthRoleListRequest>,
-    ) -> Result<TonicResponse<AuthRoleListResponse>, TonicStatus> {
+        request: Request<AuthRoleListRequest>,
+    ) -> Result<XlineResponse<AuthRoleListResponse>, Status> {
         debug!("Receive AuthRoleListRequest {:?}", request);
-        self.handle_req_tonic(request).await
+        self.handle_req(request).await
     }
 
     async fn role_delete(
         &self,
-        request: TonicRequest<AuthRoleDeleteRequest>,
-    ) -> Result<TonicResponse<AuthRoleDeleteResponse>, TonicStatus> {
+        request: Request<AuthRoleDeleteRequest>,
+    ) -> Result<XlineResponse<AuthRoleDeleteResponse>, Status> {
         debug!("Receive AuthRoleDeleteRequest {:?}", request);
-        self.handle_req_tonic(request).await
+        self.handle_req(request).await
     }
 
     async fn role_grant_permission(
         &self,
-        request: TonicRequest<AuthRoleGrantPermissionRequest>,
-    ) -> Result<TonicResponse<AuthRoleGrantPermissionResponse>, TonicStatus> {
+        request: Request<AuthRoleGrantPermissionRequest>,
+    ) -> Result<XlineResponse<AuthRoleGrantPermissionResponse>, Status> {
         debug!(
             "Receive AuthRoleGrantPermissionRequest {}",
             request.get_ref()
@@ -292,12 +291,12 @@ impl GeneratedAuth for AuthServer {
 
     async fn role_revoke_permission(
         &self,
-        request: TonicRequest<AuthRoleRevokePermissionRequest>,
-    ) -> Result<TonicResponse<AuthRoleRevokePermissionResponse>, TonicStatus> {
+        request: Request<AuthRoleRevokePermissionRequest>,
+    ) -> Result<XlineResponse<AuthRoleRevokePermissionResponse>, Status> {
         debug!(
             "Receive AuthRoleRevokePermissionRequest {}",
             request.get_ref()
         );
-        self.handle_req_tonic(request).await
+        self.handle_req(request).await
     }
 }

@@ -35,7 +35,7 @@ enum ClusterResponse {
     Promote(MemberPromoteResponse),
 }
 
-// conversions so that `handle_req_tonic` can remain generic
+// conversions so that `handle_req` can remain generic
 impl From<MemberAddRequest> for ClusterRequest {
     fn from(r: MemberAddRequest) -> Self {
         ClusterRequest::Add(r)
@@ -108,7 +108,6 @@ impl From<ClusterResponse> for MemberPromoteResponse {
     }
 }
 
-use tonic::{Request as TonicRequest, Response as TonicResponse, Status as TonicStatus};
 
 use crate::header_gen::HeaderGenerator;
 
@@ -143,18 +142,6 @@ impl ClusterServer {
             .collect())
     }
 
-    /// convert tonic request into xlinerpc request copying metadata
-    #[allow(dead_code)]
-    fn tonic_to_xline<Req>(&self, request: TonicRequest<Req>) -> Request<Req> {
-        let (body, metadata) = request.into_parts();
-        let mut xreq = Request::from_data(body);
-        for (key, value) in metadata.iter() {
-            xreq
-                .meta_mut()
-                .insert(key.as_bytes().to_vec(), value.as_bytes().to_vec());
-        }
-        xreq
-    }
 
     /// generic handler for typed cluster requests; called by the gRPC
     /// methods so that all of them go through one place.
@@ -249,72 +236,47 @@ impl ClusterServer {
             }
         }
     }
-
-    /// helper bridging tonic -> xlinerpc and back again
-    async fn handle_req_tonic<Req, Res>(
-        &self,
-        request: TonicRequest<Req>,
-    ) -> Result<TonicResponse<Res>, TonicStatus>
-    where
-        Req: Into<ClusterRequest> + Send + 'static,
-        Res: From<ClusterResponse> + Send + 'static,
-    {
-        let (body, metadata) = request.into_parts();
-        let cluster_req: ClusterRequest = body.into();
-        let mut xreq = Request::from_data(cluster_req);
-        for (key, value) in metadata.iter() {
-            xreq
-                .meta_mut()
-                .insert(key.as_bytes().to_vec(), value.as_bytes().to_vec());
-        }
-        let xresp = self
-            .handle_req(xreq)
-            .await
-            .map_err(|e| TonicStatus::from(e))?;
-        let (res_data, _) = xresp.into_parts();
-        Ok(TonicResponse::new(res_data.into()))
-}
 }
 
 #[async_trait::async_trait]
 impl GeneratedCluster for ClusterServer {
     async fn member_add(
         &self,
-        request: TonicRequest<MemberAddRequest>,
-    ) -> Result<TonicResponse<MemberAddResponse>, TonicStatus> {
+        request: Request<MemberAddRequest>,
+    ) -> Result<XlineResponse<MemberAddResponse>, Status> {
         debug!("Receive MemberAddRequest {:?}", request.get_ref());
-        self.handle_req_tonic(request).await
+        self.handle_req(request).await
     }
 
     async fn member_remove(
         &self,
-        request: TonicRequest<MemberRemoveRequest>,
-    ) -> Result<TonicResponse<MemberRemoveResponse>, TonicStatus> {
+        request: Request<MemberRemoveRequest>,
+    ) -> Result<XlineResponse<MemberRemoveResponse>, Status> {
         debug!("Receive MemberRemoveRequest {:?}", request.get_ref());
-        self.handle_req_tonic(request).await
+        self.handle_req(request).await
     }
 
     async fn member_update(
         &self,
-        request: TonicRequest<MemberUpdateRequest>,
-    ) -> Result<TonicResponse<MemberUpdateResponse>, TonicStatus> {
+        request: Request<MemberUpdateRequest>,
+    ) -> Result<XlineResponse<MemberUpdateResponse>, Status> {
         debug!("Receive MemberUpdateRequest {:?}", request.get_ref());
-        self.handle_req_tonic(request).await
+        self.handle_req(request).await
     }
 
     async fn member_list(
         &self,
-        request: TonicRequest<MemberListRequest>,
-    ) -> Result<TonicResponse<MemberListResponse>, TonicStatus> {
+        request: Request<MemberListRequest>,
+    ) -> Result<XlineResponse<MemberListResponse>, Status> {
         debug!("Receive MemberListRequest {:?}", request.get_ref());
-        self.handle_req_tonic(request).await
+        self.handle_req(request).await
     }
 
     async fn member_promote(
         &self,
-        request: TonicRequest<MemberPromoteRequest>,
-    ) -> Result<TonicResponse<MemberPromoteResponse>, TonicStatus> {
+        request: Request<MemberPromoteRequest>,
+    ) -> Result<XlineResponse<MemberPromoteResponse>, Status> {
         debug!("Receive MemberPromoteRequest {:?}", request.get_ref());
-        self.handle_req_tonic(request).await
+        self.handle_req(request).await
     }
 }

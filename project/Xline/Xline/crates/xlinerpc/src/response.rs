@@ -6,12 +6,33 @@ use crate::envelope::Envelope;
 pub struct ResponseKind;
 
 /// Generic RPC response wrapper.
-///
-/// Carries a protobuf payload together with binary metadata (status, request
-/// IDs, …).  All shared logic lives in [`Envelope`]; this type alias exists
-/// solely to give callers a meaningful name and type-level distinction from
-/// [`crate::Request`].
 pub type Response<T> = Envelope<T, ResponseKind>;
+
+impl<T> Response<T> {
+    /// Get inner data (consuming the response)
+    pub fn into_inner(self) -> T {
+        self.into_data()
+    }
+}
+
+#[cfg(feature = "tonic-compat")]
+pub mod tonic_compat {
+    use super::*;
+
+    /// Convert tonic::Response to xlinerpc::Response
+    impl<T> From<tonic::Response<T>> for Response<T> {
+        fn from(resp: tonic::Response<T>) -> Self {
+            Response::from_data(resp.into_inner())
+        }
+    }
+
+    /// Convert xlinerpc::Response to tonic::Response
+    impl<T> From<Response<T>> for tonic::Response<T> {
+        fn from(resp: Response<T>) -> Self {
+            tonic::Response::new(resp.into_data())
+        }
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -39,6 +60,18 @@ mod tests {
         assert_eq!(resp.data().result, "success");
         assert_eq!(resp.data().code, 200);
         assert!(resp.meta().is_empty());
+    }
+
+    #[test]
+    fn test_response_into_inner() {
+        let msg = TestMessage {
+            result: "success".to_string(),
+            code: 200,
+        };
+        let resp = Response::from_data(msg);
+        let data = resp.into_inner();
+        assert_eq!(data.result, "success");
+        assert_eq!(data.code, 200);
     }
 
     #[test]
@@ -111,5 +144,25 @@ mod tests {
         assert_eq!(data.result, "test");
         assert_eq!(data.code, 42);
         assert_eq!(meta_out.get("status"), Some(b"OK".as_slice()));
+    }
+
+    #[cfg(feature = "tonic-compat")]
+    #[test]
+    fn test_response_tonic_conversion() {
+        let msg = TestMessage {
+            result: "success".to_string(),
+            code: 200,
+        };
+        let xline_resp = Response::from_data(msg.clone());
+
+        // xlinerpc::Response → tonic::Response
+        let tonic_resp: tonic::Response<TestMessage> = xline_resp.into();
+        assert_eq!(tonic_resp.get_ref().result, "success");
+        assert_eq!(tonic_resp.get_ref().code, 200);
+
+        // tonic::Response → xlinerpc::Response
+        let xline_resp2: Response<TestMessage> = tonic_resp.into();
+        assert_eq!(xline_resp2.data().result, "success");
+        assert_eq!(xline_resp2.data().code, 200);
     }
 }

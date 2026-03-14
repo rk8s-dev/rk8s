@@ -7,7 +7,7 @@ use curp::{cmd::CommandExecutor as _, members::ClusterInfo, server::RawCurp};
 use engine::SnapshotApi;
 use futures::stream::Stream;
 use sha2::{Digest, Sha256};
-use xlinerpc::Status;
+use xlinerpc::{Request, Response as XlineResponse, Status};
 use tracing::{debug, error};
 use xlineapi::{
     RequestWrapper,
@@ -110,10 +110,10 @@ impl MaintenanceService for MaintenanceServer {
 
     async fn alarm(
         &self,
-        request: tonic::Request<AlarmRequest>,
-    ) -> Result<tonic::Response<Self::AlarmStream>, tonic::Status> {
+        request: Request<AlarmRequest>,
+    ) -> Result<XlineResponse<Self::AlarmStream>, Status> {
         let (data, metadata) = request.into_parts();
-        let xline_request = xlinerpc::Request::from_parts(data, metadata);
+        let xline_request = Request::from_parts(data, metadata);
         let (res, sync_res) = self.propose(xline_request).await?;
         let (mut res_wrapper, _) = res.into_parts();
         let mut res: AlarmResponse = res_wrapper.into();
@@ -125,23 +125,23 @@ impl MaintenanceService for MaintenanceServer {
             }
         }
         let stream = futures::stream::once(async move { Ok(res) });
-        Ok(tonic::Response::new(Box::pin(stream)))
+        Ok(XlineResponse::new(Box::pin(stream)))
     }
 
     async fn status(
         &self,
-        _request: tonic::Request<StatusRequest>,
-    ) -> Result<tonic::Response<Self::StatusStream>, tonic::Status> {
+        _request: Request<StatusRequest>,
+    ) -> Result<XlineResponse<Self::StatusStream>, Status> {
         let is_learner = self.cluster_info.self_member().is_learner;
         let (leader, term, _) = self.raw_curp.leader();
         let commit_index = self.raw_curp.commit_index();
         let size = self.db.file_size().map_err(|e| {
             error!("get file size failed, {e}");
-            tonic::Status::internal("get file size failed")
+            Status::internal("get file size failed")
         })?;
         let last_applied = self.ce.last_applied().map_err(|e| {
             error!("get last applied failed, {e}");
-            tonic::Status::internal("get last applied failed")
+            Status::internal("get last applied failed")
         })?;
         let mut errors = vec![];
         if leader.is_none() {
@@ -163,36 +163,36 @@ impl MaintenanceService for MaintenanceServer {
             is_learner,
         };
         let stream = futures::stream::once(async move { Ok(response) });
-        Ok(tonic::Response::new(Box::pin(stream)))
+        Ok(XlineResponse::new(Box::pin(stream)))
     }
 
     async fn defragment(
         &self,
-        _request: tonic::Request<DefragmentRequest>,
-    ) -> Result<tonic::Response<DefragmentResponse>, tonic::Status> {
-        Err(tonic::Status::unimplemented(
+        _request: Request<DefragmentRequest>,
+    ) -> Result<XlineResponse<DefragmentResponse>, Status> {
+        Err(Status::unimplemented(
             "defragment is unimplemented".to_owned(),
         ))
     }
 
     async fn hash(
         &self,
-        _request: tonic::Request<HashRequest>,
-    ) -> Result<tonic::Response<HashResponse>, tonic::Status> {
-        Ok(tonic::Response::new(HashResponse {
+        _request: Request<HashRequest>,
+    ) -> Result<XlineResponse<HashResponse>, Status> {
+        Ok(XlineResponse::new(HashResponse {
             header: Some(self.header_gen.gen_header()),
-            hash: self.db.hash().map_err(|e| tonic::Status::internal(e.to_string()))?,
+            hash: self.db.hash().map_err(|e| Status::internal(e.to_string()))?,
         }))
     }
 
     async fn hash_kv(
         &self,
-        request: tonic::Request<HashKvRequest>,
-    ) -> Result<tonic::Response<HashKvResponse>, tonic::Status> {
+        request: Request<HashKvRequest>,
+    ) -> Result<XlineResponse<HashKvResponse>, Status> {
         let revision = request.get_ref().revision;
         let (hash, compact_revision, _hash_revision) = self.kv_store.hash_kv(revision)
-            .map_err(|e| tonic::Status::internal(e.to_string()))?;
-        Ok(tonic::Response::new(HashKvResponse {
+            .map_err(|e| Status::internal(e.to_string()))?;
+        Ok(XlineResponse::new(HashKvResponse {
             header: Some(self.header_gen.gen_header()),
             hash,
             compact_revision,
@@ -201,31 +201,31 @@ impl MaintenanceService for MaintenanceServer {
 
     async fn snapshot(
         &self,
-        _request: tonic::Request<SnapshotRequest>,
-    ) -> Result<tonic::Response<Self::SnapshotStream>, tonic::Status> {
+        _request: Request<SnapshotRequest>,
+    ) -> Result<XlineResponse<Self::SnapshotStream>, Status> {
         let stream = snapshot_stream(&self.header_gen, &self.db)?;
         // Need to convert xlinerpc Stream to tonic Streaming
-        Ok(tonic::Response::new(Box::pin(stream)))
+        Ok(XlineResponse::new(Box::pin(stream)))
     }
 
     async fn move_leader(
         &self,
-        request: tonic::Request<MoveLeaderRequest>,
-    ) -> Result<tonic::Response<MoveLeaderResponse>, tonic::Status> {
+        request: Request<MoveLeaderRequest>,
+    ) -> Result<XlineResponse<MoveLeaderResponse>, Status> {
         let (data, _metadata) = request.into_parts();
         let node_id = data.target_id;
         self.client.move_leader(node_id).await
-            .map_err(|e| tonic::Status::internal(e.to_string()))?;
-        Ok(tonic::Response::new(MoveLeaderResponse {
+            .map_err(|e| Status::internal(e.to_string()))?;
+        Ok(XlineResponse::new(MoveLeaderResponse {
             header: Some(self.header_gen.gen_header()),
         }))
     }
 
     async fn downgrade(
         &self,
-        _request: tonic::Request<DowngradeRequest>,
-    ) -> Result<tonic::Response<DowngradeResponse>, tonic::Status> {
-        Err(tonic::Status::unimplemented(
+        _request: Request<DowngradeRequest>,
+    ) -> Result<XlineResponse<DowngradeResponse>, Status> {
+        Err(Status::unimplemented(
             "downgrade is unimplemented".to_owned(),
         ))
     }

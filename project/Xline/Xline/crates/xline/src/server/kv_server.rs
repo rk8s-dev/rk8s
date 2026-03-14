@@ -14,7 +14,6 @@ use tracing::{debug, instrument};
 use xlineapi::Kv as GeneratedKv;
 use xlinerpc::{Request, Response as XlineResponse, Status};
 use xlineapi::{ResponseWrapper, ResponseHeader};
-use tonic::{Request as TonicRequest, Response as TonicResponse, Status as TonicStatus};
 
 use crate::{
     revision_check::RevisionCheck,
@@ -161,54 +160,10 @@ impl KvServer {
         Self::update_header_revision(&mut res, revision);
         Ok(res)
     }
-
-    /// convert tonic request into xlinerpc request copying metadata
-    fn tonic_to_xline<Req>(&self, request: TonicRequest<Req>) -> Request<Req> {
-        let (body, metadata) = request.into_parts();
-        let mut xreq = Request::from_data(body);
-        for (key, value) in metadata.iter() {
-            xreq
-                .meta_mut()
-                .insert(key.as_bytes().to_vec(), value.as_bytes().to_vec());
-        }
-        xreq
-    }
-
-    /// helper bridging tonic -> xlinerpc and back again
-    async fn handle_req_tonic<Req, Res>(
-        &self,
-        request: TonicRequest<Req>,
-    ) -> Result<TonicResponse<Res>, TonicStatus>
-    where
-        Req: Into<RequestWrapper> + Send + 'static,
-        Res: From<ResponseWrapper> + Send + 'static,
-    {
-        // convert tonic request to xlinerpc request and capture auth info
-        let xreq = self.tonic_to_xline(request);
-        let auth_info = self.auth_storage.try_get_auth_info_from_request(&xreq)?;
-
-        // propose through the new API which returns a plain `Response`
-        let proto_resp: Response = self.propose(xreq, auth_info).await?;
-
-        // translate proto message into wrapper enum so the generic `Res`
-        // conversion can still be used.
-        let res_wrapper = match proto_resp {
-            Response::ResponseRange(resp) => ResponseWrapper::RangeResponse(resp),
-            Response::ResponsePut(resp) => ResponseWrapper::PutResponse(resp),
-            Response::ResponseDeleteRange(resp) => ResponseWrapper::DeleteRangeResponse(resp),
-            Response::ResponseTxn(resp) => ResponseWrapper::TxnResponse(resp),
-            Response::ResponseCompaction(resp) => ResponseWrapper::CompactionResponse(resp),
-            _ => unreachable!("unexpected response kind {:?}", proto_resp),
-        };
-
-        let xresp = XlineResponse::new(res_wrapper.into());
-        let (res_data, _) = xresp.into_parts();
-        Ok(TonicResponse::new(res_data))
-    }
 }
 
 #[async_trait::async_trait]
-impl Kv for KvServer {
+impl GeneratedKv for KvServer {
     /// Range gets the keys in the range from the key-value store.
     #[instrument(skip_all)]
     async fn range(

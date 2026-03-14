@@ -6,27 +6,39 @@ use crate::envelope::Envelope;
 pub struct RequestKind;
 
 /// Generic RPC request wrapper.
-///
-/// Carries a protobuf payload together with binary metadata (auth tokens, trace
-/// IDs, …).  All shared logic lives in [`Envelope`]; this type alias exists
-/// solely to give callers a meaningful name and type-level distinction from
-/// [`crate::Response`].
 pub type Request<T> = Envelope<T, RequestKind>;
 
+impl<T> Request<T> {
+    /// Get mutable reference to data
+    pub fn data_mut(&mut self) -> &mut T {
+        self.data_mut()
+    }
+
+    /// Get inner data (consuming the request)
+    pub fn into_inner(self) -> T {
+        self.into_data()
+    }
+}
 
 #[cfg(feature = "tonic-compat")]
 pub mod tonic_compat {
     use super::*;
-    use crate::Response;
 
     /// Convert tonic::Request to xlinerpc::Request
     impl<T> From<tonic::Request<T>> for Request<T> {
         fn from(req: tonic::Request<T>) -> Self {
-            let (data, metadata, _extensions) = req.into_parts();
+            let (metadata, data, _extensions) = req.into_parts();
             let mut xline_metadata = crate::MetaData::new();
-            for (key, value) in metadata.iter() {
-                if let Ok(v) = value.to_bytes() {
-                    xline_metadata.insert(key.as_str(), String::from_utf8_lossy(&v).as_ref());
+            for key_and_value in metadata.iter() {
+                match key_and_value {
+                    tonic::metadata::KeyAndValueRef::Ascii(key, value) => {
+                        if let Ok(v) = value.to_str() {
+                            xline_metadata.insert(key.as_str().as_bytes(), v.as_bytes());
+                        }
+                    }
+                    tonic::metadata::KeyAndValueRef::Binary(key, value) => {
+                        xline_metadata.insert(key.as_str().as_bytes(), value.as_bytes());
+                    }
                 }
             }
             Request::new(data, xline_metadata)
@@ -40,32 +52,19 @@ pub mod tonic_compat {
             let mut tonic_metadata = tonic::metadata::MetadataMap::new();
             for (key, value) in metadata.iter() {
                 if let (Ok(key_str), Ok(val_str)) = (
-                    std::str::from_utf8(key.as_bytes()),
+                    std::str::from_utf8(key),
                     std::str::from_utf8(value),
                 ) {
-                    let _ = tonic_metadata.insert(
-                        tonic::metadata::MetadataKey::from_bytes(key.as_bytes()).unwrap(),
-                        val_str.parse().unwrap_or_default(),
-                    );
+                    if let Ok(meta_key) = tonic::metadata::MetadataKey::from_str(key_str) {
+                        if let Ok(meta_val) = val_str.parse::<tonic::metadata::MetadataValue<tonic::metadata::Ascii>>() {
+                            let _ = tonic_metadata.insert(meta_key, meta_val);
+                        }
+                    }
                 }
             }
             let mut tonic_req = tonic::Request::new(data);
             *tonic_req.metadata_mut() = tonic_metadata;
             tonic_req
-        }
-    }
-
-    /// Convert tonic::Response to xlinerpc::Response
-    impl<T> From<tonic::Response<T>> for Response<T> {
-        fn from(resp: tonic::Response<T>) -> Self {
-            Response::from_data(resp.into_inner())
-        }
-    }
-
-    /// Convert xlinerpc::Response to tonic::Response
-    impl<T> From<Response<T>> for tonic::Response<T> {
-        fn from(resp: Response<T>) -> Self {
-            tonic::Response::new(resp.into_data())
         }
     }
 }
@@ -96,6 +95,29 @@ mod tests {
         assert_eq!(req.data().name, "test");
         assert_eq!(req.data().value, 42);
         assert!(req.meta().is_empty());
+    }
+
+    #[test]
+    fn test_request_data_mut() {
+        let msg = TestMessage {
+            name: "test".to_string(),
+            value: 42,
+        };
+        let mut req = Request::from_data(msg);
+        req.data_mut().name = "modified".to_string();
+        assert_eq!(req.data().name, "modified");
+    }
+
+    #[test]
+    fn test_request_into_inner() {
+        let msg = TestMessage {
+            name: "test".to_string(),
+            value: 42,
+        };
+        let req = Request::from_data(msg);
+        let data = req.into_inner();
+        assert_eq!(data.name, "test");
+        assert_eq!(data.value, 42);
     }
 
     #[test]
@@ -168,5 +190,22 @@ mod tests {
         assert_eq!(data.name, "test");
         assert_eq!(data.value, 42);
         assert_eq!(meta_out.get("key"), Some(b"value".as_slice()));
+    }
+
+    #[cfg(feature = "tonic-compat")]
+    #[test]
+    fn test_request_tonic_conversion() {
+        let msg = TestMessage {
+            name: "test".to_string(),
+            value: 42,
+        };
+        let mut meta = MetaData::new();
+        meta.insert("authorization", "Bearer token123");
+        let xline_req = Request::new(msg, meta);
+
+        // xlinerpc::Request → tonic::Request
+        let tonic_req: tonic::Request<TestMessage> = xline_req.into();
+        assert_eq!(tonic_req.get_ref().name, "test");
+        assert!(tonic_req.metadata().contains_key("authorization"));
     }
 }

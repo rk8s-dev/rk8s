@@ -12,7 +12,7 @@ use dashmap::DashMap;
 use engine::{Snapshot, TransactionApi};
 use event_listener::Event;
 use parking_lot::RwLock;
-use tonic::Status;
+use xlinerpc::status::Status;
 use tracing::warn;
 use utils::{barrier::IdBarrier, table_names::META_TABLE};
 use xlineapi::{
