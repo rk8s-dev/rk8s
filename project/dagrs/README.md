@@ -104,7 +104,54 @@ Each stage is defined as a task with its dependencies and execution command. The
 
 For more detailed info about this example, please see the [notebook.ipynb](examples/dagrs-sklearn/examples/notebook.ipynb) jupyter notebook file.
 
+## Execution Entry Points
+
+Dagrs no longer creates or owns a Tokio runtime internally. Runtime lifecycle is managed by callers.
+
+### Preferred async entry
+
+Use `async_start().await` when already in an async runtime context:
+
+```rust
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let mut graph = build_graph_somehow();
+    graph.async_start().await?;
+    Ok(())
+}
+```
+
+### Temporary sync adapter (deprecated)
+
+For synchronous callers, use an externally managed runtime and call `start_with_runtime(&runtime)`:
+
+```rust
+let runtime = tokio::runtime::Builder::new_current_thread()
+    .enable_all()
+    .build()
+    .expect("failed to create tokio runtime");
+graph.start_with_runtime(&runtime)?;
+```
+
+`Graph::start()` has been removed.  
+`Graph::start_with_runtime()` is deprecated and planned for removal in the next major version.
+
 ## Changelog
+
+### Unreleased
+
+#### 🚀 Runtime/API Changes
+
+- **Runtime Decoupling**: Dagrs no longer creates or owns a Tokio runtime internally.
+- **Primary Entry**: `Graph::async_start()` is the recommended execution entry.
+- **Legacy Sync Adapter**: `Graph::start_with_runtime(&runtime)` remains temporarily for compatibility but is deprecated.
+- **Removed API**: `Graph::start()` has been removed.
+
+#### 💡 Migration
+
+- Existing `Graph::start()` callers should migrate to:
+  - `async_start().await` (preferred)
+  - `start_with_runtime(&runtime)` (temporary sync adapter)
 
 ### v0.6.0
 
