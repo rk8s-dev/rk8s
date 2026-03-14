@@ -1031,17 +1031,81 @@ pub mod kv_server {
 }
 
 pub mod watch_server {
+    use super::*;
+    use tonic::{Request, Response, Status};
+    use tonic::server::NamedService;
+    use tonic::codegen::{http, Body, BoxFuture};
+    use tower_service::Service;
+    use std::task::{Context, Poll};
+    use std::sync::Arc;
+    use futures::Stream;
+
     #[async_trait::async_trait]
     pub trait Watch: Send + Sync + 'static {
         type WatchStream: Stream<Item = Result<WatchResponse, Status>> + Send + 'static;
         async fn watch(&self, request: Request<tonic::Streaming<WatchRequest>>) 
             -> Result<Response<Self::WatchStream>, Status>;
     }
+
+    #[derive(Debug, Clone)]
+    pub struct WatchServer<S> {
+        inner: std::sync::Arc<S>,
+    }
+
+    impl<S> WatchServer<S>
+    where
+        S: Watch + Send + Sync + 'static,
+    {
+        pub fn new(service: S) -> Self {
+            Self {
+                inner: std::sync::Arc::new(service),
+            }
+        }
+    }
+
+    impl<S> NamedService for WatchServer<S>
+    where
+        S: Watch + Send + Sync + 'static,
+    {
+        const NAME: &'static str = "etcdserverpb.Watch";
+    }
+
+    impl<S> Service<http::Request<tonic::body::BoxBody>> for WatchServer<S>
+    where
+        S: Watch + Send + Sync + 'static,
+        S: 'static,
+    {
+        type Response = http::Response<tonic::body::BoxBody>;
+        type Error = http::Error;
+        type Future = BoxFuture<Self::Response, Self::Error>;
+
+        fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+            Poll::Ready(Ok(()))
+        }
+
+        fn call(&mut self, _req: http::Request<tonic::body::BoxBody>) -> Self::Future {
+            let fut = async {
+                Ok(http::Response::builder()
+                    .status(http::StatusCode::UNIMPLEMENTED)
+                    .header("grpc-status", "12")
+                    .header("grpc-message", "Streaming RPC: Use direct registration in xline_server.rs")
+                    .body(tonic::body::BoxBody::default())
+                    .unwrap())
+            };
+            Box::pin(fut)
+        }
+    }
 }
+
 
 pub mod lease_server {
     use super::*;
     use tonic::{Request, Response, Status};
+    use tonic::server::NamedService;
+    use tonic::codegen::{http, Body, BoxFuture};
+    use tower_service::Service;
+    use std::task::{Context, Poll};
+    use std::sync::Arc;
     use futures::Stream;
 
     #[async_trait::async_trait]
@@ -1052,6 +1116,90 @@ pub mod lease_server {
         async fn lease_keep_alive(&self, request: Request<tonic::Streaming<LeaseKeepAliveRequest>>) -> Result<Response<Self::LeaseKeepAliveStream>, Status>;
         async fn lease_time_to_live(&self, request: Request<LeaseTimeToLiveRequest>) -> Result<Response<LeaseTimeToLiveResponse>, Status>;
         async fn lease_leases(&self, request: Request<LeaseLeasesRequest>) -> Result<Response<LeaseLeasesResponse>, Status>;
+    }
+
+    #[derive(Debug, Clone)]
+    pub struct LeaseServer<S> {
+        inner: std::sync::Arc<S>,
+    }
+
+    impl<S> LeaseServer<S>
+    where
+        S: Lease + Send + Sync + 'static,
+    {
+        pub fn new(service: S) -> Self {
+            Self {
+                inner: std::sync::Arc::new(service),
+            }
+        }
+
+        pub fn from_arc(inner: Arc<S>) -> Self {
+            Self { inner }
+        }
+    }
+
+    impl<S> NamedService for LeaseServer<S>
+    where
+        S: Lease + Send + Sync + 'static,
+    {
+        const NAME: &'static str = "etcdserverpb.Lease";
+    }
+
+    impl<S> Service<http::Request<tonic::body::BoxBody>> for LeaseServer<S>
+    where
+        S: Lease + Send + Sync + 'static,
+        S: 'static,
+    {
+        type Response = http::Response<tonic::body::BoxBody>;
+        type Error = http::Error;
+        type Future = BoxFuture<Self::Response, Self::Error>;
+
+        fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+            Poll::Ready(Ok(()))
+        }
+
+        fn call(&mut self, req: http::Request<tonic::body::BoxBody>) -> Self::Future {
+            let inner = Arc::clone(&self.inner);
+            Box::pin(async move {
+                let path = req.uri().path().to_string();
+                match path.as_str() {
+                    "/etcdserverpb.Lease/LeaseGrant" => {
+                        let msg = decode_request::<LeaseGrantRequest>(req).await?;
+                        let resp = inner.lease_grant(msg).await.map_err(status_to_http_error)?;
+                        Ok(encode_response(resp))
+                    }
+                    "/etcdserverpb.Lease/LeaseRevoke" => {
+                        let msg = decode_request::<LeaseRevokeRequest>(req).await?;
+                        let resp = inner.lease_revoke(msg).await.map_err(status_to_http_error)?;
+                        Ok(encode_response(resp))
+                    }
+                    "/etcdserverpb.Lease/LeaseTimeToLive" => {
+                        let msg = decode_request::<LeaseTimeToLiveRequest>(req).await?;
+                        let resp = inner.lease_time_to_live(msg).await.map_err(status_to_http_error)?;
+                        Ok(encode_response(resp))
+                    }
+                    "/etcdserverpb.Lease/LeaseLeases" => {
+                        let msg = decode_request::<LeaseLeasesRequest>(req).await?;
+                        let resp = inner.lease_leases(msg).await.map_err(status_to_http_error)?;
+                        Ok(encode_response(resp))
+                    }
+                    "/etcdserverpb.Lease/LeaseKeepAlive" => {
+                        Ok(http::Response::builder()
+                            .status(http::StatusCode::UNIMPLEMENTED)
+                            .header("grpc-status", "12")
+                            .header("grpc-message", "Streaming RPC: Use direct registration in xline_server.rs")
+                            .body(tonic::body::BoxBody::default())
+                            .unwrap())
+                    }
+                    _ => {
+                        Ok(http::Response::builder()
+                            .status(http::StatusCode::NOT_FOUND)
+                            .body(tonic::body::BoxBody::default())
+                            .unwrap())
+                    }
+                }
+            })
+        }
     }
 }
 
@@ -1235,13 +1383,11 @@ pub mod maintenance_server {
 
     #[async_trait::async_trait]
     pub trait Maintenance: Send + Sync + 'static {
-        type AlarmStream: Stream<Item = Result<AlarmResponse, Status>> + Send + 'static;
-        type StatusStream: Stream<Item = Result<StatusResponse, Status>> + Send + 'static;
-        type SnapshotStream: Stream<Item = Result<SnapshotResponse, Status>> + Send + 'static;
-        async fn alarm(&self, request: Request<AlarmRequest>) -> Result<Response<Self::AlarmStream>, Status>;
-        async fn status(&self, request: Request<StatusRequest>) -> Result<Response<Self::StatusStream>, Status>;
+        async fn alarm(&self, request: Request<AlarmRequest>) -> Result<Response<AlarmResponse>, Status>;
+        async fn status(&self, request: Request<StatusRequest>) -> Result<Response<StatusResponse>, Status>;
         async fn hash(&self, request: Request<HashRequest>) -> Result<Response<HashResponse>, Status>;
         async fn hash_kv(&self, request: Request<HashKvRequest>) -> Result<Response<HashKvResponse>, Status>;
+        type SnapshotStream: Stream<Item = Result<SnapshotResponse, Status>> + Send + 'static;
         async fn snapshot(&self, request: Request<SnapshotRequest>) -> Result<Response<Self::SnapshotStream>, Status>;
         async fn move_leader(&self, request: Request<MoveLeaderRequest>) -> Result<Response<MoveLeaderResponse>, Status>;
         async fn defragment(&self, request: Request<DefragmentRequest>) -> Result<Response<DefragmentResponse>, Status>;
@@ -1293,15 +1439,72 @@ pub mod maintenance_server {
             Box::pin(async move {
                 let path = req.uri().path().to_string();
                 match path.as_str() {
+                    "/etcdserverpb.Maintenance/Alarm" => {
+                        let msg = decode_request::<AlarmRequest>(req).await?;
+                        let resp = inner.alarm(msg).await.map_err(status_to_http_error)?;
+                        Ok(encode_response(resp))
+                    }
+                    "/etcdserverpb.Maintenance/Status" => {
+                        let msg = decode_request::<StatusRequest>(req).await?;
+                        let resp = inner.status(msg).await.map_err(status_to_http_error)?;
+                        Ok(encode_response(resp))
+                    }
                     "/etcdserverpb.Maintenance/Hash" => {
                         let msg = decode_request::<HashRequest>(req).await?;
                         let resp = inner.hash(msg).await.map_err(status_to_http_error)?;
                         Ok(encode_response(resp))
                     }
+                    "/etcdserverpb.Maintenance/HashKv" => {
+                        let msg = decode_request::<HashKvRequest>(req).await?;
+                        let resp = inner.hash_kv(msg).await.map_err(status_to_http_error)?;
+                        Ok(encode_response(resp))
+                    }
+                    "/etcdserverpb.Maintenance/MoveLeader" => {
+                        let msg = decode_request::<MoveLeaderRequest>(req).await?;
+                        let resp = inner.move_leader(msg).await.map_err(status_to_http_error)?;
+                        Ok(encode_response(resp))
+                    }
+                    "/etcdserverpb.Maintenance/Defragment" => {
+                        let msg = decode_request::<DefragmentRequest>(req).await?;
+                        let resp = inner.defragment(msg).await.map_err(status_to_http_error)?;
+                        Ok(encode_response(resp))
+                    }
+                    "/etcdserverpb.Maintenance/MemberList" => {
+                        let msg = decode_request::<MemberListRequest>(req).await?;
+                        let resp = inner.member_list(msg).await.map_err(status_to_http_error)?;
+                        Ok(encode_response(resp))
+                    }
+                    "/etcdserverpb.Maintenance/MemberAdd" => {
+                        let msg = decode_request::<MemberAddRequest>(req).await?;
+                        let resp = inner.member_add(msg).await.map_err(status_to_http_error)?;
+                        Ok(encode_response(resp))
+                    }
+                    "/etcdserverpb.Maintenance/MemberRemove" => {
+                        let msg = decode_request::<MemberRemoveRequest>(req).await?;
+                        let resp = inner.member_remove(msg).await.map_err(status_to_http_error)?;
+                        Ok(encode_response(resp))
+                    }
+                    "/etcdserverpb.Maintenance/MemberUpdate" => {
+                        let msg = decode_request::<MemberUpdateRequest>(req).await?;
+                        let resp = inner.member_update(msg).await.map_err(status_to_http_error)?;
+                        Ok(encode_response(resp))
+                    }
+                    "/etcdserverpb.Maintenance/MemberPromote" => {
+                        let msg = decode_request::<MemberPromoteRequest>(req).await?;
+                        let resp = inner.member_promote(msg).await.map_err(status_to_http_error)?;
+                        Ok(encode_response(resp))
+                    }
+                    "/etcdserverpb.Maintenance/Snapshot" => {
+                        Ok(http::Response::builder()
+                            .status(http::StatusCode::UNIMPLEMENTED)
+                            .header("grpc-status", "12")
+                            .header("grpc-message", "Streaming RPC: Use direct registration in xline_server.rs")
+                            .body(tonic::body::BoxBody::default())
+                            .unwrap())
+                    }
                     _ => {
                         Ok(http::Response::builder()
                             .status(http::StatusCode::NOT_FOUND)
-                            .header("content-type", "application/grpc")
                             .body(tonic::body::BoxBody::default())
                             .unwrap())
                     }
@@ -2100,12 +2303,10 @@ pub mod maintenance_client {
             }
         }
 
-        /// Alarm gets or clears alarms.
         pub async fn alarm(
             &mut self,
             request: impl tonic::IntoRequest<AlarmRequest>,
-        ) -> Result<Response<impl Stream<Item = Result<AlarmResponse, Status>> + Send + 'static>, Status>
-        {
+        ) -> Result<Response<AlarmResponse>, Status> {
             self.inner
                 .ready()
                 .await
@@ -2115,18 +2316,13 @@ pub mod maintenance_client {
             let mut req = request.into_request();
             req.extensions_mut()
                 .insert(GrpcMethod::new("etcdserverpb.Maintenance", "Alarm"));
-            let resp = self.inner.server_streaming(req, path, codec).await?;
-            Ok(resp.map_inner(|stream| {
-                Box::pin(stream.map(|item| item.map_err(Into::into))) as Box<dyn Stream<Item = Result<AlarmResponse, Status>> + Send>
-            }))
+            self.inner.unary(req, path, codec).await
         }
 
-        /// Status gets the status of the member.
         pub async fn status(
             &mut self,
             request: impl tonic::IntoRequest<StatusRequest>,
-        ) -> Result<Response<impl Stream<Item = Result<StatusResponse, Status>> + Send + 'static>, Status>
-        {
+        ) -> Result<Response<StatusResponse>, Status> {
             self.inner
                 .ready()
                 .await
@@ -2136,10 +2332,7 @@ pub mod maintenance_client {
             let mut req = request.into_request();
             req.extensions_mut()
                 .insert(GrpcMethod::new("etcdserverpb.Maintenance", "Status"));
-            let resp = self.inner.server_streaming(req, path, codec).await?;
-            Ok(resp.map_inner(|stream| {
-                Box::pin(stream.map(|item| item.map_err(Into::into))) as Box<dyn Stream<Item = Result<StatusResponse, Status>> + Send>
-            }))
+            self.inner.unary(req, path, codec).await
         }
 
         /// Hash computes the hash of the KV's states.
@@ -2176,12 +2369,11 @@ pub mod maintenance_client {
             self.inner.unary(req, path, codec).await
         }
 
-        /// Snapshot sends a snapshot of the entire backend from a member over a stream to a client.
+        /// ✓ Snapshot 是流式 RPC（server streaming）
         pub async fn snapshot(
             &mut self,
             request: impl tonic::IntoRequest<SnapshotRequest>,
-        ) -> Result<Response<impl Stream<Item = Result<SnapshotResponse, Status>> + Send + 'static>, Status>
-        {
+        ) -> Result<Response<impl Stream<Item = Result<SnapshotResponse, Status>> + Send + 'static>, Status> {
             self.inner
                 .ready()
                 .await
@@ -2559,6 +2751,8 @@ fn encode_response<T: prost::Message>(resp: Response<T>) -> http::Response<tonic
     use http_body_util::Full;
     use bytes::{Bytes, BytesMut, BufMut};
 
+    const GRPC_FRAME_HEADER_LEN: usize = 5;
+
     let (metadata, msg, _extensions) = resp.into_parts();
     
     let mut message_buf = Vec::new();
@@ -2573,13 +2767,20 @@ fn encode_response<T: prost::Message>(resp: Response<T>) -> http::Response<tonic
     
     frame.extend_from_slice(&message_buf);
 
+    let metadata_headers = metadata.into_headers();
+    
     let mut http_resp = http::Response::builder()
         .status(http::StatusCode::OK)
         .header("content-type", "application/grpc")
         .body(tonic::body::BoxBody::new(Full::new(frame.freeze())))
         .unwrap();
 
-    *http_resp.headers_mut() = metadata.into_headers();
+    for (key, value) in metadata_headers {
+        if let Some(key) = key {
+            http_resp.headers_mut().insert(key, value);
+        }
+    }
+    
     http_resp
 }
 
@@ -2592,6 +2793,7 @@ fn status_to_http_error(status: Status) -> http::Error {
 }
 
 /// Helper function: Encode gRPC status trailers
+/// 
 pub fn encode_grpc_trailers(status: &Status) -> http::HeaderMap {
     use http::header::{HeaderMap, HeaderName};
     
