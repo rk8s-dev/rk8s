@@ -391,7 +391,7 @@ where
 // ============================================================================
 
 /// Parse gRPC request
-async fn parse_request<T>(req: HttpRequest<BoxBody>) -> Result<TonicRequest<T>, Status>
+async fn parse_request<T>(req: HttpRequest<BoxBody>) -> Result<Request<T>, Status>
 where
     T: prost::Message + Default,
 {
@@ -401,16 +401,13 @@ where
         .map_err(|e| Status::internal(e.to_string()))?;
     let message = T::decode(bytes.as_ref())
         .map_err(|e| Status::internal(e.to_string()))?;
-    let mut metadata = MetaData::new();
+    let mut metadata = xlinerpc::MetaData::new();
     for (key, value) in parts.headers.iter() {
         if let Ok(value_str) = value.to_str() {
             metadata.insert(key.as_str().as_bytes(), value_str.as_bytes());
         }
     }
-    Ok(Request::new(
-        message,
-        metadata,
-    ))
+    Ok(Request::new(message, metadata))
 }
 
 /// Build gRPC response

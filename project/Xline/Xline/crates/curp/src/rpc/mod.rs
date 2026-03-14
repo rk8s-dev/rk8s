@@ -52,66 +52,6 @@ use futures::Stream;
 use prost::Message;
 use serde::{Deserialize, Serialize};
 use xlinerpc::status::{Code, Status};
-pub(crate) use self::proto::{
-    commandpb::CurpError as CurpErrorWrapper,
-    inner_messagepb::{
-        AppendEntriesRequest, AppendEntriesResponse, InstallSnapshotRequest,
-        InstallSnapshotResponse, TriggerShutdownRequest, TriggerShutdownResponse,
-        TryBecomeLeaderNowRequest, TryBecomeLeaderNowResponse, VoteRequest, VoteResponse,
-        inner_protocol_server::InnerProtocol,
-    },
-};
-pub use self::proto::{
-    commandpb::{
-        CmdResult,
-        FetchClusterRequest,
-        FetchClusterResponse,
-        FetchReadStateRequest,
-        FetchReadStateResponse,
-        LeaseKeepAliveMsg,
-        Member,
-        MoveLeaderRequest,
-        MoveLeaderResponse,
-        OpResponse,
-        OptionalU64,
-        ProposeConfChangeRequest,
-        ProposeConfChangeResponse,
-        ProposeId as PbProposeId,
-        ProposeRequest,
-        ProposeResponse,
-        PublishRequest,
-        PublishResponse,
-        ReadIndexRequest,
-        ReadIndexResponse,
-        RecordRequest,
-        RecordResponse,
-        ShutdownRequest,
-        ShutdownResponse,
-        SyncedResponse,
-        WaitSyncedRequest,
-        WaitSyncedResponse,
-        cmd_result::Result as CmdResultInner,
-        curp_error::Err as CurpError, // easy for match
-        curp_error::Redirect,
-        fetch_read_state_response::{IdSet, ReadState},
-        op_response::Op as ResponseOp,
-        propose_conf_change_request::{ConfChange, ConfChangeType},
-        protocol_client,
-        protocol_server::{Protocol, ProtocolServer},
-    },
-    inner_messagepb::inner_protocol_server::InnerProtocolServer,
-};
-use crate::{LogIndex, cmd::Command, log_entry::LogEntry, members::ServerId};
-use async_trait::async_trait;
-use curp_external_api::{
-    InflightId,
-    cmd::{ConflictCheck, PbCodec, PbSerializeError},
-    conflict::EntryId,
-};
-use futures::Stream;
-use prost::Message;
-use serde::{Deserialize, Serialize};
-use xlinerpc::status::{Code, Status};
 
 /// Metrics
 #[cfg(feature = "client-metrics")]
