@@ -41,6 +41,7 @@ pub use commandpb::{
     FetchClusterRequest, FetchClusterResponse, ProposeRequest, ProposeResponse,
     protocol_client::ProtocolClient,
 };
+use xlinerpc::status::Status;
 
 /// `BOTTOM_TASKS` are tasks which not dependent on other tasks in the task group.
 const BOTTOM_TASKS: [TaskName; 2] = [TaskName::WatchTask, TaskName::ConfChange];

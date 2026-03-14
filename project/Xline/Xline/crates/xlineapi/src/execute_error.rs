@@ -1,6 +1,7 @@
 #![allow(clippy::arithmetic_side_effects)] // introduced by `strum_macros::EnumIter`
 
 use crate::{PbExecuteError, PbExecuteErrorOuter, PbRevisions, PbUserRole};
+use crate::{PbExecuteError, PbExecuteErrorOuter, PbRevisions, PbUserRole};
 use curp::cmd::{PbCodec, PbSerializeError};
 use prost::Message;
 use serde::{Deserialize, Serialize};
@@ -215,6 +216,7 @@ impl PbCodec for ExecuteError {
 }
 
 // The etcd client relies on GRPC error messages for error type interpretation.
+impl From<ExecuteError> for xlinerpc::Status {
 impl From<ExecuteError> for xlinerpc::Status {
     #[inline]
     fn from(err: ExecuteError) -> Self {
