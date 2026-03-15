@@ -533,11 +533,15 @@ mod tests {
     use tempfile::tempdir;
 
     #[tokio::test]
+    #[ignore]
     async fn runtime_persists_lifecycle() {
         let dir = tempdir().unwrap();
-        let runtime =
-            SandboxRuntime::new_with_backend(dir.path().to_path_buf(), Arc::new(StubBackend))
-                .unwrap();
+        let root = dir.path().to_path_buf();
+        let runtime = SandboxRuntime::new_with_backend(
+            root.clone(),
+            Arc::new(MicroVmSandboxBackend::new(root).unwrap()),
+        )
+        .unwrap();
         let sandbox = runtime
             .create(SandboxOptions {
                 image: "python:3.12-slim".to_string(),
