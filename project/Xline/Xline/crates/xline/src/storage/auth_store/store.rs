@@ -1203,7 +1203,7 @@ fn get_cn<T>(request: &xlinerpc::Request<T>) -> Option<String> {
     // client certificate's common name.  This avoids pulling `tonic` into the
     // storage layer and keeps `xlinerpc` lean.
     if let Some(bytes) = request.meta().get(b"x-tls-cn") {
-        if let Ok(s) = String::from_utf8(bytes.clone()) {
+        if let Ok(s) = String::from_utf8(bytes.to_vec()) {
             return Some(s);
         }
     }

@@ -44,7 +44,7 @@ pub(crate) fn get_token(metadata: &xlinerpc::MetaData) -> Option<String> {
     metadata
         .get(token_key)
         .or_else(|| metadata.get(auth_key))
-        .and_then(|v| String::from_utf8(v.clone()).ok())
+        .and_then(|v| String::from_utf8(v.to_vec()).ok())
 }
 
 impl AuthServer {
