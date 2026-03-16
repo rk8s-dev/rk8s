@@ -14,6 +14,7 @@ use xlineapi::command::KeyRange;
 // TODO: use our own status type
 // use xlinerpc::status::Status;
 use crate::{
+    router::endpoint::EndPoint as RouterEndpoint,
     header_gen::HeaderGenerator,
     rpc::{
         RequestUnion, ResponseHeader, Watch, WatchCancelRequest, WatchCreateRequest,
@@ -408,6 +409,33 @@ impl Watch for WatchServer {
             )
         });
         Ok(tonic::Response::new(ReceiverStream::new(rx)))
+    }
+}
+
+pub(crate) struct Server {
+    watch_server: Arc<WatchServer>,
+}
+impl Server {
+    #[allow(unused)]
+    pub(crate) fn new(server: WatchServer) -> Self {
+        Self {
+            watch_server: Arc::new(server),
+        }
+    }
+    #[allow(unused)]
+    pub(crate) fn from_arc(server: Arc<WatchServer>) -> Self {
+        Self {
+            watch_server: server,
+        }
+    }
+    pub(crate) fn endpoint(self) -> RouterEndpoint<Arc<WatchServer>> {
+        RouterEndpoint::new(self.watch_server)
+            .add_streaming_fn(
+                "/Watch",
+                move |this: Arc<WatchServer>, request: tonic::Request<tonic::Streaming<WatchRequest>>| async move {
+                    this.watch(request).await
+                },
+            )
     }
 }
 

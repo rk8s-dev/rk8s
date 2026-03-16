@@ -21,6 +21,7 @@ use xlineapi::{
 // use xlinerpc::status::{Code,Status};
 
 use crate::{
+    router::endpoint::EndPoint as RouterEndpoint,
     revision_check::RevisionCheck,
     rpc::{
         CompactionRequest, CompactionResponse, DeleteRangeRequest, DeleteRangeResponse, Kv,
@@ -414,5 +415,56 @@ mod test {
         let expected_tonic_status =
             Status::from(compact_request.check_revision(13, 18).unwrap_err());
         assert_eq!(expected_tonic_status.code(), Code::OutOfRange);
+    }
+}
+
+pub(crate) struct Server {
+    kvserver: Arc<KvServer>,
+}
+impl Server {
+    #[allow(unused)]
+    pub(crate) fn new(lock_server: KvServer) -> Self {
+        Self {
+            kvserver: Arc::new(lock_server),
+        }
+    }
+    #[allow(unused)]
+    pub(crate) fn from_arc(lock_server: Arc<KvServer>) -> Self {
+        Self {
+            kvserver: lock_server,
+        }
+    }
+    pub(crate) fn endpoint(self) -> RouterEndpoint<Arc<KvServer>> {
+        RouterEndpoint::new(self.kvserver)
+            .add_unary_fn(
+                "/Range",
+                move |this: Arc<KvServer>, request: tonic::Request<RangeRequest>| async move {
+                    this.range(request).await
+                },
+            )
+            .add_unary_fn(
+                "/Put",
+                move |this: Arc<KvServer>, request: tonic::Request<PutRequest>| async move {
+                    this.put(request).await
+                },
+            )
+            .add_unary_fn(
+                "/DeleteRange",
+                move |this: Arc<KvServer>, request: tonic::Request<DeleteRangeRequest>| async move {
+                    this.delete_range(request).await
+                },
+            )
+            .add_unary_fn(
+                "/Txn",
+                move |this: Arc<KvServer>, request: tonic::Request<TxnRequest>| async move {
+                    this.txn(request).await
+                },
+            )
+            .add_unary_fn(
+                "/Compact",
+                move |this: Arc<KvServer>, request: tonic::Request<CompactionRequest>| async move {
+                    this.compact(request).await
+                },
+            )
     }
 }

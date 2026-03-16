@@ -19,6 +19,7 @@ use xlineapi::{
 // TODO: use our own status type
 // use xlinerpc::status::Status;
 use crate::{
+    router::endpoint::EndPoint as RouterEndpoint,
     id_gen::IdGenerator,
     metrics,
     rpc::{
@@ -392,5 +393,55 @@ impl Lease for LeaseServer {
             }
         }
         Ok(tonic::Response::new(res))
+    }
+}
+
+pub(crate) struct Server {
+    lease_server: Arc<LeaseServer>,
+}
+impl Server {
+    #[allow(unused)]
+    pub(crate) fn new(lock_server: LeaseServer) -> Self {
+        Self {
+            lease_server: Arc::new(lock_server),
+        }
+    }
+    pub(crate) fn from_arc(lock_server: Arc<LeaseServer>) -> Self {
+        Self {
+            lease_server: lock_server,
+        }
+    }
+    pub(crate) fn endpoint(self) -> RouterEndpoint<Arc<LeaseServer>> {
+        RouterEndpoint::new(self.lease_server)
+            .add_unary_fn(
+                "/LeaseGrant",
+                move |this: Arc<LeaseServer>, request: tonic::Request<LeaseGrantRequest>| async move {
+                    this.lease_grant(request).await
+                },
+            )
+            .add_unary_fn(
+                "/LeaseRevoke",
+                move |this: Arc<LeaseServer>, request: tonic::Request<LeaseRevokeRequest>| async move {
+                    this.lease_revoke(request).await
+                },
+            )
+            .add_streaming_fn(
+                "/LeaseKeepAlive",
+                move |this: Arc<LeaseServer>, request: tonic::Request<tonic::Streaming<LeaseKeepAliveRequest>>| async move {
+                    this.lease_keep_alive(request).await
+                },
+            )
+            .add_unary_fn(
+                "/LeaseTimeToLive",
+                move |this: Arc<LeaseServer>, request: tonic::Request<LeaseTimeToLiveRequest>| async move {
+                    this.lease_time_to_live(request).await
+                },
+            )
+            .add_unary_fn(
+                "/LeaseLeases",
+                move |this: Arc<LeaseServer>, request: tonic::Request<LeaseLeasesRequest>| async move {
+                    this.lease_leases(request).await
+                },
+            )
     }
 }

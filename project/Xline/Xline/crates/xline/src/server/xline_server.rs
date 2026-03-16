@@ -15,13 +15,17 @@ use engine::{MemorySnapshotAllocator, RocksSnapshotAllocator, SnapshotAllocator}
 use futures::Stream;
 use jsonwebtoken::{DecodingKey, EncodingKey};
 use tokio::io::{AsyncRead, AsyncWrite};
-use tonic::transport::server::{Connected, Router};
-use tonic::transport::{Certificate, ClientTlsConfig, Identity, Server, ServerTlsConfig};
+use tonic::{
+    Status,
+    // TODO: use our own status type
+    // use xlinerpc::status::Status;
+    transport::{
+        server::Connected,
+        Certificate, ClientTlsConfig, Identity, ServerTlsConfig
+    },
+};
 use tracing::{info, warn};
 
-use tonic::Status;
-// TODO: use our own status type
-// use xlinerpc::status::Status;
 
 use utils::{
     barrier::IdBarrier,
@@ -34,21 +38,41 @@ use utils::{
 use xlineapi::command::{Command, CurpClient};
 
 use super::{
-    auth_server::AuthServer,
-    auth_wrapper::AuthWrapper,
-    cluster_server::ClusterServer,
+    auth_server::{
+        AuthServer,
+        Server as AuthEndpointServer,
+    },
+    auth_wrapper::{
+        Server as AuthWrapperEndpointServer,
+        AuthWrapper,
+    },
+    cluster_server::{
+        ClusterServer,
+        Server as ClusterEndpointServer,
+    },
     command::{Alarmer, CommandExecutor},
-    kv_server::KvServer,
-    lease_server::LeaseServer,
-    lock_server::LockServer,
-    maintenance::MaintenanceServer,
-    watch_server::{CHANNEL_SIZE, WatchServer},
+    kv_server::{
+        KvServer,
+        Server as KvEndpointServer,
+    },
+    lease_server::{
+        LeaseServer,
+        Server as LeaseEndpointServer,
+    },
+    lock_server::{LockServer, Server as LockEndPointServer},
+    maintenance::{
+        MaintenanceServer,
+        Server as MaintenanceEndpointServer,
+    },
+    watch_server::{CHANNEL_SIZE, WatchServer, Server as WatchEndpointServer},
+    curp_server::Server as ProtocolEndpointServer,
 };
 use crate::{
     conflict::{XlineSpeculativePools, XlineUncommittedPools},
     header_gen::HeaderGenerator,
     id_gen::IdGenerator,
     metrics::Metrics,
+    router::Server,
     rpc::{
         AuthServer as RpcAuthServer, ClusterServer as RpcClusterServer, KvServer as RpcKvServer,
         LeaseServer as RpcLeaseServer, LockServer as RpcLockServer,
@@ -90,6 +114,8 @@ pub struct XlineServer {
     task_manager: Arc<TaskManager>,
     /// Curp storage
     curp_storage: Arc<CurpDB<Command>>,
+    /// TLS Config
+    tls_config: TlsConfig,
 }
 
 impl XlineServer {
@@ -126,6 +152,7 @@ impl XlineServer {
             server_tls_config,
             task_manager: Arc::new(TaskManager::new()),
             curp_storage,
+            tls_config,
         })
     }
 
@@ -275,18 +302,17 @@ impl XlineServer {
             Arc::new(IdGenerator::new(member_id)),
         )
     }
-
     /// Init xline and curp router
     ///
     /// # Errors
     ///
     /// Will return `Err` when `init_servers` return an error
     #[inline]
-    pub async fn init_router(
+    pub async fn init_routers(
         &self,
         db: Arc<DB>,
         key_pair: Option<(EncodingKey, DecodingKey)>,
-    ) -> Result<(Router, Router, Arc<CurpClient>)> {
+    ) -> Result<(Server, Server, Arc<CurpClient>)> {
         let (
             kv_server,
             lock_server,
@@ -299,7 +325,63 @@ impl XlineServer {
             auth_wrapper,
             curp_client,
         ) = self.init_servers(db, key_pair).await?;
-        let mut builder = Server::builder();
+        let mut builder = Server::new();
+
+        builder = builder.tls_config(&self.tls_config);
+
+        let xline_router = builder
+            .clone()
+        .add_subrouter( "/v3lockpb.Lock", LockEndPointServer::new(lock_server).endpoint().into(),)
+        .add_subrouter( "/etcdserverpb.Auth", AuthEndpointServer::new(auth_server).endpoint().into())
+        .add_subrouter( "/etcdserverpb.Lease", LeaseEndpointServer::from_arc(lease_server).endpoint().into())
+        .add_subrouter( "/etcdserverpb.KV", KvEndpointServer::new(kv_server).endpoint().into())
+        .add_subrouter( "/etcdserverpb.Watch", WatchEndpointServer::new(watch_server).endpoint().into())
+        .add_subrouter( "/etcdserverpb.Maintenance", MaintenanceEndpointServer::new(maintenance_server).endpoint().into())
+        .add_subrouter( "/etcdserverpb.Cluster", ClusterEndpointServer::new(cluster_server).endpoint().into())
+        .add_subrouter( "/commandpb.Protocol", AuthWrapperEndpointServer::new(auth_wrapper).endpoint().into());
+        let curp_router = builder
+            .add_subrouter("/commandpb.Protocol", ProtocolEndpointServer::new(curp_server.clone()).endpoint().into())
+            .add_subrouter("innerprotocol", ProtocolEndpointServer::new(curp_server).endpoint().into());
+
+        let xline_router = {
+            let (mut reporter, health_server) = tonic_health::server::health_reporter();
+            reporter
+                .set_service_status("", tonic_health::ServingStatus::Serving)
+                .await;
+            xline_router.add_service("", health_server)
+        };
+
+        Ok((xline_router, curp_router, curp_client))
+    }
+
+    /// Init xline and curp router
+    ///
+    /// # Errors
+    ///
+    /// Will return `Err` when `init_servers` return an error
+    #[inline]
+    pub async fn init_router(
+        &self,
+        db: Arc<DB>,
+        key_pair: Option<(EncodingKey, DecodingKey)>,
+    ) -> Result<(
+        tonic::transport::server::Router,
+        tonic::transport::server::Router,
+        Arc<CurpClient>,
+    )> {
+        let (
+            kv_server,
+            lock_server,
+            lease_server,
+            auth_server,
+            watch_server,
+            maintenance_server,
+            cluster_server,
+            curp_server,
+            auth_wrapper,
+            curp_client,
+        ) = self.init_servers(db, key_pair).await?;
+        let mut builder = tonic::transport::Server::builder();
 
         if let Some(ref cfg) = self.server_tls_config {
             builder = builder.tls_config(cfg.clone())?;
@@ -390,6 +472,34 @@ impl XlineServer {
         let xline_incoming = tokio_stream::wrappers::TcpListenerStream::new(xline_listener);
         let curp_incoming = tokio_stream::wrappers::TcpListenerStream::new(curp_listener);
         self.start_inner(xline_incoming, curp_incoming).await
+    }
+
+    /// Start `XlineServer` using gm-quic as transport protocol
+    ///
+    /// # Errors
+    ///
+    /// Will return `Err` when `tonic::Server` serve return an error
+    #[inline]
+    pub async fn start_with_quic(&self) -> Result<()> {
+        // parse peer_listen_urls to listen
+        let client_listen_urls = self.cluster_config.client_listen_urls().clone();
+        let peer_listen_urls = self.cluster_config.peer_listen_urls().clone();
+        info!("start xline server on {:?}", client_listen_urls);
+        info!("start curp server on {:?}", peer_listen_urls);
+        let db = DB::open(&self.storage_config.engine)?;
+        let key_pair = Self::read_key_pair(&self.auth_config).await?;
+        let (xline_router, curp_router, curp_client) = self.init_routers(db, key_pair).await?;
+        self.task_manager
+            .spawn(TaskName::TonicServer, |_| async move {
+                tokio::select! {
+                    _ = xline_router.serve(client_listen_urls) => {},
+                    _ = curp_router.serve(peer_listen_urls) => {},
+                }
+            });
+        if let Err(e) = self.publish(curp_client).await {
+            warn!("publish name to cluster failed: {e:?}");
+        }
+        Ok(())
     }
 
     /// Init `KvServer`, `LockServer`, `LeaseServer`, `WatchServer` and
