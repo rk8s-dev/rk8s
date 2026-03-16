@@ -21,6 +21,7 @@ mod registry;
 mod repo;
 mod rt;
 mod run;
+mod sandbox;
 mod storage;
 mod task;
 mod utils;
@@ -90,6 +91,8 @@ fn main() -> Result<()> {
         Commands::Rmi(args) => images::remove_image(args),
         Commands::Run(args) => container::run_container(&args.container_yaml, args.volumes),
         Commands::Save(args) => images::save_image(args),
+        Commands::Sandbox(cmd) => sandbox::cli::execute(cmd),
+        Commands::SandboxShim(args) => sandbox::vm::run_shim_command(args),
         Commands::Start(args) => container::start_container(&args.container_name),
         Commands::State(args) => container::state_container(&args.container_name),
         Commands::Tag(args) => images::tag_image(args),
