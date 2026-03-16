@@ -138,7 +138,7 @@ graph.start_with_runtime(&runtime)?;
 
 ## Changelog
 
-### Unreleased
+### v0.7.0
 
 #### 🚀 Runtime/API Changes
 
