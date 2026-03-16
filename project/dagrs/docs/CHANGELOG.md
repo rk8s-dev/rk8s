@@ -16,7 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Runtime Decoupling**: The library no longer creates or owns a Tokio runtime. `Graph::async_start()` is now the primary execution entry point. Runtime lifecycle is entirely managed by the caller.
 - All examples migrated to `#[tokio::main]` + `async_start().await` or explicit `Runtime::new()` + `start_with_runtime` patterns.
 - Graph construction paths (`add_node` / `add_edge`) now avoid `blocking_lock`, fixing async-context panics during graph building.
-- `GraphError::RuntimeNotProvided` removed with `Graph::start()` removal.
+- `GraphError::RuntimeCreationFailed` removed with `Graph::start()` removal.
 
 ### Deprecated
 - `Graph::start_with_runtime()` is now deprecated as a legacy sync adapter and is planned for removal in the next major version. Prefer `async_start().await`.
