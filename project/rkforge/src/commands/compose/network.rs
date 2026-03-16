@@ -27,7 +27,7 @@ use ipnetwork::Ipv4Network;
 use crate::commands::compose::spec::ComposeSpec;
 use crate::commands::compose::spec::ServiceSpec;
 use crate::commands::container::ContainerRunner;
-use crate::commands::container::netwok::{bind_mount_netns, unbind_mount_netns};
+use crate::commands::container::network::{bind_mount_netns, unbind_mount_netns};
 use anyhow::Result;
 use anyhow::anyhow;
 use tracing::{debug, warn};
