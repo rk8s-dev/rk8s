@@ -3,12 +3,19 @@
 use crate::csi::controller::RksCsiController;
 use crate::node::NodeRegistry;
 use common::RksMessage;
+use dashmap::DashMap;
 use libcsi::{
-    CsiController, CsiError, CsiMessage, CreateVolumeRequest, NodePublishVolumeRequest,
+    CreateVolumeRequest, CsiController, CsiError, CsiMessage, NodePublishVolumeRequest,
     NodeStageVolumeRequest, Volume, VolumeCapability, VolumeId,
 };
 use log::info;
 use std::sync::Arc;
+use std::time::Duration;
+use tokio::sync::oneshot;
+use uuid::Uuid;
+
+/// Default timeout for waiting on a CSI response from a worker node.
+const CSI_REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Orchestrates volume lifecycle in coordination with RKL nodes.
 ///
@@ -18,13 +25,19 @@ use std::sync::Arc;
 pub struct VolumeOrchestrator {
     controller: Arc<RksCsiController>,
     node_registry: Arc<NodeRegistry>,
+    pending: Arc<DashMap<Uuid, oneshot::Sender<CsiMessage>>>,
 }
 
 impl VolumeOrchestrator {
-    pub fn new(controller: Arc<RksCsiController>, node_registry: Arc<NodeRegistry>) -> Self {
+    pub fn new(
+        controller: Arc<RksCsiController>,
+        node_registry: Arc<NodeRegistry>,
+        pending: Arc<DashMap<Uuid, oneshot::Sender<CsiMessage>>>,
+    ) -> Self {
         Self {
             controller,
             node_registry,
+            pending,
         }
     }
 
@@ -43,14 +56,14 @@ impl VolumeOrchestrator {
 
         let staging_target_path = format!("/var/lib/rkl/volumes/{}/globalmount", vol_id);
 
-        // 2. Send StageVolume to target node
+        // 2. Send StageVolume to target node and wait for response
         let stage_req = NodeStageVolumeRequest {
             volume_id: vol_id.clone(),
             staging_target_path: staging_target_path.clone(),
             volume_capability: VolumeCapability::default(),
             volume_context: volume.volume_context.clone(),
         };
-        self.send_csi_request(node_id, CsiMessage::StageVolume(stage_req))
+        self.send_csi_request_and_wait(node_id, CsiMessage::StageVolume(stage_req))
             .await?;
 
         info!(
@@ -59,7 +72,7 @@ impl VolumeOrchestrator {
             vol_id, node_id
         );
 
-        // 3. Send PublishVolume to target node
+        // 3. Send PublishVolume to target node and wait for response
         let publish_req = NodePublishVolumeRequest {
             volume_id: vol_id.clone(),
             staging_target_path,
@@ -67,7 +80,7 @@ impl VolumeOrchestrator {
             volume_capability: VolumeCapability::default(),
             read_only: false,
         };
-        self.send_csi_request(node_id, CsiMessage::PublishVolume(publish_req))
+        self.send_csi_request_and_wait(node_id, CsiMessage::PublishVolume(publish_req))
             .await?;
 
         info!(
@@ -91,7 +104,7 @@ impl VolumeOrchestrator {
         let staging_target_path = format!("/var/lib/rkl/volumes/{}/globalmount", volume_id);
 
         // 1. Unpublish
-        self.send_csi_request(
+        self.send_csi_request_and_wait(
             node_id,
             CsiMessage::UnpublishVolume {
                 volume_id: volume_id.clone(),
@@ -107,7 +120,7 @@ impl VolumeOrchestrator {
         );
 
         // 2. Unstage
-        self.send_csi_request(
+        self.send_csi_request_and_wait(
             node_id,
             CsiMessage::UnstageVolume {
                 volume_id: volume_id.clone(),
@@ -134,26 +147,67 @@ impl VolumeOrchestrator {
         Ok(())
     }
 
-    /// Send a CSI request to a specific node via its WorkerSession channel.
-    async fn send_csi_request(
+    /// Send a CSI request to a specific node and wait for the response.
+    ///
+    /// Registers a oneshot channel keyed by a unique request id, sends the
+    /// request through the worker session, then awaits the response with a
+    /// timeout.  The response is decoded: `CsiMessage::Ok` maps to `Ok(())`,
+    /// `CsiMessage::Error(e)` maps to `Err(e)`, anything else is an internal
+    /// error.
+    async fn send_csi_request_and_wait(
         &self,
         node_id: &str,
         request: CsiMessage,
     ) -> Result<(), CsiError> {
-        let session = self
-            .node_registry
-            .get(node_id)
+        let request_id = Uuid::new_v4();
+
+        let (tx, rx) = oneshot::channel();
+        self.pending.insert(request_id, tx);
+
+        // Look up the worker session and send the request
+        let session = self.node_registry.get(node_id).await.ok_or_else(|| {
+            self.pending.remove(&request_id);
+            CsiError::Internal(format!("node {} not found in registry", node_id))
+        })?;
+
+        if let Err(e) = session
+            .tx
+            .send(RksMessage::CsiRequest {
+                id: request_id,
+                message: request,
+            })
             .await
-            .ok_or_else(|| {
-                CsiError::Internal(format!("node {} not found in registry", node_id))
+        {
+            self.pending.remove(&request_id);
+            return Err(CsiError::transport(format!(
+                "failed to send to node {}: {}",
+                node_id, e
+            )));
+        }
+
+        // Wait for the response with timeout
+        let response = tokio::time::timeout(CSI_REQUEST_TIMEOUT, rx)
+            .await
+            .map_err(|_| {
+                self.pending.remove(&request_id);
+                CsiError::Internal(format!(
+                    "CSI request to node {} timed out after {}s",
+                    node_id,
+                    CSI_REQUEST_TIMEOUT.as_secs()
+                ))
+            })?
+            .map_err(|_| {
+                CsiError::Internal(format!("CSI response channel dropped for node {}", node_id))
             })?;
 
-        session
-            .tx
-            .send(RksMessage::CsiRequest(request))
-            .await
-            .map_err(|e| CsiError::transport(format!("failed to send to node {}: {}", node_id, e)))?;
-
-        Ok(())
+        // Interpret the response
+        match response {
+            CsiMessage::Ok => Ok(()),
+            CsiMessage::Error(e) => Err(e),
+            other => Err(CsiError::Internal(format!(
+                "unexpected CSI response: {}",
+                other
+            ))),
+        }
     }
 }

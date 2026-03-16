@@ -10,6 +10,5 @@ pub mod orchestrator;
 pub mod volume_store;
 
 pub use controller::RksCsiController;
-pub use identity::RksCsiIdentity;
 pub use orchestrator::VolumeOrchestrator;
 pub use volume_store::VolumeStore;

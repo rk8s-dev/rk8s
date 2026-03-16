@@ -121,10 +121,7 @@ mod tests {
         let loaded = store.load(&vol_id).unwrap();
         assert_eq!(loaded.volume_id, vol_id);
         assert_eq!(loaded.state, VolumeState::Staged);
-        assert_eq!(
-            loaded.staging_target_path.as_deref(),
-            Some("/mnt/staging")
-        );
+        assert_eq!(loaded.staging_target_path.as_deref(), Some("/mnt/staging"));
         assert!(loaded.target_path.is_none());
         assert_eq!(
             loaded.volume_context.get("key").map(|s| s.as_str()),

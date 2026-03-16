@@ -16,9 +16,7 @@ use nix::mount::{MntFlags, MsFlags};
 use rfuse3::raw::MountHandle;
 use tracing::{error, info, warn};
 
-use libcsi::{
-    CsiError, NodePublishVolumeRequest, NodeStageVolumeRequest, VolumeId, VolumeState,
-};
+use libcsi::{CsiError, NodePublishVolumeRequest, NodeStageVolumeRequest, VolumeId, VolumeState};
 use slayerfs::{
     ChunkLayout, LocalFsBackend, ObjectBlockStore, ObjectClient, create_meta_store_from_url,
 };
@@ -63,9 +61,8 @@ impl SlayerFsOperator {
             ))
         })?;
 
-        let state_store = VolumeStateStore::new(state_dir).map_err(|e| {
-            CsiError::Internal(format!("failed to create state store: {e}"))
-        })?;
+        let state_store = VolumeStateStore::new(state_dir)
+            .map_err(|e| CsiError::Internal(format!("failed to create state store: {e}")))?;
 
         Ok(Self {
             data_root,
@@ -112,7 +109,9 @@ impl SlayerFsOperator {
         // 3. Build SlayerFS VFS (LocalFsBackend + ObjectBlockStore + sqlite meta)
         let backend = LocalFsBackend::new(&vol_data_dir);
         let client = ObjectClient::new(backend);
-        let meta_handle = create_meta_store_from_url("sqlite::memory:")
+        let meta_db_path = vol_data_dir.join("meta.db");
+        let meta_url = format!("sqlite://{}?mode=rwc", meta_db_path.display());
+        let meta_handle = create_meta_store_from_url(&meta_url)
             .await
             .map_err(|e| CsiError::BackendError(format!("create meta store: {e}")))?;
         let store = ObjectBlockStore::new(client);
@@ -160,18 +159,18 @@ impl SlayerFsOperator {
     ) -> Result<(), CsiError> {
         if let Some((_, handle)) = self.mount_handles.remove(volume_id) {
             // Proper async unmount via rfuse3 API
-            handle.unmount().await.map_err(|e| CsiError::UnmountFailed {
-                path: staging_target_path.to_owned(),
-                reason: format!("FUSE unmount: {e}"),
-            })?;
+            handle
+                .unmount()
+                .await
+                .map_err(|e| CsiError::UnmountFailed {
+                    path: staging_target_path.to_owned(),
+                    reason: format!("FUSE unmount: {e}"),
+                })?;
             info!(volume_id = %volume_id, "FUSE unmount completed");
         } else {
             // Idempotent: no handle tracked. Try a lazy umount in case the
             // mount survived from a previous process.
-            let _ = nix::mount::umount2(
-                Path::new(staging_target_path),
-                MntFlags::MNT_DETACH,
-            );
+            let _ = nix::mount::umount2(Path::new(staging_target_path), MntFlags::MNT_DETACH);
             info!(volume_id = %volume_id, "volume not tracked, idempotent unstage");
         }
 
@@ -330,19 +329,19 @@ impl SlayerFsOperator {
         for state in states {
             match state.state {
                 VolumeState::Published | VolumeState::Staged => {
-                    if let Some(ref staging) = state.staging_target_path {
-                        if is_mount_point(staging) {
-                            // Mount survived from the previous process. We
-                            // cannot reclaim the MountHandle, but the FUSE
-                            // mount is still alive in the kernel. The fallback
-                            // umount2 path in unstage_volume handles cleanup.
-                            info!(
-                                volume_id = %state.volume_id,
-                                state = ?state.state,
-                                "recovered active volume (mount alive)"
-                            );
-                            continue;
-                        }
+                    if let Some(ref staging) = state.staging_target_path
+                        && is_mount_point(staging)
+                    {
+                        // Mount survived from the previous process. We
+                        // cannot reclaim the MountHandle, but the FUSE
+                        // mount is still alive in the kernel. The fallback
+                        // umount2 path in unstage_volume handles cleanup.
+                        info!(
+                            volume_id = %state.volume_id,
+                            state = ?state.state,
+                            "recovered active volume (mount alive)"
+                        );
+                        continue;
                     }
                     // Mount point gone — clean up stale state
                     warn!(

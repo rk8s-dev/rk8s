@@ -12,9 +12,9 @@ use std::sync::Arc;
 pub async fn dispatch_worker(
     msg: RksMessage,
     conn: &RksConnection,
-    xline_store: &Arc<XlineStore>,
     shared: &Arc<Shared>,
 ) -> anyhow::Result<()> {
+    let xline_store = &shared.xline_store;
     match msg {
         RksMessage::Heartbeat { node_name, status } => {
             handle_heartbeat(xline_store, &node_name, status).await?;
@@ -29,13 +29,19 @@ pub async fn dispatch_worker(
             "received Ack"
         ),
 
-        RksMessage::CsiResponse(csi_msg) => {
-            info!(
-                target: "rks::node::worker_dispatch",
-                "received CSI response: {csi_msg}"
-            );
-            // CSI responses are typically handled inline by the orchestration
-            // flow that sent the request. If one arrives here, log it.
+        RksMessage::CsiResponse { id, message } => {
+            if let Some((_, sender)) = shared.pending_csi_requests.remove(&id) {
+                info!(
+                    target: "rks::node::worker_dispatch",
+                    "routing CSI response for request {id}"
+                );
+                let _ = sender.send(message);
+            } else {
+                warn!(
+                    target: "rks::node::worker_dispatch",
+                    "received CSI response for unknown request {id}"
+                );
+            }
         }
 
         RksMessage::SetPodip((pod_name, pod_ip)) => {

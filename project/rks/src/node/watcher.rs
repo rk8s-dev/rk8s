@@ -2,8 +2,9 @@ use crate::commands::create::watch_create;
 use crate::commands::delete::watch_delete;
 use crate::node::Shared;
 use common::quic::RksConnection;
-use common::{PodTask, RksMessage, log_error};
+use common::{PodTask, RksMessage, VolumeSourceType, log_error};
 use etcd_client::{KeyValue, WatchResponse};
+use libcsi::CreateVolumeRequest;
 use log::{error, info};
 use std::ops::Deref;
 use std::sync::Arc;
@@ -57,13 +58,40 @@ impl PodsWatcher {
                 }
                 etcd_client::EventType::Delete => {
                     if let Some(kv) = event.prev_kv() {
-                        watch_delete(
-                            String::from_utf8_lossy(kv.key()).replace("/registry/pods/", ""),
-                            String::from_utf8_lossy(kv.value()).to_string(),
-                            self.conn.deref(),
-                            node_id,
-                        )
-                        .await?;
+                        let pod_name =
+                            String::from_utf8_lossy(kv.key()).replace("/registry/pods/", "");
+                        let pod_yaml = String::from_utf8_lossy(kv.value()).to_string();
+
+                        // Send DeletePod first
+                        watch_delete(pod_name, pod_yaml.clone(), self.conn.deref(), node_id)
+                            .await?;
+
+                        // Then deprovision SlayerFs volumes
+                        if let Ok(pod) = serde_yaml::from_str::<PodTask>(&pod_yaml)
+                            && pod.spec.node_name.as_deref() == Some(node_id) {
+                                let orchestrator = &self.shared.volume_orchestrator;
+                                for vol in &pod.spec.volumes {
+                                    if let VolumeSourceType::SlayerFs { .. } = &vol.source {
+                                        let vol_name =
+                                            format!("{}-{}", pod.metadata.name, vol.name);
+                                        let vol_id = libcsi::VolumeId::from(vol_name);
+                                        let target_path = format!(
+                                            "/var/lib/rkl/pods/{}/volumes/{}",
+                                            pod.metadata.uid, vol.name
+                                        );
+                                        if let Err(e) = orchestrator
+                                            .unmount_and_deprovision(&vol_id, node_id, &target_path)
+                                            .await
+                                        {
+                                            error!(
+                                                target: "rks::node::watch_pods",
+                                                "failed to deprovision volume {} for pod {}: {e}",
+                                                vol.name, pod.metadata.name
+                                            );
+                                        }
+                                    }
+                                }
+                            }
                     }
                 }
             }
@@ -171,6 +199,42 @@ impl PodsWatcher {
             "Pod {} assigned to {:?}",
             pod.metadata.name, pod.spec.node_name
         );
+
+        // Provision SlayerFs volumes before sending CreatePod
+        let orchestrator = &self.shared.volume_orchestrator;
+        for vol in &pod.spec.volumes {
+            if let VolumeSourceType::SlayerFs {
+                capacity_bytes,
+                read_only: _,
+            } = &vol.source
+            {
+                let req = CreateVolumeRequest {
+                    name: format!("{}-{}", pod.metadata.name, vol.name),
+                    capacity_bytes: capacity_bytes.unwrap_or(0),
+                    ..Default::default()
+                };
+                let target_path = format!(
+                    "/var/lib/rkl/pods/{}/volumes/{}",
+                    pod.metadata.uid, vol.name
+                );
+                if let Err(e) = orchestrator
+                    .provision_and_mount(req, node_id, &target_path)
+                    .await
+                {
+                    error!(
+                        target: "rks::node::watch_pods",
+                        "failed to provision volume {} for pod {}: {e}",
+                        vol.name, pod.metadata.name
+                    );
+                    return Err(e.into());
+                }
+                info!(
+                    target: "rks::node::watch_pods",
+                    "provisioned volume {} for pod {}",
+                    vol.name, pod.metadata.name
+                );
+            }
+        }
 
         watch_create(
             String::from_utf8_lossy(payload).to_string(),

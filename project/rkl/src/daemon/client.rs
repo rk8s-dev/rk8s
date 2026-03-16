@@ -458,12 +458,19 @@ pub async fn run_once(
                                 }
                             });
                         }
-                        Ok(RksMessage::CsiRequest(csi_msg)) => {
-                            info!("[worker] received CSI request: {csi_msg}");
+                        Ok(RksMessage::CsiRequest {
+                            id,
+                            message: csi_msg,
+                        }) => {
+                            info!("[worker] received CSI request [{}]: {csi_msg}", id);
                             let response =
                                 handle_csi_request(csi_node_service, csi_identity, csi_msg).await;
-                            if let Err(e) =
-                                client.send_msg(&RksMessage::CsiResponse(response)).await
+                            if let Err(e) = client
+                                .send_msg(&RksMessage::CsiResponse {
+                                    id,
+                                    message: response,
+                                })
+                                .await
                             {
                                 error!("[worker] failed to send CSI response: {e}");
                             }

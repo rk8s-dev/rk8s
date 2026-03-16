@@ -57,6 +57,7 @@ reqwest = { workspace = true }
 either = { workspace = true }
 tokio-stream = { workspace = true }
 uuid = { workspace = true }
+dashmap = { workspace = true }
 lru = { workspace = true }
 
 [dev-dependencies]

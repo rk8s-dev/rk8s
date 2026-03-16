@@ -52,9 +52,7 @@ impl CsiNode for CsiNodeService {
         volume_id: &VolumeId,
         target_path: &str,
     ) -> Result<(), CsiError> {
-        self.operator
-            .unpublish_volume(volume_id, target_path)
-            .await
+        self.operator.unpublish_volume(volume_id, target_path).await
     }
 
     async fn get_info(&self) -> Result<NodeInfo, CsiError> {

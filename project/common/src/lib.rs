@@ -296,6 +296,33 @@ pub enum NodeSelectorOperator {
     Lt,
 }
 
+/// A volume declared in the pod specification.
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+pub struct Volume {
+    /// Logical name of the volume, referenced by containers.
+    pub name: String,
+    /// Volume source type and configuration.
+    #[serde(flatten)]
+    pub source: VolumeSourceType,
+}
+
+/// Supported volume source types.
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+#[serde(tag = "type", rename_all = "camelCase")]
+pub enum VolumeSourceType {
+    /// Ephemeral in-memory or disk-backed volume.
+    EmptyDir,
+    /// Mount a host filesystem path.
+    HostPath { path: String },
+    /// SlayerFS-backed persistent volume.
+    SlayerFs {
+        #[serde(default)]
+        capacity_bytes: Option<u64>,
+        #[serde(default)]
+        read_only: Option<bool>,
+    },
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq, Default)]
 pub struct PodSpec {
     //if pod is distributed to a node ,then this field should be filled with node-id
@@ -311,6 +338,8 @@ pub struct PodSpec {
     pub affinity: Option<Affinity>,
     #[serde(default)]
     pub restart_policy: RestartPolicy,
+    #[serde(default)]
+    pub volumes: Vec<Volume>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq, Default)]
@@ -811,8 +840,14 @@ pub enum RksMessage {
     },
 
     // CSI volume lifecycle
-    CsiRequest(libcsi::CsiMessage),
-    CsiResponse(libcsi::CsiMessage),
+    CsiRequest {
+        id: uuid::Uuid,
+        message: libcsi::CsiMessage,
+    },
+    CsiResponse {
+        id: uuid::Uuid,
+        message: libcsi::CsiMessage,
+    },
 
     //response
     Ack,
@@ -929,8 +964,12 @@ impl std::fmt::Debug for RksMessage {
             Self::UpdateNftablesRules(rules) => {
                 write!(f, "RksMessage::UpdateNftablesRules (len={})", rules.len())
             }
-            Self::CsiRequest(msg) => write!(f, "RksMessage::CsiRequest({:?})", msg),
-            Self::CsiResponse(msg) => write!(f, "RksMessage::CsiResponse({:?})", msg),
+            Self::CsiRequest { id, message } => {
+                write!(f, "RksMessage::CsiRequest(id={}, {:?})", id, message)
+            }
+            Self::CsiResponse { id, message } => {
+                write!(f, "RksMessage::CsiResponse(id={}, {:?})", id, message)
+            }
             // response
             Self::Ack => f.write_str("RksMessage::Ack"),
             Self::Error(err_msg) => write!(f, "RksMessage::Error({})", err_msg),
@@ -1111,8 +1150,8 @@ impl Display for RksMessage {
                 "Update status for pod '{}' in namespace '{}'",
                 pod_name, pod_namespace
             ),
-            Self::CsiRequest(msg) => write!(f, "CSI request: {}", msg),
-            Self::CsiResponse(msg) => write!(f, "CSI response: {}", msg),
+            Self::CsiRequest { id, message } => write!(f, "CSI request [{}]: {}", id, message),
+            Self::CsiResponse { id, message } => write!(f, "CSI response [{}]: {}", id, message),
 
             // response
             Self::Ack => f.write_str("Acknowledge message receipt"),

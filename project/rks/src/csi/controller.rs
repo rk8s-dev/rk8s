@@ -1,7 +1,7 @@
 //! CsiController trait implementation for RKS.
 
 use async_trait::async_trait;
-use libcsi::{CsiController, CsiError, CreateVolumeRequest, Volume, VolumeCapability, VolumeId};
+use libcsi::{CreateVolumeRequest, CsiController, CsiError, Volume, VolumeCapability, VolumeId};
 use log::info;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -30,9 +30,8 @@ pub fn build_volume(volume_id: VolumeId, req: &CreateVolumeRequest) -> Volume {
 
 /// RKS-side CSI Controller implementation.
 ///
-/// Follows Strategy B from the design doc: `create_volume` records metadata
-/// in xline; physical volume creation (FUSE mount) is deferred to the Node
-/// side during `stage_volume`.
+/// `create_volume` records metadata in xline;
+/// physical volume creation (FUSE mount) is deferred to the Node side during `stage_volume`.
 pub struct RksCsiController {
     store: Arc<VolumeStore>,
 }
@@ -53,10 +52,7 @@ impl CsiController for RksCsiController {
         let volume_id = generate_volume_id();
         let volume = build_volume(volume_id, &req);
 
-        self.store
-            .put(&volume)
-            .await
-            .map_err(CsiError::internal)?;
+        self.store.put(&volume).await.map_err(CsiError::internal)?;
 
         info!(
             target: "rks::csi::controller",

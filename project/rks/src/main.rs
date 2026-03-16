@@ -73,6 +73,13 @@ async fn handle_start_command() -> anyhow::Result<()> {
     let volume_store = Arc::new(csi::VolumeStore::new(xline_store.clone()));
     let csi_controller = Arc::new(csi::RksCsiController::new(volume_store));
 
+    let pending_csi_requests = Arc::new(dashmap::DashMap::new());
+    let volume_orchestrator = Arc::new(csi::VolumeOrchestrator::new(
+        csi_controller.clone(),
+        node_registry.clone(),
+        pending_csi_requests.clone(),
+    ));
+
     register_controllers(
         CONTROLLER_MANAGER.clone(),
         xline_store.clone(),
@@ -91,6 +98,8 @@ async fn handle_start_command() -> anyhow::Result<()> {
         vault.clone(),
         node_registry,
         csi_controller,
+        volume_orchestrator,
+        pending_csi_requests,
     ));
 
     internal::start_internal_server(vault.clone()).await?;
