@@ -28,6 +28,11 @@ engine = { path = "../engine" }
 event-listener = { workspace = true }
 flume = { workspace = true }
 futures = { workspace = true }
+gm-quic = "0.4.0"
+h3 = "0.0.8"
+h3-shim = "0.4.0"
+http = "1.4.0"
+http-body = "1.0.1"
 hyper = "1.0.0"
 itertools = { workspace = true }
 jsonwebtoken = { workspace = true }
@@ -54,12 +59,13 @@ prometheus = "0.13.4"
 prost = { workspace = true }
 serde = { workspace = true }
 sha2 = "0.10.6"
-tokio = { workspace = true }
+tokio = { workspace = true, features = ["full"] }
 tokio-stream = { workspace = true }
 tokio-util = { workspace = true }
 toml = { workspace = true }
 tonic = { workspace = true }
 tonic-health = "0.12.0"
+tower = "0.5.3"
 tracing = { workspace = true }
 tracing-appender = { workspace = true }
 tracing-opentelemetry = { workspace = true }

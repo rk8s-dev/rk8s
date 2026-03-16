@@ -15,6 +15,7 @@ use xlineapi::{
 // use xlinerpc::status::Status;
 use crate::{
     id_gen::IdGenerator,
+    router::endpoint::EndPoint as RouterEndpoint,
     rpc::{
         Compare, CompareResult, CompareTarget, DeleteRangeRequest, DeleteRangeResponse,
         LeaseGrantRequest, LeaseGrantResponse, Lock, LockRequest, LockResponse, PutRequest,
@@ -291,5 +292,31 @@ impl Lock for LockServer {
         let auth_info = self.auth_store.try_get_auth_info_from_request(&request)?;
         let header = self.delete_key(&request.get_ref().key, auth_info).await?;
         Ok(tonic::Response::new(UnlockResponse { header }))
+    }
+}
+
+pub(crate) struct Server {
+    lock_server: Arc<LockServer>,
+}
+impl Server {
+    pub(crate) fn new(lock_server: LockServer) -> Self {
+        Self {
+            lock_server: Arc::new(lock_server),
+        }
+    }
+    pub(crate) fn endpoint(self) -> RouterEndpoint<Arc<LockServer>> {
+        RouterEndpoint::new(self.lock_server)
+            .add_unary_fn(
+                "/lock",
+                move |this: Arc<LockServer>, request: tonic::Request<LockRequest>| async move {
+                    this.lock(request).await
+                },
+            )
+            .add_unary_fn(
+                "/unlock",
+                move |this: Arc<LockServer>, request: tonic::Request<UnlockRequest>| async move {
+                    this.unlock(request).await
+                },
+            )
     }
 }

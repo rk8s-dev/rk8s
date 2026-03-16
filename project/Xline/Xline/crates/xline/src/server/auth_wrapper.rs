@@ -17,7 +17,10 @@ use xlineapi::command::Command;
 // TODO: use our own status type
 // use xlinerpc::status::Status;
 use super::xline_server::CurpServer;
-use crate::storage::AuthStore;
+use crate::{
+    router::endpoint::EndPoint as RouterEndpoint,
+    storage::AuthStore,
+};
 
 /// Auth wrapper
 pub(crate) struct AuthWrapper {
@@ -121,5 +124,68 @@ impl Protocol for AuthWrapper {
         request: tonic::Request<tonic::Streaming<LeaseKeepAliveMsg>>,
     ) -> Result<tonic::Response<LeaseKeepAliveMsg>, Status> {
         self.curp_server.lease_keep_alive(request).await
+    }
+}
+
+pub(crate) struct Server {
+    server: Arc<AuthWrapper>,
+}
+impl Server {
+    #[allow(unused)]
+    pub(crate) fn new(server: AuthWrapper) -> Self {
+        Self {
+            server: Arc::new(server),
+        }
+    }
+    #[allow(unused)]
+    pub(crate) fn from_arc(server: Arc<AuthWrapper>) -> Self {
+        Self {
+            server: server,
+        }
+    }
+    pub(crate) fn endpoint(self) -> RouterEndpoint<Arc<AuthWrapper>> {
+        RouterEndpoint::new(self.server)
+            .add_server_streaming_fn(
+                "/ProposeStream",
+                move |this: Arc<AuthWrapper>, request: tonic::Request<ProposeRequest>| async move {
+                    this.propose_stream(request).await
+                },
+            )
+            .add_unary_fn(
+                "/Record",
+                move |this: Arc<AuthWrapper>, request: tonic::Request<RecordRequest>| async move {
+                    this.record(request).await
+                },
+            )
+            .add_unary_fn(
+                "/ReadIndex",
+                move |this: Arc<AuthWrapper>, request: tonic::Request<ReadIndexRequest>| async move {
+                    this.read_index(request).await
+                },
+            )
+            .add_unary_fn(
+                "/ProposeConfChange",
+                move |this: Arc<AuthWrapper>, request: tonic::Request<ProposeConfChangeRequest>| async move {
+                    this.propose_conf_change(request).await
+                },
+            )
+            .add_unary_fn(
+                "/Publish",
+                move |this: Arc<AuthWrapper>, request: tonic::Request<PublishRequest>| async move {
+                    this.publish(request).await
+                }
+            )
+            .add_unary_fn(
+                "/Shutdown",
+                move |this: Arc<AuthWrapper>, request: tonic::Request<ShutdownRequest>| async move {
+                    this.shutdown(request).await
+                },
+            )
+            .add_unary_fn(
+                "/FetchCluster",
+                move |this: Arc<AuthWrapper>, request: tonic::Request<FetchClusterRequest>| async move {
+                    this.fetch_cluster(request).await
+                },
+            )
     }
 }

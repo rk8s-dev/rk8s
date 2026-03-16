@@ -18,7 +18,10 @@ use xlineapi::{
     MemberUpdateRequest, MemberUpdateResponse, command::CurpClient,
 };
 
-use crate::header_gen::HeaderGenerator;
+use crate::{
+    header_gen::HeaderGenerator,
+    router::endpoint::EndPoint as RouterEndpoint,
+};
 
 /// Cluster Server
 pub(crate) struct ClusterServer {
@@ -160,5 +163,56 @@ impl Cluster for ClusterServer {
             members,
         };
         Ok(Response::new(resp))
+    }
+}
+
+pub(crate) struct Server {
+    server: Arc<ClusterServer>,
+}
+impl Server {
+    #[allow(unused)]
+    pub(crate) fn new(server: ClusterServer) -> Self {
+        Self {
+            server: Arc::new(server),
+        }
+    }
+    #[allow(unused)]
+    pub(crate) fn from_arc(server: Arc<ClusterServer>) -> Self {
+        Self {
+            server: server,
+        }
+    }
+    pub(crate) fn endpoint(self) -> RouterEndpoint<Arc<ClusterServer>> {
+        RouterEndpoint::new(self.server)
+            .add_unary_fn(
+                "/MemberAdd",
+                move |this: Arc<ClusterServer>, request: Request<MemberAddRequest>| async move {
+                    this.member_add(request).await
+                },
+            )
+            .add_unary_fn(
+                "/MemberRemove",
+                move |this: Arc<ClusterServer>, request: Request<MemberRemoveRequest>| async move {
+                    this.member_remove(request).await
+                },
+            )
+            .add_unary_fn(
+                "/MemberUpdate",
+                move |this: Arc<ClusterServer>, request: Request<MemberUpdateRequest>| async move {
+                    this.member_update(request).await
+                },
+            )
+            .add_unary_fn(
+                "/MemberList",
+                move |this: Arc<ClusterServer>, request: Request<MemberListRequest>| async move {
+                    this.member_list(request).await
+                },
+            )
+            .add_unary_fn(
+                "/MemberPromote",
+                move |this: Arc<ClusterServer>, request: Request<MemberPromoteRequest>| async move {
+                    this.member_promote(request).await
+                },
+            )
     }
 }

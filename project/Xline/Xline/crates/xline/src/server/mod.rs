@@ -18,6 +18,8 @@ mod maintenance;
 mod watch_server;
 /// Xline server
 mod xline_server;
+/// curp server
+mod curp_server;
 
 pub use self::xline_server::XlineServer;
 pub(crate) use self::{auth_server::get_token, maintenance::MAINTENANCE_SNAPSHOT_CHUNK_SIZE};
