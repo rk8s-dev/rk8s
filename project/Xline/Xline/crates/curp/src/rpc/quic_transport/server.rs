@@ -21,7 +21,7 @@ use crate::{
             Frame, FrameReader, FrameWriter, MethodId, read_request_header, status_error, status_ok,
         },
     },
-    server::Rpc,
+    server::{Rpc, CurpRouter, CurpProtocolAdapter},
 };
 
 use super::super::{CurpService, InnerCurpService, Metadata};
@@ -60,6 +60,16 @@ where
         }
     }
 
+    /// Create a new QUIC gRPC server with router
+    pub fn new_with_router(router: Arc<CurpRouter>) -> Self {
+        let adapter = CurpProtocolAdapter::new(router, "curp".to_string());
+        Self {
+            service: Arc::new(adapter.clone()),
+            inner_service: Arc::new(adapter),
+            _phantom: PhantomData,
+        }
+    }
+
     /// Create a new QUIC gRPC server with a custom external service implementation.
     ///
     /// This allows wrapping the external `CurpService` (e.g., with an auth layer)
@@ -69,6 +79,15 @@ where
         Self {
             service: Arc::new(external_service),
             inner_service: Arc::new(rpc),
+            _phantom: PhantomData,
+        }
+    }
+
+    /// Create a new QUIC gRPC server with service
+    pub fn new_with_service(service: Arc<dyn CurpService>, inner_service: Arc<dyn InnerCurpService>) -> Self {
+        Self {
+            service,
+            inner_service,
             _phantom: PhantomData,
         }
     }
