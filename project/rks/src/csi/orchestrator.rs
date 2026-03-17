@@ -44,6 +44,8 @@ impl VolumeOrchestrator {
     /// Provision and mount a volume on the target node.
     ///
     /// Flow: create_volume -> send StageVolume -> send PublishVolume
+    ///
+    /// If stage or publish fails, the volume metadata is rolled back.
     pub async fn provision_and_mount(
         &self,
         req: CreateVolumeRequest,
@@ -63,8 +65,20 @@ impl VolumeOrchestrator {
             volume_capability: VolumeCapability::default(),
             volume_context: volume.volume_context.clone(),
         };
-        self.send_csi_request_and_wait(node_id, CsiMessage::StageVolume(stage_req))
-            .await?;
+        if let Err(e) = self
+            .send_csi_request_and_wait(node_id, CsiMessage::StageVolume(stage_req))
+            .await
+        {
+            // Rollback: delete volume metadata
+            if let Err(del_err) = self.controller.delete_volume(vol_id).await {
+                log::error!(
+                    target: "rks::csi::orchestrator",
+                    "rollback: failed to delete volume {} after stage failure: {del_err}",
+                    vol_id
+                );
+            }
+            return Err(e);
+        }
 
         info!(
             target: "rks::csi::orchestrator",
@@ -75,13 +89,34 @@ impl VolumeOrchestrator {
         // 3. Send PublishVolume to target node and wait for response
         let publish_req = NodePublishVolumeRequest {
             volume_id: vol_id.clone(),
-            staging_target_path,
+            staging_target_path: staging_target_path.clone(),
             target_path: target_path.to_owned(),
             volume_capability: VolumeCapability::default(),
             read_only: false,
         };
-        self.send_csi_request_and_wait(node_id, CsiMessage::PublishVolume(publish_req))
-            .await?;
+        if let Err(e) = self
+            .send_csi_request_and_wait(node_id, CsiMessage::PublishVolume(publish_req))
+            .await
+        {
+            // Rollback: unstage then delete volume metadata
+            let _ = self
+                .send_csi_request_and_wait(
+                    node_id,
+                    CsiMessage::UnstageVolume {
+                        volume_id: vol_id.clone(),
+                        staging_target_path,
+                    },
+                )
+                .await;
+            if let Err(del_err) = self.controller.delete_volume(vol_id).await {
+                log::error!(
+                    target: "rks::csi::orchestrator",
+                    "rollback: failed to delete volume {} after publish failure: {del_err}",
+                    vol_id
+                );
+            }
+            return Err(e);
+        }
 
         info!(
             target: "rks::csi::orchestrator",
@@ -197,6 +232,7 @@ impl VolumeOrchestrator {
                 ))
             })?
             .map_err(|_| {
+                self.pending.remove(&request_id);
                 CsiError::Internal(format!("CSI response channel dropped for node {}", node_id))
             })?;
 

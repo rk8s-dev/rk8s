@@ -231,7 +231,7 @@ impl SlayerFsOperator {
         // If read-only, remount with MS_RDONLY
         if req.read_only {
             nix::mount::mount(
-                None::<&str>,
+                Some(Path::new(&req.staging_target_path)),
                 Path::new(&req.target_path),
                 None::<&str>,
                 MsFlags::MS_BIND | MsFlags::MS_REMOUNT | MsFlags::MS_RDONLY,
