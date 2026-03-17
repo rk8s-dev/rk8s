@@ -15,12 +15,14 @@ mod quic;
 mod task;
 
 use commands::{
-    container::ContainerCommand, deployment::DeploymentCommand, logs::LogCommand, pod::PodCommand,
-    replicaset::ReplicaSetCommand, service::ServiceCommand,
+    apply::ApplyCommand, container::ContainerCommand, delete::DeleteCommand,
+    deployment::DeploymentCommand, exec::ExecCommand, get::GetCommand, logs::LogCommand, pod::PodCommand,
+    replicaset::ReplicaSetCommand, run::RunCommand, service::ServiceCommand,
 };
 use commands::{
-    container::container_execute, deployment::deployment_execute, logs::logs_execute,
-    pod::pod_execute, replicaset::replicaset_execute, service::service_execute,
+    apply::apply_execute, container::container_execute, delete::delete_execute,
+    deployment::deployment_execute, exec::exec_execute, get::get_execute, logs::logs_execute,
+    pod::pod_execute, replicaset::replicaset_execute, service::service_execute, run::run_execute,
 };
 use tracing::error;
 
@@ -45,6 +47,11 @@ struct Cli {
 impl Cli {
     fn run(self) -> Result<(), anyhow::Error> {
         match self.workload {
+            Workload::Apply(cmd) => apply_execute(cmd),
+            Workload::Run(cmd) => run_execute(cmd),
+            Workload::Exec(cmd) => exec_execute(cmd),
+            Workload::Get(cmd) => get_execute(cmd),
+            Workload::Delete(cmd) => delete_execute(cmd),
             Workload::Pod(cmd) => pod_execute(cmd),
             Workload::Container(cmd) => container_execute(cmd),
             Workload::Replicaset(cmd) => replicaset_execute(cmd),
@@ -58,6 +65,21 @@ impl Cli {
 
 #[derive(Subcommand)]
 enum Workload {
+    #[command(about = "Apply a configuration to a resource whether it exists or not")]
+    Apply(ApplyCommand),
+
+    #[command(about = "Create and run a particular image in a pod")]
+    Run(RunCommand),
+
+    #[command(about = "Execute a command in a container")]
+    Exec(ExecCommand),
+
+    #[command(about = "Display one or many resources")]
+    Get(GetCommand),
+
+    #[command(about = "Delete resources by file names, stdin, resources and names, or by resources and label selector.")]
+    Delete(DeleteCommand),
+
     #[command(subcommand, about = "Operations related to pods", alias = "p")]
     Pod(PodCommand),
 
