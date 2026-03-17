@@ -5,7 +5,7 @@ authors = [
     "Xiaolong Fu <njufxl@gmail.com>",
     "Zhilei Qiu <qzl2503687@gmail.com>",
 ]
-version = "0.7.0"
+version = "0.8.0"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 description = "Dagrs follows the concept of Flow-based Programming and is suitable for the execution of multiple tasks with graph-like dependencies. Dagrs has the characteristics of high performance and asynchronous execution. It provides users with a convenient programming interface."
@@ -15,7 +15,7 @@ keywords = ["DAG", "task", "async", "fbp", "tokio"]
 
 [dependencies]
 dagrs-derive = {workspace = true}
-tokio = { workspace = true , features = ["rt", "sync", "rt-multi-thread", "time"] }
+tokio = { workspace = true , features = ["macros", "rt", "sync", "rt-multi-thread", "time"] }
 log = {workspace = true}
 async-trait = {workspace = true}
 futures = {workspace = true}
