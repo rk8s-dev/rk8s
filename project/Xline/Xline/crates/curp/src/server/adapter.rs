@@ -17,9 +17,9 @@ use super::{CurpRouter, CurpServer};
 /// Curp protocol adapter
 /// Adapts CurpService trait calls to CurpServer trait
 pub struct CurpProtocolAdapter {
-    /// 路由器
+    /// Router
     router: Arc<CurpRouter>,
-    /// 服务名称
+    /// Service name
     service_name: String,
 }
 

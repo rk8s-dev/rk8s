@@ -10,7 +10,7 @@ use super::{CurpServer, CurpServiceRegistry};
 /// Curp request router
 /// Used to route requests to the appropriate service based on request type
 pub struct CurpRouter {
-    /// 服务注册表
+    /// Service Registry
     registry: Arc<CurpServiceRegistry>,
 }
 

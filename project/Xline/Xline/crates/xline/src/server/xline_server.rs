@@ -361,9 +361,18 @@ impl XlineServer {
     
         // Create router
         let router = Arc::new(CurpRouter::new(registry));
+        
+        // Create CurpProtocolAdapter for inner service (internal Raft messages)
+        let adapter = CurpProtocolAdapter::new(router, "curp".to_string());
+        
+        // Create AuthWrapper for external service (CURP RPCs with auth)
+        let quic_auth_wrapper = AuthWrapper::new(curp_server, auth_storage.clone());
     
         // Curp peer communication uses QUIC, with AuthWrapper for token-based auth
-        let quic_server = QuicGrpcServer::new_with_router(router);
+        let quic_server = QuicGrpcServer::new_with_service(
+            Arc::new(quic_auth_wrapper),
+            Arc::new(adapter)
+        );
 
         let xline_router = {
             let (mut reporter, health_server) = tonic_health::server::health_reporter();

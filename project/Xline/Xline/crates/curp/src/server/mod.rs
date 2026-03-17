@@ -25,14 +25,14 @@ use engine::SnapshotAllocator;
 use tokio::sync::broadcast;
 use utils::{config::CurpConfig, task_manager::TaskManager};
 
-// 导入新的 Server 抽象
+// Import new Server abstraction
 mod server;
 mod curp_server;
 mod registry;
 mod router;
 mod adapter;
 
-// 导出核心组件
+// Export core components
 pub use self::server::CurpServer;
 pub use self::curp_server::CurpServerImpl;
 pub use self::registry::CurpServiceRegistry;

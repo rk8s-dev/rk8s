@@ -18,7 +18,7 @@ use super::{CurpServer, curp_node::CurpNode};
 
 /// CurpServer concrete implementation
 pub struct CurpServerImpl<C: Command, CE: CommandExecutor<C>, RC: RoleChange> {
-    /// 内部 CurpNode 实例
+    /// Inner CurpNode instance
     inner: Arc<CurpNode<C, CE, RC>>,
 }
 

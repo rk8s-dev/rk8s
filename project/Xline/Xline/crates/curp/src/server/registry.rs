@@ -6,7 +6,7 @@ use super::CurpServer;
 /// Curp service registry
 /// Used to manage and register different CurpServer instances
 pub struct CurpServiceRegistry {
-    /// 服务映射表
+    /// Service Mapping Table
     services: HashMap<String, Arc<dyn CurpServer>>,
 }
 
