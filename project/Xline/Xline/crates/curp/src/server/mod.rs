@@ -1,6 +1,17 @@
 use std::{fmt::Debug, sync::Arc};
 
+use async_trait::async_trait;
+use futures::{Stream, StreamExt};
+
 use self::curp_node::CurpNode;
+use crate::rpc::{
+    AppendEntriesRequest, AppendEntriesResponse, CurpError, FetchClusterRequest,
+    FetchClusterResponse, FetchReadStateRequest, FetchReadStateResponse, InstallSnapshotRequest,
+    InstallSnapshotResponse, LeaseKeepAliveMsg, MoveLeaderRequest, MoveLeaderResponse, OpResponse,
+    ProposeConfChangeRequest, ProposeConfChangeResponse, ProposeRequest, PublishRequest,
+    PublishResponse, ReadIndexResponse, RecordRequest, RecordResponse, ShutdownRequest,
+    ShutdownResponse, VoteRequest, VoteResponse,
+};
 pub use self::{
     conflict::{spec_pool_new::SpObject, uncommitted_pool::UcpObject},
     raw_curp::RawCurp,
@@ -13,6 +24,20 @@ use crate::{
 use engine::SnapshotAllocator;
 use tokio::sync::broadcast;
 use utils::{config::CurpConfig, task_manager::TaskManager};
+
+// Import new Server abstraction
+mod server;
+mod curp_server;
+mod registry;
+mod router;
+mod adapter;
+
+// Export core components
+pub use self::server::CurpServer;
+pub use self::curp_server::CurpServerImpl;
+pub use self::registry::CurpServiceRegistry;
+pub use self::router::CurpRouter;
+pub use self::adapter::CurpProtocolAdapter;
 
 /// Command worker to do execution and after sync
 mod cmd_worker;
@@ -185,6 +210,118 @@ impl<C: Command, CE: CommandExecutor<C>, RC: RoleChange> Rpc<C, CE, RC> {
 }
 
 // ============================================================================
+// CurpServer trait implementation for Rpc
+// ============================================================================
+
+#[async_trait]
+impl<C: Command, CE: CommandExecutor<C>, RC: RoleChange> CurpServer for Rpc<C, CE, RC> {
+    async fn handle_propose_stream(
+        &self,
+        req: ProposeRequest,
+        bypassed: bool,
+    ) -> Result<Box<dyn Stream<Item = Result<OpResponse, CurpError>> + Send + Unpin>, CurpError> {
+        let (tx, rx) = flume::bounded(2);
+        let resp_tx = Arc::new(crate::response::ResponseSender::new(tx));
+        self.inner.propose_stream(&req, resp_tx, bypassed).await?;
+
+        let stream = rx.into_stream().map(|r| r.map_err(CurpError::from));
+        Ok(Box::new(stream))
+    }
+    
+    fn handle_record(&self, req: RecordRequest) -> Result<RecordResponse, CurpError> {
+        self.inner.record(&req).map_err(CurpError::from)
+    }
+    
+    fn handle_read_index(&self) -> Result<ReadIndexResponse, CurpError> {
+        self.inner.read_index().map_err(CurpError::from)
+    }
+    
+    async fn handle_shutdown(
+        &self,
+        req: ShutdownRequest,
+        bypassed: bool,
+    ) -> Result<ShutdownResponse, CurpError> {
+        self.inner.shutdown(req, bypassed).await.map_err(CurpError::from)
+    }
+    
+    async fn handle_propose_conf_change(
+        &self,
+        req: ProposeConfChangeRequest,
+        bypassed: bool,
+    ) -> Result<ProposeConfChangeResponse, CurpError> {
+        self.inner.propose_conf_change(req, bypassed).await.map_err(CurpError::from)
+    }
+    
+    fn handle_publish(
+        &self,
+        req: PublishRequest,
+        bypassed: bool,
+    ) -> Result<PublishResponse, CurpError> {
+        self.inner.publish(req, bypassed).map_err(CurpError::from)
+    }
+    
+    fn handle_fetch_cluster(&self, req: FetchClusterRequest) -> Result<FetchClusterResponse, CurpError> {
+        self.inner.fetch_cluster(req).map_err(CurpError::from)
+    }
+    
+    fn handle_fetch_read_state(
+        &self,
+        req: FetchReadStateRequest,
+    ) -> Result<FetchReadStateResponse, CurpError> {
+        self.inner.fetch_read_state(req).map_err(CurpError::from)
+    }
+    
+    async fn handle_move_leader(
+        &self,
+        req: MoveLeaderRequest,
+    ) -> Result<MoveLeaderResponse, CurpError> {
+        self.inner.move_leader(req).await.map_err(CurpError::from)
+    }
+    
+    async fn handle_lease_keep_alive(
+        &self,
+        stream: Box<dyn Stream<Item = Result<LeaseKeepAliveMsg, CurpError>> + Send + Unpin>,
+    ) -> Result<LeaseKeepAliveMsg, CurpError> {
+        // CurpNode::lease_keep_alive is generic over E: Error + 'static.
+        // xlinerpc::Status implements Error, so convert CurpError → xlinerpc::Status.
+        let status_stream = stream.map(|r| r.map_err(xlinerpc::status::Status::from));
+        self.inner.lease_keep_alive(status_stream).await.map_err(CurpError::from)
+    }
+    
+    fn handle_append_entries(
+        &self,
+        req: AppendEntriesRequest,
+    ) -> Result<AppendEntriesResponse, CurpError> {
+        self.inner.append_entries(&req).map_err(CurpError::from)
+    }
+    
+    fn handle_vote(&self, req: VoteRequest) -> Result<VoteResponse, CurpError> {
+        self.inner.vote(&req).map_err(CurpError::from)
+    }
+    
+    async fn handle_install_snapshot(
+        &self,
+        stream: Box<dyn Stream<Item = Result<InstallSnapshotRequest, CurpError>> + Send + Unpin>,
+    ) -> Result<InstallSnapshotResponse, CurpError> {
+        // CurpNode::install_snapshot is generic over E: Error + 'static.
+        // xlinerpc::Status implements Error, so convert CurpError → xlinerpc::Status.
+        let status_stream = stream.map(|r| r.map_err(xlinerpc::status::Status::from));
+        self.inner.install_snapshot(status_stream).await.map_err(CurpError::from)
+    }
+    
+    fn handle_trigger_shutdown(&self) -> Result<(), CurpError> {
+        use crate::rpc::TriggerShutdownRequest;
+        let _resp = self.inner.trigger_shutdown(TriggerShutdownRequest {});
+        Ok(())
+    }
+    
+    async fn handle_try_become_leader_now(&self) -> Result<(), CurpError> {
+        use crate::rpc::TryBecomeLeaderNowRequest;
+        self.inner.try_become_leader_now(TryBecomeLeaderNowRequest {}).await.map_err(CurpError::from)
+    }
+}
+
+// ============================================================================
 // QUIC transport service trait implementations
 // ============================================================================
 
@@ -210,7 +347,7 @@ mod quic_service_impl {
         },
     };
 
-    use super::Rpc;
+    use super::{Rpc, CurpServer, CurpProtocolAdapter, CurpRouter, CurpServiceRegistry};
 
     #[async_trait]
     impl<C: Command, CE: CommandExecutor<C>, RC: RoleChange> crate::rpc::CurpService
@@ -223,20 +360,15 @@ mod quic_service_impl {
         ) -> Result<Box<dyn Stream<Item = Result<OpResponse, CurpError>> + Send + Unpin>, CurpError>
         {
             let bypassed = meta.is_bypassed();
-            let (tx, rx) = flume::bounded(2);
-            let resp_tx = Arc::new(ResponseSender::new(tx));
-            self.inner.propose_stream(&req, resp_tx, bypassed).await?;
-
-            let stream = rx.into_stream().map(|r| r.map_err(CurpError::from));
-            Ok(Box::new(stream))
+            self.handle_propose_stream(req, bypassed).await
         }
 
         fn record(&self, req: RecordRequest, _meta: Metadata) -> Result<RecordResponse, CurpError> {
-            self.inner.record(&req).map_err(CurpError::from)
+            self.handle_record(req)
         }
 
         fn read_index(&self, _meta: Metadata) -> Result<ReadIndexResponse, CurpError> {
-            self.inner.read_index().map_err(CurpError::from)
+            self.handle_read_index()
         }
 
         async fn shutdown(
@@ -246,10 +378,7 @@ mod quic_service_impl {
         ) -> Result<ShutdownResponse, CurpError> {
             let bypassed = meta.is_bypassed();
             meta.extract_span();
-            self.inner
-                .shutdown(req, bypassed)
-                .await
-                .map_err(CurpError::from)
+            self.handle_shutdown(req, bypassed).await
         }
 
         async fn propose_conf_change(
@@ -259,10 +388,7 @@ mod quic_service_impl {
         ) -> Result<ProposeConfChangeResponse, CurpError> {
             let bypassed = meta.is_bypassed();
             meta.extract_span();
-            self.inner
-                .propose_conf_change(req, bypassed)
-                .await
-                .map_err(CurpError::from)
+            self.handle_propose_conf_change(req, bypassed).await
         }
 
         fn publish(
@@ -272,41 +398,35 @@ mod quic_service_impl {
         ) -> Result<PublishResponse, CurpError> {
             let bypassed = meta.is_bypassed();
             meta.extract_span();
-            self.inner.publish(req, bypassed).map_err(CurpError::from)
+            self.handle_publish(req, bypassed)
         }
 
         fn fetch_cluster(
             &self,
             req: FetchClusterRequest,
         ) -> Result<FetchClusterResponse, CurpError> {
-            self.inner.fetch_cluster(req).map_err(CurpError::from)
+            self.handle_fetch_cluster(req)
         }
 
         fn fetch_read_state(
             &self,
             req: FetchReadStateRequest,
         ) -> Result<FetchReadStateResponse, CurpError> {
-            self.inner.fetch_read_state(req).map_err(CurpError::from)
+            self.handle_fetch_read_state(req)
         }
 
         async fn move_leader(
             &self,
             req: MoveLeaderRequest,
         ) -> Result<MoveLeaderResponse, CurpError> {
-            self.inner.move_leader(req).await.map_err(CurpError::from)
+            self.handle_move_leader(req).await
         }
 
         async fn lease_keep_alive(
             &self,
             stream: Box<dyn Stream<Item = Result<LeaseKeepAliveMsg, CurpError>> + Send + Unpin>,
         ) -> Result<LeaseKeepAliveMsg, CurpError> {
-            // CurpNode::lease_keep_alive is generic over E: Error + 'static.
-            // xlinerpc::Status implements Error, so convert CurpError → xlinerpc::Status.
-            let status_stream = stream.map(|r| r.map_err(xlinerpc::status::Status::from));
-            self.inner
-                .lease_keep_alive(status_stream)
-                .await
-                .map_err(CurpError::from)
+            self.handle_lease_keep_alive(stream).await
         }
     }
 
@@ -318,11 +438,11 @@ mod quic_service_impl {
             &self,
             req: AppendEntriesRequest,
         ) -> Result<AppendEntriesResponse, CurpError> {
-            self.inner.append_entries(&req).map_err(CurpError::from)
+            self.handle_append_entries(req)
         }
 
         fn vote(&self, req: VoteRequest) -> Result<VoteResponse, CurpError> {
-            self.inner.vote(&req).map_err(CurpError::from)
+            self.handle_vote(req)
         }
 
         async fn install_snapshot(
@@ -331,23 +451,125 @@ mod quic_service_impl {
                 dyn Stream<Item = Result<InstallSnapshotRequest, CurpError>> + Send + Unpin,
             >,
         ) -> Result<InstallSnapshotResponse, CurpError> {
-            // CurpNode::install_snapshot is generic over E: Error + 'static.
-            // xlinerpc::Status implements Error, so convert CurpError → xlinerpc::Status.
-            let status_stream = stream.map(|r| r.map_err(xlinerpc::status::Status::from));
-            self.inner
-                .install_snapshot(status_stream)
-                .await
-                .map_err(CurpError::from)
+            self.handle_install_snapshot(stream).await
         }
 
         fn trigger_shutdown(&self) -> Result<(), CurpError> {
-            use crate::rpc::TriggerShutdownRequest;
-            let _resp = self.inner.trigger_shutdown(TriggerShutdownRequest {});
-            Ok(())
+            self.handle_trigger_shutdown()
         }
 
         async fn try_become_leader_now(&self) -> Result<(), CurpError> {
-            use crate::rpc::TryBecomeLeaderNowRequest;
+            self.handle_try_become_leader_now().await
+        }
+    }
+}
+
+// ============================================================================// Server 抽象适配实现// ============================================================================
+
+#[async_trait]
+impl<C: Command, CE: CommandExecutor<C>, RC: RoleChange> CurpServer for Rpc<C, CE, RC> {
+    async fn handle_propose_stream(
+        &self,
+        req: ProposeRequest,
+        bypassed: bool,
+    ) -> Result<Box<dyn Stream<Item = Result<OpResponse, CurpError>> + Send + Unpin>, CurpError> {
+        let (tx, rx) = flume::bounded(2);
+        let resp_tx = Arc::new(crate::response::ResponseSender::new(tx));
+        self.inner.propose_stream(&req, resp_tx, bypassed).await?;
+
+        let stream = rx.into_stream().map(|r| r.map_err(CurpError::from));
+        Ok(Box::new(stream))
+    }
+    
+    fn handle_record(&self, req: RecordRequest) -> Result<RecordResponse, CurpError> {
+        self.inner.record(&req).map_err(CurpError::from)
+    }
+    
+    fn handle_read_index(&self) -> Result<ReadIndexResponse, CurpError> {
+        self.inner.read_index().map_err(CurpError::from)
+    }
+    
+    async fn handle_shutdown(
+        &self,
+        req: ShutdownRequest,
+        bypassed: bool,
+    ) -> Result<ShutdownResponse, CurpError> {
+        self.inner.shutdown(req, bypassed).await.map_err(CurpError::from)
+    }
+    
+    async fn handle_propose_conf_change(
+        &self,
+        req: ProposeConfChangeRequest,
+        bypassed: bool,
+    ) -> Result<ProposeConfChangeResponse, CurpError> {
+        self.inner.propose_conf_change(req, bypassed).await.map_err(CurpError::from)
+    }
+    
+    fn handle_publish(
+        &self,
+        req: PublishRequest,
+        bypassed: bool,
+    ) -> Result<PublishResponse, CurpError> {
+        self.inner.publish(req, bypassed).map_err(CurpError::from)
+    }
+    
+    fn handle_fetch_cluster(&self, req: FetchClusterRequest) -> Result<FetchClusterResponse, CurpError> {
+        self.inner.fetch_cluster(req).map_err(CurpError::from)
+    }
+    
+    fn handle_fetch_read_state(
+        &self,
+        req: FetchReadStateRequest,
+    ) -> Result<FetchReadStateResponse, CurpError> {
+        self.inner.fetch_read_state(req).map_err(CurpError::from)
+    }
+    
+    async fn handle_move_leader(
+        &self,
+        req: MoveLeaderRequest,
+    ) -> Result<MoveLeaderResponse, CurpError> {
+        self.inner.move_leader(req).await.map_err(CurpError::from)
+    }
+    
+    async fn handle_lease_keep_alive(
+        &self,
+        stream: Box<dyn Stream<Item = Result<LeaseKeepAliveMsg, CurpError>> + Send + Unpin>,
+    ) -> Result<LeaseKeepAliveMsg, CurpError> {
+        // CurpNode::lease_keep_alive is generic over E: Error + 'static.
+        // xlinerpc::Status implements Error, so convert CurpError → xlinerpc::Status.
+        let status_stream = stream.map(|r| r.map_err(xlinerpc::status::Status::from));
+        self.inner.lease_keep_alive(status_stream).await.map_err(CurpError::from)
+    }
+    
+    fn handle_append_entries(
+        &self,
+        req: AppendEntriesRequest,
+    ) -> Result<AppendEntriesResponse, CurpError> {
+        self.inner.append_entries(&req).map_err(CurpError::from)
+    }
+    
+    fn handle_vote(&self, req: VoteRequest) -> Result<VoteResponse, CurpError> {
+        self.inner.vote(&req).map_err(CurpError::from)
+    }
+    
+    async fn handle_install_snapshot(
+        &self,
+        stream: Box<dyn Stream<Item = Result<InstallSnapshotRequest, CurpError>> + Send + Unpin>,
+    ) -> Result<InstallSnapshotResponse, CurpError> {
+        // CurpNode::install_snapshot is generic over E: Error + 'static.
+        // xlinerpc::Status implements Error, so convert CurpError → xlinerpc::Status.
+        let status_stream = stream.map(|r| r.map_err(xlinerpc::status::Status::from));
+        self.inner.install_snapshot(status_stream).await.map_err(CurpError::from)
+    }
+    
+    fn handle_trigger_shutdown(&self) -> Result<(), CurpError> {
+        use crate::rpc::TriggerShutdownRequest;
+        let _resp = self.inner.trigger_shutdown(TriggerShutdownRequest {});
+        Ok(())
+    }
+    
+    async fn handle_try_become_leader_now(&self) -> Result<(), CurpError> {
+        use crate::rpc::TryBecomeLeaderNowRequest;
             let _ = self
                 .inner
                 .try_become_leader_now(&TryBecomeLeaderNowRequest {})
