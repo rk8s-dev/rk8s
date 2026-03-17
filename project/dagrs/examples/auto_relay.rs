@@ -19,8 +19,8 @@ impl MyNode {
     }
 }
 
-#[allow(deprecated)]
-fn main() {
+#[tokio::main]
+async fn main() {
     let mut node_table = NodeTable::default();
 
     let node_name = "auto_node";
@@ -33,10 +33,5 @@ fn main() {
         s -> a b,
         b -> a
     );
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .expect("failed to create tokio runtime");
-
-    g.start_with_runtime(&runtime).unwrap();
+    g.async_start().await.unwrap();
 }

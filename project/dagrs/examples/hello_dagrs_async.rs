@@ -1,10 +1,7 @@
 //! # Example: hello_dagrs_async
 //!
-//! This is the **recommended** async version of the hello_dagrs example.
 //! It demonstrates running a `Graph` inside `#[tokio::main]` using
 //! `graph.async_start().await` — no manual runtime management needed.
-//!
-//! For the synchronous variant (with explicit runtime), see `hello_dagrs.rs`.
 
 use std::sync::Arc;
 
