@@ -33,8 +33,8 @@ impl Router for SimpleRouter {
     }
 }
 
-#[test]
-fn test_router_merge() {
+#[tokio::test]
+async fn test_router_merge() {
     // A -> Router -> B
     //             -> C
     // B -> D
@@ -94,13 +94,10 @@ fn test_router_merge() {
     graph.add_edge(id_b, vec![id_d]);
     graph.add_edge(id_c, vec![id_d]);
 
-    let rt = tokio::runtime::Runtime::new().unwrap();
-    rt.block_on(async {
-        match graph.async_start().await {
-            Ok(_) => {}
-            Err(e) => panic!("Graph failed: {:?}", e),
-        }
-    });
+    match graph.async_start().await {
+        Ok(_) => {}
+        Err(e) => panic!("Graph failed: {:?}", e),
+    }
 
     assert!(*exec_b.lock().unwrap(), "B should run");
     assert!(!*exec_c.lock().unwrap(), "C should not run");
