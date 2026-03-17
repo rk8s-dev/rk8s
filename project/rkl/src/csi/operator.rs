@@ -107,7 +107,7 @@ impl SlayerFsOperator {
         })?;
 
         // 3. Build SlayerFS VFS (LocalFsBackend + ObjectBlockStore + sqlite meta)
-        let backend = LocalFsBackend::new(&vol_data_dir);
+        let backend = LocalFsBackend::new(&vol_data_dir.join("xxx"));
         let client = ObjectClient::new(backend);
         let meta_db_path = vol_data_dir.join("meta.db");
         let meta_url = format!("sqlite://{}?mode=rwc", meta_db_path.display());
