@@ -759,8 +759,8 @@ impl Graph {
                             Err(_) => {
                                 // Panic occurred
                                 let mut node_guard = node_ref.lock().await;
-                                node_guard.input_channels().close_all();
-                                node_guard.output_channels().close_all();
+                                node_guard.input_channels().close_all().await;
+                                node_guard.output_channels().close_all().await;
 
                                 error!("Execution panic [name: {}, id: {}]", node_name, id_val);
                                 let _ = event_sender.send(GraphEvent::NodeFailed {
@@ -1070,40 +1070,6 @@ impl Graph {
         });
     }
 
-    fn ensure_blocking_context() -> Result<(), GraphError> {
-        if tokio::runtime::Handle::try_current().is_ok() {
-            return Err(GraphError::BlockingCallInAsyncContext(
-                "A Tokio runtime is already active on this thread. Use `async_start().await` \
-                 instead of a blocking start API."
-                    .to_string(),
-            ));
-        }
-        Ok(())
-    }
-
-    /// Executes a single DAG synchronously with an externally managed Tokio runtime.
-    ///
-    /// This is a legacy compatibility adapter for synchronous callers.
-    /// It blocks the current thread until execution completes, but it does
-    /// not create or own the runtime.
-    ///
-    /// Prefer [`Graph::async_start`] in new code.
-    ///
-    /// # Deprecation
-    ///
-    /// This method is planned for removal in the next major version.
-    /// Migrate synchronous callers by moving graph execution into an async
-    /// context and awaiting [`Graph::async_start`].
-    #[deprecated(
-        note = "start_with_runtime() is a legacy sync adapter and will be removed in the next major version. Prefer async_start().await."
-    )]
-    pub fn start_with_runtime(
-        &mut self,
-        runtime: &tokio::runtime::Runtime,
-    ) -> Result<(), GraphError> {
-        Self::ensure_blocking_context()?;
-        runtime.block_on(self.async_start())
-    }
     /// Executes a single DAG within an existing async runtime.
     ///
     /// Use this method when you are already running inside an async context,
@@ -1424,8 +1390,8 @@ impl Graph {
                             Err(_) => {
                                 let mut node_guard: tokio::sync::MutexGuard<dyn Node> =
                                     node_ref.lock().await;
-                                node_guard.input_channels().close_all();
-                                node_guard.output_channels().close_all();
+                                node_guard.input_channels().close_all().await;
+                                node_guard.output_channels().close_all().await;
 
                                 error!("Execution panic [name: {}, id: {}]", node_name, id_val,);
                                 let _ = event_sender.send(GraphEvent::NodeFailed {
@@ -1802,9 +1768,8 @@ mod tests {
     ///
     /// Step 4: Run the graph and verify the output saved in the graph structure.
 
-    #[test]
-    #[allow(deprecated)]
-    fn test_graph_execution() {
+    #[tokio::test]
+    async fn test_graph_execution() {
         let mut graph = Graph::new();
         let mut node_table = NodeTable::new();
 
@@ -1825,11 +1790,7 @@ mod tests {
 
         graph.add_edge(node_id, vec![node1_id]);
 
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .unwrap();
-        match graph.start_with_runtime(&runtime) {
+        match graph.async_start().await {
             Ok(_) => {
                 let out = graph.execute_states[&node1_id].get_output().unwrap();
                 let out: &String = out.get().unwrap();
@@ -1861,9 +1822,8 @@ mod tests {
     /// Step 3: Add nodes to graph and set up dependencies between them.
     ///
     /// Step 4: Run the graph and verify the conditional node fails as expected.
-    #[test]
-    #[allow(deprecated)]
-    fn test_conditional_execution() {
+    #[tokio::test]
+    async fn test_conditional_execution() {
         let mut graph = Graph::new();
         let mut node_table = NodeTable::new();
 
@@ -1893,11 +1853,7 @@ mod tests {
         graph.add_edge(node_a_id, vec![node_b_id]);
 
         // Execute graph
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .unwrap();
-        match graph.start_with_runtime(&runtime) {
+        match graph.async_start().await {
             Ok(_) => {
                 // Node A should have failed
                 assert!(graph.execute_states[&node_a_id].get_output().is_none());
@@ -1906,22 +1862,6 @@ mod tests {
                 assert!(matches!(e, GraphError::ExecutionFailed { .. }));
             }
         }
-    }
-
-    #[test]
-    #[allow(deprecated)]
-    fn test_blocking_start_rejected_in_async_context() {
-        let mut graph = Graph::new();
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .unwrap();
-        let err_from_runtime =
-            runtime.block_on(async { graph.start_with_runtime(&runtime).unwrap_err() });
-        assert!(matches!(
-            err_from_runtime,
-            GraphError::BlockingCallInAsyncContext(_)
-        ));
     }
 
     #[tokio::test]
