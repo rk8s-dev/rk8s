@@ -7,12 +7,11 @@ use std::{
 use event_listener::Event;
 use tokio::sync::mpsc;
 use tokio_stream::{Stream, StreamExt, wrappers::ReceiverStream};
-use tonic::Status;
+use xlinerpc::status::Status;
 use tracing::{debug, warn};
 use utils::task_manager::{Listener, TaskManager, tasks::TaskName};
 use xlineapi::command::KeyRange;
-// TODO: use our own status type
-// use xlinerpc::status::Status;
+
 use crate::{
     header_gen::HeaderGenerator,
     rpc::{
@@ -379,7 +378,7 @@ where
     }
 }
 
-#[tonic::async_trait]
+
 impl Watch for WatchServer {
     ///Server streaming response type for the Watch method.
     type WatchStream = ReceiverStream<Result<WatchResponse, Status>>;
@@ -391,8 +390,8 @@ impl Watch for WatchServer {
     /// last compaction revision.
     async fn watch(
         &self,
-        request: tonic::Request<tonic::Streaming<WatchRequest>>,
-    ) -> Result<tonic::Response<Self::WatchStream>, Status> {
+        request: xlinerpc::Request<impl Stream<Item = Result<WatchRequest, Status>> + Send>,
+    ) -> Result<xlinerpc::Response<Self::WatchStream>, Status> {
         debug!("Receive Watch Connection {:?}", request);
         let req_stream = request.into_inner();
         let (tx, rx) = mpsc::channel(CHANNEL_SIZE);
@@ -407,7 +406,7 @@ impl Watch for WatchServer {
                 n,
             )
         });
-        Ok(tonic::Response::new(ReceiverStream::new(rx)))
+        Ok(xlinerpc::Response::from_data(ReceiverStream::new(rx)))
     }
 }
 

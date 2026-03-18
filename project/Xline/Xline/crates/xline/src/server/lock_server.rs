@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use async_stream::stream;
 use clippy_utilities::OverflowArithmetic;
-use tonic::Status;
+use xlinerpc::status::Status;
 use tonic::transport::{Channel, ClientTlsConfig, Endpoint};
 use tracing::debug;
 use utils::build_endpoint;
@@ -11,8 +11,7 @@ use xlineapi::{
     command::{Command, CommandResponse, CurpClient, KeyRange, SyncResponse},
     execute_error::ExecuteError,
 };
-// TODO: use our own status type
-// use xlinerpc::status::Status;
+
 use crate::{
     id_gen::IdGenerator,
     rpc::{
@@ -201,7 +200,7 @@ impl LockServer {
     }
 }
 
-#[tonic::async_trait]
+
 impl Lock for LockServer {
     /// Lock acquires a distributed shared lock on a given named lock.
     /// On success, it will return a unique key that exists so long as the
@@ -211,8 +210,8 @@ impl Lock for LockServer {
     /// lease associate with the owner expires.
     async fn lock(
         &self,
-        request: tonic::Request<LockRequest>,
-    ) -> Result<tonic::Response<LockResponse>, Status> {
+        request: xlinerpc::Request<LockRequest>,
+    ) -> Result<xlinerpc::Response<LockResponse>, Status> {
         debug!("Receive LockRequest {:?}", request);
         let auth_info = self.auth_store.try_get_auth_info_from_request(&request)?;
         let lock_req = request.into_inner();
@@ -277,7 +276,7 @@ impl Lock for LockServer {
             header,
             key: key.into_bytes(),
         };
-        Ok(tonic::Response::new(res))
+        Ok(xlinerpc::Response::from_data(res))
     }
 
     /// Unlock takes a key returned by Lock and releases the hold on lock. The
@@ -285,11 +284,11 @@ impl Lock for LockServer {
     /// ownership of the lock.
     async fn unlock(
         &self,
-        request: tonic::Request<UnlockRequest>,
-    ) -> Result<tonic::Response<UnlockResponse>, Status> {
+        request: xlinerpc::Request<UnlockRequest>,
+    ) -> Result<xlinerpc::Response<UnlockResponse>, Status> {
         debug!("Receive UnlockRequest {:?}", request);
         let auth_info = self.auth_store.try_get_auth_info_from_request(&request)?;
         let header = self.delete_key(&request.get_ref().key, auth_info).await?;
-        Ok(tonic::Response::new(UnlockResponse { header }))
+        Ok(xlinerpc::Response::from_data(UnlockResponse { header }))
     }
 }
