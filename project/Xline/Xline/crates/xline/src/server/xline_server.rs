@@ -8,7 +8,7 @@ use curp::{
     client::ClientBuilder as CurpClientBuilder,
     members::{ClusterInfo, get_cluster_info_from_remote},
     rpc::{QuicGrpcServer, TransportConfig},
-    server::{DB as CurpDB, Rpc, StorageApi as _},
+    server::{DB as CurpDB, Rpc, StorageApi as _, CurpServerImpl, CurpServiceRegistry, CurpRouter, CurpProtocolAdapter},
 };
 use dashmap::DashMap;
 use engine::{MemorySnapshotAllocator, RocksSnapshotAllocator, SnapshotAllocator};
@@ -66,7 +66,7 @@ use crate::{
 };
 
 /// Rpc Server of curp protocol
-pub(crate) type CurpServer = Rpc<Command, CommandExecutor, State<Arc<CurpClient>>>;
+pub(crate) type CurpServerImpl = Rpc<Command, CommandExecutor, State<Arc<CurpClient>>>;
 
 /// Xline server
 pub struct XlineServer {
@@ -318,7 +318,7 @@ impl XlineServer {
     ///
     /// Will return `Err` when `init_servers` return an error
     #[inline]
-    pub(crate) async fn init_router(
+    pub async fn init_router(
         &self,
         db: Arc<DB>,
         key_pair: Option<(EncodingKey, DecodingKey)>,
@@ -354,8 +354,25 @@ impl XlineServer {
             .add_service(RpcClusterServer::new(cluster_server))
             .add_service(ProtocolServer::new(auth_wrapper.clone()));
 
+        // Create service registry and register CurpServer
+        let mut registry = CurpServiceRegistry::new();
+        registry.register_service("curp".to_string(), Arc::new(curp_server));
+        let registry = Arc::new(registry);
+    
+        // Create router
+        let router = Arc::new(CurpRouter::new(registry));
+        
+        // Create CurpProtocolAdapter for inner service (internal Raft messages)
+        let adapter = CurpProtocolAdapter::new(router, "curp".to_string());
+        
+        // Create AuthWrapper for external service (CURP RPCs with auth)
+        let quic_auth_wrapper = AuthWrapper::new(curp_server, auth_storage.clone());
+    
         // Curp peer communication uses QUIC, with AuthWrapper for token-based auth
-        let quic_server = QuicGrpcServer::new_with_service(auth_wrapper, curp_server);
+        let quic_server = QuicGrpcServer::new_with_service(
+            Arc::new(quic_auth_wrapper),
+            Arc::new(adapter)
+        );
 
         let xline_router = {
             let (mut reporter, health_server) = tonic_health::server::health_reporter();
@@ -578,7 +595,7 @@ impl XlineServer {
         WatchServer,
         MaintenanceServer,
         ClusterServer,
-        CurpServer,
+        CurpServerImpl,
         AuthWrapper,
         Arc<CurpClient>,
     )> {
@@ -636,7 +653,7 @@ impl XlineServer {
 
         let curp_config = Arc::new(self.cluster_config.curp_config().clone());
 
-        let curp_server = CurpServer::new(
+        let curp_server = CurpServerImpl::new(
             Arc::clone(&self.cluster_info),
             *self.cluster_config.is_leader(),
             Arc::clone(&ce),
