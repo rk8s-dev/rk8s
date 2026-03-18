@@ -2,7 +2,7 @@ use std::io::{Cursor, Read};
 use std::mem::take;
 use std::sync::Arc;
 
-use crate::chuck::{BlockTag, ChunkSpan, PageTag};
+use crate::chunk::{BlockTag, ChunkSpan, PageTag};
 use crate::utils::NumCastExt;
 use crate::utils::zero::make_zero_bytes;
 use crate::vfs::config::WriteConfig;
@@ -371,7 +371,7 @@ impl Page {
 mod tests {
     use std::sync::Arc;
 
-    use crate::chuck::ChunkLayout;
+    use crate::chunk::ChunkLayout;
     use crate::vfs::cache::page::CacheSlice;
     use crate::vfs::config::WriteConfig;
     use bytes::Bytes;

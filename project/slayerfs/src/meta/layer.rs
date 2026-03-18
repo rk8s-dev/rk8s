@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 
-use crate::chuck::SliceDesc;
+use crate::chunk::SliceDesc;
 use crate::meta::client::session::SessionInfo;
 use crate::meta::file_lock::{FileLockInfo, FileLockQuery, FileLockRange, FileLockType};
 use crate::meta::store::{

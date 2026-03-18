@@ -261,7 +261,6 @@ impl DiskStorage {
         }
     }
 
-    #[allow(dead_code)]
     pub async fn remove(&self, key: &str) -> anyhow::Result<()> {
         let filename = Self::key_to_filename(key);
         let filepath = self.base_dir.join(filename);
@@ -1077,7 +1076,6 @@ impl Policy {
     }
 
     /// Clean up old entries
-    #[allow(dead_code)]
     async fn cleanup_old_entries(&self, max_idle_duration: Duration) {
         let mut stats = self.access_stats.write().await;
         let now = SystemTime::now()
@@ -1142,7 +1140,7 @@ impl Policy {
 ///
 /// ## Basic Usage
 /// ```ignore
-/// # use slayerfs::chuck::cache::ChunksCache;
+/// # use slayerfs::chunk::cache::ChunksCache;
 /// # async fn demo() -> anyhow::Result<()> {
 /// let cache = ChunksCache::new().await?;
 /// cache.insert("key1", &data).await?;
@@ -1213,7 +1211,6 @@ pub struct ChunksCache {
 
 impl ChunksCache {
     /// Creates a new ChunksCache with default configuration
-    #[allow(dead_code)]
     pub async fn new() -> anyhow::Result<Self> {
         Self::new_with_config(ChunksCacheConfig::default()).await
     }
@@ -1375,7 +1372,6 @@ impl ChunksCache {
         Ok(())
     }
 
-    #[allow(dead_code)]
     pub async fn remove(&self, key: &String) -> anyhow::Result<()> {
         info!("Cache REMOVE request for key: {}", key);
         trace!("Invalidating from hot cache: {}", key);

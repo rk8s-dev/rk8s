@@ -1,6 +1,8 @@
 pub(crate) trait NumCastExt {
     fn as_u32(&self) -> u32;
+
     fn as_usize(&self) -> usize;
+
     fn as_i64(&self) -> i64;
 }
 

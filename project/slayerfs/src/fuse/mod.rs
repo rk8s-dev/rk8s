@@ -14,7 +14,7 @@
 //! and provides utilities for mapping VFS metadata to FUSE attributes.
 pub(crate) mod adapter;
 pub mod mount;
-use crate::chuck::store::BlockStore;
+use crate::chunk::store::BlockStore;
 use crate::meta::MetaLayer;
 use crate::meta::file_lock::{FileLockQuery, FileLockRange, FileLockType};
 use crate::meta::store::{MetaError, SetAttrFlags, SetAttrRequest};
@@ -42,8 +42,8 @@ mod mount_tests {
     use super::*;
     use crate::cadapter::client::ObjectClient;
     use crate::cadapter::localfs::LocalFsBackend;
-    use crate::chuck::chunk::ChunkLayout;
-    use crate::chuck::store::ObjectBlockStore;
+    use crate::chunk::chunk::ChunkLayout;
+    use crate::chunk::store::ObjectBlockStore;
     use crate::fuse::mount::mount_vfs_unprivileged;
     use crate::meta::factory::create_meta_store_from_url;
     use std::fs;

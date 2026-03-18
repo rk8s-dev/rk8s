@@ -18,7 +18,7 @@
 //! # Example
 //!
 //! ```ignore
-//! use slayerfs::chuck::singleflight::SingleFlight;
+//! use slayerfs::chunk::singleflight::SingleFlight;
 //!
 //! let sf: SingleFlight<String, Vec<u8>> = SingleFlight::new();
 //!

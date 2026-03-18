@@ -26,7 +26,7 @@ use super::{
     chunk::ChunkLayout,
     span::{BlockTag, ChunkTag, Span},
 };
-use crate::chuck::BlockStore;
+use crate::chunk::BlockStore;
 use anyhow::Context;
 use std::marker::PhantomData;
 
@@ -139,7 +139,7 @@ pub fn key_for_block_of_slice(slice_id: u64, index: u64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::chuck::chunk::DEFAULT_BLOCK_SIZE;
+    use crate::chunk::chunk::DEFAULT_BLOCK_SIZE;
 
     #[test]
     fn test_single_block_span() {

@@ -40,7 +40,6 @@ impl From<&str> for PathHint {
     }
 }
 
-#[allow(dead_code)]
 #[derive(Error, Debug)]
 pub enum VfsError {
     // Filesystem/path-related errors (often used with a path hint).

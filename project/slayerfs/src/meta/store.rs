@@ -1,7 +1,7 @@
 //! Metadata store abstract interface
 //!
 //! Defines unified interface for filesystem metadata operations
-use crate::chuck::SliceDesc;
+use crate::chunk::SliceDesc;
 use crate::meta::client::session::{Session, SessionInfo};
 use crate::meta::config::Config;
 use crate::meta::entities::content_meta::EntryType;

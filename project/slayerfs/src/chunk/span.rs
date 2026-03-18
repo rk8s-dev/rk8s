@@ -11,7 +11,6 @@ impl SpanTag for ChunkTag {}
 pub struct BlockTag;
 impl SpanTag for BlockTag {}
 
-#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq)]
 /// Reserved for local cache.
 pub struct PageTag;

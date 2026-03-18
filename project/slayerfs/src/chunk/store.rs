@@ -1,11 +1,11 @@
 //! Storage backends: asynchronous block-level IO traits and in-memory implementations.
 
-use crate::chuck::singleflight::SingleFlight;
+use crate::chunk::singleflight::SingleFlight;
 use crate::utils::NumCastExt;
 use crate::utils::zero::make_zero_bytes;
 use crate::{
     cadapter::client::{ObjectBackend, ObjectClient},
-    chuck::cache::{ChunksCache, ChunksCacheConfig},
+    chunk::cache::{ChunksCache, ChunksCacheConfig},
 };
 use anyhow::{self, Context};
 use async_trait::async_trait;
@@ -397,7 +397,7 @@ mod tests {
     use super::*;
     use crate::cadapter::client::ObjectClient;
     use crate::cadapter::localfs::LocalFsBackend;
-    use crate::chuck::chunk::ChunkLayout;
+    use crate::chunk::chunk::ChunkLayout;
 
     #[tokio::test]
     async fn test_localfs_block_store_put_get() {

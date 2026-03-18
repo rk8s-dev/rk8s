@@ -2,7 +2,7 @@ mod cache;
 mod path_trie;
 pub mod session;
 
-use crate::chuck::SliceDesc;
+use crate::chunk::SliceDesc;
 use crate::meta::config::{CacheCapacity, CacheTtl};
 use crate::meta::file_lock::{FileLockInfo, FileLockQuery, FileLockRange, FileLockType};
 use crate::meta::layer::MetaLayer;
@@ -1917,7 +1917,7 @@ impl<T: MetaStore + 'static> MetaLayer for MetaClient<T> {
 mod tests {
     use super::*;
     use crate::meta::config::{CacheConfig, ClientOptions, Config, DatabaseConfig, DatabaseType};
-    use crate::meta::stores::database_store::DatabaseMetaStore;
+    use crate::meta::stores::database::DatabaseMetaStore;
     use crate::vfs::chunk_id_for;
     use std::time::Duration;
 
@@ -2029,7 +2029,7 @@ mod tests {
         let chunk_id = chunk_id_for(ino, 1).unwrap();
 
         let test_slices = (1..=10)
-            .map(|e| crate::chuck::SliceDesc {
+            .map(|e| crate::chunk::SliceDesc {
                 slice_id: e,
                 chunk_id,
                 offset: 0,

@@ -1,6 +1,6 @@
 //! File and directory handle management
 
-use crate::chuck::BlockStore;
+use crate::chunk::BlockStore;
 use crate::meta::MetaLayer;
 use crate::meta::store::FileAttr;
 use crate::vfs::fs::DirEntry;

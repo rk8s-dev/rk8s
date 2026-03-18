@@ -5,17 +5,16 @@
 //!
 //! - `DatabaseMetaStore`: SQL databases (PostgreSQL, SQLite)
 //! - `EtcdMetaStore`: Distributed etcd cluster
-pub mod database_store;
-pub mod etcd_store;
-pub(crate) mod etcd_watch;
+pub mod database;
+pub mod etcd;
 pub(crate) mod pool;
-pub mod redis_store;
+pub mod redis;
 
 // Re-export main types for convenience
-pub use database_store::DatabaseMetaStore;
-pub use etcd_store::EtcdMetaStore;
-pub(crate) use etcd_watch::{CacheInvalidationEvent, EtcdWatchWorker, WatchConfig};
-pub use redis_store::RedisMetaStore;
+pub use database::DatabaseMetaStore;
+pub use etcd::EtcdMetaStore;
+pub(crate) use etcd::watch::{CacheInvalidationEvent, EtcdWatchWorker, WatchConfig};
+pub use redis::RedisMetaStore;
 use std::future::Future;
 
 pub(crate) async fn build_paths_from_names<E, F, FR>(
@@ -111,7 +110,7 @@ fn trim_action(offset: u64, length: u64, cutoff_offset: u64) -> TrimAction {
     }
 }
 
-fn trim_slices_in_place(slices: &mut Vec<crate::chuck::SliceDesc>, cutoff_offset: u64) {
+fn trim_slices_in_place(slices: &mut Vec<crate::chunk::SliceDesc>, cutoff_offset: u64) {
     slices.retain(|s| s.offset < cutoff_offset);
     for slice in slices.iter_mut() {
         let end = slice.offset + slice.length;

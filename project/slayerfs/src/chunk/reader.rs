@@ -157,8 +157,8 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::chuck::store::InMemoryBlockStore;
-    use crate::chuck::writer::DataUploader;
+    use crate::chunk::store::InMemoryBlockStore;
+    use crate::chunk::writer::DataUploader;
     use crate::meta::SLICE_ID_KEY;
     use crate::meta::factory::create_meta_store_from_url;
     use crate::vfs::backend::Backend;

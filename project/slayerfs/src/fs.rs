@@ -9,8 +9,8 @@
 //! The design mirrors JuiceFS's FileSystem layer while delegating core I/O
 //! and handle lifecycle to VFS.
 
-use crate::chuck::chunk::ChunkLayout;
-use crate::chuck::store::BlockStore;
+use crate::chunk::chunk::ChunkLayout;
+use crate::chunk::store::BlockStore;
 use crate::meta::MetaStore;
 use crate::meta::client::MetaClient;
 use crate::meta::config::MetaClientConfig;
@@ -2044,7 +2044,7 @@ mod tests {
     use super::*;
     use crate::cadapter::client::ObjectClient;
     use crate::cadapter::localfs::LocalFsBackend;
-    use crate::chuck::store::ObjectBlockStore;
+    use crate::chunk::store::ObjectBlockStore;
     use crate::meta::factory::create_meta_store_from_url;
     use tempfile::tempdir;
 

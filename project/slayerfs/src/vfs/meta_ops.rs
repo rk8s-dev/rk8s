@@ -6,7 +6,7 @@
 //! `meta_lookup_path_required`) that were previously at the bottom of `fs.rs` live
 //! here as well, since they are purely metadata-layer concerns.
 
-use crate::chuck::store::BlockStore;
+use crate::chunk::store::BlockStore;
 use crate::meta::MetaLayer;
 use crate::meta::file_lock::{FileLockInfo, FileLockQuery, FileLockRange, FileLockType};
 use crate::meta::store::{

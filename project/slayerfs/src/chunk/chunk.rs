@@ -52,13 +52,11 @@ impl ChunkLayout {
     }
 
     #[inline]
-    #[allow(dead_code)]
     pub fn chunk_index_of(&self, file_offset: u64) -> u64 {
         file_offset / self.chunk_size
     }
 
     #[inline]
-    #[allow(dead_code)]
     pub fn within_chunk_offset(&self, file_offset: u64) -> u64 {
         file_offset % self.chunk_size
     }
