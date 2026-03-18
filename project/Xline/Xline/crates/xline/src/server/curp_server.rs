@@ -1,9 +1,8 @@
 use std::sync::Arc;
 
 use curp::rpc::{
-        FetchClusterRequest,
-        ProposeConfChangeRequest, ProposeRequest, Protocol,
-        PublishRequest, ReadIndexRequest, RecordRequest, ShutdownRequest,
+        FetchClusterRequest, FetchReadStateRequest, ProposeConfChangeRequest, ProposeRequest, Protocol, PublishRequest, ReadIndexRequest, RecordRequest, ShutdownRequest,
+        MoveLeaderRequest, LeaseKeepAliveMsg
     };
 use crate::router::endpoint::EndPoint as RouterEndpoint;
 
@@ -68,6 +67,24 @@ where
                 "/FetchCluster",
                 move |this: Arc<T>, request: tonic::Request<FetchClusterRequest>| async move {
                     this.fetch_cluster(request).await
+                },
+            )
+            .add_unary_fn(
+                "/FetchReadState",
+                move |this: Arc<T>, request: tonic::Request<FetchReadStateRequest>| async move {
+                    this.fetch_read_state(request).await
+                },
+            )
+            .add_unary_fn(
+                "/MoveLeader",
+                move |this: Arc<T>, request: tonic::Request<MoveLeaderRequest>| async move {
+                    this.move_leader(request).await
+                },
+            )
+            .add_client_streaming_fn(
+                "/LeaseKeepAlive",
+                move |this: Arc<T>, request: tonic::Request<tonic::Streaming<LeaseKeepAliveMsg>>| async move {
+                    this.lease_keep_alive(request).await
                 },
             )
     }

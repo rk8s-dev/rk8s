@@ -332,9 +332,21 @@ impl Server {
                 },
             )
             .add_unary_fn(
+                "/RoleList",
+                move |this: Arc<AuthServer>, request: tonic::Request<AuthRoleListRequest>| async move {
+                    this.role_list(request).await
+                },
+            )
+            .add_unary_fn(
                 "/RoleDelete",
                 move |this: Arc<AuthServer>, request: tonic::Request<AuthRoleDeleteRequest>| async move {
                     this.role_delete(request).await
+                },
+            )
+            .add_unary_fn(
+                "/RoleGrantPermission",
+                move |this: Arc<AuthServer>, request: tonic::Request<AuthRoleGrantPermissionRequest>| async move {
+                    this.role_grant_permission(request).await
                 },
             )
             .add_unary_fn(

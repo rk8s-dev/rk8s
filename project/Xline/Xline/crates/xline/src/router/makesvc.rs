@@ -273,3 +273,74 @@ where
         Box::pin(fut)
     }
 }
+
+#[derive(Clone)]
+pub(crate) struct MakeClientStreamingSvc<SVC, Input, Output> {
+    inner: SVC,
+    _1: std::marker::PhantomData<Input>,
+    _2: std::marker::PhantomData<Output>,
+}
+
+impl<SVC, Input, Output> MakeClientStreamingSvc<SVC, Input, Output>
+where
+    SVC: Clone,
+{
+    pub(crate) fn new(service: SVC) -> Self {
+        MakeClientStreamingSvc {
+            inner: service,
+            _1: std::marker::PhantomData,
+            _2: std::marker::PhantomData,
+        }
+    }
+}
+
+impl<B, SVC, Input, Output> Service<Request<B>>
+    for WithEncodingOption<MakeClientStreamingSvc<SVC, Input, Output>>
+where
+    Input: Message + Default + Send + 'static,
+    Output: Message + Default + Send + 'static + Clone,
+    SVC: Service<
+        tonic::Request<Streaming<Input>>,
+        Response = tonic::Response<
+            Output
+        >, Error = tonic::Status
+    >
+        + Clone
+        + 'static
+        + Send
+        + Sync,
+    SVC::Future: Send,
+    B: Body + Send + 'static,
+    B::Error: Into<super::Error> + Send + 'static,
+{
+    type Response = http::Response<BoxBody>;
+    type Error = std::convert::Infallible;
+    type Future = BoxFuture<Self::Response, Self::Error>;
+
+    fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        Poll::Ready(Ok(()))
+    }
+
+    fn call(&mut self, request: Request<B>) -> Self::Future {
+        let accept_compression_encodings = self.accept_compression_encodings;
+        let send_compression_encodings = self.send_compression_encodings;
+        let max_decoding_message_size = self.max_decoding_message_size;
+        let max_encoding_message_size = self.max_encoding_message_size;
+        let method = self.svc.inner.clone();
+        let fut = async move {
+            let mut grpc =
+                Grpc::<ProstCodec<Output, Input>>::new(ProstCodec::<Output, Input>::default())
+                    .apply_compression_config(
+                        accept_compression_encodings,
+                        send_compression_encodings,
+                    )
+                    .apply_max_message_size_config(
+                        max_decoding_message_size,
+                        max_encoding_message_size,
+                    );
+            let res = grpc.client_streaming(method, request).await;
+            Ok(res)
+        };
+        Box::pin(fut)
+    }
+}

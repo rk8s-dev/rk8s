@@ -7,6 +7,7 @@ use super::{
         MakeUnarySVC,
         MakeStreamingSvc,
         MakeServerStreamingSvc,
+        MakeClientStreamingSvc,
     },
 };
 use prost::Message;
@@ -123,6 +124,31 @@ where
             axum::routing::post_service(WithEncodingOption::new(MakeServerStreamingSvc::new(
                 handler_service,
             ))),
+        );
+        self
+    }
+
+    pub fn add_client_streaming_fn<InputScheme, OutputScheme, F, Fut>(mut self, name: &str, handler: F) -> Self
+    where
+        InputScheme: Clone + Default + Message + Send + 'static,
+        OutputScheme: Clone + Default + Message + Send + 'static,
+        F: FnMut(T, tonic::Request<Streaming<InputScheme>>) -> Fut + Clone + Send + Sync + 'static,
+        Fut: Future<Output = Result<tonic::Response<OutputScheme>, tonic::Status>> + Send + 'static,
+    {
+        let state = self.state.clone();
+        let handler_service = service_fn(move |request: tonic::Request<Streaming<InputScheme>>| {
+            let mut handler = handler.clone();
+            let state = state.clone();
+            async move { handler(state.clone(), request).await }
+        });
+
+        self.router = self.router.route_service(
+            name,
+            axum::routing::post_service(
+                WithEncodingOption::new(MakeClientStreamingSvc::new(
+                    handler_service,
+                )
+            )),
         );
         self
     }

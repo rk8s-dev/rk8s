@@ -5,6 +5,7 @@ use tokio::fs;
 use anyhow::{Result, anyhow};
 use clippy_utilities::{NumericCast, OverflowArithmetic};
 use curp::{
+    self,
     client::ClientBuilder as CurpClientBuilder,
     members::{ClusterInfo, get_cluster_info_from_remote},
     rpc::{InnerProtocolServer, ProtocolServer},
@@ -72,7 +73,10 @@ use crate::{
     header_gen::HeaderGenerator,
     id_gen::IdGenerator,
     metrics::Metrics,
-    router::Server,
+    router::{
+        RouterBuilder,
+        Server,
+    },
     rpc::{
         AuthServer as RpcAuthServer, ClusterServer as RpcClusterServer, KvServer as RpcKvServer,
         LeaseServer as RpcLeaseServer, LockServer as RpcLockServer,
@@ -312,7 +316,7 @@ impl XlineServer {
         &self,
         db: Arc<DB>,
         key_pair: Option<(EncodingKey, DecodingKey)>,
-    ) -> Result<(Server, Server, Arc<CurpClient>)> {
+    ) -> Result<(RouterBuilder, RouterBuilder, Arc<CurpClient>)> {
         let (
             kv_server,
             lock_server,
@@ -325,13 +329,13 @@ impl XlineServer {
             auth_wrapper,
             curp_client,
         ) = self.init_servers(db, key_pair).await?;
-        let mut builder = Server::new();
+        let mut builder = RouterBuilder::new();
 
         builder = builder.tls_config(&self.tls_config);
 
         let xline_router = builder
             .clone()
-        .add_subrouter( "/v3lockpb.Lock", LockEndPointServer::new(lock_server).endpoint().into(),)
+        .add_subrouter( "/v3lockpb.Lock", LockEndPointServer::new(lock_server).endpoint().into())
         .add_subrouter( "/etcdserverpb.Auth", AuthEndpointServer::new(auth_server).endpoint().into())
         .add_subrouter( "/etcdserverpb.Lease", LeaseEndpointServer::from_arc(lease_server).endpoint().into())
         .add_subrouter( "/etcdserverpb.KV", KvEndpointServer::new(kv_server).endpoint().into())
@@ -341,14 +345,14 @@ impl XlineServer {
         .add_subrouter( "/commandpb.Protocol", AuthWrapperEndpointServer::new(auth_wrapper).endpoint().into());
         let curp_router = builder
             .add_subrouter("/commandpb.Protocol", ProtocolEndpointServer::new(curp_server.clone()).endpoint().into())
-            .add_subrouter("innerprotocol", ProtocolEndpointServer::new(curp_server).endpoint().into());
+            .add_subrouter("/inner_messagepb.InnerProtocol", ProtocolEndpointServer::new(curp_server).endpoint().into());
 
         let xline_router = {
             let (mut reporter, health_server) = tonic_health::server::health_reporter();
             reporter
                 .set_service_status("", tonic_health::ServingStatus::Serving)
                 .await;
-            xline_router.add_service("", health_server)
+            xline_router.add_service("/", health_server)
         };
 
         Ok((xline_router, curp_router, curp_client))
@@ -489,11 +493,14 @@ impl XlineServer {
         let db = DB::open(&self.storage_config.engine)?;
         let key_pair = Self::read_key_pair(&self.auth_config).await?;
         let (xline_router, curp_router, curp_client) = self.init_routers(db, key_pair).await?;
+        let server = Server::new()
+            .add_server("localhost", xline_router, client_listen_urls)
+            .add_server("127.0.0.1", curp_router, peer_listen_urls);
         self.task_manager
-            .spawn(TaskName::TonicServer, |_| async move {
+            .spawn(TaskName::TonicServer, |n| async move {
                 tokio::select! {
-                    _ = xline_router.serve(client_listen_urls) => {},
-                    _ = curp_router.serve(peer_listen_urls) => {},
+                    _ = server.serve() => {},
+                    _ = n.wait() => {},
                 }
             });
         if let Err(e) = self.publish(curp_client).await {

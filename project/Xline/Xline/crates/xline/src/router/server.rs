@@ -19,6 +19,7 @@ use std::{
     convert::Infallible,
     future::poll_fn,
     sync::Arc,
+    collections::HashMap,
 };
 use tower::Service;
 use utils::config::TlsConfig;
@@ -26,12 +27,12 @@ use utils::config::TlsConfig;
 
 /// A Server for creating axum routers for gRPC services
 #[derive(Debug, Default, Clone)]
-pub struct Server {
+pub struct RouterBuilder {
     router: Router,
     tls_config: TlsConfig,
 }
 
-impl Server {
+impl RouterBuilder {
     /// Create a new Server with an empty router
     pub fn new() -> Self {
         Self {
@@ -74,47 +75,74 @@ impl Server {
             tls_config: config.clone(),
         }
     }
+}
+
+pub(crate) struct Server {
+    // servername: (router, peer_urls)
+    routers: HashMap<String, (RouterBuilder, Vec<String>)>
+}
+
+impl Server {
+    pub(crate) fn new() -> Self {
+        Server {
+            routers: HashMap::new()
+        }
+    }
+
+    /// Add a router nested to the router
+    pub(crate) fn add_server(mut self, name: &str, router: RouterBuilder, peer_urls: impl IntoIterator<Item = String>) -> Self {
+        if let Some(_) = self.routers.insert(name.to_string(), (router, peer_urls.into_iter().collect())) {
+            panic!("{}", format!("duplicate server name {name}"));
+        }
+        self
+    }
 
     pub(crate) async fn serve(
         self,
-        peer_urls: impl IntoIterator<Item = String>,
     ) -> Result<(), super::Error>
-where {
-        // let concurrency_limit = self.concurrency_limit;
-        // let init_connection_window_size = self.init_connection_window_size;
-        // let init_stream_window_size = self.init_stream_window_size;
-        // let max_concurrent_streams = self.max_concurrent_streams;
-        // let timeout = self.timeout;
-        // let max_frame_size = self.max_frame_size;
-        // let max_connection_age = self.max_connection_age;
-
+    {
         let listeners = QuicListeners::builder().map(|builder| {
             builder
                 .without_client_cert_verifier()
                 .with_parameters(handy::server_parameters())
+                .with_alpns(["h3"])
                 .listen(4096)
         })?;
-        listeners.add_server(
-            "localhost",
-            self.tls_config
-                .peer_cert_path()
-                .clone()
-                .expect("server tls cert config is needed")
-                .as_path(),
-            self.tls_config
-                .peer_key_path()
-                .clone()
-                .expect("server tls key config is needed")
-                .as_path(),
-            peer_urls
-                .into_iter()
-                .map(|s| s.parse().map_err(|e: ParseBindUriError| anyhow::anyhow!(e)))
-                .collect::<anyhow::Result<Vec<BindUri>>>()?,
-            None,
-        )?;
+        for (server_name, (router_builder, peer_urls)) in &self.routers {
+            listeners.add_server(
+                server_name,
+                router_builder.tls_config
+                    .peer_cert_path()
+                    .clone()
+                    .expect("server tls cert config is needed")
+                    .as_path(),
+                router_builder.tls_config
+                    .peer_key_path()
+                    .clone()
+                    .expect("server tls key config is needed")
+                    .as_path(),
+                peer_urls
+                    .into_iter()
+                    .map(|s| s.parse().map_err(|e: ParseBindUriError| anyhow::anyhow!(e)))
+                    .collect::<anyhow::Result<Vec<BindUri>>>()?,
+                None,
+            )?;
 
+            let _ = listeners
+                    .get_server(&server_name)
+                    .unwrap()
+                    .bind_interfaces()
+                    .iter()
+                    .next()
+                    .unwrap()
+                    .1
+                    .borrow()?;
+        }
+
+        // tracing::info!("yes quic is serving");
         // handle incoming connections and requests
-        while let Ok((new_conn, _server, _pathway, _link)) = listeners.accept().await {
+        while let Ok((new_conn, server, _pathway, _link)) = listeners.accept().await {
+            tracing::info!("get a conenction  {server:?} {_pathway:?} {_link:?}");
             let h3_conn =
                 match h3::server::Connection::new(h3_shim::QuicConnection::new(Arc::new(new_conn)))
                     .await
@@ -128,7 +156,9 @@ where {
                         continue;
                     }
                 };
-            let _ = tokio::spawn(Self::handle_connection(self.router.clone(), h3_conn));
+            if let Some((RouterBuilder { router, ..}, _)) = self.routers.get(&server) {
+                let _ = tokio::spawn(Self::handle_connection(router.clone(), h3_conn));
+            }
         }
 
         Ok(())
@@ -155,8 +185,14 @@ where {
                         })
                     });
                 }
-                Ok(None) => break,
-                Err(..) => break,
+                Ok(None) => {
+                    tracing::error!("failed to accept a conenction");
+                    break;
+                },
+                Err(_) => {
+                    // tracing::error!("encounter an error: {e:?}");
+                    break
+                },
             }
         }
     }
@@ -188,13 +224,16 @@ where
             .get(http::header::CONTENT_LENGTH)
             .and_then(|len| len.to_str().ok().and_then(|x| x.parse().ok())),
     );
-    let resp = service.call(Request::new(body)).await?;
+    let (parts, _) = request.into_parts();
+    let resp = service.call(Request::from_parts(parts, body)).await?;
     let (parts, body) = resp.into_parts();
     send.send_response(Response::from_parts(parts, ())).await?;
     copy_response_body(send, body).await?;
     Ok(())
 }
+#[allow(unused)]
 async fn unimplemented() -> impl axum::response::IntoResponse {
+    tracing::error!("unimplemented");
     let status = http::StatusCode::OK;
     let headers = [
         (tonic::Status::GRPC_STATUS, HeaderValue::from_static("12")),
@@ -221,7 +260,12 @@ where
     while let Some(frame) = poll_fn(|cx| body.as_mut().poll_frame(cx)).await {
         match frame?.into_data() {
             Ok(data) => send.send_data(data).await?,
-            Err(_) => continue,
+            Err(frame) => {
+                if let Ok(trailers) = frame.into_trailers() {
+                    send.send_trailers(trailers).await?;
+                }
+                continue
+            },
         }
     }
 
