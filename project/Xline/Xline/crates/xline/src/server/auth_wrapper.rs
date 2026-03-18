@@ -167,17 +167,45 @@ impl Protocol for AuthWrapper {
         );
         // Try full xlinerpc auth (token + mTLS peer certs)
         let mut req = request.get_ref().clone();
-        if let Some(auth_info) = self.auth_store.try_get_auth_info_from_request(&request)? {
+    
+        let auth_info = if self.auth_store.is_enabled() {
+            if let Some(token) = get_token(request.metadata()) {
+                Some(self.auth_store.verify(&token)?)
+            } else {
+                if let Some(cn) = get_cn_from_xlinerpc_request(&request) {
+                    Some(AuthInfo {
+                        username: cn,
+                        auth_revision: self.auth_store.revision(),
+                    })
+                } else {
+                    None
+                }
+            }
+        } else {
+            None
+        };
+    
+        if let Some(auth_info) = auth_info {
             let mut command: Command = req.cmd().map_err(|e| Status::internal(e.to_string()))?;
             command.set_auth_info(auth_info);
             req.command = command.encode();
         }
+    
         let meta = metadata_from_xlinerpc(request.meta());
         let stream = CurpService::propose_stream(&self.curp_server, req, meta)
             .await
             .map_err(curp_error_to_xlinerpc_status)?;
         let mapped = stream.map(|r| r.map_err(curp_error_to_xlinerpc_status));
         Ok(xlinerpc::Response::from_data(Box::pin(mapped)))
+    }
+
+    // Helper function: Get CN from xlinerpc::Request
+    fn get_cn_from_xlinerpc_request<T>(request: &xlinerpc::Request<T>) -> Option<String> {
+        if let Some(tonic_request) = request.inner_tonic_request() {
+            get_cn(tonic_request)
+        } else {
+            None
+        }
     }
 
     async fn record(
