@@ -64,7 +64,7 @@ The project already includes a bundle and `config.json` file for the Pause conta
 ### Set up network 
 Prepare network config:
 ```bash
-cp rk8s/project/test/test.conflist etc/cni/net.d
+$ cp rk8s/project/test/test.conflist /etc/cni/net.d
 ```
 
 ## Usage Details

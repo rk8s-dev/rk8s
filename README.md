@@ -167,7 +167,7 @@ cargo build -p rks
 
 2. **Prepare network config:**
 ```bash
-sudo cp rk8s/project/test/test.conflist /etc/cni/net.d
+sudo cp test/test.conflist /etc/cni/net.d
 ```
 
 3. **Prepare container images:**
