@@ -4,28 +4,372 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
-use cni_plugin::config::IpamConfig;
+use cni_plugin::Command;
+use cni_plugin::delegation::delegate;
+use cni_plugin::reply::{SuccessReply, reply};
 use cni_plugin::{
-    Cni, Command, Inputs,
-    config::NetworkConfig,
-    delegation::delegate,
+    Cni, Inputs,
+    config::{IpamConfig, NetworkConfig},
     error::CniError,
-    reply::{SuccessReply, reply},
 };
 use ipnetwork::{Ipv4Network, Ipv6Network};
-use log::{debug, error, info};
-
 use serde_json::{Map, Value, json};
-use types::{FlannelNetConf, SubnetEnv};
+use tracing::{debug, error, info};
 
-mod types;
-//const DEFAULT_SUBNET_FILE: &str = "/run/flannel/subnet.env";
+use crate::types::{FlannelNetConf, SubnetEnv};
+
 const DEFAULT_SUBNET_FILE: &str = "/etc/cni/net.d/subnet.env";
 const DEFAULT_DATA_DIR: &str = "/var/lib/cni/flannel";
 
-/// Entry point of the CNI bridge plugin.
-fn main() {
-    cni_plugin::logger::install("libnetwork.log");
+pub fn load_flannel_net_conf(config: NetworkConfig) -> Result<FlannelNetConf, CniError> {
+    let mut json_value = serde_json::to_value(&config).map_err(CniError::from)?;
+
+    if json_value.get("subnetFile").is_none() {
+        json_value["subnetFile"] = serde_json::json!(DEFAULT_SUBNET_FILE);
+    }
+    if json_value.get("dataDir").is_none() {
+        json_value["dataDir"] = serde_json::json!(DEFAULT_DATA_DIR);
+    }
+
+    let flannel_conf: FlannelNetConf =
+        serde_json::from_value(json_value).map_err(CniError::from)?;
+
+    Ok(flannel_conf)
+}
+
+pub fn load_flannel_subnet_env(path: &str) -> Result<SubnetEnv, CniError> {
+    let content = std::fs::read_to_string(path).map_err(|e| CniError::Generic(e.to_string()))?;
+
+    let mut subnet_env = SubnetEnv {
+        networks: Vec::new(),
+        subnet: None,
+        ip6_networks: Vec::new(),
+        ip6_subnet: None,
+        mtu: None,
+        ipmasq: None,
+    };
+
+    for line in content.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+
+        if let Some((k, v)) = line.split_once('=') {
+            let k = k.trim();
+            let v = v.trim();
+            match k {
+                "RKL_NETWORK" => {
+                    subnet_env.networks = v
+                        .split(',')
+                        .map(|s| s.parse::<Ipv4Network>())
+                        .collect::<Result<_, _>>()
+                        .map_err(|e| CniError::Generic(e.to_string()))?;
+                }
+                "RKL_IPV6_NETWORK" => {
+                    subnet_env.ip6_networks = v
+                        .split(',')
+                        .map(|s| s.parse::<Ipv6Network>())
+                        .collect::<Result<_, _>>()
+                        .map_err(|e| CniError::Generic(e.to_string()))?;
+                }
+                "RKL_SUBNET" => {
+                    subnet_env.subnet = Some(
+                        v.parse::<Ipv4Network>()
+                            .map_err(|e| CniError::Generic(e.to_string()))?,
+                    );
+                }
+                "RKL_IPV6_SUBNET" => {
+                    subnet_env.ip6_subnet = Some(
+                        v.parse::<Ipv6Network>()
+                            .map_err(|e| CniError::Generic(e.to_string()))?,
+                    );
+                }
+                "RKL_MTU" => {
+                    subnet_env.mtu = Some(
+                        v.parse::<u32>()
+                            .map_err(|e| CniError::Generic(e.to_string()))?,
+                    );
+                }
+                "RKL_IPMASQ" => {
+                    subnet_env.ipmasq = Some(
+                        v.parse::<bool>()
+                            .map_err(|e| CniError::Generic(e.to_string()))?,
+                    );
+                }
+                _ => {}
+            }
+        }
+    }
+
+    Ok(subnet_env)
+}
+
+pub fn get_delegate_ipam(
+    flannel_conf: &mut FlannelNetConf,
+    subnet_env: &SubnetEnv,
+) -> Result<(), CniError> {
+    if flannel_conf.net_conf.ipam.is_none() {
+        flannel_conf.net_conf.ipam = Some(IpamConfig {
+            plugin: "libipam".to_string(),
+            specific: HashMap::new(),
+        });
+    }
+
+    let ipam = flannel_conf
+        .net_conf
+        .ipam
+        .as_mut()
+        .ok_or_else(|| CniError::Generic("missing ipam config".to_string()))?;
+
+    if ipam.plugin.is_empty() {
+        ipam.plugin = "libipam".to_string();
+    }
+
+    let mut ranges = Vec::new();
+    if let Some(sn) = &subnet_env.subnet {
+        let gateway_ip = sn.nth(1).ok_or_else(|| {
+            CniError::Generic(format!("failed to compute gateway from subnet {sn}"))
+        })?;
+        ranges.push(Value::Array(vec![json!({
+            "gateway": gateway_ip.to_string(),
+            "subnet": sn.to_string()
+        })]));
+    }
+
+    if let Some(ip6_sn) = &subnet_env.ip6_subnet {
+        ranges.push(Value::Array(vec![json!({"subnet": ip6_sn.to_string()})]));
+    }
+
+    if let Some(existing_ranges) = ipam.specific.get("ranges")
+        && let Some(arr) = existing_ranges.as_array()
+    {
+        ranges.extend(arr.clone());
+    }
+
+    ipam.specific.insert("ranges".into(), Value::Array(ranges));
+
+    let mut routes = Vec::new();
+    let gateway_v4 = subnet_env.subnet.and_then(|subnet| subnet.nth(1));
+
+    routes.extend(subnet_env.networks.iter().map(|n| {
+        let mut route = json!({"dst": n.to_string()});
+        if let Some(gw) = gateway_v4
+            && let Some(obj) = route.as_object_mut()
+        {
+            obj.insert("gw".to_string(), json!(gw.to_string()));
+        }
+
+        route
+    }));
+
+    routes.extend(
+        subnet_env
+            .ip6_networks
+            .iter()
+            .map(|n| json!({"dst": n.to_string()})),
+    );
+
+    if let Some(gw) = gateway_v4 {
+        routes.push(json!({"dst": "0.0.0.0/0", "gw": gw.to_string()}));
+    }
+
+    ipam.specific.insert("routes".into(), Value::Array(routes));
+
+    Ok(())
+}
+
+pub fn build_delegate_add_config(
+    mut config: FlannelNetConf,
+    container_id: &str,
+) -> Result<NetworkConfig, CniError> {
+    let subnet_file = config
+        .subnet_file
+        .clone()
+        .ok_or_else(|| CniError::Generic("subnetFile is required".to_string()))?;
+    let subnet_env = load_flannel_subnet_env(&subnet_file)?;
+
+    match &mut config.delegate {
+        None => config.delegate = Some(HashMap::new()),
+        Some(delegate) => {
+            if !delegate
+                .get("type")
+                .map(|it| it.is_string())
+                .unwrap_or(false)
+            {
+                return Err(CniError::Generic(
+                    "'delegate' dictionary, if present, must have (string) 'type' field"
+                        .to_string(),
+                ));
+            }
+
+            if delegate.get("name").is_some() {
+                return Err(CniError::Generic(
+                    "'delegate' dictionary must not have 'name' field, it'll be set by flannel"
+                        .to_string(),
+                ));
+            }
+
+            if delegate.get("ipam").is_some() {
+                return Err(CniError::Generic(
+                    "'delegate' dictionary must not have 'ipam' field, it'll be set by flannel"
+                        .to_string(),
+                ));
+            }
+        }
+    }
+
+    let delegate_mut = config
+        .delegate
+        .as_mut()
+        .ok_or_else(|| CniError::Generic("missing delegate config".to_string()))?;
+
+    delegate_mut.insert("name".into(), Value::String(config.net_conf.name.clone()));
+    delegate_mut
+        .entry("type".into())
+        .or_insert(Value::String("libbridge".to_string()));
+
+    if !delegate_mut.contains_key("ipMasq") {
+        delegate_mut.insert(
+            "ipMasq".into(),
+            Value::Bool(!subnet_env.ipmasq.unwrap_or(false)),
+        );
+    }
+
+    delegate_mut
+        .entry("mtu".into())
+        .or_insert(Value::Number(subnet_env.mtu.unwrap_or(1500).into()));
+
+    if delegate_mut.get("type").and_then(Value::as_str) == Some("libbridge") {
+        delegate_mut
+            .entry("isGateway".into())
+            .or_insert(Value::Bool(true));
+    }
+
+    delegate_mut.insert(
+        "cniVersion".into(),
+        Value::String(config.net_conf.cni_version.to_string()),
+    );
+
+    get_delegate_ipam(&mut config, &subnet_env)?;
+    let delegate_mut = config.delegate.as_mut().unwrap();
+    if let Some(ipam_config) = config.net_conf.ipam.clone() {
+        let ipam_value = serde_json::to_value(ipam_config)
+            .map_err(|e| CniError::Generic(format!("Failed to serialize ipam config: {e}")))?;
+        delegate_mut.insert("ipam".into(), ipam_value);
+    }
+
+    let serde_map: Map<String, Value> = config
+        .delegate
+        .as_ref()
+        .ok_or_else(|| CniError::Generic("missing delegate config".to_string()))?
+        .clone()
+        .into_iter()
+        .collect();
+
+    let delegate_config: NetworkConfig = serde_json::from_value(Value::Object(serde_map))
+        .map_err(|e| CniError::Generic(format!("Failed to parse delegate config: {e}")))?;
+
+    let data_dir = config
+        .data_dir
+        .clone()
+        .ok_or_else(|| CniError::Generic("dataDir is required".to_string()))?;
+    let netconf_bytes = serde_json::to_vec(&delegate_config).map_err(CniError::Json)?;
+    save_scratch_net_conf(container_id, &data_dir, &netconf_bytes)
+        .map_err(|e| CniError::Generic(e.to_string()))?;
+
+    Ok(delegate_config)
+}
+
+pub fn build_delegate_del_config(
+    config: FlannelNetConf,
+    container_id: &str,
+) -> Result<Option<NetworkConfig>, CniError> {
+    let data_dir = config
+        .data_dir
+        .ok_or_else(|| CniError::Generic("dataDir is required".to_string()))?;
+
+    let (_cleanup, netconf_bytes) = match consume_scratch_net_conf(container_id, data_dir.as_str())
+    {
+        Ok((cleanup, bytes)) => (cleanup, bytes),
+        Err(err) => {
+            if err
+                .downcast_ref::<std::io::Error>()
+                .map(|e| e.kind() == std::io::ErrorKind::NotFound)
+                .unwrap_or(false)
+            {
+                return Ok(None);
+            }
+            return Err(CniError::Generic(format!(
+                "Failed to read scratch net config: {err}"
+            )));
+        }
+    };
+
+    let delegate_config: NetworkConfig = serde_json::from_slice(&netconf_bytes)
+        .map_err(|e| CniError::Generic(format!("failed to parse netconf: {e}")))?;
+
+    Ok(Some(delegate_config))
+}
+
+pub fn save_scratch_net_conf(
+    cid: &str,
+    data_dir: &str,
+    netconf_bytes: &[u8],
+) -> anyhow::Result<()> {
+    let cache_dir = build_cache_path(cid, data_dir)?;
+
+    fs::create_dir_all(&cache_dir)
+        .with_context(|| format!("Failed to create cache directory: {}", cache_dir.display()))?;
+
+    let file_path = cache_dir.join(format!("{cid}.json"));
+
+    let mut temp_file = File::create(&file_path)
+        .with_context(|| format!("Failed to create temp file: {}", file_path.display()))?;
+
+    temp_file
+        .write_all(netconf_bytes)
+        .with_context(|| format!("Failed to write to file: {}", file_path.display()))?;
+
+    temp_file
+        .sync_all()
+        .with_context(|| format!("Failed to sync file: {}", file_path.display()))?;
+
+    Ok(())
+}
+
+fn build_cache_path(cid: &str, data_dir: &str) -> anyhow::Result<PathBuf> {
+    let base_path = Path::new(data_dir);
+
+    if cid
+        .chars()
+        .any(|c| !c.is_ascii_alphanumeric() && c != '-' && c != '_')
+    {
+        anyhow::bail!("Invalid container ID format: {cid}");
+    }
+
+    Ok(base_path.join("results").join(cid))
+}
+
+pub fn consume_scratch_net_conf(
+    cid: &str,
+    data_dir: &str,
+) -> Result<(impl FnOnce(&anyhow::Error), Vec<u8>)> {
+    let file_path = build_cache_path(cid, data_dir)?.join(format!("{cid}.json"));
+
+    let contents = fs::read(&file_path)
+        .with_context(|| format!("Failed to read file: {}", file_path.display()))?;
+
+    let cleanup = move |err: &anyhow::Error| {
+        if !err.is::<std::io::Error>() {
+            let _ = fs::remove_file(&file_path);
+        }
+    };
+
+    Ok((cleanup, contents))
+}
+
+pub fn run() {
     debug!(
         "{} (CNI flannel plugin) version {}",
         env!("CARGO_PKG_NAME"),
@@ -76,234 +420,6 @@ fn main() {
             reply(res.into_reply(cni_version))
         }
     }
-}
-
-fn load_flannel_net_conf(config: NetworkConfig) -> Result<FlannelNetConf, CniError> {
-    let mut json_value = serde_json::to_value(&config).map_err(CniError::from)?;
-
-    if json_value.get("subnetFile").is_none() {
-        json_value["subnetFile"] = serde_json::json!(DEFAULT_SUBNET_FILE);
-    }
-    if json_value.get("dataDir").is_none() {
-        json_value["dataDir"] = serde_json::json!(DEFAULT_DATA_DIR);
-    }
-
-    let flannel_conf: FlannelNetConf =
-        serde_json::from_value(json_value).map_err(CniError::from)?;
-
-    Ok(flannel_conf)
-}
-
-fn load_flannel_subnet_env(path: &str) -> Result<SubnetEnv, CniError> {
-    let content = std::fs::read_to_string(path).map_err(|e| CniError::Generic(e.to_string()))?;
-
-    let mut subnet_env = SubnetEnv {
-        networks: Vec::new(),
-        subnet: None,
-        ip6_networks: Vec::new(),
-        ip6_subnet: None,
-        mtu: None,
-        ipmasq: None,
-    };
-    for line in content.lines() {
-        let line = line.trim();
-        if line.is_empty() || line.starts_with('#') {
-            continue;
-        }
-        if let Some((k, v)) = line.split_once('=') {
-            let k = k.trim();
-            let v = v.trim();
-            match k {
-                "RKL_NETWORK" => {
-                    subnet_env.networks = v
-                        .split(',')
-                        .map(|s| s.parse::<Ipv4Network>())
-                        .collect::<Result<_, _>>()
-                        .map_err(|e| CniError::Generic(e.to_string()))?;
-                }
-                "RKL_IPV6_NETWORK" => {
-                    subnet_env.ip6_networks = v
-                        .split(',')
-                        .map(|s| s.parse::<Ipv6Network>())
-                        .collect::<Result<_, _>>()
-                        .map_err(|e| CniError::Generic(e.to_string()))?;
-                }
-                "RKL_SUBNET" => {
-                    subnet_env.subnet = Some(
-                        v.parse::<Ipv4Network>()
-                            .map_err(|e| CniError::Generic(e.to_string()))?,
-                    );
-                }
-                "RKL_IPV6_SUBNET" => {
-                    subnet_env.ip6_subnet = Some(
-                        v.parse::<Ipv6Network>()
-                            .map_err(|e| CniError::Generic(e.to_string()))?,
-                    );
-                }
-                "RKL_MTU" => {
-                    subnet_env.mtu = Some(
-                        v.parse::<u32>()
-                            .map_err(|e| CniError::Generic(e.to_string()))?,
-                    );
-                }
-                "RKL_IPMASQ" => {
-                    subnet_env.ipmasq = Some(
-                        v.parse::<bool>()
-                            .map_err(|e| CniError::Generic(e.to_string()))?,
-                    );
-                }
-                _ => {}
-            }
-        }
-    }
-    Ok(subnet_env)
-}
-
-fn get_delegate_ipam(
-    flannel_conf: &mut FlannelNetConf,
-    subnet_env: &SubnetEnv,
-) -> Result<(), CniError> {
-    if flannel_conf.net_conf.ipam.is_none() {
-        flannel_conf.net_conf.ipam = Some(IpamConfig {
-            plugin: "libipam".to_string(),
-            specific: HashMap::new(),
-        });
-    }
-
-    let ipam = flannel_conf.net_conf.ipam.as_mut().unwrap();
-    if ipam.plugin.is_empty() {
-        ipam.plugin = "libipam".to_string();
-    }
-
-    let mut ranges = Vec::new();
-    if let Some(sn) = &subnet_env.subnet {
-        let gateway_ip = sn.nth(1).ok_or_else(|| {
-            CniError::Generic(format!("failed to compute gateway from subnet {sn}"))
-        })?;
-        ranges.push(Value::Array(vec![json!({
-            "gateway": gateway_ip.to_string(),
-            "subnet": sn.to_string()
-        })]));
-    }
-    if let Some(ip6_sn) = &subnet_env.ip6_subnet {
-        ranges.push(Value::Array(vec![json!({"subnet": ip6_sn.to_string()})]));
-    }
-    #[allow(clippy::collapsible_if)]
-    if let Some(existing_ranges) = ipam.specific.get("ranges") {
-        if let Some(arr) = existing_ranges.as_array() {
-            ranges.extend(arr.clone());
-        }
-    }
-
-    ipam.specific.insert("ranges".into(), Value::Array(ranges));
-
-    let mut routes = Vec::new();
-    let gateway_v4 = subnet_env
-        .subnet
-        .map(|subnet| subnet.nth(1).unwrap().to_string());
-    routes.extend(subnet_env.networks.iter().map(|n| {
-        let mut route = json!({"dst": n.to_string()});
-        if let Some(ref gw) = gateway_v4 {
-            route
-                .as_object_mut()
-                .unwrap()
-                .insert("gw".to_string(), json!(gw));
-        }
-        route
-    }));
-    routes.extend(
-        subnet_env
-            .ip6_networks
-            .iter()
-            .map(|n| json!({"dst": n.to_string()})),
-    );
-    let gateway_v4 = subnet_env
-        .subnet
-        .map(|subnet| subnet.nth(1).unwrap().to_string());
-    if let Some(ref gw) = gateway_v4 {
-        routes.push(json!({"dst": "0.0.0.0/0", "gw": gw}));
-    }
-    ipam.specific.insert("routes".into(), Value::Array(routes));
-
-    info!("{}", serde_json::to_string(&ipam)?);
-
-    Ok(())
-}
-
-async fn delegate_add(
-    cid: &str,
-    data_dir: &str,
-    delegate_conf: &NetworkConfig,
-) -> Result<SuccessReply, CniError> {
-    let netconf_bytes = serde_json::to_vec(delegate_conf).map_err(CniError::Json)?;
-    save_scratch_net_conf(cid, data_dir, &netconf_bytes)
-        .map_err(|e| CniError::Generic(e.to_string()))?;
-
-    let plugin_type = delegate_conf.plugin.as_str();
-    let result: SuccessReply =
-        match delegate(plugin_type, Command::Add, &delegate_conf.clone()).await {
-            Ok(reply) => reply,
-            Err(e) => return Err(e),
-        };
-
-    Ok(result)
-}
-
-pub fn save_scratch_net_conf(
-    cid: &str,
-    data_dir: &str,
-    netconf_bytes: &[u8],
-) -> anyhow::Result<()> {
-    let cache_dir = build_cache_path(cid, data_dir)?;
-
-    fs::create_dir_all(&cache_dir)
-        .with_context(|| format!("Failed to create cache directory: {}", cache_dir.display()))?;
-
-    let file_path = cache_dir.join(format!("{cid}.json"));
-
-    let mut temp_file = File::create(&file_path)
-        .with_context(|| format!("Failed to create temp file: {}", file_path.display()))?;
-
-    temp_file
-        .write_all(netconf_bytes)
-        .with_context(|| format!("Failed to write to file: {}", file_path.display()))?;
-
-    temp_file
-        .sync_all()
-        .with_context(|| format!("Failed to sync file: {}", file_path.display()))?;
-
-    Ok(())
-}
-
-fn build_cache_path(cid: &str, data_dir: &str) -> anyhow::Result<PathBuf> {
-    let base_path = Path::new(data_dir);
-
-    if cid
-        .chars()
-        .any(|c| !c.is_ascii_alphanumeric() && c != '-' && c != '_')
-    {
-        anyhow::bail!("Invalid container ID format: {}", cid);
-    }
-
-    Ok(base_path.join("results").join(cid))
-}
-
-pub fn consume_scratch_net_conf(
-    cid: &str,
-    data_dir: &str,
-) -> Result<(impl FnOnce(&anyhow::Error), Vec<u8>)> {
-    let file_path = build_cache_path(cid, data_dir)?.join(format!("{cid}.json"));
-
-    let contents = fs::read(&file_path)
-        .with_context(|| format!("Failed to read file: {}", file_path.display()))?;
-
-    let cleanup = move |err: &anyhow::Error| {
-        if !err.is::<std::io::Error>() {
-            let _ = fs::remove_file(&file_path);
-        }
-    };
-
-    Ok((cleanup, contents))
 }
 
 async fn cmd_add(mut config: FlannelNetConf, inputs: Inputs) -> Result<SuccessReply, CniError> {
@@ -467,6 +583,25 @@ async fn cmd_del(config: FlannelNetConf, inputs: Inputs) -> Result<SuccessReply,
         };
 
     Ok(res)
+}
+
+async fn delegate_add(
+    cid: &str,
+    data_dir: &str,
+    delegate_conf: &NetworkConfig,
+) -> Result<SuccessReply, CniError> {
+    let netconf_bytes = serde_json::to_vec(delegate_conf).map_err(CniError::Json)?;
+    save_scratch_net_conf(cid, data_dir, &netconf_bytes)
+        .map_err(|e| CniError::Generic(e.to_string()))?;
+
+    let plugin_type = delegate_conf.plugin.as_str();
+    let result: SuccessReply =
+        match delegate(plugin_type, Command::Add, &delegate_conf.clone()).await {
+            Ok(reply) => reply,
+            Err(e) => return Err(e),
+        };
+
+    Ok(result)
 }
 
 #[cfg(test)]

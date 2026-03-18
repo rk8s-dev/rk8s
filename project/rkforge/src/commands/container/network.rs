@@ -3,12 +3,15 @@ use ipnet::IpNet;
 use netavark::commands::setup::Setup;
 use netavark::commands::teardown::Teardown;
 use netavark::network::types::{Network, NetworkOptions, PerNetworkOptions, Subnet};
+use nix::mount;
 use std::collections::HashMap;
 use std::ffi::OsString;
 use std::fs;
 use std::net::{IpAddr, Ipv4Addr};
+use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
+use tracing::{debug, warn};
 
 fn default_netavark_config_dir() -> OsString {
     if let Some(v) = std::env::var_os("NETAVARK_CONFIG") {
@@ -60,6 +63,71 @@ fn unique_network_id(prefix: &str, name: &str) -> String {
         .unwrap_or_default()
         .as_millis();
     format!("{prefix}-{name}-{ts}")
+}
+
+const BIND_MOUNT_PATH: &str = "/var/run/netns";
+
+fn bind_mount_path(name: &str) -> PathBuf {
+    Path::new(BIND_MOUNT_PATH).join(name)
+}
+
+fn ensure_bind_mount_dir() -> Result<PathBuf> {
+    let dir = Path::new(BIND_MOUNT_PATH);
+    if !dir.exists() {
+        fs::create_dir_all(dir)?;
+        // Set appropriate permissions (755)
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut perms = fs::metadata(dir)?.permissions();
+            perms.set_mode(0o755);
+            fs::set_permissions(dir, perms)?;
+        }
+    }
+    Ok(dir.to_path_buf())
+}
+
+pub(crate) fn bind_mount_netns(netns_path: &str, name: &str) -> Result<PathBuf> {
+    ensure_bind_mount_dir()?;
+    let target_path = bind_mount_path(name);
+
+    // Create the target file
+    fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o444)
+        .open(&target_path)?;
+
+    // Bind mount the network namespace
+    mount::mount(
+        Some(Path::new(netns_path)),
+        &target_path,
+        None::<&str>,
+        mount::MsFlags::MS_BIND,
+        None::<&str>,
+    )?;
+
+    Ok(target_path)
+}
+
+pub(crate) fn unbind_mount_netns(name: &str) -> Result<()> {
+    let target_path = bind_mount_path(name);
+    if target_path.exists() {
+        // First try to unmount
+        let _ = mount::umount2(&target_path, mount::MntFlags::MNT_DETACH);
+        // Then remove the file
+        let _ = fs::remove_file(&target_path);
+    }
+    Ok(())
+}
+
+pub(crate) fn get_bind_mount_netns(name: &str) -> Result<Option<PathBuf>> {
+    let target_path = bind_mount_path(name);
+    if target_path.exists() {
+        Ok(Some(target_path))
+    } else {
+        Ok(None)
+    }
 }
 
 pub struct RootfulBridgeSpec {
@@ -176,6 +244,24 @@ pub fn setup_rootful_bridge(
         )
         .map_err(|e| anyhow!("[{container_id}] netavark setup failed: {e}"))?;
 
+    // Create bind mount backup of network namespace
+    let bind_mount_name = format!("rkforge-{}", container_id);
+    match bind_mount_netns(netns_path, &bind_mount_name) {
+        Ok(bind_path) => {
+            debug!(
+                "Created bind mount backup at {:?} for container {}",
+                bind_path, container_id
+            );
+        }
+        Err(e) => {
+            warn!(
+                "Failed to create bind mount backup for container {}: {}",
+                container_id, e
+            );
+            // Continue anyway, as bind mount is just a backup
+        }
+    }
+
     // Return the configured IP (static by design for sync one-shot flows)
     spec.static_ipv4
         .ok_or_else(|| anyhow!("setup completed but no static_ipv4 was configured"))
@@ -185,6 +271,9 @@ pub fn teardown_rootful_bridge(netns_path: &str, container_id: &str) -> Result<(
     let json_path = state_path_for(container_id)?;
     if !json_path.exists() {
         // Idempotent teardown: if no state exists, treat as already torn down.
+        // Still try to clean up bind mount if it exists
+        let bind_mount_name = format!("rkforge-{}", container_id);
+        let _ = unbind_mount_netns(&bind_mount_name);
         return Ok(());
     }
 
@@ -202,5 +291,16 @@ pub fn teardown_rootful_bridge(netns_path: &str, container_id: &str) -> Result<(
         .map_err(|e| anyhow!("[{container_id}] netavark teardown failed: {e}"))?;
 
     let _ = fs::remove_file(&json_path);
+
+    // Clean up bind mount backup
+    let bind_mount_name = format!("rkforge-{}", container_id);
+    if let Err(e) = unbind_mount_netns(&bind_mount_name) {
+        warn!(
+            "Failed to clean up bind mount backup for container {}: {}",
+            container_id, e
+        );
+        // Continue anyway
+    }
+
     Ok(())
 }

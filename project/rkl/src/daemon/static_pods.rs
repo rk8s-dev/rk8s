@@ -125,7 +125,7 @@ async fn stop_removed_pods(state: Arc<State>, pods: &Vec<PodTask>) -> Result<(),
             continue;
         }
 
-        match pod::standalone::delete_pod(&pod.metadata.name) {
+        match pod::standalone::delete_pod_async(&pod.metadata.name).await {
             Ok(_) => {
                 // spawn deregistration but keep the JoinHandle so we can observe failures
                 let pod_name = pod.metadata.name.clone();

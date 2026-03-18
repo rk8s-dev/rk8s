@@ -261,6 +261,26 @@ pub async fn route_add(route: Route) -> anyhow::Result<()> {
     Ok(())
 }
 
+pub async fn route_add_on_link(route: Route, link_index: u32) -> anyhow::Result<()> {
+    if route.gw.is_none() {
+        bail!("Route Gateway must be specified");
+    }
+
+    let handle = get_handle()?.ok_or_else(|| anyhow!("Cannot get handle"))?;
+    let route_handle = handle.route();
+
+    let mut builder = RouteMessageBuilder::<IpAddr>::new();
+    builder = builder
+        .destination_prefix(route.dst.ip(), route.dst.prefix())?
+        .gateway(route.gw.unwrap())?
+        .output_interface(link_index);
+
+    debug!("route_builder_with_oif:{builder:?}");
+    route_handle.add(builder.build()).execute().await?;
+
+    Ok(())
+}
+
 pub async fn route_del(route: Route) -> anyhow::Result<()> {
     if route.gw.is_none() {
         bail!("gw can not be all none");

@@ -308,17 +308,6 @@ dependencies = [
 
 [[package]]
 name = "async-channel"
-version = "1.9.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "81953c529336010edd6d8e358f886d9581267795c61b19475b71314bffa46d35"
-dependencies = [
- "concurrent-queue",
- "event-listener 2.5.3",
- "futures-core",
-]
-
-[[package]]
-name = "async-channel"
 version = "2.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "924ed96dd52d1b75e9c1a3e6275715fd320f5f9439fb5a4a11fa51f4221158d2"
@@ -360,7 +349,7 @@ version = "2.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "05b1b633a2115cd122d73b955eadd9916c18c8f510ec9cd1686404c60ad1c29c"
 dependencies = [
- "async-channel 2.5.0",
+ "async-channel",
  "async-executor",
  "async-io 2.6.0",
  "async-lock 3.4.2",
@@ -461,7 +450,7 @@ version = "2.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fc50921ec0055cdd8a16de48773bfeec5c972598674347252c0399676be7da75"
 dependencies = [
- "async-channel 2.5.0",
+ "async-channel",
  "async-io 2.6.0",
  "async-lock 3.4.2",
  "async-signal",
@@ -500,32 +489,6 @@ dependencies = [
  "signal-hook-registry",
  "slab",
  "windows-sys 0.61.2",
-]
-
-[[package]]
-name = "async-std"
-version = "1.13.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2c8e079a4ab67ae52b7403632e4618815d6db36d2a010cfe41b02c1b1578f93b"
-dependencies = [
- "async-channel 1.9.0",
- "async-global-executor",
- "async-io 2.6.0",
- "async-lock 3.4.2",
- "crossbeam-utils",
- "futures-channel",
- "futures-core",
- "futures-io",
- "futures-lite 2.6.1",
- "gloo-timers",
- "kv-log-macro",
- "log",
- "memchr",
- "once_cell",
- "pin-project-lite",
- "pin-utils",
- "slab",
- "wasm-bindgen-futures",
 ]
 
 [[package]]
@@ -1379,7 +1342,7 @@ version = "1.6.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e83f8d02be6967315521be875afa792a316e28d57b5a2d401897e2a7921b7f21"
 dependencies = [
- "async-channel 2.5.0",
+ "async-channel",
  "async-task",
  "futures-io",
  "futures-lite 2.6.1",
@@ -3516,18 +3479,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0cc23270f6e1808e30a928bdc84dea0b9b4136a8bc82338574f23baf47bbd280"
 
 [[package]]
-name = "gloo-timers"
-version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bbb143cf96099802033e0d4f4963b19fd2e0b728bcf076cd9cf7f6634f092994"
-dependencies = [
- "futures-channel",
- "futures-core",
- "js-sys",
- "wasm-bindgen",
-]
-
-[[package]]
 name = "go-defer"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4749,15 +4700,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "kv-log-macro"
-version = "1.0.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0de8b303297635ad57c9f5059fd9cee7a47f8e8daa09df0fcd07dd39fb22977f"
-dependencies = [
- "log",
-]
-
-[[package]]
 name = "kvm-bindings"
 version = "0.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4792,31 +4734,6 @@ name = "leb128fmt"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "09edd9e8b54e49e587e4f6295a7d29c3ea94d469cb40ab8ca70b288248a81db2"
-
-[[package]]
-name = "libbridge"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "async-std",
- "cni-plugin",
- "futures",
- "ipnetwork",
- "libcni",
- "libnetwork",
- "log",
- "macaddr",
- "netlink-packet-route",
- "nftables",
- "nix 0.29.0",
- "rand 0.9.2",
- "rtnetlink",
- "semver 0.11.0",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
- "tokio",
-]
 
 [[package]]
 name = "libbz2-rs-sys"
@@ -5023,24 +4940,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "libipam"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "async-std",
- "cni-plugin",
- "ipnetwork",
- "log",
- "nix 0.29.0",
- "semver 0.11.0",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror 2.0.18",
- "tokio",
-]
-
-[[package]]
 name = "libm"
 version = "0.2.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5058,14 +4957,20 @@ dependencies = [
  "lazy_static",
  "libcni",
  "log",
+ "macaddr",
  "netlink-packet-route",
  "nftables",
+ "nix 0.29.0",
  "regex",
+ "rtnetlink",
+ "semver 0.11.0",
  "serde",
  "serde_json",
  "serde_yaml",
  "tempfile",
+ "thiserror 2.0.18",
  "tokio",
+ "tracing",
 ]
 
 [[package]]
@@ -5119,7 +5024,6 @@ dependencies = [
  "libcni",
  "libcontainer",
  "libfuse-fs",
- "libipam",
  "libnetwork",
  "liboci-cli",
  "libvault",
@@ -7681,7 +7585,6 @@ dependencies = [
  "libcni",
  "libcontainer",
  "libfuse-fs",
- "libipam",
  "libnetwork",
  "liboci-cli",
  "libruntime",
@@ -7752,7 +7655,6 @@ dependencies = [
  "libcni",
  "libcontainer",
  "libfuse-fs",
- "libipam",
  "libnetwork",
  "liboci-cli",
  "libruntime",
@@ -7789,6 +7691,7 @@ dependencies = [
  "tracing",
  "tracing-appender",
  "tracing-journald",
+ "tracing-log",
  "tracing-subscriber",
  "uuid",
 ]

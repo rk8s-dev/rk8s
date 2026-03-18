@@ -1,14 +1,11 @@
+use std::borrow::Cow;
 use std::str::FromStr;
 use std::{collections::HashSet, net::Ipv4Addr};
-
-use crate::error::{AppError, VlanError};
-use crate::types::{Bridge, BridgeNetConf, GatewayInfo, VlanTrunk};
 
 use anyhow::anyhow;
 use cni_plugin::{
     Cni, Command, Inputs,
     config::NetworkConfig,
-    delegation::delegate,
     error::CniError,
     macaddr::MacAddr,
     reply::{Interface, IpamSuccessReply, Route, SuccessReply, reply},
@@ -21,8 +18,6 @@ use libcni::{
     },
     ns::netns::{self, Netns},
 };
-use libnetwork::ip::{IPStack, PublicIPOpts, lookup_ext_iface};
-use log::{debug, error, info};
 use netlink_packet_route::{
     AddressFamily,
     link::{InfoBridge, InfoData, LinkAttribute, LinkInfo},
@@ -38,14 +33,16 @@ use rtnetlink::{
     LinkBridge,
     packet_core::{NLM_F_ACK, NLM_F_REQUEST},
 };
-use std::borrow::Cow;
+use tracing::{debug, error, info};
 
-mod error;
-mod types;
+use crate::bridge::error::{AppError, VlanError};
+use crate::bridge::types::{Bridge, BridgeNetConf, GatewayInfo, VlanTrunk};
+use crate::ip::{IPStack, PublicIPOpts, lookup_ext_iface};
+
 const BRIDGE_DEFAULT_NAME: &str = "cni0";
 
 /// Entry point of the CNI bridge plugin.
-fn main() {
+pub fn run() {
     cni_plugin::logger::install("libbridge.log");
     debug!(
         "{} (CNI bridge plugin) version {}",
@@ -149,6 +146,24 @@ pub fn load_bri_netconf(config: NetworkConfig) -> Result<BridgeNetConf, AppError
     }
 
     Ok(bridge_conf)
+}
+
+/// Library entrypoint for executing bridge ADD using already parsed CNI inputs.
+pub async fn add_from_inputs(
+    config: NetworkConfig,
+    inputs: Inputs,
+) -> Result<SuccessReply, AppError> {
+    let bridge_conf = load_bri_netconf(config)?;
+    cmd_add(bridge_conf, inputs).await
+}
+
+/// Library entrypoint for executing bridge DEL using already parsed CNI inputs.
+pub async fn del_from_inputs(
+    config: NetworkConfig,
+    inputs: Inputs,
+) -> Result<SuccessReply, AppError> {
+    let bridge_conf = load_bri_netconf(config)?;
+    cmd_del(bridge_conf, inputs).await
 }
 
 /// Collects VLAN trunk IDs from a given optional list of `VlanTrunk`.
@@ -381,7 +396,6 @@ pub async fn setup_veth(
     let br_link = link::link_by_name(&br.name)
         .await
         .map_err(|e| AppError::LinkError(format!("{}:{}", e, br.name)))?;
-
     let host_inf_link = link::link_by_name(&veth.peer_inf.name)
         .await
         .map_err(|e| AppError::LinkError(format!("{}:{}", e, veth.peer_inf.name)))?;
@@ -407,7 +421,7 @@ pub async fn setup_veth(
 ///
 /// # Returns
 /// * `Result<SuccessReply, AppError>` - The success response with network details, or an error if failed.
-async fn cmd_add(mut config: BridgeNetConf, inputs: Inputs) -> Result<SuccessReply, AppError> {
+pub async fn cmd_add(mut config: BridgeNetConf, inputs: Inputs) -> Result<SuccessReply, AppError> {
     let is_layer3 = config
         .net_conf
         .ipam
@@ -479,14 +493,10 @@ async fn cmd_add(mut config: BridgeNetConf, inputs: Inputs) -> Result<SuccessRep
     };
 
     if is_layer3 {
-        let ipam_plugin = config.net_conf.ipam.clone().unwrap().plugin;
         let ipam_result: IpamSuccessReply =
-            match delegate(&ipam_plugin, Command::Add, &config.net_conf.clone()).await {
-                Ok(reply) => reply,
-                Err(err) => {
-                    return Err(AppError::IpamError(err.to_string()));
-                }
-            };
+            crate::ipam::plugin::cmd_add(&config.net_conf, &inputs.container_id, &inputs.ifname)
+                .await
+                .map_err(|err| AppError::IpamError(err.to_string()))?;
         debug!("ipam_result:{ipam_result:?}");
         bridge_result.ips = ipam_result.ips.clone();
         bridge_result.routes = ipam_result.routes.clone();
@@ -638,7 +648,7 @@ fn calc_gateway(
 ///
 /// # Returns
 /// * `Result<SuccessReply, AppError>` - The success response or an error if deletion fails.
-async fn cmd_del(config: BridgeNetConf, inputs: Inputs) -> Result<SuccessReply, AppError> {
+pub async fn cmd_del(config: BridgeNetConf, inputs: Inputs) -> Result<SuccessReply, AppError> {
     let is_layer3 = config
         .net_conf
         .ipam
@@ -653,18 +663,14 @@ async fn cmd_del(config: BridgeNetConf, inputs: Inputs) -> Result<SuccessReply, 
         dns: Default::default(),
         specific: Default::default(),
     };
-
+    let if_name = &inputs.ifname.clone();
     let ipam_del = || async move {
         if is_layer3 {
-            let ipam_plugin = config.net_conf.ipam.clone().unwrap().plugin;
-            match delegate(&ipam_plugin, Command::Del, &config.net_conf.clone()).await {
-                Ok(reply) => {
-                    let _: IpamSuccessReply = reply;
-                }
-                Err(e) => return Err(AppError::IpamError(e.to_string())),
-            }
+            let _ = crate::ipam::plugin::cmd_del(&config.net_conf, &inputs.container_id, if_name)
+                .await
+                .map_err(|e| AppError::IpamError(e.to_string()))?;
         }
-        Ok(())
+        Ok::<(), AppError>(())
     };
 
     if inputs.netns.is_none() {

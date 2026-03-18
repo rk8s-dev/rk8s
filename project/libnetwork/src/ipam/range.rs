@@ -1,4 +1,4 @@
-use crate::allocator::{last_ip, next_ip};
+use crate::ipam::allocator::{last_ip, next_ip};
 use std::net::IpAddr;
 
 use anyhow::bail;

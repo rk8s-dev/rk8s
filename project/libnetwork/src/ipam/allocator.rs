@@ -1,12 +1,12 @@
 use std::net::{IpAddr, Ipv4Addr};
 use std::sync::Arc;
 
-use crate::disk::{FileLockExt, Store};
-use crate::range::IpRangeExt;
-use crate::range_set::{RangeSet, RangeSetExt};
+use crate::ipam::disk::{FileLockExt, Store};
+use crate::ipam::range::IpRangeExt;
+use crate::ipam::range_set::{RangeSet, RangeSetExt};
 
-use ::cni_plugin::reply::Ip;
 use anyhow::{anyhow, bail};
+use cni_plugin::reply::Ip;
 use ipnetwork::IpNetwork;
 
 pub struct IpAllocator {

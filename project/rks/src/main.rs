@@ -27,7 +27,7 @@ use clap::Parser;
 use cli::{Cli, Commands};
 use libscheduler::plugins::{Plugins, node_resources_fit::ScoringStrategy};
 use libvault::storage::xline::XlineOptions;
-use log::{error, info};
+use log::{LevelFilter, error, info};
 use rustls::crypto::CryptoProvider;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -39,7 +39,9 @@ async fn main() -> anyhow::Result<()> {
 
     let cli = Cli::parse();
 
-    env_logger::init();
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info"))
+        .filter_module("netlink_packet_route", LevelFilter::Error)
+        .init();
 
     match &cli.command {
         Commands::Start { config } => {

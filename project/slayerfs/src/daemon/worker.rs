@@ -35,14 +35,14 @@ impl Default for GcConfig {
 }
 
 #[allow(dead_code)]
-pub(crate) struct MarkBasedGarbageCollector<B: ObjectBackend> {
+pub(crate) struct MarkBasedGarbageCollector<B: ObjectBackend + Clone> {
     meta_store: Arc<dyn MetaStore>,
     object_client: Arc<ObjectClient<B>>,
     config: GcConfig,
 }
 
 #[allow(dead_code)]
-impl<B: ObjectBackend> MarkBasedGarbageCollector<B> {
+impl<B: ObjectBackend + Clone> MarkBasedGarbageCollector<B> {
     pub(crate) fn new(
         meta_store: Arc<dyn MetaStore>,
         object_client: Arc<ObjectClient<B>>,
@@ -169,7 +169,7 @@ impl<B: ObjectBackend> MarkBasedGarbageCollector<B> {
 
 /// Start garbage collector with graceful shutdown support
 #[allow(dead_code)]
-pub async fn start_gc<B: ObjectBackend>(
+pub async fn start_gc<B: ObjectBackend + Clone>(
     meta_store: Arc<dyn MetaStore>,
     object_client: Arc<ObjectClient<B>>,
     config: Option<GcConfig>,

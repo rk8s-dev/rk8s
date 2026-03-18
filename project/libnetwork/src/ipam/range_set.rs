@@ -1,4 +1,4 @@
-use crate::range::IpRangeExt;
+use crate::ipam::range::IpRangeExt;
 use std::net::IpAddr;
 
 use anyhow::bail;

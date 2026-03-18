@@ -43,6 +43,7 @@ rust_binary(
         "//third-party/rust/crates/nix/0.30.1:nix",
         "//third-party/rust/crates/syslog/7.0.0:syslog",
         "//third-party/rust/crates/tokio/1.49.0:tokio",
+        ":aardvark_dns"
     ],
 )
 

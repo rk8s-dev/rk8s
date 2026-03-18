@@ -1,6 +1,6 @@
 use std::net::IpAddr;
 
-use crate::range_set::RangeSet;
+use crate::ipam::range_set::RangeSet;
 
 use cni_plugin::{config::RuntimeConfig, reply::Route};
 use serde::{Deserialize, Serialize};
@@ -48,7 +48,7 @@ pub struct Net {
 
 #[cfg(test)]
 mod tests {
-    use crate::config::Net;
+    use crate::ipam::config::Net;
 
     #[test]
     fn test_parse() {

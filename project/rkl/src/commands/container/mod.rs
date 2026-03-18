@@ -1,7 +1,7 @@
 use crate::{
     commands::{Exec, ExecContainer, create, delete, exec, list, load_container, start},
     config::OVERLAY_CONFIG,
-    task::get_cni,
+    network::plugin_chain,
 };
 use libruntime::volume::parse_key_val;
 
@@ -443,19 +443,16 @@ impl ContainerRunner {
         if self.determine_single_status() {
             setup_network_conf()?;
         }
-
-        let mut cni = get_cni()?;
         let container_pid = self
             .get_container_state()?
             .pid
             .ok_or_else(|| anyhow!("get container {} pid failed", self.container_id))?;
-        cni.load_default_conf();
 
-        cni.setup(
-            format!("{container_pid}"),
-            format!("/proc/{container_pid}/ns/net"),
+        plugin_chain::setup_network(
+            format!("{container_pid}").as_str(),
+            format!("/proc/{container_pid}/ns/net").as_str(),
         )
-        .map_err(|e| anyhow::anyhow!("Failed to add CNI network: {}", e))
+        .map_err(|e| anyhow!("Failed to add CNI network via library chain: {e}"))
     }
 
     #[allow(clippy::result_large_err)]
@@ -689,12 +686,11 @@ pub fn remove_container(root_path: &Path, state: &State) -> Result<()> {
 }
 
 pub fn remove_container_network(pid: Pid) -> Result<()> {
-    let mut cni = get_cni()?;
-    cni.load_default_conf();
     let netns_path = format!("/proc/{pid}/ns/net");
     let id = pid.to_string();
-    cni.remove(id, netns_path.clone())
-        .map_err(|e| anyhow::anyhow!("Failed to remove CNI network: {}", e))?;
+
+    plugin_chain::remove_network(&id, &netns_path)
+        .map_err(|e| anyhow!("Failed to remove CNI network via library chain: {e}"))?;
     Ok(())
 }
 pub fn start_container(container_id: &str) -> Result<()> {
