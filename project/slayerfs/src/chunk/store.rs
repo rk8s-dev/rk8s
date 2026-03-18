@@ -397,7 +397,7 @@ mod tests {
     use super::*;
     use crate::cadapter::client::ObjectClient;
     use crate::cadapter::localfs::LocalFsBackend;
-    use crate::chunk::chunk::ChunkLayout;
+    use crate::chunk::layout::ChunkLayout;
 
     #[tokio::test]
     async fn test_localfs_block_store_put_get() {

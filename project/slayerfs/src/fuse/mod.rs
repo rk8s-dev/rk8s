@@ -42,7 +42,7 @@ mod mount_tests {
     use super::*;
     use crate::cadapter::client::ObjectClient;
     use crate::cadapter::localfs::LocalFsBackend;
-    use crate::chunk::chunk::ChunkLayout;
+    use crate::chunk::layout::ChunkLayout;
     use crate::chunk::store::ObjectBlockStore;
     use crate::fuse::mount::mount_vfs_unprivileged;
     use crate::meta::factory::create_meta_store_from_url;

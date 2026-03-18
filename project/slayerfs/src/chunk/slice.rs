@@ -23,7 +23,7 @@
 //! Note: this module assumes the provided slice stays inside a single chunk; cross-chunk validation is not performed.
 
 use super::{
-    chunk::ChunkLayout,
+    layout::ChunkLayout,
     span::{BlockTag, ChunkTag, Span},
 };
 use crate::chunk::BlockStore;
@@ -139,7 +139,7 @@ pub fn key_for_block_of_slice(slice_id: u64, index: u64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::chunk::chunk::DEFAULT_BLOCK_SIZE;
+    use crate::chunk::layout::DEFAULT_BLOCK_SIZE;
 
     #[test]
     fn test_single_block_span() {

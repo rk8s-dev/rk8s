@@ -1236,7 +1236,7 @@ bitflags::bitflags! {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::chunk::chunk::ChunkLayout;
+    use crate::chunk::layout::ChunkLayout;
     use crate::fs::{CallerIdentity, FileSystemConfig};
     use crate::vfs::sdk::LocalClient;
     use futures::task::noop_waker;

@@ -7,7 +7,7 @@
 //!
 //! All methods return `io::Result<T>` for consistent error handling.
 
-use crate::chunk::chunk::ChunkLayout;
+use crate::chunk::layout::ChunkLayout;
 use crate::chunk::store::BlockStore;
 use crate::fs::{FileSystem, FileSystemConfig, OpenFlags};
 use crate::meta::MetaStore;

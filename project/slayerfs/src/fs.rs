@@ -9,7 +9,7 @@
 //! The design mirrors JuiceFS's FileSystem layer while delegating core I/O
 //! and handle lifecycle to VFS.
 
-use crate::chunk::chunk::ChunkLayout;
+use crate::chunk::layout::ChunkLayout;
 use crate::chunk::store::BlockStore;
 use crate::meta::MetaStore;
 use crate::meta::client::MetaClient;

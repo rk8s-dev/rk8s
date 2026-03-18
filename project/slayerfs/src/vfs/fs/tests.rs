@@ -1,7 +1,7 @@
 //! VFS filesystem tests - separated from main implementation
 
 use crate::chunk::BlockStore;
-use crate::chunk::chunk::ChunkLayout;
+use crate::chunk::layout::ChunkLayout;
 use crate::chunk::store::InMemoryBlockStore;
 use crate::meta::MetaLayer;
 use crate::meta::factory::create_meta_store_from_url;

@@ -25,7 +25,7 @@ pub use crate::vfs::sdk::{LocalClient, VfsClient};
 pub use crate::cadapter::client::{ObjectBackend, ObjectClient};
 pub use crate::cadapter::localfs::LocalFsBackend;
 pub use crate::cadapter::s3::{S3Backend, S3Config};
-pub use crate::chunk::chunk::ChunkLayout;
+pub use crate::chunk::layout::ChunkLayout;
 pub use crate::chunk::store::{BlockKey, BlockStore, InMemoryBlockStore, ObjectBlockStore};
 pub use crate::meta::client::MetaClient;
 pub use crate::meta::config::{CacheConfig, ClientOptions, Config, DatabaseConfig, DatabaseType};

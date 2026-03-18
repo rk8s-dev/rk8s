@@ -451,7 +451,7 @@ mod tests {
             slice.config.page_size as usize,
         );
 
-        let pages_per_block = block_size.div_ceil(page_size as usize) as usize;
+        let pages_per_block = block_size.div_ceil(page_size);
         assert_eq!(
             slice.pages.iter().filter(|p| p.is_some()).count(),
             pages_per_block + 1

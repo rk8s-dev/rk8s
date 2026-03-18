@@ -1,6 +1,6 @@
 //! DataFetcher: fetch data from blocks according to offset/length, handling gaps with zeros.
 
-use super::chunk::ChunkLayout;
+use super::layout::ChunkLayout;
 use super::slice::{ChunkOffset, SliceDesc, SliceOffset, block_span_iter_slice};
 use super::store::BlockStore;
 use crate::meta::MetaLayer;

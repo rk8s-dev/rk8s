@@ -15,7 +15,7 @@
 #![allow(unused_imports)]
 
 pub mod cache;
-pub mod chunk;
+pub mod layout;
 pub mod reader;
 pub mod singleflight;
 pub mod slice;
@@ -24,7 +24,7 @@ pub mod store;
 pub mod util;
 pub mod writer;
 
-pub use chunk::{
+pub use layout::{
     ChunkLayout, DEFAULT_BLOCK_SIZE, DEFAULT_CHUNK_SIZE, chunk_index_of, within_chunk_offset,
 };
 pub use singleflight::SingleFlight;

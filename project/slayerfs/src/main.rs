@@ -34,7 +34,7 @@ use tracing_subscriber::util::SubscriberInitExt;
 
 use crate::cadapter::client::ObjectClient;
 use crate::cadapter::localfs::LocalFsBackend;
-use crate::chunk::chunk::{ChunkLayout, DEFAULT_BLOCK_SIZE, DEFAULT_CHUNK_SIZE};
+use crate::chunk::layout::{ChunkLayout, DEFAULT_BLOCK_SIZE, DEFAULT_CHUNK_SIZE};
 use crate::chunk::store::ObjectBlockStore;
 use crate::fuse::mount::mount_vfs_unprivileged;
 use crate::meta::MetaStore;

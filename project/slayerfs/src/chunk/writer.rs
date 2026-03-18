@@ -1,6 +1,6 @@
 //! DataUploader: writes a slice payload into blocks without touching metadata.
 
-use super::chunk::ChunkLayout;
+use super::layout::ChunkLayout;
 use super::slice::{SliceOffset, block_span_iter_slice};
 use super::store::BlockStore;
 use crate::meta::MetaLayer;
@@ -102,7 +102,7 @@ where
 mod tests {
     use super::*;
     use crate::chunk::SliceDesc;
-    use crate::chunk::chunk::ChunkLayout;
+    use crate::chunk::layout::ChunkLayout;
     use crate::chunk::reader::DataFetcher;
     use crate::chunk::store::InMemoryBlockStore;
     use crate::meta::SLICE_ID_KEY;
