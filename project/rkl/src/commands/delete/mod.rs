@@ -1,11 +1,11 @@
 use anyhow::Result;
 use clap::Args;
 
-use crate::commands::pod::TLSConnectionArgs;
 use crate::commands::get::{ResourceArg, ResourceType, parse_resource_type};
+use crate::commands::pod::TLSConnectionArgs;
 use crate::commands::{
-    container::delete_container, deployment::deployment_delete,
-    pod::pod_delete, replicaset::replicaset_delete, service::service_delete,
+    container::delete_container, deployment::deployment_delete, pod::pod_delete,
+    replicaset::replicaset_delete, service::service_delete,
 };
 use tracing::warn;
 
@@ -19,7 +19,12 @@ pub struct DeleteCommand {
     pub all: bool,
 
     /// RKS control-plane address (required for Deployment, ReplicaSet, Service and cluster-mode Pod).
-    #[arg(long, value_name = "RKS_ADDRESS", env = "RKS_ADDRESS", required = false)]
+    #[arg(
+        long,
+        value_name = "RKS_ADDRESS",
+        env = "RKS_ADDRESS",
+        required = false
+    )]
     pub cluster: Option<String>,
 
     #[clap(flatten)]
@@ -30,16 +35,23 @@ pub fn delete_execute(cmd: DeleteCommand) -> Result<()> {
     let resource_args: Vec<ResourceArg> = parse_resource_type(&cmd.resource);
 
     for resource_arg in resource_args {
-
         if !resource_arg.resource_name.is_empty() {
             // there is specified resource name, do delete
             for name in resource_arg.resource_name {
                 match resource_arg.resource_type {
                     ResourceType::Container => delete_container(&name)?,
-                    ResourceType::Pod => pod_delete(&name, cmd.cluster.clone(), cmd.tls_cfg.clone())?,
-                    ResourceType::Deployment => deployment_delete(&name, cmd.cluster.clone(), cmd.tls_cfg.clone())?,
-                    ResourceType::ReplicaSet => replicaset_delete(&name, cmd.cluster.clone(), cmd.tls_cfg.clone())?,
-                    ResourceType::Service => service_delete(&name, cmd.cluster.clone(), cmd.tls_cfg.clone())?,
+                    ResourceType::Pod => {
+                        pod_delete(&name, cmd.cluster.clone(), cmd.tls_cfg.clone())?
+                    }
+                    ResourceType::Deployment => {
+                        deployment_delete(&name, cmd.cluster.clone(), cmd.tls_cfg.clone())?
+                    }
+                    ResourceType::ReplicaSet => {
+                        replicaset_delete(&name, cmd.cluster.clone(), cmd.tls_cfg.clone())?
+                    }
+                    ResourceType::Service => {
+                        service_delete(&name, cmd.cluster.clone(), cmd.tls_cfg.clone())?
+                    }
                 }
             }
         } else {

@@ -101,7 +101,7 @@ pub fn replicaset_execute(cmd: ReplicaSetCommand) -> Result<()> {
         } => {
             warn!("This command has been deprecated. Use 'rkl apply -f replicaset.yaml' instead.");
             replicaset_apply(&rs_yaml, cluster, tls_cfg)
-        },
+        }
         ReplicaSetCommand::Create {
             rs_yaml,
             cluster,
@@ -109,7 +109,7 @@ pub fn replicaset_execute(cmd: ReplicaSetCommand) -> Result<()> {
         } => {
             warn!("This command has been deprecated. Use 'rkl apply -f rs.yaml' instead.");
             replicaset_create(&rs_yaml, cluster, tls_cfg)
-        },
+        }
         ReplicaSetCommand::Delete {
             rs_name,
             cluster,
@@ -117,7 +117,7 @@ pub fn replicaset_execute(cmd: ReplicaSetCommand) -> Result<()> {
         } => {
             warn!("This command has been deprecated. Use 'rkl delete rs RS_NAME' instead.");
             replicaset_delete(&rs_name, cluster, tls_cfg)
-        },
+        }
         ReplicaSetCommand::Get {
             rs_name,
             cluster,
@@ -125,15 +125,19 @@ pub fn replicaset_execute(cmd: ReplicaSetCommand) -> Result<()> {
         } => {
             warn!("This command has been deprecated. Use 'rkl get rs RS_NAME' instead.");
             replicaset_get(&rs_name, cluster, tls_cfg)
-        },
+        }
         ReplicaSetCommand::List { cluster, tls_cfg } => {
             warn!("This command has been deprecated. Use 'rkl get rs' instead.");
             replicaset_list(cluster, tls_cfg)
-        },
+        }
     }
 }
 
-pub fn replicaset_apply(rs_yaml: &str, addr: Option<String>, tls_cfg: TLSConnectionArgs) -> Result<()> {
+pub fn replicaset_apply(
+    rs_yaml: &str,
+    addr: Option<String>,
+    tls_cfg: TLSConnectionArgs,
+) -> Result<()> {
     let env_addr = env::var("RKS_ADDRESS").ok();
     let rt = tokio::runtime::Runtime::new()?;
     match addr.or(env_addr) {
@@ -174,7 +178,11 @@ pub fn replicaset_delete(
     }
 }
 
-pub fn replicaset_get(rs_name: &str, addr: Option<String>, tls_cfg: TLSConnectionArgs) -> Result<()> {
+pub fn replicaset_get(
+    rs_name: &str,
+    addr: Option<String>,
+    tls_cfg: TLSConnectionArgs,
+) -> Result<()> {
     let env_addr = env::var("RKS_ADDRESS").ok();
     let rt = tokio::runtime::Runtime::new()?;
     match addr.or(env_addr) {

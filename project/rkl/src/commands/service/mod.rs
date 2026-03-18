@@ -101,7 +101,7 @@ pub fn service_execute(cmd: ServiceCommand) -> Result<()> {
         } => {
             warn!("This command has been deprecated. Use 'rkl apply -f svc.yaml' instead.");
             service_apply(&svc_yaml, cluster, tls_cfg)
-        },
+        }
         ServiceCommand::Create {
             svc_yaml,
             cluster,
@@ -109,7 +109,7 @@ pub fn service_execute(cmd: ServiceCommand) -> Result<()> {
         } => {
             warn!("This command has been deprecated. Use 'rkl apply -f svc.yaml' instead.");
             service_create(&svc_yaml, cluster, tls_cfg)
-        },
+        }
         ServiceCommand::Delete {
             svc_name,
             cluster,
@@ -117,7 +117,7 @@ pub fn service_execute(cmd: ServiceCommand) -> Result<()> {
         } => {
             warn!("This command has been deprecated. Use 'rkl delete svc SVC_NAME' instead.");
             service_delete(&svc_name, cluster, tls_cfg)
-        },
+        }
         ServiceCommand::Get {
             svc_name,
             cluster,
@@ -125,15 +125,19 @@ pub fn service_execute(cmd: ServiceCommand) -> Result<()> {
         } => {
             warn!("This command has been deprecated. Use 'rkl get svc SVC_NAME' instead.");
             service_get(&svc_name, cluster, tls_cfg)
-        },
+        }
         ServiceCommand::List { cluster, tls_cfg } => {
             warn!("This command has been deprecated. Use 'rkl get svc' instead.");
             service_list(cluster, tls_cfg)
-        },
+        }
     }
 }
 
-pub fn service_apply(svc_yaml: &str, addr: Option<String>, tls_cfg: TLSConnectionArgs) -> Result<()> {
+pub fn service_apply(
+    svc_yaml: &str,
+    addr: Option<String>,
+    tls_cfg: TLSConnectionArgs,
+) -> Result<()> {
     let env_addr = env::var("RKS_ADDRESS").ok();
     let rt = tokio::runtime::Runtime::new()?;
     match addr.or(env_addr) {
@@ -155,7 +159,11 @@ fn service_create(svc_yaml: &str, addr: Option<String>, tls_cfg: TLSConnectionAr
     }
 }
 
-pub fn service_delete(svc_name: &str, addr: Option<String>, tls_cfg: TLSConnectionArgs) -> Result<()> {
+pub fn service_delete(
+    svc_name: &str,
+    addr: Option<String>,
+    tls_cfg: TLSConnectionArgs,
+) -> Result<()> {
     let env_addr = env::var("RKS_ADDRESS").ok();
     let rt = tokio::runtime::Runtime::new()?;
     match addr.or(env_addr) {

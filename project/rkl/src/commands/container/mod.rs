@@ -868,27 +868,31 @@ pub fn container_execute(cmd: ContainerCommand) -> Result<()> {
         } => {
             warn!("This command has been deprecated. Use 'rkl run' instead.");
             run_container(&container_yaml, volumes)
-        },
+        }
         ContainerCommand::Start { container_name } => start_container(&container_name),
         ContainerCommand::State { container_name } => {
-            warn!("This command has been deprecated. Use 'rkl get container CONTAINER_NAME' instead.");
+            warn!(
+                "This command has been deprecated. Use 'rkl get container CONTAINER_NAME' instead."
+            );
             state_container(&container_name)
-        },
+        }
         ContainerCommand::Delete { container_name } => {
-            warn!("This command has been deprecated. Use 'rkl delete container CONTAINER_NAME' instead.");
+            warn!(
+                "This command has been deprecated. Use 'rkl delete container CONTAINER_NAME' instead."
+            );
             delete_container(&container_name)
-        },
+        }
         ContainerCommand::Create {
             container_yaml,
             volumes,
         } => {
             warn!("This command has been deprecated. Use 'rkl apply -f container.yaml' instead.");
             create_container(&container_yaml, volumes)
-        },
+        }
         ContainerCommand::List { quiet, format } => {
             warn!("This command has been deprecated. Use 'rkl get containers' instead.");
             list_container(quiet, format)
-        },
+        }
         ContainerCommand::Exec(exec) => {
             warn!("This command has been deprecated. Use 'rkl exec' instead.");
             // root_path => default directory

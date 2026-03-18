@@ -2,19 +2,17 @@ use anyhow::{Result, anyhow};
 use clap::Args;
 use tracing::debug;
 
-use super::{Exec, ExecBase, exec};
 use super::pod::PodInfo;
+use super::{Exec, ExecBase, exec};
 use libcontainer::syscall::syscall::create_syscall;
 use libruntime::rootpath;
 use std::path::PathBuf;
 
 #[derive(Args, Debug, Clone)]
-#[command(
-    override_usage = "\
+#[command(override_usage = "\
 rkl exec [OPTIONS] <TARGET> [-c <CONTAINER_NAME>] -- [COMMAND...]
 
-TARGET can be a pod name or a container ID (auto-detected)"
-)]
+TARGET can be a pod name or a container ID (auto-detected)")]
 pub struct ExecCommand {
     /// Pod name or container ID
     #[arg(value_name = "TARGET")]
@@ -34,7 +32,10 @@ pub struct ExecCommand {
 }
 
 pub fn exec_execute(cmd: ExecCommand) -> Result<(), anyhow::Error> {
-    let root_path = rootpath::determine(cmd.root_path.as_ref().map(PathBuf::from), &*create_syscall())?;
+    let root_path = rootpath::determine(
+        cmd.root_path.as_ref().map(PathBuf::from),
+        &*create_syscall(),
+    )?;
 
     // Auto-detect whether target is a pod_name or a container_id:
     //   - If root_path/pods/<target> exists as a file  → it's a pod_name
@@ -119,8 +120,11 @@ pub fn exec_execute(cmd: ExecCommand) -> Result<(), anyhow::Error> {
         cgroup: cmd.base.cgroup,
     };
 
-    debug!("exec command args:
-{:?}", args);
+    debug!(
+        "exec command args:
+{:?}",
+        args
+    );
     let exit_code = exec(args, root_path)?;
     std::process::exit(exit_code);
 }

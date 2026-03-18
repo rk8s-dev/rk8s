@@ -138,7 +138,7 @@ pub fn deployment_execute(cmd: DeploymentCommand) -> Result<()> {
         } => {
             warn!("This command has been deprecated. Use 'rkl apply -f deploy.yaml' instead.");
             deployment_apply(&deploy_yaml, cluster, tls_cfg)
-        },
+        }
         DeploymentCommand::Create {
             deploy_yaml,
             cluster,
@@ -146,7 +146,7 @@ pub fn deployment_execute(cmd: DeploymentCommand) -> Result<()> {
         } => {
             warn!("This command has been deprecated. Use 'rkl apply -f deploy.yaml' instead.");
             deployment_create(&deploy_yaml, cluster, tls_cfg)
-        },
+        }
         DeploymentCommand::Delete {
             deploy_name,
             cluster,
@@ -154,7 +154,7 @@ pub fn deployment_execute(cmd: DeploymentCommand) -> Result<()> {
         } => {
             warn!("This command has been deprecated. Use 'rkl delete deploy DEPLOY_NAME' instead.");
             deployment_delete(&deploy_name, cluster, tls_cfg)
-        },
+        }
         DeploymentCommand::Get {
             deploy_name,
             cluster,
@@ -162,11 +162,11 @@ pub fn deployment_execute(cmd: DeploymentCommand) -> Result<()> {
         } => {
             warn!("This command has been deprecated. Use 'rkl get deploy' instead.");
             deployment_get(&deploy_name, cluster, tls_cfg)
-        },
+        }
         DeploymentCommand::List { cluster, tls_cfg } => {
             warn!("This command has been deprecated. Use 'rkl get deploys' instead.");
             deployment_list(cluster, tls_cfg)
-        },
+        }
         DeploymentCommand::Rollback {
             deploy_name,
             to_revision,

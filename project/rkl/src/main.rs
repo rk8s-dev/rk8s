@@ -16,13 +16,13 @@ mod task;
 
 use commands::{
     apply::ApplyCommand, container::ContainerCommand, delete::DeleteCommand,
-    deployment::DeploymentCommand, exec::ExecCommand, get::GetCommand, logs::LogCommand, pod::PodCommand,
-    replicaset::ReplicaSetCommand, run::RunCommand, service::ServiceCommand,
+    deployment::DeploymentCommand, exec::ExecCommand, get::GetCommand, logs::LogCommand,
+    pod::PodCommand, replicaset::ReplicaSetCommand, run::RunCommand, service::ServiceCommand,
 };
 use commands::{
     apply::apply_execute, container::container_execute, delete::delete_execute,
     deployment::deployment_execute, exec::exec_execute, get::get_execute, logs::logs_execute,
-    pod::pod_execute, replicaset::replicaset_execute, service::service_execute, run::run_execute,
+    pod::pod_execute, replicaset::replicaset_execute, run::run_execute, service::service_execute,
 };
 use tracing::error;
 
@@ -77,22 +77,32 @@ enum Workload {
     #[command(about = "Display one or many resources")]
     Get(GetCommand),
 
-    #[command(about = "Delete resources by file names, stdin, resources and names, or by resources and label selector.")]
+    #[command(
+        about = "Delete resources by file names, stdin, resources and names, or by resources and label selector."
+    )]
     Delete(DeleteCommand),
 
-    #[command(subcommand, about = "Operations related to pods", alias = "p")]
+    #[command(
+        subcommand,
+        about = "(Deprecated)Operations related to pods",
+        alias = "p"
+    )]
     Pod(PodCommand),
 
-    #[command(subcommand, about = "Manage standalone containers", alias = "c")]
+    #[command(
+        subcommand,
+        about = "(Deprecated)Manage standalone containers",
+        alias = "c"
+    )]
     Container(ContainerCommand),
 
-    #[command(subcommand, about = "Manage ReplicaSets", alias = "rs")]
+    #[command(subcommand, about = "(Deprecated)Manage ReplicaSets", alias = "rs")]
     Replicaset(ReplicaSetCommand),
 
-    #[command(subcommand, about = "Manage Deployments", alias = "deploy")]
+    #[command(subcommand, about = "(Deprecated)Manage Deployments", alias = "deploy")]
     Deployment(DeploymentCommand),
 
-    #[command(subcommand, about = "Manage Services", alias = "svc")]
+    #[command(subcommand, about = "(Deprecated)Manage Services", alias = "svc")]
     Service(ServiceCommand),
 
     #[command(about = "Get logs from a pod's container")]
