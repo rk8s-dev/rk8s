@@ -177,38 +177,14 @@ pub mod interval;
 pub mod request_validation;
 
 #[allow(dead_code)]
-mod etcdserverpb {
-    tonic::include_proto!("etcdserverpb");
-}
-
-#[allow(dead_code)]
-mod authpb {
-    tonic::include_proto!("authpb");
-}
-
-#[allow(dead_code)]
-mod mvccpb {
-    tonic::include_proto!("mvccpb");
-}
-
-#[allow(dead_code)]
-mod v3lockpb {
-    tonic::include_proto!("v3lockpb");
-}
-
-#[allow(dead_code)]
-mod leasepb {
-    tonic::include_proto!("leasepb");
-}
-
-#[allow(dead_code)]
-mod commandpb {
-    tonic::include_proto!("commandpb");
-}
-
-#[allow(dead_code)]
-mod errorpb {
-    tonic::include_proto!("errorpb");
+mod proto {
+    pub mod etcdserverpb;
+    pub mod authpb;
+    pub mod mvccpb;
+    pub mod v3lockpb;
+    pub mod leasepb;
+    pub mod commandpb;
+    pub mod errorpb;
 }
 
 use std::fmt::Display;
@@ -217,7 +193,7 @@ use classifier::RequestClassifier;
 use command::KeyRange;
 use utils::write_vec;
 
-pub use self::{
+pub use self::proto::{
     authpb::{Permission, Role, User, UserAddOptions, permission::Type},
     commandpb::{
         Command as PbCommand, CommandResponse as PbCommandResponse, KeyRange as PbKeyRange,
@@ -237,10 +213,9 @@ pub use self::{
         AuthRoleListRequest, AuthRoleListResponse, AuthRoleRevokePermissionRequest,
         AuthRoleRevokePermissionResponse, AuthStatusRequest, AuthStatusResponse,
         AuthUserAddRequest, AuthUserAddResponse, AuthUserChangePasswordRequest,
-        AuthUserChangePasswordResponse, AuthUserDeleteRequest, AuthUserDeleteResponse,
-        AuthUserGetRequest, AuthUserGetResponse, AuthUserGrantRoleRequest,
-        AuthUserGrantRoleResponse, AuthUserListRequest, AuthUserListResponse,
-        AuthUserRevokeRoleRequest, AuthUserRevokeRoleResponse, AuthenticateRequest,
+        AuthUserChangePasswordResponse, AuthUserDeleteRequest, AuthUserDeleteResponse, AuthUserGetRequest,
+        AuthUserGetResponse, AuthUserGrantRoleRequest, AuthUserGrantRoleResponse, AuthUserListRequest,
+        AuthUserListResponse, AuthUserRevokeRoleRequest, AuthUserRevokeRoleResponse, AuthenticateRequest,
         AuthenticateResponse, CompactionRequest, CompactionResponse, Compare, DefragmentRequest,
         DefragmentResponse, DeleteRangeRequest, DeleteRangeResponse, DowngradeRequest,
         DowngradeResponse, HashKvRequest, HashKvResponse, HashRequest, HashResponse,

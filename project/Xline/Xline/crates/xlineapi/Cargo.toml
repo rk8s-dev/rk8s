@@ -22,8 +22,7 @@ thiserror = { workspace = true }
 tonic = { workspace = true }
 utils = { path = "../utils" }
 
-[build-dependencies]
-tonic-build = { workspace = true }
+
 
 [dev-dependencies]
 strum = "0.26"

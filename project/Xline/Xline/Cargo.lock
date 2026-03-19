@@ -4866,7 +4866,6 @@ dependencies = [
  "strum_macros",
  "thiserror 1.0.69",
  "tonic",
- "tonic-build",
  "utils",
  "xlinerpc",
 ]
