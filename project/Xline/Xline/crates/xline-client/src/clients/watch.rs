@@ -1,12 +1,12 @@
-use std::{fmt::Debug, sync::Arc};
+use std::fmt::Debug;
 
 use futures::channel::mpsc::channel;
-use tonic::transport::Channel;
-use xlineapi::{self, RequestUnion};
+use xlineapi::{RequestUnion, WatchResponse};
 
 use crate::{
-    AuthService,
-    error::{Result, XlineClientError},
+    Client, ClientOptions,
+    error::{Result, XlineClientBuildError, XlineClientError},
+    transport::{Channel, MethodId, Streaming},
     types::watch::{WatchOptions, WatchStreaming, Watcher},
 };
 
@@ -16,21 +16,32 @@ const CHANNEL_SIZE: usize = 128;
 /// Client for Watch operations.
 #[derive(Clone, Debug)]
 pub struct WatchClient {
-    /// The watch RPC client, only communicate with one server at a time
-    inner: xlineapi::WatchClient<AuthService<Channel>>,
+    /// The watch transport
+    inner: Channel,
 }
 
 impl WatchClient {
+    /// Creates a watch client by connecting to the cluster.
+    ///
+    /// This is a public construction path for users that want to work with
+    /// `WatchClient` directly rather than going through `Client::watch_client()`.
+    #[inline]
+    pub async fn connect<E, S>(
+        all_members: S,
+        options: ClientOptions,
+    ) -> std::result::Result<Self, XlineClientBuildError>
+    where
+        E: AsRef<str>,
+        S: IntoIterator<Item = E>,
+    {
+        Ok(Client::connect(all_members, options).await?.watch_client())
+    }
+
     /// Creates a new maintenance client
     #[inline]
     #[must_use]
-    pub fn new(channel: Channel, token: Option<String>) -> Self {
-        Self {
-            inner: xlineapi::WatchClient::new(AuthService::new(
-                channel,
-                token.and_then(|t| t.parse().ok().map(Arc::new)),
-            )),
-        }
+    pub(crate) fn new(channel: Channel) -> Self {
+        Self { inner: channel }
     }
 
     /// Watches for events happening or that have happened. Both input and output
@@ -97,7 +108,10 @@ impl WatchClient {
             .try_send(request)
             .map_err(|e| XlineClientError::WatchError(e.to_string()))?;
 
-        let mut response_stream = self.inner.watch(request_receiver).await?.into_inner();
+        let mut response_stream: Streaming<WatchResponse> = self
+            .inner
+            .client_streaming(MethodId::XlineWatch, request_receiver)
+            .await?;
 
         let watch_id = match response_stream.message().await? {
             Some(resp) => {

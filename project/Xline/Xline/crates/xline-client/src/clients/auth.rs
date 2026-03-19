@@ -1,6 +1,5 @@
 use std::{fmt::Debug, sync::Arc};
 
-use tonic::transport::Channel;
 use utils::hash_password;
 use xlineapi::{
     AuthDisableResponse, AuthEnableResponse, AuthRoleAddResponse, AuthRoleDeleteResponse,
@@ -13,8 +12,9 @@ use xlineapi::{
 };
 
 use crate::{
-    AuthService, CurpClient,
+    CurpClient,
     error::{Result, XlineClientError},
+    transport::{Channel, MethodId},
     types::{auth::Permission, range_end::RangeOption},
 };
 
@@ -23,9 +23,9 @@ use crate::{
 pub struct AuthClient {
     /// The client running the CURP protocol, communicate with all servers.
     curp_client: Arc<CurpClient>,
-    /// The auth RPC client, only communicate with one server at a time
+    /// The auth transport
     #[allow(clippy::struct_field_names)]
-    auth_client: xlineapi::AuthClient<AuthService<Channel>>,
+    auth_client: Channel,
     /// The auth token
     token: Option<String>,
 }
@@ -43,13 +43,14 @@ impl Debug for AuthClient {
 impl AuthClient {
     /// Creates a new `AuthClient`
     #[inline]
-    pub fn new(curp_client: Arc<CurpClient>, channel: Channel, token: Option<String>) -> Self {
+    pub(crate) fn new(
+        curp_client: Arc<CurpClient>,
+        channel: Channel,
+        token: Option<String>,
+    ) -> Self {
         Self {
             curp_client,
-            auth_client: xlineapi::AuthClient::new(AuthService::new(
-                channel,
-                token.as_ref().and_then(|t| t.parse().ok().map(Arc::new)),
-            )),
+            auth_client: channel,
             token,
         }
     }
@@ -189,14 +190,16 @@ impl AuthClient {
         name: N,
         password: P,
     ) -> Result<AuthenticateResponse> {
-        Ok(self
-            .auth_client
-            .authenticate(xlineapi::AuthenticateRequest {
-                name: name.into(),
-                password: password.into(),
-            })
-            .await?
-            .into_inner())
+        self.auth_client
+            .unary(
+                MethodId::XlineAuthenticate,
+                xlineapi::AuthenticateRequest {
+                    name: name.into(),
+                    password: password.into(),
+                },
+            )
+            .await
+            .map_err(Into::into)
     }
 
     /// Add an user.

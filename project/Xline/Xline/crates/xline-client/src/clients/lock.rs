@@ -4,7 +4,6 @@ use async_dropper::{AsyncDrop, AsyncDropper};
 use async_trait::async_trait;
 use clippy_utilities::OverflowArithmetic;
 use tokio::{task::JoinHandle, time::sleep};
-use tonic::transport::Channel;
 use xlineapi::{
     Compare, CompareResult, CompareTarget, DeleteRangeRequest, EventType, PutRequest, RangeRequest,
     RangeResponse, Request, RequestOp, RequestWrapper, Response, ResponseHeader, SortOrder,
@@ -17,6 +16,7 @@ use crate::{
     clients::{DEFAULT_SESSION_TTL, lease::LeaseClient, watch::WatchClient},
     error::{Result, XlineClientError},
     lease_gen::LeaseIdGenerator,
+    transport::Channel,
     types::kv::TxnRequest as KvTxnRequest,
 };
 
@@ -373,7 +373,7 @@ impl Debug for LockClient {
 impl LockClient {
     /// Creates a new `LockClient`
     #[inline]
-    pub fn new(
+    pub(crate) fn new(
         curp_client: Arc<CurpClient>,
         channel: Channel,
         token: Option<String>,
@@ -382,7 +382,7 @@ impl LockClient {
         Self {
             curp_client: Arc::clone(&curp_client),
             lease_client: LeaseClient::new(curp_client, channel.clone(), token.clone(), id_gen),
-            watch_client: WatchClient::new(channel, token.clone()),
+            watch_client: WatchClient::new(channel),
             token,
         }
     }

@@ -1,8 +1,8 @@
 //! VFS filesystem tests - separated from main implementation
 
-use crate::chuck::BlockStore;
-use crate::chuck::chunk::ChunkLayout;
-use crate::chuck::store::InMemoryBlockStore;
+use crate::chunk::BlockStore;
+use crate::chunk::layout::ChunkLayout;
+use crate::chunk::store::InMemoryBlockStore;
 use crate::meta::MetaLayer;
 use crate::meta::factory::create_meta_store_from_url;
 use crate::vfs::fs::VFS;
@@ -176,7 +176,7 @@ mod basic_tests {
         let client = crate::cadapter::client::ObjectClient::new(
             crate::cadapter::localfs::LocalFsBackend::new(tmp.path()),
         );
-        let store = crate::chuck::store::ObjectBlockStore::new(client);
+        let store = crate::chunk::store::ObjectBlockStore::new(client);
 
         let meta_handle = create_meta_store_from_url("sqlite::memory:").await.unwrap();
         let meta_store = meta_handle.store();
@@ -369,7 +369,7 @@ mod io_tests {
     use super::*;
     use crate::cadapter::client::ObjectClient;
     use crate::cadapter::localfs::LocalFsBackend;
-    use crate::chuck::store::ObjectBlockStore;
+    use crate::chunk::store::ObjectBlockStore;
     use rand::rngs::StdRng;
     use rand::{Rng, RngCore, SeedableRng};
     use std::sync::Arc;

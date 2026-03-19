@@ -1,7 +1,7 @@
 use cni_plugin::ip_range::IpRange;
 use ipnetwork::{IpNetwork, Ipv4Network};
-use libipam::config::IPAMConfig;
-use libipam::range_set::RangeSet;
+use libnetwork::ipam::config::IPAMConfig;
+use libnetwork::ipam::range_set::RangeSet;
 use serde::{Deserialize, Serialize};
 use std::net::{IpAddr, Ipv4Addr};
 

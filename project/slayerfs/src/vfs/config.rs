@@ -1,4 +1,4 @@
-use crate::chuck::ChunkLayout;
+use crate::chunk::ChunkLayout;
 use std::sync::Arc;
 use std::time::Duration;
 

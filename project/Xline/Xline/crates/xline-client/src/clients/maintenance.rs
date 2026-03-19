@@ -1,31 +1,28 @@
-use std::{fmt::Debug, sync::Arc};
+use std::fmt::Debug;
 
-use tonic::{Streaming, transport::Channel};
 use xlineapi::{
     AlarmAction, AlarmRequest, AlarmResponse, AlarmType, SnapshotRequest, SnapshotResponse,
     StatusRequest, StatusResponse,
 };
 
-use crate::{AuthService, error::Result};
+use crate::{
+    error::Result,
+    transport::{Channel, MethodId, Streaming},
+};
 
 /// Client for Maintenance operations.
 #[derive(Clone, Debug)]
 pub struct MaintenanceClient {
-    /// The maintenance RPC client, only communicate with one server at a time
-    inner: xlineapi::MaintenanceClient<AuthService<Channel>>,
+    /// The maintenance transport
+    inner: Channel,
 }
 
 impl MaintenanceClient {
     /// Creates a new maintenance client
     #[inline]
     #[must_use]
-    pub fn new(channel: Channel, token: Option<String>) -> Self {
-        Self {
-            inner: xlineapi::MaintenanceClient::new(AuthService::new(
-                channel,
-                token.and_then(|t| t.parse().ok().map(Arc::new)),
-            )),
-        }
+    pub(crate) fn new(channel: Channel) -> Self {
+        Self { inner: channel }
     }
 
     /// Gets a snapshot over a stream
@@ -67,7 +64,10 @@ impl MaintenanceClient {
     /// ```
     #[inline]
     pub async fn snapshot(&mut self) -> Result<Streaming<SnapshotResponse>> {
-        Ok(self.inner.snapshot(SnapshotRequest {}).await?.into_inner())
+        self.inner
+            .server_streaming(MethodId::XlineSnapshot, SnapshotRequest {})
+            .await
+            .map_err(Into::into)
     }
 
     /// Sends a alarm request
@@ -104,15 +104,17 @@ impl MaintenanceClient {
         member_id: u64,
         alarm_type: AlarmType,
     ) -> Result<AlarmResponse> {
-        Ok(self
-            .inner
-            .alarm(AlarmRequest {
-                action: action.into(),
-                member_id,
-                alarm: alarm_type.into(),
-            })
-            .await?
-            .into_inner())
+        self.inner
+            .unary(
+                MethodId::XlineAlarm,
+                AlarmRequest {
+                    action: action.into(),
+                    member_id,
+                    alarm: alarm_type.into(),
+                },
+            )
+            .await
+            .map_err(Into::into)
     }
 
     /// Sends a status request
@@ -143,10 +145,9 @@ impl MaintenanceClient {
     /// ```
     #[inline]
     pub async fn status(&mut self) -> Result<StatusResponse> {
-        Ok(self
-            .inner
-            .status(StatusRequest::default())
-            .await?
-            .into_inner())
+        self.inner
+            .unary(MethodId::XlineMaintStatus, StatusRequest::default())
+            .await
+            .map_err(Into::into)
     }
 }

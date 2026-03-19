@@ -85,6 +85,7 @@ impl Action for RootAction {
     }
 }
 
+#[allow(deprecated)]
 fn main() {
     env_logger::init();
 
@@ -139,7 +140,11 @@ fn main() {
 
     let root_id = *env_var.get_node_id("root").unwrap();
     dag.set_env(env_var);
-    dag.start().unwrap();
+    let runtime = dagrs::tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    dag.start_with_runtime(&runtime).unwrap();
 
     let outputs = dag.get_outputs();
     let result = outputs.get(&root_id).unwrap().get_out().unwrap();

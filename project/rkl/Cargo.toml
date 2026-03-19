@@ -19,7 +19,6 @@ common = { workspace = true }
 libruntime = { workspace = true }
 libnetwork = { workspace = true }
 rkforge = { workspace = true }
-libipam = { workspace = true }
 libcgroups = { workspace = true }
 libcontainer = { workspace = true }
 libvault = { workspace = true }
@@ -82,7 +81,7 @@ tonic =  "0.13"
 tonic-build = "0.13"
 prost-build = { workspace = true }
 dashmap = { workspace = true }
-
+tracing-log = { workspace = true }
 [dev-dependencies]
 tempfile = { workspace = true }
 scopeguard = { workspace = true }

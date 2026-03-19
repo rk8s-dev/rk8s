@@ -1,7 +1,7 @@
 //! Background workers (upload, compaction, gc)
 
 use crate::cadapter::client::{ObjectBackend, ObjectClient};
-use crate::chuck::ChunkLayout;
+use crate::chunk::ChunkLayout;
 use crate::meta::store::MetaStore;
 use std::sync::Arc;
 use tokio::time::{Duration, interval};

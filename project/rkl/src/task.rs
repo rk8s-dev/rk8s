@@ -1,7 +1,6 @@
 use anyhow::{Result, anyhow};
 use common::{ContainerSpec, PodTask};
 use json::JsonValue;
-use libcni::rust_cni::cni::Libcni;
 use libcontainer::syscall::syscall::create_syscall;
 use liboci_cli::{Create, Delete, Kill, Start};
 use libruntime::cri::config::ContainerConfigBuilder;
@@ -29,6 +28,8 @@ use std::fs::File;
 use std::io::{BufWriter, Read, Write};
 use std::path::{Path, PathBuf};
 use tracing::{debug, error, info};
+
+use crate::network::plugin_chain;
 
 /// Error indicating pause container is dead, Pod needs to be rebuilt
 #[derive(Debug, Error)]
@@ -269,7 +270,7 @@ impl TaskRunner {
             .pid
             .ok_or_else(|| anyhow!("PID not found for container {}", sandbox_id))?;
 
-        let pod_json = Self::setup_pod_network(pid_i32).map_err(|e| {
+        let pod_json = Self::setup_pod_network(pid_i32).await.map_err(|e| {
             let rollback_res = delete(
                 Delete {
                     container_id: sandbox_id.clone(),
@@ -386,7 +387,7 @@ impl TaskRunner {
             .pid
             .ok_or_else(|| anyhow!("PID not found for container {}", sandbox_id))?;
 
-        let pod_json = Self::setup_pod_network(pid_i32).map_err(|e| {
+        let pod_json = Self::sync_setup_pod_network(pid_i32).map_err(|e| {
             let rollback_res = delete(
                 Delete {
                     container_id: sandbox_id.clone(),
@@ -416,18 +417,21 @@ impl TaskRunner {
         Ok((response, podip))
     }
 
-    pub fn setup_pod_network(pid: i32) -> Result<JsonValue, anyhow::Error> {
-        let mut cni = get_cni()?;
-        cni.load_default_conf();
-
+    pub async fn setup_pod_network(pid: i32) -> Result<JsonValue, anyhow::Error> {
         let netns_path = format!("/proc/{pid}/ns/net");
         let id = pid.to_string();
 
-        let result = cni
-            .setup(id.clone(), netns_path.clone())
-            .map_err(|e| anyhow::anyhow!("Failed to add CNI network: {}", e))?;
+        plugin_chain::setup_network_async(&id, &netns_path)
+            .await
+            .map_err(|e| anyhow!("Failed to setup pod network via library chain: {e}"))
+    }
 
-        Ok(result)
+    pub fn sync_setup_pod_network(pid: i32) -> Result<JsonValue, anyhow::Error> {
+        let netns_path = format!("/proc/{pid}/ns/net");
+        let id = pid.to_string();
+
+        plugin_chain::setup_network(&id, &netns_path)
+            .map_err(|e| anyhow!("Failed to setup pod network via library chain: {e}"))
     }
 
     pub fn sync_build_create_container_request(
@@ -1057,18 +1061,6 @@ impl TaskRunner {
             }
         }
     }
-}
-
-pub fn get_cni() -> Result<Libcni, anyhow::Error> {
-    let plugin_dirs = vec!["/opt/cni/bin".to_string()];
-    let plugin_conf_dir = Path::new("/etc/cni/net.d");
-
-    let cni = Libcni::new(
-        Some(plugin_dirs),
-        Some(plugin_conf_dir.to_string_lossy().to_string()),
-        None,
-    );
-    Ok(cni)
 }
 
 // #[cfg(test)]

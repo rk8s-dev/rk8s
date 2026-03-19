@@ -14,7 +14,7 @@
 //! and provides utilities for mapping VFS metadata to FUSE attributes.
 pub(crate) mod adapter;
 pub mod mount;
-use crate::chuck::store::BlockStore;
+use crate::chunk::store::BlockStore;
 use crate::meta::MetaLayer;
 use crate::meta::file_lock::{FileLockQuery, FileLockRange, FileLockType};
 use crate::meta::store::{MetaError, SetAttrFlags, SetAttrRequest};
@@ -42,8 +42,8 @@ mod mount_tests {
     use super::*;
     use crate::cadapter::client::ObjectClient;
     use crate::cadapter::localfs::LocalFsBackend;
-    use crate::chuck::chunk::ChunkLayout;
-    use crate::chuck::store::ObjectBlockStore;
+    use crate::chunk::layout::ChunkLayout;
+    use crate::chunk::store::ObjectBlockStore;
     use crate::fuse::mount::mount_vfs_unprivileged;
     use crate::meta::factory::create_meta_store_from_url;
     use std::fs;
@@ -1117,9 +1117,9 @@ where
         self.set_xattr_ino(inode as i64, &name, value, flags)
             .await
             .map_err(|e| match e {
-                MetaError::AlreadyExists { .. } => Errno::from(libc::EEXIST),
-                MetaError::NotSupported(_) | MetaError::NotImplemented => Errno::from(libc::ENOSYS),
-                MetaError::NotFound(_) => Errno::from(libc::ENODATA),
+                VfsError::AlreadyExists { .. } => Errno::from(libc::EEXIST),
+                VfsError::Unsupported => Errno::from(libc::ENOSYS),
+                VfsError::NotFound { .. } => Errno::from(libc::ENODATA),
                 _ => Errno::from(libc::EIO),
             })
     }
@@ -1139,7 +1139,7 @@ where
             .get_xattr_ino(inode as i64, &name)
             .await
             .map_err(|e| match e {
-                MetaError::NotSupported(_) | MetaError::NotImplemented => Errno::from(libc::ENOSYS),
+                VfsError::Unsupported => Errno::from(libc::ENOSYS),
                 _ => Errno::from(libc::EIO),
             })?
             .ok_or_else(|| Errno::from(libc::ENODATA))?;
@@ -1160,7 +1160,7 @@ where
             .list_xattr_ino(inode as i64)
             .await
             .map_err(|e| match e {
-                MetaError::NotSupported(_) | MetaError::NotImplemented => Errno::from(libc::ENOSYS),
+                VfsError::Unsupported => Errno::from(libc::ENOSYS),
                 _ => Errno::from(libc::EIO),
             })?;
         let total_len: usize = names.iter().map(|n| n.len() + 1).sum();
@@ -1186,8 +1186,8 @@ where
         self.remove_xattr_ino(inode as i64, &name)
             .await
             .map_err(|e| match e {
-                MetaError::NotSupported(_) | MetaError::NotImplemented => libc::ENOSYS.into(),
-                MetaError::NotFound(_) => libc::ENODATA.into(),
+                VfsError::Unsupported => libc::ENOSYS.into(),
+                VfsError::NotFound { .. } => libc::ENODATA.into(),
                 _ => libc::EIO.into(),
             })
     }

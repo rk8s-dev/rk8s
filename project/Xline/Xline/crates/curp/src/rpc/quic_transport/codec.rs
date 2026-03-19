@@ -114,6 +114,46 @@ define_method_ids! {
     TriggerShutdown    = 0x0104, "TriggerShutdown";
     /// Try to become leader immediately
     TryBecomeLeaderNow = 0x0105, "TryBecomeLeaderNow";
+
+    // xline Auth direct-RPC service (0x02xx)
+    /// Authenticate with username and password
+    XlineAuthenticate  = 0x0201, "XlineAuthenticate";
+
+    // xline Lease direct-RPC service (0x03xx)
+    /// Revoke a lease
+    XlineLeaseRevoke   = 0x0301, "XlineLeaseRevoke";
+    /// Keep a lease alive
+    XlineLeaseKeepAlive = 0x0302, "XlineLeaseKeepAlive";
+    /// Query lease time-to-live
+    XlineLeaseTtl      = 0x0303, "XlineLeaseTtl";
+
+    // xline Watch direct-RPC service (0x04xx)
+    /// Watch key changes with bidirectional streaming
+    XlineWatch         = 0x0401, "XlineWatch";
+
+    // xline Maintenance direct-RPC service (0x05xx)
+    /// Get a snapshot from the server
+    XlineSnapshot      = 0x0501, "XlineSnapshot";
+    /// Send an alarm request
+    XlineAlarm         = 0x0502, "XlineAlarm";
+    /// Get server maintenance status
+    XlineMaintStatus   = 0x0503, "XlineMaintStatus";
+
+    // xline Cluster direct-RPC service (0x06xx)
+    /// Add a new cluster member
+    XlineMemberAdd     = 0x0601, "XlineMemberAdd";
+    /// Remove a cluster member
+    XlineMemberRemove  = 0x0602, "XlineMemberRemove";
+    /// Promote a learner to voter
+    XlineMemberPromote = 0x0603, "XlineMemberPromote";
+    /// Update an existing member
+    XlineMemberUpdate  = 0x0604, "XlineMemberUpdate";
+    /// List all cluster members
+    XlineMemberList    = 0x0605, "XlineMemberList";
+
+    // xline KV direct-RPC service (0x07xx)
+    /// Compact MVCC history
+    XlineCompact       = 0x0701, "XlineCompact";
 }
 
 /// Frame type constants
@@ -127,7 +167,7 @@ const STATUS_ERROR: u8 = 0x01;
 
 /// Frame types for QUIC protocol
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum Frame {
+pub enum Frame {
     /// DATA frame containing protobuf-encoded message
     Data(Vec<u8>),
     /// END frame marking stream completion (application layer)
@@ -160,7 +200,7 @@ pub(crate) enum StreamState {
 }
 
 /// Stateful frame reader with stream state machine
-pub(crate) struct FrameReader<R: AsyncRead + Unpin> {
+pub struct FrameReader<R: AsyncRead + Unpin> {
     /// Underlying reader
     reader: R,
     /// Current stream state
@@ -172,7 +212,7 @@ pub(crate) struct FrameReader<R: AsyncRead + Unpin> {
 impl<R: AsyncRead + Unpin> FrameReader<R> {
     /// Create a unary response reader (initial state: ExpectData)
     #[inline]
-    pub(crate) fn new_unary_response(reader: R) -> Self {
+    pub fn new_unary_response(reader: R) -> Self {
         Self {
             reader,
             state: StreamState::ExpectData,
@@ -182,7 +222,7 @@ impl<R: AsyncRead + Unpin> FrameReader<R> {
 
     /// Create a server-streaming response reader (initial state: ExpectDataOrStatus)
     #[inline]
-    pub(crate) fn new_server_streaming(reader: R) -> Self {
+    pub fn new_server_streaming(reader: R) -> Self {
         Self {
             reader,
             state: StreamState::ExpectDataOrStatus,
@@ -193,7 +233,7 @@ impl<R: AsyncRead + Unpin> FrameReader<R> {
     /// Create a client-streaming request reader (initial state: ExpectDataOrEnd)
     #[inline]
     #[allow(dead_code)] // Used in server-side handling
-    pub(crate) fn new_client_streaming(reader: R) -> Self {
+    pub fn new_client_streaming(reader: R) -> Self {
         Self {
             reader,
             state: StreamState::ExpectDataOrEnd,
@@ -203,7 +243,7 @@ impl<R: AsyncRead + Unpin> FrameReader<R> {
 
     /// Create a unary request reader (initial state: ExpectData)
     #[inline]
-    pub(crate) fn new_unary_request(reader: R) -> Self {
+    pub fn new_unary_request(reader: R) -> Self {
         Self {
             reader,
             state: StreamState::ExpectData,
@@ -212,7 +252,7 @@ impl<R: AsyncRead + Unpin> FrameReader<R> {
     }
 
     /// Read next frame with state machine validation
-    pub(crate) async fn read_frame(&mut self) -> Result<Frame, CurpError> {
+    pub async fn read_frame(&mut self) -> Result<Frame, CurpError> {
         if self.state == StreamState::Terminal {
             return Err(CurpError::internal(
                 "protocol violation: frame received after terminal frame",
@@ -378,13 +418,22 @@ impl<R: AsyncRead + Unpin> FrameReader<R> {
     /// Check if reader is in terminal state
     #[inline]
     #[allow(dead_code)] // Used in tests
-    pub(crate) fn is_terminal(&self) -> bool {
+    pub fn is_terminal(&self) -> bool {
         self.state == StreamState::Terminal
     }
 }
 
+impl<R: AsyncRead + Unpin> std::fmt::Debug for FrameReader<R> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("FrameReader")
+            .field("state", &self.state)
+            .field("is_response", &self.is_response)
+            .finish_non_exhaustive()
+    }
+}
+
 /// Frame writer (handles frame encoding only, not stream lifecycle)
-pub(crate) struct FrameWriter<W: AsyncWrite + Unpin> {
+pub struct FrameWriter<W: AsyncWrite + Unpin> {
     /// Underlying writer
     writer: W,
 }
@@ -392,12 +441,12 @@ pub(crate) struct FrameWriter<W: AsyncWrite + Unpin> {
 impl<W: AsyncWrite + Unpin> FrameWriter<W> {
     /// Create a new frame writer
     #[inline]
-    pub(crate) fn new(writer: W) -> Self {
+    pub fn new(writer: W) -> Self {
         Self { writer }
     }
 
     /// Write request header (method ID + metadata)
-    pub(crate) async fn write_request_header(
+    pub async fn write_request_header(
         &mut self,
         method: MethodId,
         meta: &[(String, String)],
@@ -458,7 +507,7 @@ impl<W: AsyncWrite + Unpin> FrameWriter<W> {
     }
 
     /// Write a frame
-    pub(crate) async fn write_frame(&mut self, frame: &Frame) -> Result<(), CurpError> {
+    pub async fn write_frame(&mut self, frame: &Frame) -> Result<(), CurpError> {
         match *frame {
             Frame::Data(ref data) => {
                 self.writer
@@ -508,7 +557,7 @@ impl<W: AsyncWrite + Unpin> FrameWriter<W> {
     }
 
     /// Flush buffered data to the underlying writer
-    pub(crate) async fn flush(&mut self) -> Result<(), CurpError> {
+    pub async fn flush(&mut self) -> Result<(), CurpError> {
         self.writer
             .flush()
             .await
@@ -517,8 +566,14 @@ impl<W: AsyncWrite + Unpin> FrameWriter<W> {
 
     /// Consume writer and return underlying stream
     #[inline]
-    pub(crate) fn into_inner(self) -> W {
+    pub fn into_inner(self) -> W {
         self.writer
+    }
+}
+
+impl<W: AsyncWrite + Unpin> std::fmt::Debug for FrameWriter<W> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("FrameWriter").finish_non_exhaustive()
     }
 }
 
@@ -546,7 +601,7 @@ impl<W: AsyncWrite + Unpin> FrameWriter<W> {
 /// Returns the raw method ID (u16) without validating it against `MethodId`.
 /// The caller (`handle_stream`) is responsible for converting to `MethodId`
 /// and returning a structured error for unknown IDs.
-pub(crate) async fn read_request_header<R: AsyncRead + Unpin>(
+pub async fn read_request_header<R: AsyncRead + Unpin>(
     r: &mut R,
 ) -> Result<(u16, Vec<(String, String)>), CurpError> {
     // Read method ID
@@ -604,13 +659,13 @@ pub(crate) async fn read_request_header<R: AsyncRead + Unpin>(
 
 /// Status code for OK response
 #[inline]
-pub(crate) const fn status_ok() -> u8 {
+pub const fn status_ok() -> u8 {
     STATUS_OK
 }
 
 /// Status code for error response
 #[inline]
-pub(crate) const fn status_error() -> u8 {
+pub const fn status_error() -> u8 {
     STATUS_ERROR
 }
 
@@ -837,7 +892,33 @@ mod tests {
         assert_eq!(MethodId::TriggerShutdown.as_u16(), 0x0104);
         assert_eq!(MethodId::TryBecomeLeaderNow.as_u16(), 0x0105);
 
+        // xline Auth direct-RPC service (0x02xx)
+        assert_eq!(MethodId::XlineAuthenticate.as_u16(), 0x0201);
+
+        // xline Lease direct-RPC service (0x03xx)
+        assert_eq!(MethodId::XlineLeaseRevoke.as_u16(), 0x0301);
+        assert_eq!(MethodId::XlineLeaseKeepAlive.as_u16(), 0x0302);
+        assert_eq!(MethodId::XlineLeaseTtl.as_u16(), 0x0303);
+
+        // xline Watch direct-RPC service (0x04xx)
+        assert_eq!(MethodId::XlineWatch.as_u16(), 0x0401);
+
+        // xline Maintenance direct-RPC service (0x05xx)
+        assert_eq!(MethodId::XlineSnapshot.as_u16(), 0x0501);
+        assert_eq!(MethodId::XlineAlarm.as_u16(), 0x0502);
+        assert_eq!(MethodId::XlineMaintStatus.as_u16(), 0x0503);
+
+        // xline Cluster direct-RPC service (0x06xx)
+        assert_eq!(MethodId::XlineMemberAdd.as_u16(), 0x0601);
+        assert_eq!(MethodId::XlineMemberRemove.as_u16(), 0x0602);
+        assert_eq!(MethodId::XlineMemberPromote.as_u16(), 0x0603);
+        assert_eq!(MethodId::XlineMemberUpdate.as_u16(), 0x0604);
+        assert_eq!(MethodId::XlineMemberList.as_u16(), 0x0605);
+
+        // xline KV direct-RPC service (0x07xx)
+        assert_eq!(MethodId::XlineCompact.as_u16(), 0x0701);
+
         // Total count guard: if you add a new method, update this assertion.
-        assert_eq!(ALL_METHOD_IDS.len(), 15);
+        assert_eq!(ALL_METHOD_IDS.len(), 29);
     }
 }

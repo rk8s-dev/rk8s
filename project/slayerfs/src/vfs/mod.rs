@@ -23,6 +23,7 @@ pub mod fs;
 pub(crate) mod handles;
 pub(crate) mod inode;
 pub(crate) mod io;
+pub(crate) mod meta_ops;
 pub mod sdk;
 // Module implementation TODOs remain.
 

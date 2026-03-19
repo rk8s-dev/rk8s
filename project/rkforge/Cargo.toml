@@ -9,7 +9,6 @@ repository = "https://github.com/r2cn-dev/rk8s/tree/main/project/rkforge"
 [dependencies]
 common = { workspace = true }
 libnetwork = { workspace = true }
-libipam = { workspace = true }
 libcgroups = { workspace = true }
 libcontainer = { workspace = true }
 libruntime = { workspace = true }

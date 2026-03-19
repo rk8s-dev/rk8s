@@ -25,7 +25,7 @@ use crate::{
 pub(crate) const CHANNEL_SIZE: usize = 1024;
 
 /// Watch Server
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub(crate) struct WatchServer {
     /// KV watcher
     watcher: Arc<KvWatcher>,
@@ -54,6 +54,29 @@ impl WatchServer {
             watch_progress_notify_interval,
             task_manager,
         }
+    }
+
+    /// Start a watch stream from an arbitrary request stream source.
+    pub(crate) fn watch_stream<ST>(
+        &self,
+        req_stream: ST,
+    ) -> ReceiverStream<Result<WatchResponse, Status>>
+    where
+        ST: Stream<Item = Result<WatchRequest, Status>> + Send + Unpin + 'static,
+    {
+        let (tx, rx) = mpsc::channel(CHANNEL_SIZE);
+        self.task_manager.spawn(TaskName::WatchTask, |n| {
+            Self::task(
+                Arc::clone(&self.next_id_gen),
+                Arc::clone(&self.watcher),
+                tx,
+                req_stream,
+                Arc::clone(&self.header_gen),
+                self.watch_progress_notify_interval,
+                n,
+            )
+        });
+        ReceiverStream::new(rx)
     }
 
     /// bg task for handle watch connection

@@ -354,18 +354,13 @@ fn test_automatic_retry_success() {
 
         let collector = tokio::spawn(async move {
             let mut collected = Vec::new();
-            loop {
-                match tokio::time::timeout(std::time::Duration::from_millis(500), receiver.recv())
-                    .await
-                {
-                    Ok(Ok(event)) => {
-                        let is_finished = matches!(event, GraphEvent::GraphFinished);
-                        collected.push(event);
-                        if is_finished {
-                            break;
-                        }
-                    }
-                    _ => break,
+            while let Ok(Ok(event)) =
+                tokio::time::timeout(std::time::Duration::from_millis(500), receiver.recv()).await
+            {
+                let is_finished = matches!(event, GraphEvent::GraphFinished);
+                collected.push(event);
+                if is_finished {
+                    break;
                 }
             }
             collected

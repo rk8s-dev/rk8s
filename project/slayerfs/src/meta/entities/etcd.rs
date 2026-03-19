@@ -58,24 +58,27 @@ impl EtcdDirChildren {
         Self { inode, children }
     }
 }
-#[allow(dead_code)]
 impl EtcdEntryInfo {
     pub fn permission(&self) -> &Permission {
         &self.permission
     }
 
+    #[allow(dead_code)]
     pub fn set_permission(&mut self, permission: Permission) {
         self.permission = permission;
     }
 
+    #[allow(dead_code)]
     pub fn mode(&self) -> u32 {
         self.permission.mode
     }
 
+    #[allow(dead_code)]
     pub fn uid(&self) -> u32 {
         self.permission.uid
     }
 
+    #[allow(dead_code)]
     pub fn gid(&self) -> u32 {
         self.permission.gid
     }
