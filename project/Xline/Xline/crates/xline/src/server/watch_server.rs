@@ -17,7 +17,7 @@ use crate::{
     router::endpoint::EndPoint as RouterEndpoint,
     header_gen::HeaderGenerator,
     rpc::{
-        RequestUnion, ResponseHeader, Watch, WatchCancelRequest, WatchCreateRequest,
+        RequestUnion, ResponseHeader, WatchCancelRequest, WatchCreateRequest,
         WatchProgressRequest, WatchRequest, WatchResponse,
     },
     storage::kvwatcher::{KvWatcher, KvWatcherOps, WatchEvent, WatchId, WatchIdGenerator},
@@ -121,6 +121,32 @@ impl WatchServer {
                 }
             }
         }
+    }
+
+    /// Watch watches for events happening or that have happened. Both input and output
+    /// are streams; the input stream is for creating and canceling watchers and the output
+    /// stream sends events. One watch RPC can watch on multiple key ranges, streaming events
+    /// for several watches at once. The entire event history can be watched starting from the
+    /// last compaction revision.
+    async fn watch(
+        &self,
+        request: tonic::Request<tonic::Streaming<WatchRequest>>,
+    ) -> Result<tonic::Response<ReceiverStream<Result<WatchResponse, Status>>>, Status> {
+        debug!("Receive Watch Connection {:?}", request);
+        let req_stream = request.into_inner();
+        let (tx, rx) = mpsc::channel(CHANNEL_SIZE);
+        self.task_manager.spawn(TaskName::WatchTask, |n| {
+            Self::task(
+                Arc::clone(&self.next_id_gen),
+                Arc::clone(&self.watcher),
+                tx,
+                req_stream,
+                Arc::clone(&self.header_gen),
+                self.watch_progress_notify_interval,
+                n,
+            )
+        });
+        Ok(tonic::Response::new(ReceiverStream::new(rx)))
     }
 }
 
@@ -380,37 +406,6 @@ where
     }
 }
 
-#[tonic::async_trait]
-impl Watch for WatchServer {
-    ///Server streaming response type for the Watch method.
-    type WatchStream = ReceiverStream<Result<WatchResponse, Status>>;
-
-    /// Watch watches for events happening or that have happened. Both input and output
-    /// are streams; the input stream is for creating and canceling watchers and the output
-    /// stream sends events. One watch RPC can watch on multiple key ranges, streaming events
-    /// for several watches at once. The entire event history can be watched starting from the
-    /// last compaction revision.
-    async fn watch(
-        &self,
-        request: tonic::Request<tonic::Streaming<WatchRequest>>,
-    ) -> Result<tonic::Response<Self::WatchStream>, Status> {
-        debug!("Receive Watch Connection {:?}", request);
-        let req_stream = request.into_inner();
-        let (tx, rx) = mpsc::channel(CHANNEL_SIZE);
-        self.task_manager.spawn(TaskName::WatchTask, |n| {
-            Self::task(
-                Arc::clone(&self.next_id_gen),
-                Arc::clone(&self.watcher),
-                tx,
-                req_stream,
-                Arc::clone(&self.header_gen),
-                self.watch_progress_notify_interval,
-                n,
-            )
-        });
-        Ok(tonic::Response::new(ReceiverStream::new(rx)))
-    }
-}
 
 pub(crate) struct Server {
     watch_server: Arc<WatchServer>,

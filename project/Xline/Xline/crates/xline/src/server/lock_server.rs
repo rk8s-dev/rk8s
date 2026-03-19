@@ -18,7 +18,7 @@ use crate::{
     router::endpoint::EndPoint as RouterEndpoint,
     rpc::{
         Compare, CompareResult, CompareTarget, DeleteRangeRequest, DeleteRangeResponse,
-        LeaseGrantRequest, LeaseGrantResponse, Lock, LockRequest, LockResponse, PutRequest,
+        LeaseGrantRequest, LeaseGrantResponse, LockRequest, LockResponse, PutRequest,
         RangeRequest, RangeResponse, Request, RequestOp, RequestUnion, RequestWrapper, Response,
         ResponseHeader, SortOrder, SortTarget, TargetUnion, TxnRequest, TxnResponse, UnlockRequest,
         UnlockResponse, WatchClient, WatchCreateRequest, WatchRequest,
@@ -200,10 +200,7 @@ impl LockServer {
         let res = Into::<LeaseGrantResponse>::into(cmd_res.into_inner());
         Ok(res.id)
     }
-}
 
-#[tonic::async_trait]
-impl Lock for LockServer {
     /// Lock acquires a distributed shared lock on a given named lock.
     /// On success, it will return a unique key that exists so long as the
     /// lock is held by the caller. This key can be used in conjunction with

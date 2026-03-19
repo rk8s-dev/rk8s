@@ -13,7 +13,7 @@ use tonic::{Request, Response, Status};
 // use xlinerpc::status::Status;
 use utils::timestamp;
 use xlineapi::{
-    Cluster, Member, MemberAddRequest, MemberAddResponse, MemberListRequest, MemberListResponse,
+    Member, MemberAddRequest, MemberAddResponse, MemberListRequest, MemberListResponse,
     MemberPromoteRequest, MemberPromoteResponse, MemberRemoveRequest, MemberRemoveResponse,
     MemberUpdateRequest, MemberUpdateResponse, command::CurpClient,
 };
@@ -53,10 +53,7 @@ impl ClusterServer {
             })
             .collect())
     }
-}
 
-#[tonic::async_trait]
-impl Cluster for ClusterServer {
     async fn member_add(
         &self,
         request: Request<MemberAddRequest>,

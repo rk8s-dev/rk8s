@@ -23,7 +23,7 @@ use crate::{
     id_gen::IdGenerator,
     metrics,
     rpc::{
-        Lease, LeaseClient, LeaseGrantRequest, LeaseGrantResponse, LeaseKeepAliveRequest,
+        LeaseClient, LeaseGrantRequest, LeaseGrantResponse, LeaseKeepAliveRequest,
         LeaseKeepAliveResponse, LeaseLeasesRequest, LeaseLeasesResponse, LeaseRevokeRequest,
         LeaseRevokeResponse, LeaseTimeToLiveRequest, LeaseTimeToLiveResponse, RequestWrapper,
     },
@@ -227,26 +227,7 @@ impl LeaseServer {
 
         Ok(Box::pin(stream))
     }
-}
 
-/// Build endpoints from addresses
-#[allow(clippy::result_large_err)]
-fn build_endpoints(
-    addrs: &[String],
-    tls_config: Option<&ClientTlsConfig>,
-) -> Result<Vec<Endpoint>, Status> {
-    addrs
-        .iter()
-        .map(|addr| {
-            let endpoint =
-                build_endpoint(addr, tls_config).map_err(|e| Status::internal(e.to_string()))?;
-            Ok(endpoint)
-        })
-        .collect()
-}
-
-#[tonic::async_trait]
-impl Lease for LeaseServer {
     /// `LeaseGrant` creates a lease which expires if the server does not receive a `keepAlive`
     /// within a given time to live period. All keys attached to the lease will be expired and
     /// deleted if the lease expires. Each expired key generates a delete event in the event history.
@@ -294,16 +275,13 @@ impl Lease for LeaseServer {
         Ok(tonic::Response::new(res))
     }
 
-    /// Server streaming response type for the `LeaseKeepAlive` method.
-    type LeaseKeepAliveStream =
-        Pin<Box<dyn Stream<Item = Result<LeaseKeepAliveResponse, Status>> + Send>>;
 
     /// `LeaseKeepAlive` keeps the lease alive by streaming keep alive requests from the client
     /// to the server and streaming keep alive responses from the server to the client.
     async fn lease_keep_alive(
         &self,
         request: tonic::Request<tonic::Streaming<LeaseKeepAliveRequest>>,
-    ) -> Result<tonic::Response<Self::LeaseKeepAliveStream>, Status> {
+    ) -> Result<tonic::Response<Pin<Box<dyn Stream<Item = Result<LeaseKeepAliveResponse, Status>> + Send>>>, Status> {
         debug!("Receive LeaseKeepAliveRequest {:?}", request);
         let request_stream = request.into_inner();
         let stream = loop {
@@ -394,6 +372,22 @@ impl Lease for LeaseServer {
         }
         Ok(tonic::Response::new(res))
     }
+}
+
+/// Build endpoints from addresses
+#[allow(clippy::result_large_err)]
+fn build_endpoints(
+    addrs: &[String],
+    tls_config: Option<&ClientTlsConfig>,
+) -> Result<Vec<Endpoint>, Status> {
+    addrs
+        .iter()
+        .map(|addr| {
+            let endpoint =
+                build_endpoint(addr, tls_config).map_err(|e| Status::internal(e.to_string()))?;
+            Ok(endpoint)
+        })
+        .collect()
 }
 
 pub(crate) struct Server {

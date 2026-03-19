@@ -8,20 +8,16 @@ use curp::{
     self,
     client::ClientBuilder as CurpClientBuilder,
     members::{ClusterInfo, get_cluster_info_from_remote},
-    rpc::{InnerProtocolServer, ProtocolServer},
     server::{DB as CurpDB, Rpc, StorageApi as _},
 };
 use dashmap::DashMap;
 use engine::{MemorySnapshotAllocator, RocksSnapshotAllocator, SnapshotAllocator};
-use futures::Stream;
 use jsonwebtoken::{DecodingKey, EncodingKey};
-use tokio::io::{AsyncRead, AsyncWrite};
 use tonic::{
     Status,
     // TODO: use our own status type
     // use xlinerpc::status::Status;
     transport::{
-        server::Connected,
         Certificate, ClientTlsConfig, Identity, ServerTlsConfig
     },
 };
@@ -77,11 +73,6 @@ use crate::{
         RouterBuilder,
         Server,
     },
-    rpc::{
-        AuthServer as RpcAuthServer, ClusterServer as RpcClusterServer, KvServer as RpcKvServer,
-        LeaseServer as RpcLeaseServer, LockServer as RpcLockServer,
-        MaintenanceServer as RpcMaintenanceServer, WatchServer as RpcWatchServer,
-    },
     state::State,
     storage::{
         AlarmStore, AuthStore, KvStore, LeaseStore,
@@ -113,7 +104,7 @@ pub struct XlineServer {
     /// Client tls config
     client_tls_config: Option<ClientTlsConfig>,
     /// Server tls config
-    server_tls_config: Option<ServerTlsConfig>,
+    _server_tls_config: Option<ServerTlsConfig>,
     /// Task Manager
     task_manager: Arc<TaskManager>,
     /// Curp storage
@@ -153,7 +144,7 @@ impl XlineServer {
             compact_config,
             auth_config,
             client_tls_config,
-            server_tls_config,
+            _server_tls_config: server_tls_config,
             task_manager: Arc::new(TaskManager::new()),
             curp_storage,
             tls_config,
@@ -356,126 +347,6 @@ impl XlineServer {
         };
 
         Ok((xline_router, curp_router, curp_client))
-    }
-
-    /// Init xline and curp router
-    ///
-    /// # Errors
-    ///
-    /// Will return `Err` when `init_servers` return an error
-    #[inline]
-    pub async fn init_router(
-        &self,
-        db: Arc<DB>,
-        key_pair: Option<(EncodingKey, DecodingKey)>,
-    ) -> Result<(
-        tonic::transport::server::Router,
-        tonic::transport::server::Router,
-        Arc<CurpClient>,
-    )> {
-        let (
-            kv_server,
-            lock_server,
-            lease_server,
-            auth_server,
-            watch_server,
-            maintenance_server,
-            cluster_server,
-            curp_server,
-            auth_wrapper,
-            curp_client,
-        ) = self.init_servers(db, key_pair).await?;
-        let mut builder = tonic::transport::Server::builder();
-
-        if let Some(ref cfg) = self.server_tls_config {
-            builder = builder.tls_config(cfg.clone())?;
-        }
-        let xline_router = builder
-            .clone()
-            .add_service(RpcLockServer::new(lock_server))
-            .add_service(RpcKvServer::new(kv_server))
-            .add_service(RpcLeaseServer::from_arc(lease_server))
-            .add_service(RpcAuthServer::new(auth_server))
-            .add_service(RpcWatchServer::new(watch_server))
-            .add_service(RpcMaintenanceServer::new(maintenance_server))
-            .add_service(RpcClusterServer::new(cluster_server))
-            .add_service(ProtocolServer::new(auth_wrapper));
-        let curp_router = builder
-            .add_service(ProtocolServer::new(curp_server.clone()))
-            .add_service(InnerProtocolServer::new(curp_server));
-
-        let xline_router = {
-            let (mut reporter, health_server) = tonic_health::server::health_reporter();
-            reporter
-                .set_service_status("", tonic_health::ServingStatus::Serving)
-                .await;
-            xline_router.add_service(health_server)
-        };
-        Ok((xline_router, curp_router, curp_client))
-    }
-
-    /// Start `XlineServer`
-    ///
-    /// # Errors
-    ///
-    /// Will return `Err` when `tonic::Server` serve return an error
-    #[inline]
-    /// inner start method shared by `start` and `start_from_listener`
-    async fn start_inner<I1, I2, IO, IE>(&self, xline_incoming: I1, curp_incoming: I2) -> Result<()>
-    where
-        I1: Stream<Item = Result<IO, IE>> + Send + 'static,
-        I2: Stream<Item = Result<IO, IE>> + Send + 'static,
-        IO: AsyncRead + AsyncWrite + Connected + Unpin + Send + 'static,
-        IO::ConnectInfo: Clone + Send + Sync + 'static,
-        IE: Into<Box<dyn std::error::Error + Send + Sync>> + Send,
-    {
-        let db = DB::open(&self.storage_config.engine)?;
-        let key_pair = Self::read_key_pair(&self.auth_config).await?;
-        let (xline_router, curp_router, curp_client) = self.init_router(db, key_pair).await?;
-        self.task_manager
-            .spawn(TaskName::TonicServer, |n1| async move {
-                let n2 = n1.clone();
-                tokio::select! {
-                    _ = xline_router.serve_with_incoming_shutdown(xline_incoming, n1.wait()) => {},
-                    _ = curp_router.serve_with_incoming_shutdown(curp_incoming, n2.wait()) => {},
-                }
-            });
-        if let Err(e) = self.publish(curp_client).await {
-            warn!("publish name to cluster failed: {e:?}");
-        }
-        Ok(())
-    }
-
-    /// Start `XlineServer`
-    ///
-    /// # Errors
-    ///
-    /// Will return `Err` when `tonic::Server` serve return an error
-    #[inline]
-    pub async fn start(&self) -> Result<()> {
-        let client_listen_urls = self.cluster_config.client_listen_urls();
-        let peer_listen_urls = self.cluster_config.peer_listen_urls();
-        let xline_incoming = bind_addrs(client_listen_urls)?;
-        let curp_incoming = bind_addrs(peer_listen_urls)?;
-        info!("start xline server on {:?}", client_listen_urls);
-        info!("start curp server on {:?}", peer_listen_urls);
-        self.start_inner(xline_incoming, curp_incoming).await
-    }
-
-    /// Start `XlineServer` from listeners
-    ///
-    /// # Errors
-    ///
-    /// Will return `Err` when `tonic::Server` serve return an error
-    #[inline]
-    pub async fn start_from_listener(
-        &self,
-        xline_listener: tokio::net::TcpListener,
-        curp_listener: tokio::net::TcpListener,
-    ) -> Result<()> {
-        let xline_incoming = tokio_stream::wrappers::TcpListenerStream::new(xline_listener);
-        let curp_incoming = tokio_stream::wrappers::TcpListenerStream::new(curp_listener);
-        self.start_inner(xline_incoming, curp_incoming).await
     }
 
     /// Start `XlineServer` using gm-quic as transport protocol
@@ -763,32 +634,4 @@ impl XlineServer {
         };
         Ok((client_tls_config, server_tls_config))
     }
-}
-
-/// Bind multiple addresses
-fn bind_addrs(
-    addrs: &[String],
-) -> Result<impl Stream<Item = Result<tokio::net::TcpStream, std::io::Error>> + use<>> {
-    use std::net::ToSocketAddrs;
-    if addrs.is_empty() {
-        return Err(anyhow!("No address to bind"));
-    }
-    let incoming = addrs
-        .iter()
-        .map(|addr| {
-            let address = match addr.split_once("://") {
-                Some((_, address)) => address,
-                None => addr,
-            };
-            address.to_socket_addrs()
-        })
-        .collect::<Result<Vec<_>, _>>()?
-        .into_iter()
-        .flatten()
-        .map(|addr| {
-            tonic::transport::server::TcpIncoming::new(addr, true, None)
-                .map_err(|e| anyhow::anyhow!("Failed to bind to {}, err: {e}", addr))
-        })
-        .collect::<Result<Vec<_>>>()?;
-    Ok(futures::stream::select_all(incoming))
 }

@@ -21,7 +21,7 @@ use crate::{
     header_gen::HeaderGenerator,
     rpc::{
         AlarmRequest, AlarmResponse, DefragmentRequest, DefragmentResponse, DowngradeRequest,
-        DowngradeResponse, HashKvRequest, HashKvResponse, HashRequest, HashResponse, Maintenance,
+        DowngradeResponse, HashKvRequest, HashKvResponse, HashRequest, HashResponse,
         MoveLeaderRequest, MoveLeaderResponse, SnapshotRequest, SnapshotResponse, StatusRequest,
         StatusResponse,
     },
@@ -97,10 +97,7 @@ impl MaintenanceServer {
         let res = self.client.propose(&cmd, None, false).await??;
         Ok(res)
     }
-}
 
-#[tonic::async_trait]
-impl Maintenance for MaintenanceServer {
     async fn alarm(
         &self,
         request: tonic::Request<AlarmRequest>,
@@ -187,12 +184,10 @@ impl Maintenance for MaintenanceServer {
         }))
     }
 
-    type SnapshotStream = Pin<Box<dyn Stream<Item = Result<SnapshotResponse, Status>> + Send>>;
-
     async fn snapshot(
         &self,
         _request: tonic::Request<SnapshotRequest>,
-    ) -> Result<tonic::Response<Self::SnapshotStream>, Status> {
+    ) -> Result<tonic::Response<Pin<Box<dyn Stream<Item = Result<SnapshotResponse, Status>> + Send>>>, Status> {
         let stream = snapshot_stream(self.header_gen.as_ref(), self.db.as_ref())?;
 
         Ok(tonic::Response::new(Box::pin(stream)))

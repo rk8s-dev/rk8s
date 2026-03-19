@@ -24,7 +24,7 @@ use crate::{
     router::endpoint::EndPoint as RouterEndpoint,
     revision_check::RevisionCheck,
     rpc::{
-        CompactionRequest, CompactionResponse, DeleteRangeRequest, DeleteRangeResponse, Kv,
+        CompactionRequest, CompactionResponse, DeleteRangeRequest, DeleteRangeResponse,
         PutRequest, PutResponse, RangeRequest, RangeResponse, RequestWrapper, Response, ResponseOp,
         TxnRequest, TxnResponse,
     },
@@ -132,10 +132,7 @@ impl KvServer {
             }
         }
     }
-}
 
-#[tonic::async_trait]
-impl Kv for KvServer {
     /// Range gets the keys in the range from the key-value store.
     #[instrument(skip_all)]
     async fn range(

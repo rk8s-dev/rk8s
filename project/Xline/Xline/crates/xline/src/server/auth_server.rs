@@ -14,7 +14,7 @@ use xlineapi::{
 use crate::{
     router::endpoint::EndPoint as RouterEndpoint,
     rpc::{
-        Auth, AuthDisableRequest, AuthDisableResponse, AuthEnableRequest, AuthEnableResponse,
+        AuthDisableRequest, AuthDisableResponse, AuthEnableRequest, AuthEnableResponse,
         AuthRoleAddRequest, AuthRoleAddResponse, AuthRoleDeleteRequest, AuthRoleDeleteResponse,
         AuthRoleGetRequest, AuthRoleGetResponse, AuthRoleGrantPermissionRequest,
         AuthRoleGrantPermissionResponse, AuthRoleListRequest, AuthRoleListResponse,
@@ -82,10 +82,7 @@ impl AuthServer {
         }
         Ok(tonic::Response::new(res_wrapper.into()))
     }
-}
 
-#[tonic::async_trait]
-impl Auth for AuthServer {
     async fn auth_enable(
         &self,
         request: tonic::Request<AuthEnableRequest>,
