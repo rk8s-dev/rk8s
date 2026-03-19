@@ -1,0 +1,2805 @@
+//! Database-based metadata store implementation
+//!
+//! Supports SQLite and PostgreSQL backends via SeaORM
+
+use super::{TrimAction, apply_truncate_plan, build_paths_from_names, trim_action};
+use crate::chunk::SliceDesc;
+use crate::meta::client::session::{Session, SessionInfo};
+use crate::meta::config::{Config, DatabaseType};
+use crate::meta::entities::counter_meta;
+use crate::meta::entities::link_parent_meta;
+use crate::meta::entities::session_meta::{self, Entity as SessionMeta};
+use crate::meta::entities::slice_meta::{self, Entity as SliceMeta};
+use crate::meta::entities::xattr_meta;
+use crate::meta::entities::*;
+use crate::meta::file_lock::{
+    FileLockInfo, FileLockQuery, FileLockRange, FileLockType, PlockRecord,
+};
+use crate::meta::store::{
+    DirEntry, FileAttr, LockName, MetaError, MetaStore, OpenFlags, SetAttrFlags, SetAttrRequest,
+    StatFsSnapshot,
+};
+use crate::meta::{INODE_ID_KEY, Permission, SLICE_ID_KEY};
+use crate::utils::NumCastExt;
+use crate::vfs::chunk_id_for;
+use crate::vfs::fs::FileType;
+use async_trait::async_trait;
+use chrono::{Duration as ChronoDuration, Utc};
+use log::info;
+use sea_orm::ActiveValue::{self, Set, Unchanged};
+use sea_orm::prelude::Uuid;
+use sea_orm::{
+    ActiveModelTrait, ColumnTrait, ConnectOptions, ConnectionTrait, Database, DatabaseConnection,
+    EntityTrait, IntoActiveModel, PaginatorTrait, QueryFilter, QueryOrder, Schema,
+    TransactionTrait, sea_query,
+};
+use sea_query::Index;
+use std::collections::HashMap;
+use std::hash::Hash;
+use std::path::Path;
+use std::sync::OnceLock;
+use std::time::Duration;
+use tokio::select;
+use tokio_util::sync::CancellationToken;
+use tracing::{Instrument, error};
+
+#[derive(Eq, Hash, PartialEq)]
+struct PlockHashMapKey {
+    pub sid: Uuid,
+    pub owner: i64,
+}
+
+/// Database-based metadata store
+pub struct DatabaseMetaStore {
+    db: DatabaseConnection,
+    sid: OnceLock<Uuid>,
+    _config: Config,
+}
+
+impl DatabaseMetaStore {
+    async fn from_config_inner(config: Config) -> Result<Self, MetaError> {
+        info!("Initializing DatabaseMetaStore from config");
+        info!("Database type: {}", config.database.db_type_str());
+
+        let db = Self::create_connection(&config).await?;
+        Self::init_schema(&db).await?;
+
+        let store = Self {
+            db,
+            sid: OnceLock::new(),
+            _config: config,
+        };
+        store.init_counters().await?;
+        store.init_root_directory().await?;
+
+        info!("DatabaseMetaStore initialized successfully");
+        Ok(store)
+    }
+
+    /// Create or open a database metadata store
+    #[allow(dead_code)]
+    pub async fn new(backend_path: &Path) -> Result<Self, MetaError> {
+        let config =
+            Config::from_path(backend_path).map_err(|e| MetaError::Config(e.to_string()))?;
+        info!("Backend path: {}", backend_path.display());
+
+        Self::from_config_inner(config).await
+    }
+
+    /// Create from existing config
+    #[allow(dead_code)]
+    pub async fn from_config(config: Config) -> Result<Self, MetaError> {
+        Self::from_config_inner(config).await
+    }
+
+    /// Initialize next inode counter from database
+    async fn init_next_inode(db: &DatabaseConnection) -> Result<u64, MetaError> {
+        let max_access = AccessMeta::find()
+            .order_by_desc(access_meta::Column::Inode)
+            .one(db)
+            .await
+            .map_err(MetaError::Database)?
+            .map(|r| r.inode as u64)
+            .unwrap_or(0); // Changed from 1 to 0 - root directory is inode 1
+
+        let max_file = FileMeta::find()
+            .order_by_desc(file_meta::Column::Inode)
+            .one(db)
+            .await
+            .map_err(MetaError::Database)?
+            .map(|r| r.inode as u64)
+            .unwrap_or(0); // Changed from 1 to 0
+
+        // Ensure next inode is at least 2 (root is 1)
+        let next = max_access.max(max_file).max(1) + 1;
+        info!("Initialized next inode counter to: {}", next);
+        Ok(next)
+    }
+
+    async fn init_next_slice(db: &DatabaseConnection) -> Result<u64, MetaError> {
+        let max_slice = SliceMeta::find()
+            .order_by_desc(slice_meta::Column::SliceId)
+            .one(db)
+            .await
+            .map_err(MetaError::Database)?
+            .map(|r| r.slice_id as u64)
+            .unwrap_or(0);
+
+        Ok(max_slice + 1)
+    }
+
+    async fn init_counters(&self) -> Result<(), MetaError> {
+        let next_inode = i64::try_from(Self::init_next_inode(&self.db).await?)
+            .map_err(|_| MetaError::Internal("inode counter overflow".to_string()))?;
+        let next_slice = i64::try_from(Self::init_next_slice(&self.db).await?)
+            .map_err(|_| MetaError::Internal("slice counter overflow".to_string()))?;
+
+        Self::set_counter_floor(&self.db, INODE_ID_KEY, next_inode).await?;
+        Self::set_counter_floor(&self.db, SLICE_ID_KEY, next_slice).await?;
+        Ok(())
+    }
+
+    fn is_unique_violation(err: &sea_orm::DbErr) -> bool {
+        let msg = err.to_string().to_lowercase();
+        msg.contains("duplicate") || msg.contains("unique")
+    }
+
+    async fn set_counter_floor(
+        db: &DatabaseConnection,
+        key: &str,
+        floor: i64,
+    ) -> Result<(), MetaError> {
+        loop {
+            let existing = CounterMeta::find_by_id(key.to_string())
+                .one(db)
+                .await
+                .map_err(MetaError::Database)?;
+
+            match existing {
+                Some(model) if model.value >= floor => return Ok(()),
+                Some(_) => {
+                    let updated = CounterMeta::update_many()
+                        .col_expr(counter_meta::Column::Value, sea_query::Expr::value(floor))
+                        .filter(counter_meta::Column::Name.eq(key))
+                        .filter(counter_meta::Column::Value.lt(floor))
+                        .exec(db)
+                        .await
+                        .map_err(MetaError::Database)?;
+                    if updated.rows_affected > 0 {
+                        return Ok(());
+                    }
+                }
+                None => {
+                    let row = counter_meta::ActiveModel {
+                        name: Set(key.to_string()),
+                        value: Set(floor),
+                    };
+                    match row.insert(db).await {
+                        Ok(_) => return Ok(()),
+                        Err(err) if Self::is_unique_violation(&err) => continue,
+                        Err(err) => return Err(MetaError::Database(err)),
+                    }
+                }
+            }
+        }
+    }
+
+    async fn alloc_counter_id(&self, key: &str) -> Result<i64, MetaError> {
+        const MAX_RETRIES: usize = 64;
+
+        for _ in 0..MAX_RETRIES {
+            let Some(row) = CounterMeta::find_by_id(key.to_string())
+                .one(&self.db)
+                .await
+                .map_err(MetaError::Database)?
+            else {
+                Self::set_counter_floor(&self.db, key, 1).await?;
+                continue;
+            };
+
+            let next = row
+                .value
+                .checked_add(1)
+                .ok_or_else(|| MetaError::Internal(format!("counter overflow for key {key}")))?;
+
+            let updated = CounterMeta::update_many()
+                .col_expr(counter_meta::Column::Value, sea_query::Expr::value(next))
+                .filter(counter_meta::Column::Name.eq(key))
+                .filter(counter_meta::Column::Value.eq(row.value))
+                .exec(&self.db)
+                .await
+                .map_err(MetaError::Database)?;
+
+            if updated.rows_affected == 1 {
+                return Ok(row.value);
+            }
+        }
+
+        Err(MetaError::Internal(format!(
+            "failed to allocate counter value for key {key}: contention limit exceeded"
+        )))
+    }
+
+    /// Create database connection
+    async fn create_connection(config: &Config) -> Result<DatabaseConnection, MetaError> {
+        match &config.database.db_config {
+            DatabaseType::Sqlite { url } => {
+                info!("Connecting to SQLite: {}", url);
+                let mut opts = ConnectOptions::new(url.clone());
+                // SQLite named shared memory (sqlite:file::memory:) needs single connection
+                // SQLite anonymous in-memory (sqlite::memory:) can use multiple connections
+                // Check for file::memory: first (more specific) before ::memory: (more general)
+                if url.contains("file::memory:") {
+                    // Named shared memory databases require exactly 1 connection
+                    opts.max_connections(1).min_connections(1);
+                } else if url.contains("::memory:") {
+                    // Anonymous in-memory databases can use multiple connections for tests
+                    opts.max_connections(5).min_connections(1);
+                } else {
+                    // File-based databases can use more connections
+                    opts.max_connections(10).min_connections(1);
+                }
+                opts.connect_timeout(Duration::from_secs(30))
+                    .idle_timeout(Duration::from_secs(30))
+                    .acquire_timeout(Duration::from_secs(30));
+                let db = Database::connect(opts).await?;
+                Ok(db)
+            }
+            DatabaseType::Postgres { url } => {
+                info!("Connecting to PostgreSQL: {}", url);
+                let mut opts = ConnectOptions::new(url.clone());
+                opts.max_connections(20)
+                    .min_connections(2)
+                    .connect_timeout(Duration::from_secs(30))
+                    .idle_timeout(Duration::from_secs(30))
+                    .acquire_timeout(Duration::from_secs(30));
+                let db = Database::connect(opts).await?;
+                Ok(db)
+            }
+            DatabaseType::Etcd { .. } => Err(MetaError::Config(
+                "Etcd backend not supported by DatabaseMetaStore. Use EtcdMetaStore instead."
+                    .to_string(),
+            )),
+            DatabaseType::Redis { .. } => Err(MetaError::Config(
+                "Redis backend not supported by DatabaseMetaStore. Use RedisMetaStore instead."
+                    .to_string(),
+            )),
+        }
+    }
+
+    /// Initialize database schema
+    async fn init_schema(db: &DatabaseConnection) -> Result<(), MetaError> {
+        let builder = db.get_database_backend();
+        let schema = Schema::new(builder);
+
+        let stmts = [
+            schema
+                .create_table_from_entity(CounterMeta)
+                .if_not_exists()
+                .to_owned(),
+            schema
+                .create_table_from_entity(AccessMeta)
+                .if_not_exists()
+                .to_owned(),
+            schema
+                .create_table_from_entity(ContentMeta)
+                .if_not_exists()
+                .to_owned(),
+            schema
+                .create_table_from_entity(FileMeta)
+                .if_not_exists()
+                .to_owned(),
+            schema
+                .create_table_from_entity(LinkParentMeta)
+                .if_not_exists()
+                .to_owned(),
+            schema
+                .create_table_from_entity(SessionMeta)
+                .if_not_exists()
+                .to_owned(),
+            schema
+                .create_table_from_entity(SliceMeta)
+                .if_not_exists()
+                .to_owned(),
+            schema
+                .create_table_from_entity(LocksMeta)
+                .if_not_exists()
+                .to_owned(),
+            schema
+                .create_table_from_entity(PlockMeta)
+                .if_not_exists()
+                .to_owned(),
+            schema
+                .create_table_from_entity(XattrMeta)
+                .if_not_exists()
+                .to_owned(),
+        ];
+
+        for (i, stmt) in stmts.iter().enumerate() {
+            let sql = builder.build(stmt);
+            match db.execute(sql).await {
+                Ok(_) => info!("Statement {} executed successfully", i + 1),
+                Err(e) => {
+                    if e.to_string().contains("duplicate key") {
+                        info!(
+                            "Table already exists for statement {}, skipping: {}",
+                            i + 1,
+                            e
+                        );
+                        continue;
+                    }
+                    return Err(MetaError::Database(e));
+                }
+            }
+        }
+
+        let index_stmt = Index::create()
+            .if_not_exists()
+            .name("idx_content_meta_inode")
+            .table(ContentMeta)
+            .col(content_meta::Column::Inode)
+            .to_owned();
+
+        let index_sql = builder.build(&index_stmt);
+        match db.execute(index_sql).await {
+            Ok(_) => info!("Index created successfully"),
+            Err(e) => {
+                if e.to_string().contains("already exists") {
+                    info!("Index already exists, skipping: {}", e);
+                } else {
+                    return Err(MetaError::Database(e));
+                }
+            }
+        }
+
+        info!("Database schema initialized successfully");
+        Ok(())
+    }
+
+    /// Initialize root directory
+    async fn init_root_directory(&self) -> Result<(), MetaError> {
+        // Check if root directory exists
+        if let Some(root) = self.get_access_meta(1).await? {
+            info!(
+                "Root directory already exists with inode 1, nlink={}",
+                root.nlink
+            );
+            return Ok(());
+        }
+
+        info!("Creating root directory with inode 1...");
+        let now = Utc::now().timestamp_nanos_opt().unwrap_or(0);
+        let root_permission = Permission::new(0o40755, 0, 0); // Directory bits: 0o40000 (dir flag) + 0o755 (mode)
+        let root_dir = access_meta::ActiveModel {
+            inode: Set(1),
+            permission: Set(root_permission),
+            access_time: Set(now),
+            modify_time: Set(now),
+            create_time: Set(now),
+            nlink: Set(2),
+        };
+
+        root_dir
+            .insert(&self.db)
+            .await
+            .map_err(MetaError::Database)?;
+        info!("Root directory created successfully with inode 1");
+
+        Ok(())
+    }
+
+    /// Get directory access metadata
+    async fn get_access_meta(&self, inode: i64) -> Result<Option<AccessMetaModel>, MetaError> {
+        AccessMeta::find_by_id(inode)
+            .one(&self.db)
+            .await
+            .map_err(|e| MetaError::Internal(format!("Database error: {}", e)))
+    }
+
+    /// Get directory content metadata
+    async fn get_content_meta(
+        &self,
+        parent_inode: i64,
+    ) -> Result<Option<Vec<ContentMetaModel>>, MetaError> {
+        let contents = ContentMeta::find()
+            .filter(content_meta::Column::ParentInode.eq(parent_inode))
+            .order_by_asc(content_meta::Column::EntryName) // Sort by name to match ls order
+            .all(&self.db)
+            .await
+            .map_err(MetaError::Database)?;
+
+        if contents.is_empty() {
+            Ok(None)
+        } else {
+            Ok(Some(contents))
+        }
+    }
+
+    /// Get file metadata
+    async fn get_file_meta(&self, inode: i64) -> Result<Option<FileMetaModel>, MetaError> {
+        FileMeta::find_by_id(inode)
+            .one(&self.db)
+            .await
+            .map_err(MetaError::Database)
+    }
+
+    /// Create a new directory
+    async fn create_directory(&self, parent_inode: i64, name: String) -> Result<i64, MetaError> {
+        let inode = self.alloc_counter_id(INODE_ID_KEY).await?;
+
+        // Start transaction
+        let txn = self.db.begin().await.map_err(MetaError::Database)?;
+
+        let parent_meta = AccessMeta::find_by_id(parent_inode)
+            .one(&txn)
+            .await
+            .map_err(MetaError::Database)?;
+
+        if parent_meta.is_none() {
+            txn.rollback().await.map_err(MetaError::Database)?;
+            return Err(MetaError::ParentNotFound(parent_inode));
+        }
+        let parent_meta = parent_meta.unwrap();
+
+        // Check if entry already exists
+        let existing = ContentMeta::find()
+            .filter(content_meta::Column::ParentInode.eq(parent_inode))
+            .filter(content_meta::Column::EntryName.eq(&name))
+            .one(&txn)
+            .await
+            .map_err(MetaError::Database)?;
+
+        if existing.is_some() {
+            txn.rollback().await.map_err(MetaError::Database)?;
+            return Err(MetaError::AlreadyExists {
+                parent: parent_inode,
+                name,
+            });
+        }
+
+        let now = Utc::now().timestamp_nanos_opt().unwrap_or(0);
+
+        let parent_perm = parent_meta.permission();
+        let parent_has_setgid = (parent_perm.mode & 0o2000) != 0;
+        let gid = if parent_has_setgid {
+            parent_perm.gid
+        } else {
+            0
+        };
+
+        let dir_permission = Permission::default_directory(0, gid);
+        let access_meta = access_meta::ActiveModel {
+            inode: Set(inode),
+            permission: Set(dir_permission),
+            access_time: Set(now),
+            modify_time: Set(now),
+            create_time: Set(now),
+            nlink: Set(2),
+        };
+
+        access_meta
+            .insert(&txn)
+            .await
+            .map_err(MetaError::Database)?;
+
+        let content_meta = content_meta::ActiveModel {
+            inode: Set(inode),
+            parent_inode: Set(parent_inode),
+            entry_name: Set(name),
+            entry_type: Set(EntryType::Directory),
+        };
+
+        content_meta
+            .insert(&txn)
+            .await
+            .map_err(MetaError::Database)?;
+
+        // Update parent directory mtime
+        let mut parent_meta: access_meta::ActiveModel = AccessMeta::find_by_id(parent_inode)
+            .one(&txn)
+            .await
+            .map_err(MetaError::Database)?
+            .unwrap()
+            .into();
+        parent_meta.modify_time = Set(now);
+        parent_meta
+            .update(&txn)
+            .await
+            .map_err(MetaError::Database)?;
+
+        txn.commit().await.map_err(MetaError::Database)?;
+
+        Ok(inode)
+    }
+
+    /// Create a new file
+    async fn create_file_internal(
+        &self,
+        parent_inode: i64,
+        name: String,
+    ) -> Result<i64, MetaError> {
+        let inode = self.alloc_counter_id(INODE_ID_KEY).await?;
+
+        // Start transaction
+        let txn = self.db.begin().await.map_err(MetaError::Database)?;
+
+        let parent_meta = AccessMeta::find_by_id(parent_inode)
+            .one(&txn)
+            .await
+            .map_err(MetaError::Database)?;
+
+        if parent_meta.is_none() {
+            txn.rollback().await.map_err(MetaError::Database)?;
+            return Err(MetaError::ParentNotFound(parent_inode));
+        }
+        let parent_meta = parent_meta.unwrap();
+
+        // Check if entry already exists
+        let existing = ContentMeta::find()
+            .filter(content_meta::Column::ParentInode.eq(parent_inode))
+            .filter(content_meta::Column::EntryName.eq(&name))
+            .one(&txn)
+            .await
+            .map_err(MetaError::Database)?;
+
+        if existing.is_some() {
+            txn.rollback().await.map_err(MetaError::Database)?;
+            return Err(MetaError::AlreadyExists {
+                parent: parent_inode,
+                name,
+            });
+        }
+
+        let now = Utc::now().timestamp_nanos_opt().unwrap_or(0);
+
+        // Inherit gid from parent if parent has setgid bit set
+        let parent_perm = parent_meta.permission();
+        let parent_has_setgid = (parent_perm.mode & 0o2000) != 0;
+        let gid = if parent_has_setgid {
+            parent_perm.gid
+        } else {
+            0
+        };
+
+        // Per POSIX semantics: when a directory has the setgid bit set, newly created
+        // entries inside inherit the directory's group (gid), but regular files
+        // do NOT inherit the setgid bit itself. Only newly created directories
+        // should carry the setgid bit. We therefore inherit `gid` from the parent
+        // but intentionally do not set the setgid bit on the file mode.
+        let file_permission = Permission::new(0o100644, 0, gid);
+        let file_meta = file_meta::ActiveModel {
+            inode: Set(inode),
+            size: Set(0),
+            permission: Set(file_permission),
+            access_time: Set(now),
+            modify_time: Set(now),
+            create_time: Set(now),
+            nlink: Set(1),
+            parent: Set(parent_inode),
+            deleted: Set(false),
+            symlink_target: Set(None),
+        };
+
+        file_meta.insert(&txn).await.map_err(MetaError::Database)?;
+
+        let content_meta = content_meta::ActiveModel {
+            inode: Set(inode),
+            parent_inode: Set(parent_inode),
+            entry_name: Set(name),
+            entry_type: Set(EntryType::File),
+        };
+
+        content_meta
+            .insert(&txn)
+            .await
+            .map_err(MetaError::Database)?;
+
+        // Update parent directory mtime
+        let mut parent_meta: access_meta::ActiveModel = AccessMeta::find_by_id(parent_inode)
+            .one(&txn)
+            .await
+            .map_err(MetaError::Database)?
+            .unwrap()
+            .into();
+        parent_meta.modify_time = Set(now);
+        parent_meta
+            .update(&txn)
+            .await
+            .map_err(MetaError::Database)?;
+
+        txn.commit().await.map_err(MetaError::Database)?;
+
+        Ok(inode)
+    }
+
+    fn now_nanos() -> i64 {
+        Utc::now().timestamp_nanos_opt().unwrap_or(0)
+    }
+
+    async fn prune_slices_for_truncate<C>(
+        &self,
+        conn: &C,
+        ino: i64,
+        new_size: u64,
+        old_size: u64,
+        chunk_size: u64,
+    ) -> Result<(), MetaError>
+    where
+        C: ConnectionTrait,
+    {
+        apply_truncate_plan(
+            new_size,
+            old_size,
+            chunk_size,
+            |cutoff_chunk, cutoff_offset| async move {
+                let chunk_id = i64::try_from(chunk_id_for(ino, cutoff_chunk)?)
+                    .map_err(|_| MetaError::Internal("chunk_id overflow".to_string()))?;
+                let rows = SliceMeta::find()
+                    .filter(slice_meta::Column::ChunkId.eq(chunk_id))
+                    .order_by_asc(slice_meta::Column::Id)
+                    .all(conn)
+                    .await
+                    .map_err(MetaError::Database)?;
+
+                for row in rows {
+                    debug_assert!(row.offset >= 0);
+                    debug_assert!(row.length >= 0);
+                    let offset = row.offset as u64;
+                    let length = row.length as u64;
+
+                    match trim_action(offset, length, cutoff_offset) {
+                        TrimAction::Keep => {}
+                        TrimAction::Drop => {
+                            let active: slice_meta::ActiveModel = row.into();
+                            active.delete(conn).await.map_err(MetaError::Database)?;
+                        }
+                        TrimAction::Truncate(new_len) => {
+                            let mut active: slice_meta::ActiveModel = row.into();
+                            active.length = Set(new_len as i64);
+                            active.update(conn).await.map_err(MetaError::Database)?;
+                        }
+                    }
+                }
+                Ok(())
+            },
+            |start, end| async move {
+                let start_chunk_id = i64::try_from(chunk_id_for(ino, start)?)
+                    .map_err(|_| MetaError::Internal("chunk_id overflow".to_string()))?;
+                let end_chunk_id = i64::try_from(chunk_id_for(ino, end)?)
+                    .map_err(|_| MetaError::Internal("chunk_id overflow".to_string()))?;
+                SliceMeta::delete_many()
+                    .filter(slice_meta::Column::ChunkId.gte(start_chunk_id))
+                    .filter(slice_meta::Column::ChunkId.lt(end_chunk_id))
+                    .exec(conn)
+                    .await
+                    .map_err(MetaError::Database)?;
+                Ok(())
+            },
+        )
+        .await
+    }
+
+    /// Convert FileMeta to FileAttr
+    fn file_meta_to_attr(file_meta: &FileMetaModel) -> FileAttr {
+        let permission = file_meta.permission();
+        let kind = if file_meta.symlink_target.is_some() {
+            FileType::Symlink
+        } else {
+            FileType::File
+        };
+        let size = if let Some(target) = &file_meta.symlink_target {
+            target.len() as u64
+        } else {
+            file_meta.size as u64
+        };
+
+        FileAttr {
+            ino: file_meta.inode,
+            size,
+            kind,
+            mode: permission.mode,
+            uid: permission.uid,
+            gid: permission.gid,
+            atime: file_meta.access_time,
+            mtime: file_meta.modify_time,
+            ctime: file_meta.create_time,
+            nlink: file_meta.nlink as u32,
+        }
+    }
+
+    /// Convert AccessMeta to FileAttr
+    fn access_meta_to_attr(access_meta: &AccessMetaModel) -> FileAttr {
+        let permission = access_meta.permission();
+        FileAttr {
+            ino: access_meta.inode,
+            size: 4096,
+            kind: FileType::Dir,
+            mode: permission.mode,
+            uid: permission.uid,
+            gid: permission.gid,
+            atime: access_meta.access_time,
+            mtime: access_meta.modify_time,
+            ctime: access_meta.create_time,
+            nlink: access_meta.nlink as u32,
+        }
+    }
+
+    async fn get_lock_internal(&self, lock_name: LockName) -> anyhow::Result<bool> {
+        let txn = self.db.begin().await.map_err(MetaError::Database)?;
+        let lock_name_str = lock_name.to_string();
+        let lock_ = LocksMeta::find()
+            .filter(locks_meta::Column::LockName.eq(lock_name_str.clone()))
+            .one(&txn)
+            .await?;
+
+        let current_time = Utc::now();
+        let flag: bool;
+        match lock_ {
+            Some(lock) => {
+                let mut lock = lock.into_active_model();
+
+                let last_updated = match &lock.last_updated {
+                    ActiveValue::Set(val) | ActiveValue::Unchanged(val) => *val,
+                    ActiveValue::NotSet => {
+                        return Err(anyhow::anyhow!("Lock last_updated field is not set"));
+                    }
+                };
+
+                if last_updated < current_time - ChronoDuration::seconds(7) {
+                    lock.last_updated = ActiveValue::Set(current_time);
+                    lock.update(&txn).await?;
+                    flag = true;
+                } else {
+                    flag = false;
+                }
+            }
+            None => {
+                let lock = locks_meta::ActiveModel {
+                    lock_name: ActiveValue::Set(lock_name_str),
+                    last_updated: ActiveValue::Set(current_time),
+                };
+                lock.insert(&txn).await?;
+                flag = true;
+            }
+        };
+
+        txn.commit().await.map_err(MetaError::Database)?;
+        Ok(flag)
+    }
+
+    async fn shutdown_session_by_id<C: ConnectionTrait>(
+        &self,
+        session_id: Uuid,
+        conn: &C,
+    ) -> Result<(), MetaError> {
+        let session = SessionMeta::find()
+            .filter(session_meta::Column::SessionId.eq(session_id))
+            .one(conn)
+            .await?;
+        let session = match session {
+            Some(s) => s.into_active_model(),
+            None => return Err(MetaError::SessionNotFound(session_id)),
+        };
+        session.delete(conn).await.map_err(MetaError::Database)?;
+
+        PlockMeta::delete_many()
+            .filter(plock_meta::Column::Sid.eq(session_id))
+            .exec(conn)
+            .await?;
+        Ok(())
+    }
+    async fn try_set_plock(
+        &self,
+        inode: i64,
+        owner: i64,
+        new_lock: &PlockRecord,
+        lock_type: FileLockType,
+        range: FileLockRange,
+    ) -> Result<(), MetaError> {
+        let txn = self.db.begin().await.map_err(MetaError::Database)?;
+
+        // check file is existing using the same transaction
+        let exists = FileMeta::find_by_id(inode)
+            .one(&txn)
+            .await
+            .map_err(MetaError::Database)?;
+        if exists.is_none() {
+            txn.rollback().await.map_err(MetaError::Database)?;
+            return Err(MetaError::NotFound(inode));
+        }
+
+        let sid = self
+            .sid
+            .get()
+            .ok_or_else(|| MetaError::Internal("sid not set".to_string()))?;
+
+        match lock_type {
+            FileLockType::UnLock => {
+                // unlock file
+                let row = PlockMeta::find()
+                    .filter(plock_meta::Column::Inode.eq(inode))
+                    .filter(plock_meta::Column::Owner.eq(owner))
+                    .filter(plock_meta::Column::Sid.eq(*sid))
+                    .one(&txn)
+                    .await
+                    .map_err(MetaError::Database)?;
+
+                match row {
+                    Some(plock) => {
+                        let records: Vec<PlockRecord> =
+                            serde_json::from_slice(&plock.records).unwrap_or_default();
+
+                        if records.is_empty() {
+                            // No locks to unlock, transaction is complete
+                            txn.commit().await.map_err(MetaError::Database)?;
+                            return Ok(());
+                        }
+
+                        let new_records = PlockRecord::update_locks(records.clone(), *new_lock);
+
+                        if new_records.is_empty() {
+                            // No more locks for this (inode, sid, owner) combination, delete the record
+                            let delete_model = plock_meta::ActiveModel {
+                                inode: Set(plock.inode),
+                                sid: Set(plock.sid),
+                                owner: Set(plock.owner),
+                                ..Default::default()
+                            };
+                            let _ = delete_model
+                                .delete(&txn)
+                                .await
+                                .map_err(MetaError::Database)?;
+                        } else {
+                            // Update the existing record with new lock list
+                            let new_records_bytes =
+                                serde_json::to_vec(&new_records).map_err(|e| {
+                                    MetaError::Internal(format!(
+                                        "error to serialization Vec<PlockRecord>: {e}"
+                                    ))
+                                })?;
+
+                            let mut active_model: plock_meta::ActiveModel = plock.into();
+                            active_model.records = Set(new_records_bytes);
+                            active_model.save(&txn).await.map_err(MetaError::Database)?;
+                        }
+                    }
+                    None => {
+                        // No existing lock record found
+                        txn.commit().await.map_err(MetaError::Database)?;
+                        return Ok(());
+                    }
+                }
+
+                txn.commit().await.map_err(MetaError::Database)?;
+                Ok(())
+            }
+            _ => {
+                let ps = PlockMeta::find()
+                    .filter(plock_meta::Column::Inode.eq(inode))
+                    .all(&txn)
+                    .await
+                    .map_err(MetaError::Database)?;
+
+                let mut locks = HashMap::new();
+                for item in ps {
+                    let key = PlockHashMapKey {
+                        sid: item.sid,
+                        owner: item.owner,
+                    };
+                    locks.insert(key, item.records);
+                }
+
+                let lkey = PlockHashMapKey { sid: *sid, owner };
+
+                // check conflict
+                let mut conflict_found = false;
+                for (k, d) in &locks {
+                    if *k == lkey {
+                        continue;
+                    }
+
+                    let ls: Vec<PlockRecord> = serde_json::from_slice(d).unwrap_or_default();
+                    conflict_found = PlockRecord::check_conflict(&lock_type, &range, &ls);
+                    if conflict_found {
+                        break;
+                    }
+                }
+
+                if conflict_found {
+                    txn.rollback().await.map_err(MetaError::Database)?;
+                    return Err(MetaError::LockConflict {
+                        inode,
+                        owner,
+                        range,
+                    });
+                }
+
+                let ls =
+                    serde_json::from_slice(locks.get(&lkey).unwrap_or(&vec![])).unwrap_or_default();
+                let ls = PlockRecord::update_locks(ls, *new_lock);
+
+                let records = serde_json::to_vec(&ls).map_err(|e| {
+                    MetaError::Internal(format!("error to serialization Vec<PlockRecord>: {e}"))
+                })?;
+
+                // lock records changed update or insert
+                if locks.get(&lkey).map(|r| r != &records).unwrap_or(true) {
+                    let plock = plock_meta::ActiveModel {
+                        sid: Set(*sid),
+                        owner: Set(owner),
+                        inode: Set(inode),
+                        records: Set(records),
+                    };
+
+                    // Check if this is a new record or an update
+                    if locks.contains_key(&lkey) {
+                        plock.save(&txn).await.map_err(MetaError::Database)?;
+                    } else {
+                        plock.insert(&txn).await.map_err(MetaError::Database)?;
+                    }
+                }
+
+                txn.commit().await.map_err(MetaError::Database)?;
+                Ok(())
+            }
+        }
+    }
+
+    fn set_sid(&self, session_id: Uuid) -> Result<(), MetaError> {
+        self.sid
+            .set(session_id)
+            .map_err(|_| MetaError::Internal("sid has been set".to_string()))?;
+        Ok(())
+    }
+
+    #[allow(dead_code)]
+    fn get_sid(&self) -> Result<&Uuid, MetaError> {
+        self.sid
+            .get()
+            .ok_or_else(|| MetaError::Internal("sid has not been set".to_string()))
+    }
+
+    async fn refresh_session(session_id: Uuid, conn: &DatabaseConnection) -> Result<(), MetaError> {
+        let txn = conn.begin().await.map_err(MetaError::Database)?;
+        let expire = (Utc::now() + ChronoDuration::minutes(5)).timestamp_millis();
+        let session = SessionMeta::find()
+            .filter(session_meta::Column::SessionId.eq(session_id))
+            .one(&txn)
+            .await?;
+        let mut session = match session {
+            Some(s) => s.into_active_model(),
+            None => return Err(MetaError::SessionNotFound(session_id)),
+        };
+        session.expire = Set(expire);
+        session.update(&txn).await.map_err(MetaError::Database)?;
+        txn.commit().await.map_err(MetaError::Database)?;
+        Ok(())
+    }
+
+    async fn life_cycle(token: CancellationToken, session_id: Uuid, conn: DatabaseConnection) {
+        let mut interval = tokio::time::interval(Duration::from_secs(60));
+        loop {
+            select! {
+                _ = interval.tick() => {
+                    // refresh session
+                    match Self::refresh_session(session_id, &conn).await {
+                        Ok(_) => {}
+                        Err(err) => {
+                            error!("Failed to refresh session: {}", err);
+                        }
+                    }
+
+                }
+                _ = token.cancelled() => {
+                    break;
+                }
+            }
+        }
+    }
+}
+
+#[async_trait]
+impl MetaStore for DatabaseMetaStore {
+    fn name(&self) -> &'static str {
+        "database"
+    }
+
+    async fn from_config(config: Config) -> Result<Self, MetaError> {
+        Self::from_config_inner(config).await
+    }
+
+    #[tracing::instrument(level = "trace", skip(self), fields(ino))]
+    async fn stat(&self, ino: i64) -> Result<Option<FileAttr>, MetaError> {
+        if let Ok(Some(file_meta)) = self.get_file_meta(ino).await {
+            return Ok(Some(Self::file_meta_to_attr(&file_meta)));
+        }
+
+        if let Ok(Some(access_meta)) = self.get_access_meta(ino).await {
+            return Ok(Some(Self::access_meta_to_attr(&access_meta)));
+        }
+
+        Ok(None)
+    }
+
+    /// Batch stat implementation using SQL WHERE IN clause for optimal performance
+    #[tracing::instrument(
+        level = "trace",
+        skip(self, inodes),
+        fields(inode_count = inodes.len())
+    )]
+    async fn batch_stat(&self, inodes: &[i64]) -> Result<Vec<Option<FileAttr>>, MetaError> {
+        if inodes.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        // Use concurrent queries for both tables - simpler and potentially faster
+        let file_query = FileMeta::find()
+            .filter(file_meta::Column::Inode.is_in(inodes.iter().copied()))
+            .all(&self.db);
+
+        let dir_query = AccessMeta::find()
+            .filter(access_meta::Column::Inode.is_in(inodes.iter().copied()))
+            .all(&self.db);
+
+        let (file_metas, access_metas) =
+            tokio::try_join!(file_query, dir_query).map_err(MetaError::Database)?;
+
+        // Build result map
+        let mut result_map: HashMap<i64, FileAttr> = HashMap::with_capacity(inodes.len());
+
+        // Process file_meta results
+        for file_meta in file_metas {
+            result_map.insert(file_meta.inode, Self::file_meta_to_attr(&file_meta));
+        }
+
+        // Process access_meta results (directories)
+        for access_meta in access_metas {
+            result_map.insert(access_meta.inode, Self::access_meta_to_attr(&access_meta));
+        }
+
+        // Preserve input order
+        Ok(inodes
+            .iter()
+            .map(|ino| result_map.get(ino).cloned())
+            .collect())
+    }
+
+    #[tracing::instrument(level = "trace", skip(self), fields(parent, name))]
+    async fn lookup(&self, parent: i64, name: &str) -> Result<Option<i64>, MetaError> {
+        let entry = ContentMeta::find()
+            .filter(content_meta::Column::ParentInode.eq(parent))
+            .filter(content_meta::Column::EntryName.eq(name))
+            .one(&self.db)
+            .await
+            .map_err(MetaError::Database)?;
+
+        Ok(entry.map(|e| e.inode))
+    }
+
+    #[tracing::instrument(level = "trace", skip(self), fields(path))]
+    async fn lookup_path(&self, path: &str) -> Result<Option<(i64, FileType)>, MetaError> {
+        if path == "/" {
+            return Ok(Some((1, FileType::Dir)));
+        }
+
+        let parts: Vec<&str> = path
+            .trim_matches('/')
+            .split('/')
+            .filter(|p| !p.is_empty())
+            .collect();
+        let mut current_inode = 1i64;
+
+        for (index, part) in parts.iter().enumerate() {
+            let entry = ContentMeta::find()
+                .filter(content_meta::Column::ParentInode.eq(current_inode))
+                .filter(content_meta::Column::EntryName.eq(*part))
+                .one(&self.db)
+                .await
+                .map_err(MetaError::Database)?;
+
+            match entry {
+                Some(entry) => match entry.entry_type {
+                    EntryType::Directory => {
+                        current_inode = entry.inode;
+                    }
+                    EntryType::File => {
+                        if index == parts.len() - 1 {
+                            return Ok(Some((entry.inode, FileType::File)));
+                        } else {
+                            return Ok(None);
+                        }
+                    }
+                    EntryType::Symlink => {
+                        if index == parts.len() - 1 {
+                            return Ok(Some((entry.inode, FileType::Symlink)));
+                        } else {
+                            return Ok(None);
+                        }
+                    }
+                },
+                None => return Ok(None),
+            }
+        }
+
+        Ok(Some((current_inode, FileType::Dir)))
+    }
+
+    #[tracing::instrument(level = "trace", skip(self), fields(ino))]
+    async fn readdir(&self, ino: i64) -> Result<Vec<DirEntry>, MetaError> {
+        let access_meta = self
+            .get_access_meta(ino)
+            .await?
+            .ok_or(MetaError::NotFound(ino))?;
+
+        let permission = access_meta.permission();
+        if !permission.is_directory() {
+            return Err(MetaError::NotDirectory(ino));
+        }
+
+        let contents = match self.get_content_meta(ino).await? {
+            Some(contents) => contents,
+            None => return Ok(Vec::new()),
+        };
+
+        let mut entries = Vec::new();
+        for content in contents {
+            let kind = match content.entry_type {
+                EntryType::File => FileType::File,
+                EntryType::Directory => FileType::Dir,
+                EntryType::Symlink => FileType::Symlink,
+            };
+            entries.push(DirEntry {
+                name: content.entry_name,
+                ino: content.inode,
+                kind,
+            });
+        }
+
+        Ok(entries)
+    }
+
+    #[tracing::instrument(level = "trace", skip(self), fields(parent, name))]
+    async fn mkdir(&self, parent: i64, name: String) -> Result<i64, MetaError> {
+        self.create_directory(parent, name).await
+    }
+
+    #[tracing::instrument(level = "trace", skip(self), fields(parent, name))]
+    async fn rmdir(&self, parent: i64, name: &str) -> Result<(), MetaError> {
+        let txn = self.db.begin().await.map_err(MetaError::Database)?;
+
+        let dir_entry = ContentMeta::find()
+            .filter(content_meta::Column::ParentInode.eq(parent))
+            .filter(content_meta::Column::EntryName.eq(name))
+            .filter(content_meta::Column::EntryType.eq(EntryType::Directory))
+            .one(&txn)
+            .await
+            .map_err(MetaError::Database)?
+            .ok_or(MetaError::NotFound(parent))?;
+
+        let dir_id = dir_entry.inode;
+
+        // Check if directory is empty
+        let child_count = ContentMeta::find()
+            .filter(content_meta::Column::ParentInode.eq(dir_id))
+            .count(&txn)
+            .await
+            .map_err(MetaError::Database)?;
+
+        if child_count > 0 {
+            txn.rollback().await.map_err(MetaError::Database)?;
+            return Err(MetaError::DirectoryNotEmpty(dir_id));
+        }
+
+        // Delete access meta
+        AccessMeta::delete_by_id(dir_id)
+            .exec(&txn)
+            .await
+            .map_err(MetaError::Database)?;
+
+        XattrMeta::delete_many()
+            .filter(xattr_meta::Column::Inode.eq(dir_id))
+            .exec(&txn)
+            .await
+            .map_err(MetaError::Database)?;
+
+        // Delete content meta
+        ContentMeta::delete_many()
+            .filter(content_meta::Column::ParentInode.eq(parent))
+            .filter(content_meta::Column::EntryName.eq(name))
+            .exec(&txn)
+            .await
+            .map_err(MetaError::Database)?;
+
+        // Update parent directory mtime
+        let mut parent_meta: access_meta::ActiveModel = AccessMeta::find_by_id(parent)
+            .one(&txn)
+            .await
+            .map_err(MetaError::Database)?
+            .ok_or(MetaError::ParentNotFound(parent))?
+            .into();
+        parent_meta.modify_time = Set(Utc::now().timestamp_nanos_opt().unwrap_or(0));
+        parent_meta
+            .update(&txn)
+            .await
+            .map_err(MetaError::Database)?;
+
+        txn.commit().await.map_err(MetaError::Database)?;
+
+        Ok(())
+    }
+
+    #[tracing::instrument(level = "trace", skip(self), fields(parent, name))]
+    async fn create_file(&self, parent: i64, name: String) -> Result<i64, MetaError> {
+        self.create_file_internal(parent, name).await
+    }
+
+    #[tracing::instrument(level = "trace", skip(self), fields(parent, name))]
+    async fn unlink(&self, parent: i64, name: &str) -> Result<(), MetaError> {
+        let txn = self.db.begin().await.map_err(MetaError::Database)?;
+
+        let file_entry = ContentMeta::find()
+            .filter(content_meta::Column::ParentInode.eq(parent))
+            .filter(content_meta::Column::EntryName.eq(name))
+            .one(&txn)
+            .await
+            .map_err(MetaError::Database)?
+            .ok_or_else(|| {
+                MetaError::Internal(format!("File '{}' not found in parent {}", name, parent))
+            })?;
+
+        if file_entry.entry_type == EntryType::Directory {
+            txn.rollback().await.map_err(MetaError::Database)?;
+            return Err(MetaError::NotDirectory(file_entry.inode));
+        }
+
+        let file_id = file_entry.inode;
+
+        let mut file_meta: file_meta::ActiveModel = FileMeta::find_by_id(file_id)
+            .one(&txn)
+            .await
+            .map_err(MetaError::Database)?
+            .ok_or(MetaError::NotFound(file_id))?
+            .into();
+
+        // Delete content meta first
+        ContentMeta::delete_many()
+            .filter(content_meta::Column::ParentInode.eq(parent))
+            .filter(content_meta::Column::EntryName.eq(name))
+            .exec(&txn)
+            .await
+            .map_err(MetaError::Database)?;
+
+        let now = Self::now_nanos();
+        let current_nlink = match &file_meta.nlink {
+            Set(n) | Unchanged(n) => *n,
+            _ => 1,
+        };
+
+        if current_nlink > 1 {
+            // Delete the LinkParent entry for this specific (parent, name)
+            LinkParentMeta::delete_many()
+                .filter(link_parent_meta::Column::Inode.eq(file_id))
+                .filter(link_parent_meta::Column::ParentInode.eq(parent))
+                .filter(link_parent_meta::Column::EntryName.eq(name))
+                .exec(&txn)
+                .await
+                .map_err(MetaError::Database)?;
+
+            file_meta.nlink = Set(current_nlink - 1);
+            file_meta.deleted = Set(false);
+
+            // 2->1 transition: Restore parent field and remove all LinkParent
+            if current_nlink == 2 {
+                // Find the remaining ContentMeta entry
+                let remaining_entry = ContentMeta::find()
+                    .filter(content_meta::Column::Inode.eq(file_id))
+                    .one(&txn)
+                    .await
+                    .map_err(MetaError::Database)?
+                    .ok_or(MetaError::Internal(format!(
+                        "No remaining ContentMeta found for inode {}",
+                        file_id
+                    )))?;
+
+                // Restore parent field from remaining entry
+                file_meta.parent = Set(remaining_entry.parent_inode);
+
+                // Delete all LinkParent entries
+                LinkParentMeta::delete_many()
+                    .filter(link_parent_meta::Column::Inode.eq(file_id))
+                    .exec(&txn)
+                    .await
+                    .map_err(MetaError::Database)?;
+            }
+        } else {
+            // 1->0 transition: Mark as deleted
+            file_meta.deleted = Set(true);
+            file_meta.nlink = Set(0);
+            file_meta.parent = Set(0);
+        }
+
+        file_meta.modify_time = Set(now);
+        file_meta.create_time = Set(now);
+        file_meta.update(&txn).await.map_err(MetaError::Database)?;
+
+        // Update parent directory mtime
+        let mut parent_meta: access_meta::ActiveModel = AccessMeta::find_by_id(parent)
+            .one(&txn)
+            .await
+            .map_err(MetaError::Database)?
+            .ok_or(MetaError::ParentNotFound(parent))?
+            .into();
+        parent_meta.modify_time = Set(Utc::now().timestamp_nanos_opt().unwrap_or(0));
+        parent_meta
+            .update(&txn)
+            .await
+            .map_err(MetaError::Database)?;
+
+        txn.commit().await.map_err(MetaError::Database)?;
+
+        Ok(())
+    }
+
+    #[tracing::instrument(level = "trace", skip(self), fields(ino, parent, name))]
+    async fn link(&self, ino: i64, parent: i64, name: &str) -> Result<FileAttr, MetaError> {
+        let txn = self.db.begin().await.map_err(MetaError::Database)?;
+
+        if ino == 1 {
+            txn.rollback().await.map_err(MetaError::Database)?;
+            return Err(MetaError::NotSupported(
+                "cannot create hard links to the root inode".into(),
+            ));
+        }
+
+        let Some(file) = FileMeta::find_by_id(ino)
+            .one(&txn)
+            .await
+            .map_err(MetaError::Database)?
+        else {
+            txn.rollback().await.map_err(MetaError::Database)?;
+            return Err(MetaError::NotFound(ino));
+        };
+
+        if file.symlink_target.is_some() {
+            txn.rollback().await.map_err(MetaError::Database)?;
+            return Err(MetaError::NotSupported(
+                "cannot create hard links to symbolic links".into(),
+            ));
+        }
+
+        if file.deleted || file.nlink <= 0 {
+            txn.rollback().await.map_err(MetaError::Database)?;
+            return Err(MetaError::NotSupported(
+                "cannot create hard link to deleted file".into(),
+            ));
+        }
+
+        let parent_dir = AccessMeta::find_by_id(parent)
+            .one(&txn)
+            .await
+            .map_err(MetaError::Database)?
+            .ok_or(MetaError::ParentNotFound(parent))?;
+
+        if !parent_dir.permission().is_directory() {
+            txn.rollback().await.map_err(MetaError::Database)?;
+            return Err(MetaError::NotDirectory(parent));
+        }
+
+        let existing = ContentMeta::find()
+            .filter(content_meta::Column::ParentInode.eq(parent))
+            .filter(content_meta::Column::EntryName.eq(name))
+            .one(&txn)
+            .await
+            .map_err(MetaError::Database)?;
+
+        if existing.is_some() {
+            txn.rollback().await.map_err(MetaError::Database)?;
+            return Err(MetaError::AlreadyExists {
+                parent,
+                name: name.to_string(),
+            });
+        }
+
+        let now = Self::now_nanos();
+        let entry_type = if file.symlink_target.is_some() {
+            EntryType::Symlink
+        } else {
+            EntryType::File
+        };
+
+        let old_nlink = file.nlink;
+        let new_nlink = file.nlink.saturating_add(1);
+
+        // Query original entry BEFORE inserting new entry to avoid conflicts
+        //
+        // Why query ContentMeta instead of using file.parent directly?
+        // - file.parent only stores the parent inode, not the entry name
+        // - We need both parent_inode AND entry_name to create LinkParent entries
+        // - ContentMeta stores the complete directory entry (parent_inode + entry_name)
+        //
+        // Why query before insert?
+        // - After inserting the new entry, there will be 2 ContentMeta rows with the same inode
+        // - Using one() on multiple rows may return either entry non-deterministically
+        // - We must capture the original entry's name before creating the new link
+        let original_entry = if old_nlink == 1 {
+            Some(
+                ContentMeta::find()
+                    .filter(content_meta::Column::Inode.eq(ino))
+                    .one(&txn)
+                    .await
+                    .map_err(MetaError::Database)?
+                    .ok_or_else(|| {
+                        MetaError::Internal(format!(
+                            "ContentMeta entry not found for inode {}",
+                            ino
+                        ))
+                    })?,
+            )
+        } else {
+            None
+        };
+
+        let new_entry = content_meta::ActiveModel {
+            inode: Set(ino),
+            parent_inode: Set(parent),
+            entry_name: Set(name.to_string()),
+            entry_type: Set(entry_type),
+        };
+        new_entry.insert(&txn).await.map_err(MetaError::Database)?;
+
+        let mut file_active: file_meta::ActiveModel = file.clone().into();
+        file_active.nlink = Set(new_nlink);
+        file_active.modify_time = Set(now);
+        file_active.create_time = Set(now);
+        file_active.deleted = Set(false);
+
+        if old_nlink == 1 {
+            let orig = original_entry.unwrap();
+            let old_parent = file.parent;
+            let old_entry_name = orig.entry_name;
+
+            // Use link_parent instead of parent
+            file_active.parent = Set(0);
+            let link_parent_old = link_parent_meta::ActiveModel {
+                inode: Set(ino),
+                parent_inode: Set(old_parent),
+                entry_name: Set(old_entry_name),
+            };
+            link_parent_old
+                .insert(&txn)
+                .await
+                .map_err(MetaError::Database)?;
+
+            // New link
+            let link_parent_new = link_parent_meta::ActiveModel {
+                inode: Set(ino),
+                parent_inode: Set(parent),
+                entry_name: Set(name.to_string()),
+            };
+            link_parent_new
+                .insert(&txn)
+                .await
+                .map_err(MetaError::Database)?;
+        } else if old_nlink > 1 {
+            let link_parent_new = link_parent_meta::ActiveModel {
+                inode: Set(ino),
+                parent_inode: Set(parent),
+                entry_name: Set(name.to_string()),
+            };
+            link_parent_new
+                .insert(&txn)
+                .await
+                .map_err(MetaError::Database)?;
+        }
+
+        file_active
+            .update(&txn)
+            .await
+            .map_err(MetaError::Database)?;
+
+        let mut parent_active: access_meta::ActiveModel = parent_dir.into();
+        parent_active.modify_time = Set(now);
+        parent_active
+            .update(&txn)
+            .await
+            .map_err(MetaError::Database)?;
+
+        txn.commit().await.map_err(MetaError::Database)?;
+
+        self.stat(ino).await?.ok_or(MetaError::NotFound(ino))
+    }
+
+    #[tracing::instrument(level = "trace", skip(self), fields(parent, name, target))]
+    async fn symlink(
+        &self,
+        parent: i64,
+        name: &str,
+        target: &str,
+    ) -> Result<(i64, FileAttr), MetaError> {
+        let inode = self.alloc_counter_id(INODE_ID_KEY).await?;
+        let txn = self.db.begin().await.map_err(MetaError::Database)?;
+
+        let parent_dir = AccessMeta::find_by_id(parent)
+            .one(&txn)
+            .await
+            .map_err(MetaError::Database)?
+            .ok_or(MetaError::ParentNotFound(parent))?;
+
+        if !parent_dir.permission().is_directory() {
+            txn.rollback().await.map_err(MetaError::Database)?;
+            return Err(MetaError::NotDirectory(parent));
+        }
+
+        let existing = ContentMeta::find()
+            .filter(content_meta::Column::ParentInode.eq(parent))
+            .filter(content_meta::Column::EntryName.eq(name))
+            .one(&txn)
+            .await
+            .map_err(MetaError::Database)?;
+
+        if existing.is_some() {
+            txn.rollback().await.map_err(MetaError::Database)?;
+            return Err(MetaError::AlreadyExists {
+                parent,
+                name: name.to_string(),
+            });
+        }
+
+        let now = Self::now_nanos();
+        let owner_uid = parent_dir.permission().uid;
+        let owner_gid = parent_dir.permission().gid;
+        let perm = Permission::new(0o120777, owner_uid, owner_gid);
+
+        let file_meta = file_meta::ActiveModel {
+            inode: Set(inode),
+            size: Set(target.len() as i64),
+            permission: Set(perm),
+            access_time: Set(now),
+            modify_time: Set(now),
+            create_time: Set(now),
+            nlink: Set(1),
+            parent: Set(parent),
+            deleted: Set(false),
+            symlink_target: Set(Some(target.to_string())),
+        };
+        file_meta.insert(&txn).await.map_err(MetaError::Database)?;
+
+        let content_meta = content_meta::ActiveModel {
+            inode: Set(inode),
+            parent_inode: Set(parent),
+            entry_name: Set(name.to_string()),
+            entry_type: Set(EntryType::Symlink),
+        };
+        content_meta
+            .insert(&txn)
+            .await
+            .map_err(MetaError::Database)?;
+
+        let mut parent_active: access_meta::ActiveModel = parent_dir.into();
+        parent_active.modify_time = Set(now);
+        parent_active
+            .update(&txn)
+            .await
+            .map_err(MetaError::Database)?;
+
+        txn.commit().await.map_err(MetaError::Database)?;
+        let attr = self.stat(inode).await?.ok_or(MetaError::NotFound(inode))?;
+        Ok((inode, attr))
+    }
+
+    #[tracing::instrument(level = "trace", skip(self), fields(ino))]
+    async fn read_symlink(&self, ino: i64) -> Result<String, MetaError> {
+        let file = FileMeta::find_by_id(ino)
+            .one(&self.db)
+            .await
+            .map_err(MetaError::Database)?
+            .ok_or(MetaError::NotFound(ino))?;
+
+        file.symlink_target
+            .ok_or_else(|| MetaError::NotSupported(format!("inode {ino} is not a symbolic link")))
+    }
+
+    #[tracing::instrument(
+        level = "trace",
+        skip(self),
+        fields(old_parent, old_name, new_parent, new_name)
+    )]
+    async fn rename(
+        &self,
+        old_parent: i64,
+        old_name: &str,
+        new_parent: i64,
+        new_name: String,
+    ) -> Result<(), MetaError> {
+        let txn = self.db.begin().await.map_err(MetaError::Database)?;
+
+        // Verify new parent exists
+        if AccessMeta::find_by_id(new_parent)
+            .one(&txn)
+            .await
+            .map_err(MetaError::Database)?
+            .is_none()
+        {
+            txn.rollback().await.map_err(MetaError::Database)?;
+            return Err(MetaError::ParentNotFound(new_parent));
+        }
+
+        // Find the entry to rename
+        let target_entry = ContentMeta::find()
+            .filter(content_meta::Column::ParentInode.eq(old_parent))
+            .filter(content_meta::Column::EntryName.eq(old_name))
+            .one(&txn)
+            .await
+            .map_err(MetaError::Database)?
+            .ok_or_else(|| {
+                MetaError::Internal(format!(
+                    "Entry '{}' not found in parent {} for rename",
+                    old_name, old_parent
+                ))
+            })?;
+
+        // Check if target already exists in new location
+        let existing = ContentMeta::find()
+            .filter(content_meta::Column::ParentInode.eq(new_parent))
+            .filter(content_meta::Column::EntryName.eq(&new_name))
+            .one(&txn)
+            .await
+            .map_err(MetaError::Database)?;
+
+        if existing.is_some() {
+            txn.rollback().await.map_err(MetaError::Database)?;
+            return Err(MetaError::AlreadyExists {
+                parent: new_parent,
+                name: new_name,
+            });
+        }
+
+        let now = Utc::now().timestamp_nanos_opt().unwrap_or(0);
+
+        // Get metadata to check nlink and type
+        // Try FileMeta first (for files), then AccessMeta (for directories)
+        let file_meta_opt = FileMeta::find_by_id(target_entry.inode)
+            .one(&txn)
+            .await
+            .map_err(MetaError::Database)?;
+
+        let access_meta_opt = AccessMeta::find_by_id(target_entry.inode)
+            .one(&txn)
+            .await
+            .map_err(MetaError::Database)?;
+
+        // Determine nlink based on entry type
+        let nlink = if let Some(ref file_meta) = file_meta_opt {
+            file_meta.nlink
+        } else if let Some(ref access_meta) = access_meta_opt {
+            access_meta.nlink
+        } else {
+            return Err(MetaError::NotFound(target_entry.inode));
+        };
+
+        // Delete old content_meta entry
+        ContentMeta::delete_many()
+            .filter(content_meta::Column::ParentInode.eq(old_parent))
+            .filter(content_meta::Column::EntryName.eq(old_name))
+            .exec(&txn)
+            .await
+            .map_err(MetaError::Database)?;
+
+        // Insert new content_meta entry
+        let new_content_meta = content_meta::ActiveModel {
+            inode: Set(target_entry.inode),
+            parent_inode: Set(new_parent),
+            entry_name: Set(new_name.clone()),
+            entry_type: Set(target_entry.entry_type),
+        };
+
+        new_content_meta
+            .insert(&txn)
+            .await
+            .map_err(MetaError::Database)?;
+
+        // Handle LinkParentMeta updates for hardlinked files
+        // Note: Directories are stored in AccessMeta only, not FileMeta
+        if nlink > 1 {
+            // For hardlinked files (nlink > 1), update LinkParentMeta
+            LinkParentMeta::delete_many()
+                .filter(link_parent_meta::Column::Inode.eq(target_entry.inode))
+                .filter(link_parent_meta::Column::ParentInode.eq(old_parent))
+                .filter(link_parent_meta::Column::EntryName.eq(old_name))
+                .exec(&txn)
+                .await
+                .map_err(MetaError::Database)?;
+
+            let new_link_parent = link_parent_meta::ActiveModel {
+                inode: Set(target_entry.inode),
+                parent_inode: Set(new_parent),
+                entry_name: Set(new_name.clone()),
+            };
+            new_link_parent
+                .insert(&txn)
+                .await
+                .map_err(MetaError::Database)?;
+        } else if nlink == 1 && file_meta_opt.is_some() {
+            // For regular files with single link, update file_meta.parent directly
+            let file_meta = file_meta_opt.unwrap();
+            let mut file_active: file_meta::ActiveModel = file_meta.into();
+            file_active.parent = Set(new_parent);
+            file_active.modify_time = Set(now);
+            // Note: create_time should not be updated during rename
+            file_active
+                .update(&txn)
+                .await
+                .map_err(MetaError::Database)?;
+        }
+        // For directories (nlink >= 2, no FileMeta), no additional updates needed
+        // The ContentMeta update above is sufficient
+
+        // Update old parent mtime (not ctime, which should only change on metadata changes)
+        let mut old_parent_meta: access_meta::ActiveModel = AccessMeta::find_by_id(old_parent)
+            .one(&txn)
+            .await
+            .map_err(MetaError::Database)?
+            .ok_or(MetaError::ParentNotFound(old_parent))?
+            .into();
+        old_parent_meta.modify_time = Set(now);
+        old_parent_meta
+            .update(&txn)
+            .await
+            .map_err(MetaError::Database)?;
+
+        // Update new parent mtime (if different)
+        if old_parent != new_parent {
+            let mut new_parent_meta: access_meta::ActiveModel = AccessMeta::find_by_id(new_parent)
+                .one(&txn)
+                .await
+                .map_err(MetaError::Database)?
+                .ok_or(MetaError::NotFound(new_parent))?
+                .into();
+            new_parent_meta.modify_time = Set(now);
+            new_parent_meta
+                .update(&txn)
+                .await
+                .map_err(MetaError::Database)?;
+        }
+
+        txn.commit().await.map_err(MetaError::Database)?;
+
+        Ok(())
+    }
+
+    async fn rename_exchange(
+        &self,
+        old_parent: i64,
+        old_name: &str,
+        new_parent: i64,
+        new_name: &str,
+    ) -> Result<(), MetaError> {
+        let txn = self.db.begin().await.map_err(MetaError::Database)?;
+
+        // Find both entries to exchange
+        let old_entry = ContentMeta::find()
+            .filter(content_meta::Column::ParentInode.eq(old_parent))
+            .filter(content_meta::Column::EntryName.eq(old_name))
+            .one(&txn)
+            .await
+            .map_err(MetaError::Database)?
+            .ok_or_else(|| {
+                MetaError::Internal(format!(
+                    "Entry '{}' not found in parent {} for exchange",
+                    old_name, old_parent
+                ))
+            })?;
+
+        let new_entry = ContentMeta::find()
+            .filter(content_meta::Column::ParentInode.eq(new_parent))
+            .filter(content_meta::Column::EntryName.eq(new_name))
+            .one(&txn)
+            .await
+            .map_err(MetaError::Database)?
+            .ok_or_else(|| {
+                MetaError::Internal(format!(
+                    "Entry '{}' not found in parent {} for exchange",
+                    new_name, new_parent
+                ))
+            })?;
+
+        let old_ino = old_entry.inode;
+        let new_ino = new_entry.inode;
+
+        // Get file metadata for both files
+        let old_file_meta = FileMeta::find_by_id(old_ino)
+            .one(&txn)
+            .await
+            .map_err(MetaError::Database)?
+            .ok_or(MetaError::NotFound(old_ino))?;
+
+        let new_file_meta = FileMeta::find_by_id(new_ino)
+            .one(&txn)
+            .await
+            .map_err(MetaError::Database)?
+            .ok_or(MetaError::NotFound(new_ino))?;
+
+        let now = Utc::now().timestamp_nanos_opt().unwrap_or(0);
+
+        // Delete both content_meta entries
+        ContentMeta::delete_many()
+            .filter(content_meta::Column::ParentInode.eq(old_parent))
+            .filter(content_meta::Column::EntryName.eq(old_name))
+            .exec(&txn)
+            .await
+            .map_err(MetaError::Database)?;
+
+        ContentMeta::delete_many()
+            .filter(content_meta::Column::ParentInode.eq(new_parent))
+            .filter(content_meta::Column::EntryName.eq(new_name))
+            .exec(&txn)
+            .await
+            .map_err(MetaError::Database)?;
+
+        // Insert swapped content_meta entries
+        let swapped_old_content = content_meta::ActiveModel {
+            inode: Set(new_ino),
+            parent_inode: Set(old_parent),
+            entry_name: Set(old_name.to_string()),
+            entry_type: Set(new_entry.entry_type),
+        };
+        swapped_old_content
+            .insert(&txn)
+            .await
+            .map_err(MetaError::Database)?;
+
+        let swapped_new_content = content_meta::ActiveModel {
+            inode: Set(old_ino),
+            parent_inode: Set(new_parent),
+            entry_name: Set(new_name.to_string()),
+            entry_type: Set(old_entry.entry_type),
+        };
+        swapped_new_content
+            .insert(&txn)
+            .await
+            .map_err(MetaError::Database)?;
+
+        // Handle LinkParentMeta updates for hardlinked files
+        // Update old file (now at new location)
+        if old_file_meta.nlink > 1 {
+            LinkParentMeta::delete_many()
+                .filter(link_parent_meta::Column::Inode.eq(old_ino))
+                .filter(link_parent_meta::Column::ParentInode.eq(old_parent))
+                .filter(link_parent_meta::Column::EntryName.eq(old_name))
+                .exec(&txn)
+                .await
+                .map_err(MetaError::Database)?;
+
+            let new_link_parent = link_parent_meta::ActiveModel {
+                inode: Set(old_ino),
+                parent_inode: Set(new_parent),
+                entry_name: Set(new_name.to_string()),
+            };
+            new_link_parent
+                .insert(&txn)
+                .await
+                .map_err(MetaError::Database)?;
+        } else if old_file_meta.nlink == 1 {
+            let mut file_active: file_meta::ActiveModel = old_file_meta.into();
+            file_active.parent = Set(new_parent);
+            file_active.modify_time = Set(now);
+            file_active
+                .update(&txn)
+                .await
+                .map_err(MetaError::Database)?;
+        }
+
+        // Update new file (now at old location)
+        if new_file_meta.nlink > 1 {
+            LinkParentMeta::delete_many()
+                .filter(link_parent_meta::Column::Inode.eq(new_ino))
+                .filter(link_parent_meta::Column::ParentInode.eq(new_parent))
+                .filter(link_parent_meta::Column::EntryName.eq(new_name))
+                .exec(&txn)
+                .await
+                .map_err(MetaError::Database)?;
+
+            let old_link_parent = link_parent_meta::ActiveModel {
+                inode: Set(new_ino),
+                parent_inode: Set(old_parent),
+                entry_name: Set(old_name.to_string()),
+            };
+            old_link_parent
+                .insert(&txn)
+                .await
+                .map_err(MetaError::Database)?;
+        } else if new_file_meta.nlink == 1 {
+            let mut file_active: file_meta::ActiveModel = new_file_meta.into();
+            file_active.parent = Set(old_parent);
+            file_active.modify_time = Set(now);
+            file_active
+                .update(&txn)
+                .await
+                .map_err(MetaError::Database)?;
+        }
+
+        // Update parent directories' mtime
+        let mut old_parent_meta: access_meta::ActiveModel = AccessMeta::find_by_id(old_parent)
+            .one(&txn)
+            .await
+            .map_err(MetaError::Database)?
+            .ok_or(MetaError::ParentNotFound(old_parent))?
+            .into();
+        old_parent_meta.modify_time = Set(now);
+        old_parent_meta
+            .update(&txn)
+            .await
+            .map_err(MetaError::Database)?;
+
+        if old_parent != new_parent {
+            let mut new_parent_meta: access_meta::ActiveModel = AccessMeta::find_by_id(new_parent)
+                .one(&txn)
+                .await
+                .map_err(MetaError::Database)?
+                .ok_or(MetaError::NotFound(new_parent))?
+                .into();
+            new_parent_meta.modify_time = Set(now);
+            new_parent_meta
+                .update(&txn)
+                .await
+                .map_err(MetaError::Database)?;
+        }
+
+        txn.commit().await.map_err(MetaError::Database)?;
+
+        Ok(())
+    }
+
+    #[tracing::instrument(level = "trace", skip(self), fields(ino, size))]
+    async fn set_file_size(&self, ino: i64, size: u64) -> Result<(), MetaError> {
+        let mut file_meta: file_meta::ActiveModel = FileMeta::find_by_id(ino)
+            .one(&self.db)
+            .await
+            .map_err(|e| MetaError::Internal(e.to_string()))?
+            .ok_or(MetaError::NotFound(ino))?
+            .into();
+
+        // Only update mtime if size actually changed
+        let old_size = match &file_meta.size {
+            Set(s) | Unchanged(s) => *s as u64,
+            _ => 0,
+        };
+
+        file_meta.size = Set(size as i64);
+
+        // Only update mtime when size changes (not on every call)
+        if old_size != size {
+            file_meta.modify_time = Set(Self::now_nanos());
+        }
+
+        file_meta
+            .update(&self.db)
+            .await
+            .map_err(|e| MetaError::Internal(e.to_string()))?;
+
+        Ok(())
+    }
+
+    #[tracing::instrument(level = "trace", skip(self), fields(ino, size))]
+    async fn extend_file_size(&self, ino: i64, size: u64) -> Result<(), MetaError> {
+        let now = Self::now_nanos();
+        let result = file_meta::Entity::update_many()
+            .col_expr(
+                file_meta::Column::Size,
+                sea_query::Expr::val(size as i64).into(),
+            )
+            .col_expr(
+                file_meta::Column::ModifyTime,
+                sea_query::Expr::val(now).into(),
+            )
+            .filter(file_meta::Column::Inode.eq(ino))
+            .filter(file_meta::Column::Size.lt(size as i64))
+            .exec(&self.db)
+            .await
+            .map_err(MetaError::Database)?;
+
+        if result.rows_affected == 0 {
+            let exists = FileMeta::find_by_id(ino)
+                .one(&self.db)
+                .await
+                .map_err(MetaError::Database)?;
+            if exists.is_none() {
+                return Err(MetaError::NotFound(ino));
+            }
+        }
+
+        Ok(())
+    }
+
+    #[tracing::instrument(level = "trace", skip(self), fields(ino, size, chunk_size))]
+    async fn truncate(&self, ino: i64, size: u64, chunk_size: u64) -> Result<(), MetaError> {
+        let txn = self.db.begin().await.map_err(MetaError::Database)?;
+
+        let mut file_meta: file_meta::ActiveModel = FileMeta::find_by_id(ino)
+            .one(&txn)
+            .await
+            .map_err(MetaError::Database)?
+            .ok_or(MetaError::NotFound(ino))?
+            .into();
+
+        let old_size = match &file_meta.size {
+            Set(s) | Unchanged(s) => *s as u64,
+            _ => 0,
+        };
+
+        file_meta.size = Set(size as i64);
+        if old_size != size {
+            file_meta.modify_time = Set(Self::now_nanos());
+        }
+
+        file_meta.update(&txn).await.map_err(MetaError::Database)?;
+        self.prune_slices_for_truncate(&txn, ino, size, old_size, chunk_size)
+            .await?;
+
+        txn.commit().await.map_err(MetaError::Database)?;
+        Ok(())
+    }
+
+    #[tracing::instrument(
+        level = "trace",
+        skip(self, req),
+        fields(ino, size = req.size, flags = ?flags)
+    )]
+    async fn set_attr(
+        &self,
+        ino: i64,
+        req: &SetAttrRequest,
+        flags: SetAttrFlags,
+    ) -> Result<FileAttr, MetaError> {
+        let txn = self.db.begin().await.map_err(MetaError::Database)?;
+
+        if let Some(file) = FileMeta::find_by_id(ino)
+            .one(&txn)
+            .await
+            .map_err(MetaError::Database)?
+        {
+            let mut permission = file.permission().clone();
+            let mut size = file.size;
+            let mut access_time = file.access_time;
+            let mut modify_time = file.modify_time;
+            let mut create_time = file.create_time;
+            let mut ctime_update = false;
+            let now = Self::now_nanos();
+
+            if let Some(mode) = req.mode {
+                permission.chmod(mode & 0o777);
+                ctime_update = true;
+            }
+
+            if let Some(uid) = req.uid {
+                let gid = req.gid.unwrap_or(permission.gid);
+                permission.chown(uid, gid);
+                ctime_update = true;
+            }
+
+            if req.uid.is_none()
+                && let Some(gid) = req.gid
+            {
+                permission.chown(permission.uid, gid);
+                ctime_update = true;
+            }
+
+            if flags.contains(SetAttrFlags::CLEAR_SUID) {
+                permission.mode &= !0o4000;
+                ctime_update = true;
+            }
+            if flags.contains(SetAttrFlags::CLEAR_SGID) {
+                permission.mode &= !0o2000;
+                ctime_update = true;
+            }
+
+            if let Some(size_req) = req.size {
+                let new_size = size_req as i64;
+                if size != new_size {
+                    size = new_size;
+                    modify_time = now;
+                }
+                ctime_update = true;
+            }
+
+            if flags.contains(SetAttrFlags::SET_ATIME_NOW) {
+                access_time = now;
+                ctime_update = true;
+            } else if let Some(atime) = req.atime {
+                access_time = atime;
+                ctime_update = true;
+            }
+
+            if flags.contains(SetAttrFlags::SET_MTIME_NOW) {
+                modify_time = now;
+                ctime_update = true;
+            } else if let Some(mtime) = req.mtime {
+                modify_time = mtime;
+                ctime_update = true;
+            }
+
+            if let Some(ctime) = req.ctime {
+                create_time = ctime;
+            } else if ctime_update {
+                create_time = now;
+            }
+
+            let kind = if file.symlink_target.is_some() {
+                FileType::Symlink
+            } else {
+                FileType::File
+            };
+            let nlink = file.nlink;
+            let symlink_len = file.symlink_target.as_ref().map(|t| t.len() as u64);
+
+            let mut active: file_meta::ActiveModel = file.into();
+            active.permission = Set(permission.clone());
+            active.size = Set(size);
+            active.access_time = Set(access_time);
+            active.modify_time = Set(modify_time);
+            active.create_time = Set(create_time);
+            active.update(&txn).await.map_err(MetaError::Database)?;
+
+            txn.commit().await.map_err(MetaError::Database)?;
+            let out = FileAttr {
+                ino,
+                size: symlink_len.unwrap_or(size as u64),
+                kind,
+                mode: permission.mode,
+                uid: permission.uid,
+                gid: permission.gid,
+                atime: access_time,
+                mtime: modify_time,
+                ctime: create_time,
+                nlink: nlink as u32,
+            };
+            return Ok(out);
+        }
+
+        if let Some(dir) = AccessMeta::find_by_id(ino)
+            .one(&txn)
+            .await
+            .map_err(MetaError::Database)?
+        {
+            let mut permission = dir.permission().clone();
+            let mut ctime_update = false;
+            let now = Self::now_nanos();
+            let mut access_time = dir.access_time;
+            let mut modify_time = dir.modify_time;
+            let mut create_time = dir.create_time;
+
+            if let Some(mode) = req.mode {
+                permission.chmod(mode & 0o777);
+                ctime_update = true;
+            }
+
+            if let Some(uid) = req.uid {
+                let gid = req.gid.unwrap_or(permission.gid);
+                permission.chown(uid, gid);
+                ctime_update = true;
+            }
+
+            if req.uid.is_none()
+                && let Some(gid) = req.gid
+            {
+                permission.chown(permission.uid, gid);
+                ctime_update = true;
+            }
+
+            if flags.contains(SetAttrFlags::CLEAR_SUID) {
+                permission.mode &= !0o4000;
+                ctime_update = true;
+            }
+            if flags.contains(SetAttrFlags::CLEAR_SGID) {
+                permission.mode &= !0o2000;
+                ctime_update = true;
+            }
+
+            if flags.contains(SetAttrFlags::SET_ATIME_NOW) {
+                access_time = now;
+                ctime_update = true;
+            } else if let Some(atime) = req.atime {
+                access_time = atime;
+                ctime_update = true;
+            }
+
+            if flags.contains(SetAttrFlags::SET_MTIME_NOW) {
+                modify_time = now;
+                ctime_update = true;
+            } else if let Some(mtime) = req.mtime {
+                modify_time = mtime;
+                ctime_update = true;
+            }
+
+            if let Some(ctime) = req.ctime {
+                create_time = ctime;
+            } else if ctime_update {
+                create_time = now;
+            }
+
+            let mut active: access_meta::ActiveModel = dir.into();
+            active.permission = Set(permission);
+            active.access_time = Set(access_time);
+            active.modify_time = Set(modify_time);
+            active.create_time = Set(create_time);
+            active.update(&txn).await.map_err(MetaError::Database)?;
+
+            txn.commit().await.map_err(MetaError::Database)?;
+            return self.stat(ino).await?.ok_or(MetaError::NotFound(ino));
+        }
+
+        txn.rollback().await.map_err(MetaError::Database)?;
+        Err(MetaError::NotFound(ino))
+    }
+
+    #[tracing::instrument(level = "trace", skip(self), fields(ino))]
+    async fn get_names(&self, ino: i64) -> Result<Vec<(Option<i64>, String)>, MetaError> {
+        if ino == 1 {
+            return Ok(vec![(None, "/".to_string())]);
+        }
+
+        if AccessMeta::find_by_id(ino)
+            .one(&self.db)
+            .await
+            .map_err(MetaError::Database)?
+            .is_some()
+        {
+            let entry = ContentMeta::find()
+                .filter(content_meta::Column::Inode.eq(ino))
+                .one(&self.db)
+                .await
+                .map_err(MetaError::Database)?;
+
+            return Ok(entry
+                .map(|e| vec![(Some(e.parent_inode), e.entry_name)])
+                .unwrap_or_default());
+        }
+
+        let entries = ContentMeta::find()
+            .filter(content_meta::Column::Inode.eq(ino))
+            .order_by_asc(content_meta::Column::ParentInode)
+            .order_by_asc(content_meta::Column::EntryName)
+            .all(&self.db)
+            .await
+            .map_err(MetaError::Database)?;
+
+        Ok(entries
+            .into_iter()
+            .map(|e| (Some(e.parent_inode), e.entry_name))
+            .collect())
+    }
+
+    #[tracing::instrument(level = "trace", skip(self), fields(ino, flags = ?flags))]
+    async fn open(&self, ino: i64, flags: OpenFlags) -> Result<FileAttr, MetaError> {
+        let txn = self.db.begin().await.map_err(MetaError::Database)?;
+
+        if let Some(mut file) = FileMeta::find_by_id(ino)
+            .one(&txn)
+            .await
+            .map_err(MetaError::Database)?
+        {
+            if file.symlink_target.is_some() {
+                txn.rollback().await.map_err(MetaError::Database)?;
+                return Err(MetaError::NotSupported(
+                    "opening symlink targets is not implemented".into(),
+                ));
+            }
+
+            let now = Self::now_nanos();
+            let truncate = flags.contains(OpenFlags::TRUNC);
+
+            file.access_time = now;
+            if truncate {
+                file.size = 0;
+                file.modify_time = now;
+                file.create_time = now;
+            }
+
+            let active: file_meta::ActiveModel = file.into();
+            active.update(&txn).await.map_err(MetaError::Database)?;
+
+            txn.commit().await.map_err(MetaError::Database)?;
+            return self.stat(ino).await?.ok_or(MetaError::NotFound(ino));
+        }
+
+        if flags.contains(OpenFlags::TRUNC) {
+            txn.rollback().await.map_err(MetaError::Database)?;
+            return Err(MetaError::NotSupported(
+                "truncate flag only supported for regular files".into(),
+            ));
+        }
+
+        if let Some(mut dir) = AccessMeta::find_by_id(ino)
+            .one(&txn)
+            .await
+            .map_err(MetaError::Database)?
+        {
+            dir.access_time = Self::now_nanos();
+            let active: access_meta::ActiveModel = dir.into();
+            let out_perm = active.permission.clone().unwrap();
+            let out_atime = active.access_time.clone().unwrap();
+            let out_mtime = active.modify_time.clone().unwrap();
+            let out_ctime = active.create_time.clone().unwrap();
+            let out_nlink = active.nlink.clone().unwrap();
+            active.update(&txn).await.map_err(MetaError::Database)?;
+
+            txn.commit().await.map_err(MetaError::Database)?;
+            let out = FileAttr {
+                ino,
+                size: 4096,
+                kind: FileType::Dir,
+                mode: out_perm.mode,
+                uid: out_perm.uid,
+                gid: out_perm.gid,
+                atime: out_atime,
+                mtime: out_mtime,
+                ctime: out_ctime,
+                nlink: out_nlink as u32,
+            };
+            return Ok(out);
+        }
+
+        txn.rollback().await.map_err(MetaError::Database)?;
+        Err(MetaError::NotFound(ino))
+    }
+
+    #[tracing::instrument(level = "trace", skip(self), fields(ino))]
+    async fn close(&self, ino: i64) -> Result<(), MetaError> {
+        if self.stat(ino).await?.is_some() {
+            Ok(())
+        } else {
+            Err(MetaError::NotFound(ino))
+        }
+    }
+
+    #[tracing::instrument(level = "trace", skip(self), fields(ino))]
+    async fn get_paths(&self, ino: i64) -> Result<Vec<String>, MetaError> {
+        if ino == 1 {
+            return Ok(vec!["/".to_string()]);
+        }
+
+        let names = self.get_names(ino).await?;
+
+        let db = &self.db;
+
+        build_paths_from_names(1, names, |current_ino| async move {
+            let entry = ContentMeta::find()
+                .filter(content_meta::Column::Inode.eq(current_ino))
+                .order_by_asc(content_meta::Column::ParentInode)
+                .order_by_asc(content_meta::Column::EntryName)
+                .one(db)
+                .await
+                .map_err(MetaError::Database)?;
+
+            Ok(entry.map(|entry| (entry.parent_inode, entry.entry_name)))
+        })
+        .await
+    }
+
+    fn root_ino(&self) -> i64 {
+        1
+    }
+
+    #[tracing::instrument(level = "trace", skip(self))]
+    async fn initialize(&self) -> Result<(), MetaError> {
+        Ok(())
+    }
+
+    #[tracing::instrument(level = "trace", skip(self))]
+    async fn stat_fs(&self) -> Result<StatFsSnapshot, MetaError> {
+        let files = FileMeta::find()
+            .all(&self.db)
+            .await
+            .map_err(MetaError::Database)?;
+
+        let used_space: u64 = files.iter().map(|file| file.size.max(0) as u64).sum();
+
+        let file_count = files.len() as u64;
+        let dir_count = AccessMeta::find()
+            .count(&self.db)
+            .await
+            .map_err(MetaError::Database)?;
+
+        Ok(StatFsSnapshot {
+            total_space: used_space,
+            available_space: 0,
+            used_inodes: file_count + dir_count,
+            available_inodes: 0,
+        })
+    }
+
+    #[tracing::instrument(level = "trace", skip(self))]
+    async fn get_deleted_files(&self) -> Result<Vec<i64>, MetaError> {
+        let deleted_files = FileMeta::find()
+            .filter(file_meta::Column::Deleted.eq(true))
+            .all(&self.db)
+            .await
+            .map_err(MetaError::Database)?;
+
+        Ok(deleted_files.into_iter().map(|f| f.inode).collect())
+    }
+
+    #[tracing::instrument(level = "trace", skip(self), fields(ino))]
+    async fn remove_file_metadata(&self, ino: i64) -> Result<(), MetaError> {
+        let txn = self.db.begin().await.map_err(MetaError::Database)?;
+
+        let file_meta = FileMeta::find_by_id(ino)
+            .one(&txn)
+            .await
+            .map_err(MetaError::Database)?
+            .ok_or(MetaError::NotFound(ino))?;
+
+        // Check if the file is marked as deleted
+        if !file_meta.deleted {
+            return Err(MetaError::Internal(
+                "File is not marked as deleted".to_string(),
+            ));
+        }
+
+        // Delete the file metadata
+        let file_meta_active: file_meta::ActiveModel = file_meta.into();
+        file_meta_active
+            .delete(&txn)
+            .await
+            .map_err(MetaError::Database)?;
+
+        XattrMeta::delete_many()
+            .filter(xattr_meta::Column::Inode.eq(ino))
+            .exec(&txn)
+            .await
+            .map_err(MetaError::Database)?;
+
+        txn.commit().await.map_err(MetaError::Database)?;
+
+        Ok(())
+    }
+
+    #[tracing::instrument(
+        level = "trace",
+        skip(self),
+        fields(chunk_id, slice_count = tracing::field::Empty)
+    )]
+    async fn get_slices(&self, chunk_id: u64) -> Result<Vec<SliceDesc>, MetaError> {
+        let rows = SliceMeta::find()
+            .filter(slice_meta::Column::ChunkId.eq(chunk_id as i64))
+            .order_by_asc(slice_meta::Column::Id)
+            .all(&self.db)
+            .instrument(tracing::trace_span!("get_slices.query", chunk_id))
+            .await
+            .map_err(MetaError::Database)?;
+
+        let slices: Vec<SliceDesc> = rows.into_iter().map(Into::into).collect();
+        tracing::Span::current().record("slice_count", slices.len());
+        Ok(slices)
+    }
+
+    #[tracing::instrument(
+        level = "trace",
+        skip(self, slice),
+        fields(chunk_id, slice_id = slice.slice_id, offset = slice.offset, len = slice.length)
+    )]
+    async fn append_slice(&self, chunk_id: u64, slice: SliceDesc) -> Result<(), MetaError> {
+        let model = slice_meta::ActiveModel {
+            chunk_id: Set(chunk_id as i64),
+            slice_id: Set(slice.slice_id as i64),
+            offset: Set(slice.offset.as_i64()),
+            length: Set(slice.length.as_i64()),
+            ..Default::default()
+        };
+
+        model.insert(&self.db).await.map_err(MetaError::Database)?;
+        Ok(())
+    }
+
+    #[tracing::instrument(
+        level = "trace",
+        skip(self, slice),
+        fields(ino, chunk_id, slice_id = slice.slice_id, offset = slice.offset, len = slice.length, new_size)
+    )]
+    async fn write(
+        &self,
+        ino: i64,
+        chunk_id: u64,
+        slice: SliceDesc,
+        new_size: u64,
+    ) -> Result<(), MetaError> {
+        let txn = self.db.begin().await.map_err(MetaError::Database)?;
+
+        let model = slice_meta::ActiveModel {
+            chunk_id: Set(chunk_id as i64),
+            slice_id: Set(slice.slice_id as i64),
+            offset: Set(slice.offset.as_i64()),
+            length: Set(slice.length.as_i64()),
+            ..Default::default()
+        };
+
+        if let Err(err) = model.insert(&txn).await {
+            let _ = txn.rollback().await;
+            return Err(MetaError::Database(err));
+        }
+
+        let now = Self::now_nanos();
+
+        // First, try to update size if needed
+        let result = file_meta::Entity::update_many()
+            .col_expr(
+                file_meta::Column::Size,
+                sea_query::Expr::val(new_size as i64).into(),
+            )
+            .col_expr(
+                file_meta::Column::ModifyTime,
+                sea_query::Expr::val(now).into(),
+            )
+            .filter(file_meta::Column::Inode.eq(ino))
+            .filter(file_meta::Column::Size.lt(new_size as i64))
+            .exec(&txn)
+            .await
+            .map_err(MetaError::Database)?;
+
+        if result.rows_affected == 0 {
+            let exists = FileMeta::find_by_id(ino)
+                .one(&txn)
+                .await
+                .map_err(MetaError::Database)?;
+            if exists.is_none() {
+                let _ = txn.rollback().await;
+                return Err(MetaError::NotFound(ino));
+            }
+        }
+
+        // POSIX: clear setuid/setgid bits on write (security: prevent privilege escalation)
+        // Need to fetch-modify-update because Permission is a JSON field
+        if let Some(file) = FileMeta::find_by_id(ino)
+            .one(&txn)
+            .await
+            .map_err(MetaError::Database)?
+        {
+            let mut perm = file.permission.clone();
+            perm.mode &= !0o6000; // Clear setuid (04000) and setgid (02000) bits
+
+            let mut active: file_meta::ActiveModel = file.into();
+            active.permission = Set(perm);
+            active.update(&txn).await.map_err(MetaError::Database)?;
+        }
+
+        txn.commit().await.map_err(MetaError::Database)?;
+        Ok(())
+    }
+
+    #[tracing::instrument(level = "trace", skip(self), fields(key))]
+    async fn next_id(&self, key: &str) -> Result<i64, MetaError> {
+        match key {
+            SLICE_ID_KEY | INODE_ID_KEY => self.alloc_counter_id(key).await,
+            other => Err(MetaError::NotSupported(format!(
+                "next_id not supported for key {other}"
+            ))),
+        }
+    }
+
+    // ---------- Session lifecycle implementation ----------
+
+    #[tracing::instrument(level = "trace", skip(self), fields(pid = session_info.process_id))]
+    async fn start_session(
+        &self,
+        session_info: SessionInfo,
+        token: CancellationToken,
+    ) -> Result<Session, MetaError> {
+        let txn = self.db.begin().await.map_err(MetaError::Database)?;
+        let session_id = Uuid::now_v7();
+        let expire = (Utc::now() + ChronoDuration::minutes(5)).timestamp_millis();
+        let payload = serde_json::to_vec(&session_info)
+            .map_err(|e| MetaError::Serialization(e.to_string()))?;
+        let session = session_meta::ActiveModel {
+            session_id: Set(session_id),
+            session_info: Set(payload),
+            expire: Set(expire),
+        };
+        if let Err(e) = session.insert(&self.db).await {
+            let _ = txn.rollback().await;
+            return Err(MetaError::Database(e));
+        }
+        self.set_sid(session_id)?;
+        txn.commit().await.map_err(MetaError::Database)?;
+
+        tokio::spawn(Self::life_cycle(token.clone(), session_id, self.db.clone()));
+
+        Ok(Session {
+            session_id,
+            expire,
+            session_info,
+        })
+    }
+
+    #[tracing::instrument(level = "trace", skip(self))]
+    async fn shutdown_session(&self) -> Result<(), MetaError> {
+        let txn = self.db.begin().await.map_err(MetaError::Database)?;
+        let session_id = self.get_sid()?;
+        self.shutdown_session_by_id(*session_id, &txn).await?;
+        txn.commit().await.map_err(MetaError::Database)?;
+        Ok(())
+    }
+
+    #[tracing::instrument(level = "trace", skip(self))]
+    async fn cleanup_sessions(&self) -> Result<(), MetaError> {
+        let txn = self.db.begin().await.map_err(MetaError::Database)?;
+        let sessions = SessionMeta::find()
+            .filter(session_meta::Column::Expire.lt(Utc::now().timestamp_millis()))
+            .all(&txn)
+            .await?;
+        for session in sessions {
+            let session_id = session.session_id;
+            self.shutdown_session_by_id(session_id, &txn).await?;
+        }
+
+        txn.commit().await.map_err(MetaError::Database)?;
+        Ok(())
+    }
+
+    #[tracing::instrument(level = "trace", skip(self), fields(lock_name = ?lock_name))]
+    async fn get_global_lock(&self, lock_name: LockName) -> bool {
+        self.get_lock_internal(lock_name).await.unwrap_or_default()
+    }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+
+    // returns the current lock owner for a range on a file.
+    #[tracing::instrument(level = "trace", skip(self, query), fields(inode, owner = query.owner))]
+    async fn get_plock(
+        &self,
+        inode: i64,
+        query: &FileLockQuery,
+    ) -> Result<FileLockInfo, MetaError> {
+        let sid = self
+            .sid
+            .get()
+            .ok_or_else(|| MetaError::Internal("sid not set".to_string()))?;
+
+        let rows = PlockMeta::find()
+            .filter(plock_meta::Column::Inode.eq(inode))
+            .all(&self.db)
+            .await
+            .map_err(MetaError::Database)?;
+
+        for row in rows {
+            let locks: Vec<PlockRecord> = serde_json::from_slice(&row.records).unwrap_or_default();
+
+            if let Some(v) = PlockRecord::get_plock(&locks, query, sid, &row.sid) {
+                return Ok(v);
+            }
+        }
+
+        Ok(FileLockInfo {
+            lock_type: FileLockType::UnLock,
+            range: FileLockRange { start: 0, end: 0 },
+            pid: 0,
+        })
+    }
+
+    // sets a file range lock on given file.
+    #[tracing::instrument(
+        level = "trace",
+        skip(self),
+        fields(inode, owner, block, lock_type = ?lock_type, pid)
+    )]
+    async fn set_plock(
+        &self,
+        inode: i64,
+        owner: i64,
+        block: bool,
+        lock_type: FileLockType,
+        range: FileLockRange,
+        pid: u32,
+    ) -> Result<(), MetaError> {
+        let new_lock = PlockRecord::new(lock_type, pid, range.start, range.end);
+
+        loop {
+            let result = self
+                .try_set_plock(inode, owner, &new_lock, lock_type, range)
+                .await;
+
+            match result {
+                Ok(()) => return Ok(()),
+                Err(MetaError::LockConflict { .. }) if block => {
+                    if lock_type == FileLockType::Write {
+                        tokio::time::sleep(tokio::time::Duration::from_millis(1)).await;
+                    } else {
+                        tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+                    }
+                    continue;
+                }
+                Err(e) => return Err(e),
+            }
+        }
+    }
+
+    async fn set_xattr(
+        &self,
+        inode: i64,
+        name: &str,
+        value: &[u8],
+        flags: u32,
+    ) -> Result<(), MetaError> {
+        if self.stat(inode).await?.is_none() {
+            return Err(MetaError::NotFound(inode));
+        }
+        let txn = self.db.begin().await.map_err(MetaError::Database)?;
+        let existing = XattrMeta::find_by_id((inode, name.to_string()))
+            .one(&txn)
+            .await
+            .map_err(MetaError::Database)?;
+        let create_only = flags & (libc::XATTR_CREATE as u32) != 0;
+        let replace_only = flags & (libc::XATTR_REPLACE as u32) != 0;
+
+        match existing {
+            Some(entry) => {
+                if create_only {
+                    txn.rollback().await.map_err(MetaError::Database)?;
+                    return Err(MetaError::AlreadyExists {
+                        parent: inode,
+                        name: name.to_string(),
+                    });
+                }
+                let mut active: xattr_meta::ActiveModel = entry.into();
+                active.value = Set(value.to_vec());
+                active.update(&txn).await.map_err(MetaError::Database)?;
+            }
+            None => {
+                if replace_only {
+                    txn.rollback().await.map_err(MetaError::Database)?;
+                    return Err(MetaError::NotFound(inode));
+                }
+                let active = xattr_meta::ActiveModel {
+                    inode: Set(inode),
+                    name: Set(name.to_string()),
+                    value: Set(value.to_vec()),
+                };
+                active.insert(&txn).await.map_err(MetaError::Database)?;
+            }
+        }
+
+        txn.commit().await.map_err(MetaError::Database)?;
+        Ok(())
+    }
+
+    async fn get_xattr(&self, inode: i64, name: &str) -> Result<Option<Vec<u8>>, MetaError> {
+        if self.stat(inode).await?.is_none() {
+            return Err(MetaError::NotFound(inode));
+        }
+        let entry = XattrMeta::find_by_id((inode, name.to_string()))
+            .one(&self.db)
+            .await
+            .map_err(MetaError::Database)?;
+        Ok(entry.map(|e| e.value))
+    }
+
+    async fn list_xattr(&self, inode: i64) -> Result<Vec<String>, MetaError> {
+        if self.stat(inode).await?.is_none() {
+            return Err(MetaError::NotFound(inode));
+        }
+        let entries = XattrMeta::find()
+            .filter(xattr_meta::Column::Inode.eq(inode))
+            .all(&self.db)
+            .await
+            .map_err(MetaError::Database)?;
+        Ok(entries.into_iter().map(|e| e.name).collect())
+    }
+
+    async fn remove_xattr(&self, inode: i64, name: &str) -> Result<(), MetaError> {
+        if self.stat(inode).await?.is_none() {
+            return Err(MetaError::NotFound(inode));
+        }
+        let result = XattrMeta::delete_by_id((inode, name.to_string()))
+            .exec(&self.db)
+            .await
+            .map_err(MetaError::Database)?;
+        if result.rows_affected == 0 {
+            return Err(MetaError::NotFound(inode));
+        }
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests;

@@ -3,7 +3,7 @@ use std::{pin::Pin, sync::Arc, time::Duration};
 use async_stream::{stream, try_stream};
 use clippy_utilities::NumericCast;
 use curp::members::ClusterInfo;
-use futures::stream::Stream;
+use futures::{StreamExt, stream::Stream};
 use tokio::time;
 use xlinerpc::status::Status;
 use tonic::transport::{ClientTlsConfig, Endpoint};
@@ -127,6 +127,7 @@ impl LeaseServer {
 
     /// Handle keep alive at leader
     #[allow(
+        dead_code,
         clippy::arithmetic_side_effects,
         clippy::ignored_unit_patterns,
         clippy::result_large_err
@@ -135,6 +136,22 @@ impl LeaseServer {
         &self,
         mut request_stream: impl Stream<Item = Result<LeaseKeepAliveRequest, Status>> + Send,
     ) -> Result<KeepAliveStream, Status> {
+        self.leader_keep_alive_stream(request_stream)
+    }
+
+    /// Handle keep alive at leader from an arbitrary request stream source.
+    #[allow(
+        clippy::arithmetic_side_effects,
+        clippy::ignored_unit_patterns,
+        clippy::result_large_err
+    )]
+    fn leader_keep_alive_stream<ST>(
+        &self,
+        mut request_stream: ST,
+    ) -> Result<KeepAliveStream, Status>
+    where
+        ST: Stream<Item = Result<LeaseKeepAliveRequest, Status>> + Unpin + Send + 'static,
+    {
         let shutdown_listener = self
             .task_manager
             .get_shutdown_listener(TaskName::LeaseKeepAlive)
@@ -147,8 +164,8 @@ impl LeaseServer {
                         debug!("Lease keep alive shutdown");
                         break;
                     }
-                    res = request_stream.message() => {
-                        if let Ok(Some(keep_alive_req)) = res {
+                    res = request_stream.next() => {
+                        if let Some(Ok(keep_alive_req)) = res {
                             keep_alive_req
                         } else {
                             break;
@@ -180,12 +197,30 @@ impl LeaseServer {
     }
 
     /// Handle keep alive at follower
-    #[allow(clippy::arithmetic_side_effects, clippy::ignored_unit_patterns)] // Introduced by tokio::select!
+    #[allow(
+        dead_code,
+        clippy::arithmetic_side_effects,
+        clippy::ignored_unit_patterns
+    )] // Introduced by tokio::select!
     async fn follower_keep_alive(
         &self,
         mut request_stream: impl Stream<Item = Result<LeaseKeepAliveRequest, Status>> + Send,
         leader_addrs: &[String],
     ) -> Result<KeepAliveStream, Status> {
+        self.follower_keep_alive_stream(request_stream, leader_addrs)
+            .await
+    }
+
+    /// Handle keep alive at follower from an arbitrary request stream source.
+    #[allow(clippy::arithmetic_side_effects, clippy::ignored_unit_patterns)]
+    async fn follower_keep_alive_stream<ST>(
+        &self,
+        mut request_stream: ST,
+        leader_addrs: &[String],
+    ) -> Result<KeepAliveStream, Status>
+    where
+        ST: Stream<Item = Result<LeaseKeepAliveRequest, Status>> + Send + Unpin + 'static,
+    {
         let shutdown_listener = self
             .task_manager
             .get_shutdown_listener(TaskName::LeaseKeepAlive)
@@ -219,6 +254,33 @@ impl LeaseServer {
             .into_inner();
 
         Ok(Box::pin(stream))
+    }
+
+    /// Start a lease keep-alive stream from an arbitrary request stream source.
+    pub(crate) async fn lease_keep_alive_stream<ST>(
+        &self,
+        request_stream: ST,
+    ) -> Result<KeepAliveStream, Status>
+    where
+        ST: Stream<Item = Result<LeaseKeepAliveRequest, Status>> + Send + Unpin + 'static,
+    {
+        loop {
+            if self.lease_storage.is_primary() {
+                break Ok(self.leader_keep_alive_stream(request_stream)?);
+            }
+            let leader_id = self.client.fetch_leader_id(false).await?;
+            if !self.lease_storage.is_primary() {
+                let leader_addrs = self.cluster_info.client_urls(leader_id).unwrap_or_else(|| {
+                    unreachable!(
+                        "The address of leader {} not found in all_members {:?}",
+                        leader_id, self.cluster_info
+                    )
+                });
+                break Ok(self
+                    .follower_keep_alive_stream(request_stream, &leader_addrs)
+                    .await?);
+            }
+        }
     }
 }
 

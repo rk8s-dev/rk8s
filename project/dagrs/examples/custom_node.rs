@@ -53,6 +53,7 @@ impl MessageNode {
     }
 }
 
+#[allow(deprecated)]
 fn main() {
     // create an empty `NodeTable`
     let mut node_table = NodeTable::new();
@@ -63,7 +64,11 @@ fn main() {
     // create a graph with this node and run
     let mut graph = Graph::new();
     graph.add_node(node);
-    match graph.start() {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("failed to create tokio runtime");
+    match graph.start_with_runtime(&runtime) {
         Ok(_) => {
             // verify the output of this node
             let outputs = graph.get_outputs();

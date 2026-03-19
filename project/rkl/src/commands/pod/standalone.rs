@@ -1,7 +1,7 @@
 use crate::commands::pod::PodInfo;
 use crate::commands::{Exec, ExecPod};
 use crate::commands::{delete, exec, kill, load_container, start, state};
-use crate::task::{self, TaskRunner};
+use crate::{network::plugin_chain, task::TaskRunner};
 use anyhow::{Result, anyhow};
 use libcontainer::container::ContainerStatus;
 use liboci_cli::{Delete, Kill, Start, State};
@@ -63,15 +63,38 @@ fn kill_and_wait_container(root_path: &std::path::Path, container_name: &str) ->
 }
 
 pub fn delete_pod(pod_name: &str) -> Result<(), anyhow::Error> {
+    delete_pod_inner(pod_name, false)
+}
+
+pub async fn delete_pod_async(pod_name: &str) -> Result<(), anyhow::Error> {
     let root_path = rootpath::determine(None, &*create_syscall())?;
-    let pod_info = PodInfo::load(&root_path, pod_name)?;
     let container = load_container(root_path.clone(), pod_name)
         .map_err(|e| anyhow!("Failed to load container {}: {}", pod_name, e))?;
     let pid_i32 = container
         .state
         .pid
         .ok_or_else(|| anyhow!("PID not found for container {}", pod_name))?;
-    remove_pod_network(pid_i32)?;
+    remove_pod_network_async(pid_i32).await?;
+
+    let pod_name = pod_name.to_string();
+    tokio::task::spawn_blocking(move || delete_pod_inner(&pod_name, true))
+        .await
+        .map_err(|e| anyhow!("delete_pod blocking task join error: {e}"))?
+}
+
+fn delete_pod_inner(pod_name: &str, skip_network_cleanup: bool) -> Result<(), anyhow::Error> {
+    let root_path = rootpath::determine(None, &*create_syscall())?;
+    let pod_info = PodInfo::load(&root_path, pod_name)?;
+
+    if !skip_network_cleanup {
+        let container = load_container(root_path.clone(), pod_name)
+            .map_err(|e| anyhow!("Failed to load container {}: {}", pod_name, e))?;
+        let pid_i32 = container
+            .state
+            .pid
+            .ok_or_else(|| anyhow!("PID not found for container {}", pod_name))?;
+        remove_pod_network(pid_i32)?;
+    }
 
     // First, kill all containers and wait for them to stop
     for container_name in &pod_info.container_names {
@@ -140,13 +163,22 @@ pub fn delete_pod(pod_name: &str) -> Result<(), anyhow::Error> {
 }
 
 pub fn remove_pod_network(pid: i32) -> Result<(), anyhow::Error> {
-    let mut cni = task::get_cni()?;
-    cni.load_default_conf();
-
     let netns_path = format!("/proc/{pid}/ns/net");
     let id = pid.to_string();
-    cni.remove(id, netns_path.clone())
-        .map_err(|e| anyhow::anyhow!("Failed to remove CNI network: {}", e))?;
+
+    plugin_chain::remove_network(&id, &netns_path)
+        .map_err(|e| anyhow!("Failed to remove CNI network via library chain: {e}"))?;
+
+    Ok(())
+}
+
+pub async fn remove_pod_network_async(pid: i32) -> Result<(), anyhow::Error> {
+    let netns_path = format!("/proc/{pid}/ns/net");
+    let id = pid.to_string();
+
+    plugin_chain::remove_network_async(&id, &netns_path)
+        .await
+        .map_err(|e| anyhow!("Failed to remove CNI network via library chain: {e}"))?;
 
     Ok(())
 }

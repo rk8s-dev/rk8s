@@ -299,7 +299,11 @@ fn test_router_in_loop_alternating_branches() {
         async fn route(&self, _: &mut InChannels, out: &OutChannels, _: Arc<EnvVar>) -> Vec<usize> {
             let target = {
                 let mut iter = self.iteration.lock().unwrap();
-                let target = if *iter % 2 == 0 { self.id_a } else { self.id_b };
+                let target = if (*iter).is_multiple_of(2) {
+                    self.id_a
+                } else {
+                    self.id_b
+                };
                 *iter += 1;
                 target
             };

@@ -6,7 +6,7 @@ use clippy_utilities::NumericCast;
 /// Note that this Lease Id generation method may cause collisions,
 /// the client should retry after informed by the server.
 #[derive(Debug, Default)]
-pub struct LeaseIdGenerator {
+pub(crate) struct LeaseIdGenerator {
     /// the current lease id
     id: AtomicU64,
 }
@@ -19,7 +19,7 @@ impl LeaseIdGenerator {
     /// panic if failed to generate random bytes
     #[inline]
     #[must_use]
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         let mut buf = [0u8; 8];
         getrandom::getrandom(&mut buf).unwrap_or_else(|err| {
             panic!("Failed to generate random bytes for lease id generator: {err}");
@@ -30,7 +30,7 @@ impl LeaseIdGenerator {
 
     /// Generate next id
     #[inline]
-    pub fn next(&self) -> i64 {
+    pub(crate) fn next(&self) -> i64 {
         let id = self.id.fetch_add(1, Ordering::Relaxed);
         // to ensure the id is positive
         if id == 0 {

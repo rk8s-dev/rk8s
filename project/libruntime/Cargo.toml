@@ -8,7 +8,6 @@ description = "Common runtime logic for rk8s"
 [dependencies]
 common = { workspace = true }
 libnetwork = { workspace = true }
-libipam = { workspace = true }
 libcgroups = { workspace = true }
 libcontainer = { workspace = true }
 libvault = { workspace = true }

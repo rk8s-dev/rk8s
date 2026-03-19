@@ -40,6 +40,7 @@ use super::{
     lease_server::LeaseServer,
     lock_server::LockServer,
     maintenance::MaintenanceServer,
+    quic_service::XlineQuicService,
     watch_server::{CHANNEL_SIZE, WatchServer},
 };
 use crate::{
@@ -324,7 +325,7 @@ impl XlineServer {
         key_pair: Option<(EncodingKey, DecodingKey)>,
     ) -> Result<(
         Router,
-        QuicGrpcServer<Command, CommandExecutor, State<Arc<CurpClient>>>,
+        QuicGrpcServer<Command, CommandExecutor, State<Arc<CurpClient>>, XlineQuicService>,
         Arc<CurpClient>,
     )> {
         let (
@@ -346,16 +347,24 @@ impl XlineServer {
         }
         let xline_router = builder
             .add_service(RpcLockServer::new(lock_server))
-            .add_service(RpcKvServer::new(kv_server))
-            .add_service(RpcLeaseServer::from_arc(lease_server))
-            .add_service(RpcAuthServer::new(auth_server))
-            .add_service(RpcWatchServer::new(watch_server))
-            .add_service(RpcMaintenanceServer::new(maintenance_server))
-            .add_service(RpcClusterServer::new(cluster_server))
+            .add_service(RpcKvServer::new(kv_server.clone()))
+            .add_service(RpcLeaseServer::from_arc(lease_server.clone()))
+            .add_service(RpcAuthServer::new(auth_server.clone()))
+            .add_service(RpcWatchServer::new(watch_server.clone()))
+            .add_service(RpcMaintenanceServer::new(maintenance_server.clone()))
+            .add_service(RpcClusterServer::new(cluster_server.clone()))
             .add_service(ProtocolServer::new(auth_wrapper.clone()));
 
         // Curp peer communication uses QUIC, with AuthWrapper for token-based auth
-        let quic_server = QuicGrpcServer::new_with_service(auth_wrapper, curp_server);
+        let quic_server = QuicGrpcServer::new_with_service(auth_wrapper, curp_server)
+            .with_extension(XlineQuicService::new(
+                auth_server,
+                cluster_server,
+                kv_server,
+                lease_server,
+                maintenance_server,
+                watch_server,
+            ));
 
         let xline_router = {
             let (mut reporter, health_server) = tonic_health::server::health_reporter();

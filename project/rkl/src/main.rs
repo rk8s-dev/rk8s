@@ -94,11 +94,19 @@ fn main() -> Result<(), anyhow::Error> {
 }
 
 fn init_tracing(is_daemon: bool) -> Result<(), anyhow::Error> {
-    let console_filter = EnvFilter::from_default_env().add_directive(
-        "rfuse3=off"
-            .parse()
-            .expect("failed to filter [rfuse3]'s log"),
-    );
+    tracing_log::LogTracer::init().map_err(|e| anyhow::anyhow!("log tracer init failed: {e}"))?;
+
+    let console_filter = EnvFilter::from_default_env()
+        .add_directive(
+            "rfuse3=off"
+                .parse()
+                .expect("failed to filter [rfuse3]'s log"),
+        )
+        .add_directive(
+            "netlink_packet_route=error"
+                .parse()
+                .expect("failed to filter [netlink_packet_route]'s log"),
+        );
     let console_layer = tracing_subscriber::fmt::layer()
         .with_ansi(true)
         .with_filter(console_filter);

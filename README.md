@@ -13,7 +13,7 @@ rk8s follows a distributed architecture with both standalone and cluster deploym
 - **RKL (Container Runtime Interface)** - The primary runtime component supporting CLI operations and daemon mode
 - **RKS (Control Plane)** - Kubernetes-like control plane combining API server, scheduler, and controller functionality  
 - **Xline** - etcd-compatible distributed storage for cluster state
-- **Networking** - CNI-compliant networking with libbridge plugin
+- **Redfannel** - Centralized Flannel Network Solution Implemented in Rust
 
 ## Supported Workload Types
 
@@ -145,8 +145,7 @@ rk8s/
 │   │   │   └── main.rs        # CLI entry point
 │   │   └── tests/             # Integration tests
 │   ├── rks/                   # Control plane server
-│   ├── libbridge/             # CNI networking plugin
-│   └── libipam/              # IP address management
+│   ├── libnetwork/            # Redfannel network
 ├── docs/                      # Documentation
 └── README.md                  # This file
 ```
@@ -166,12 +165,9 @@ cargo build -p rkl
 cargo build -p rks
 ```
 
-2. **Set up networking:**
+2. **Prepare network config:**
 ```bash
-cargo build -p libbridge
-cargo build -p libipam
-sudo install -Dm755 target/debug/libbridge /opt/cni/bin/libbridge
-sudo install -Dm755 target/debug/libipam /opt/cni/bin/libipam
+sudo cp test/test.conflist /etc/cni/net.d
 ```
 
 3. **Prepare container images:**
@@ -227,7 +223,7 @@ For detail about building a cluster with RKS and RKL, please refer to [RKS–RKL
 - **Docker Compose Support** - Familiar multi-container application definitions
 - **Namespace Sharing** - Proper pod networking with pause containers
 - **Resource Management** - CPU and memory limits with cgroups integration
-- **CNI Networking** - Pluggable network configuration
+- **Redfannel** - Centralized Flannel Network Solution Implemented in Rust
 - **Daemon Mode** - Static pod reconciliation and monitoring
 - **Cluster Orchestration** - Distributed scheduling and state management
 

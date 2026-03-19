@@ -28,6 +28,7 @@ use crate::{
 };
 
 /// Auth Server
+#[derive(Clone)]
 pub(crate) struct AuthServer {
     /// Consensus client
     client: Arc<CurpClient>,
