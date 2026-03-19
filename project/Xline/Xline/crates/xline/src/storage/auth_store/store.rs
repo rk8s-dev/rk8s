@@ -151,6 +151,25 @@ impl AuthStore {
         Ok(None)
     }
 
+    /// Try get auth info from an optional token string
+    ///
+    /// Used by `CurpService` implementations where only token-based auth is available
+    /// (no TLS peer certificate access).
+    #[allow(clippy::result_large_err)]
+    pub(crate) fn try_get_auth_info_from_token(
+        &self,
+        token: Option<&str>,
+    ) -> Result<Option<AuthInfo>, Status> {
+        if !self.is_enabled() {
+            return Ok(None);
+        }
+        if let Some(token) = token {
+            let auth_info = self.verify(token)?;
+            return Ok(Some(auth_info));
+        }
+        Ok(None)
+    }
+
     /// create permission cache
     fn create_permission_cache(&self) -> Result<(), ExecuteError> {
         let mut permission_cache = PermissionCache::new();

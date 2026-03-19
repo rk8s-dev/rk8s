@@ -16,7 +16,6 @@ use tokio::{
     sync::{broadcast, oneshot},
     time::MissedTickBehavior,
 };
-use tonic::transport::ClientTlsConfig;
 use tracing::{debug, error, info, trace, warn};
 use utils::{
     barrier::IdBarrier,
@@ -686,11 +685,16 @@ impl<C: Command, CE: CommandExecutor<C>, RC: RoleChange> CurpNode<C, CE, RC> {
             };
             match change.change_type() {
                 ConfChangeType::Add | ConfChangeType::AddLearner => {
-                    let connect = InnerConnectApiWrapper::connect(
-                        change.node_id,
-                        change.address,
-                        curp.client_tls_config().cloned(),
-                    );
+                    let connect = InnerConnectApiWrapper::new_from_arc(Arc::new(
+                        rpc::connect::QuicInnerConnect::new(
+                            change.node_id,
+                            Arc::new(rpc::quic_transport::channel::QuicChannel::with_addrs(
+                                Arc::clone(&curp.transport().client),
+                                change.address,
+                                curp.transport().dns_fallback,
+                            )),
+                        ),
+                    ));
                     curp.insert_connect(connect.clone());
                     let sync_event = curp.sync_event(change.node_id);
                     let remove_event = Arc::new(Event::new());
@@ -840,7 +844,6 @@ impl<C: Command, CE: CommandExecutor<C>, RC: RoleChange> CurpNode<C, CE, RC> {
         curp_cfg: Arc<CurpConfig>,
         storage: Arc<DB<C>>,
         task_manager: Arc<TaskManager>,
-        client_tls_config: Option<ClientTlsConfig>,
         sps: Vec<SpObject<C>>,
         ucps: Vec<UcpObject<C>>,
         transport: rpc::TransportConfig,
@@ -850,16 +853,12 @@ impl<C: Command, CE: CommandExecutor<C>, RC: RoleChange> CurpNode<C, CE, RC> {
             .into_iter()
             .map(|server_id| (server_id, Arc::new(Event::new())))
             .collect();
-        let connects = match transport {
-            rpc::TransportConfig::Tonic => {
-                rpc::inner_connects(cluster_info.peers_addrs(), client_tls_config.as_ref())
-                    .collect()
-            }
-            #[cfg(feature = "quic")]
-            rpc::TransportConfig::Quic(ref client, dns_fallback) => {
-                rpc::quic_inner_connects(cluster_info.peers_addrs(), client, dns_fallback).collect()
-            }
-        };
+        let connects = rpc::quic_inner_connects(
+            cluster_info.peers_addrs(),
+            &transport.client,
+            transport.dns_fallback,
+        )
+        .collect();
         let cmd_board = Arc::new(RwLock::new(CommandBoard::new()));
         let lease_manager = Arc::new(RwLock::new(LeaseManager::new()));
         let last_applied = cmd_executor
@@ -886,7 +885,7 @@ impl<C: Command, CE: CommandExecutor<C>, RC: RoleChange> CurpNode<C, CE, RC> {
                 .voted_for(voted_for)
                 .entries(entries)
                 .curp_storage(Arc::clone(&storage))
-                .client_tls_config(client_tls_config)
+                .transport(transport)
                 .spec_pool(Arc::clone(&sp))
                 .uncommitted_pool(ucp)
                 .as_tx(as_tx.clone())
@@ -1044,7 +1043,7 @@ impl<C: Command, CE: CommandExecutor<C>, RC: RoleChange> CurpNode<C, CE, RC> {
     }
 
     /// Send `append_entries` request
-    /// Return `tonic::Error` if meet network issue
+    /// Return `CurpError` if meet network issue
     /// Return (`leader_retires`, `ae_succeed`)
     #[allow(clippy::arithmetic_side_effects)] // won't overflow
     async fn send_ae(
@@ -1086,7 +1085,7 @@ impl<C: Command, CE: CommandExecutor<C>, RC: RoleChange> CurpNode<C, CE, RC> {
     }
 
     /// Send snapshot
-    /// Return `tonic::Error` if meet network issue
+    /// Return `CurpError` if meet network issue
     /// Return `leader_retires`
     async fn send_snapshot(
         connect: &(impl InnerConnectApi + ?Sized),

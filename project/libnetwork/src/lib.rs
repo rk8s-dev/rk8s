@@ -1,6 +1,10 @@
+pub mod bridge;
+pub mod cni_chain;
 pub mod config;
 pub mod iface;
 pub mod ip;
+pub mod ipam;
 pub mod nftables;
 pub mod route;
 pub mod subnet;
+pub mod types;

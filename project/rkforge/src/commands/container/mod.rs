@@ -1,10 +1,10 @@
-mod netwok;
+pub mod network;
 pub mod rootfs_mount;
 use self::rootfs_mount::RootfsMount;
 use crate::{
     commands::{
         Exec, ExecContainer,
-        container::netwok::{RootfulBridgeSpec, setup_rootful_bridge, teardown_rootful_bridge},
+        container::network::{RootfulBridgeSpec, setup_rootful_bridge, teardown_rootful_bridge},
         create, delete, exec, list, load_container, start,
         volume::parse_key_val,
     },

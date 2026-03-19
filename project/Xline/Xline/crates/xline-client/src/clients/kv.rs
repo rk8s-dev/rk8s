@@ -1,14 +1,14 @@
 use std::{fmt::Debug, sync::Arc};
 
-use tonic::transport::Channel;
 use xlineapi::{
     CompactionResponse, DeleteRangeResponse, PutResponse, RangeResponse, RequestWrapper,
     TxnResponse, command::Command,
 };
 
 use crate::{
-    AuthService, CurpClient,
+    CurpClient,
     error::Result,
+    transport::{Channel, MethodId},
     types::kv::{DeleteRangeOptions, PutOptions, RangeOptions, TxnRequest},
 };
 
@@ -17,9 +17,9 @@ use crate::{
 pub struct KvClient {
     /// The client running the CURP protocol, communicate with all servers.
     curp_client: Arc<CurpClient>,
-    /// The lease RPC client, only communicate with one server at a time
+    /// The kv transport
     #[allow(clippy::struct_field_names)]
-    kv_client: xlineapi::KvClient<AuthService<Channel>>,
+    kv_client: Channel,
     /// The auth token
     token: Option<String>,
 }
@@ -44,10 +44,7 @@ impl KvClient {
     ) -> Self {
         Self {
             curp_client,
-            kv_client: xlineapi::KvClient::new(AuthService::new(
-                channel,
-                token.as_ref().and_then(|t| t.parse().ok().map(Arc::new)),
-            )),
+            kv_client: channel,
             token,
         }
     }
@@ -285,11 +282,10 @@ impl KvClient {
     pub async fn compact(&self, revision: i64, physical: bool) -> Result<CompactionResponse> {
         let request = xlineapi::CompactionRequest { revision, physical };
         if physical {
-            let mut kv_client = self.kv_client.clone();
-            return kv_client
-                .compact(request)
+            return self
+                .kv_client
+                .unary(MethodId::XlineCompact, request)
                 .await
-                .map(tonic::Response::into_inner)
                 .map_err(Into::into);
         }
         let cmd = Command::new(RequestWrapper::from(request));

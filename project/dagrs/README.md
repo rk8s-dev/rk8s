@@ -104,18 +104,70 @@ Each stage is defined as a task with its dependencies and execution command. The
 
 For more detailed info about this example, please see the [notebook.ipynb](examples/dagrs-sklearn/examples/notebook.ipynb) jupyter notebook file.
 
+## Execution Entry Points
+
+Dagrs no longer creates or owns a Tokio runtime internally. Runtime lifecycle is managed by callers.
+
+### Preferred async entry
+
+Use `async_start().await` when already in an async runtime context:
+
+```rust
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let mut graph = build_graph_somehow();
+    graph.async_start().await?;
+    Ok(())
+}
+```
+
+### Temporary sync adapter (deprecated)
+
+For synchronous callers, use an externally managed runtime and call `start_with_runtime(&runtime)`:
+
+```rust
+let runtime = tokio::runtime::Builder::new_current_thread()
+    .enable_all()
+    .build()
+    .expect("failed to create tokio runtime");
+graph.start_with_runtime(&runtime)?;
+```
+
+`Graph::start()` has been removed.  
+`Graph::start_with_runtime()` is deprecated and planned for removal in the next major version.
+
 ## Changelog
 
-### v0.5.2
+### v0.7.0
+
+#### 🚀 Runtime/API Changes
+
+- **Runtime Decoupling**: Dagrs no longer creates or owns a Tokio runtime internally.
+- **Primary Entry**: `Graph::async_start()` is the recommended execution entry.
+- **Legacy Sync Adapter**: `Graph::start_with_runtime(&runtime)` remains temporarily for compatibility but is deprecated.
+- **Removed API**: `Graph::start()` has been removed.
+
+#### 💡 Migration
+
+- Existing `Graph::start()` callers should migrate to:
+  - `async_start().await` (preferred)
+  - `start_with_runtime(&runtime)` (temporary sync adapter)
+
+### v0.6.0
 
 #### 🚀 New Features
 
-- **Async Execution Interface**: Added `run_async()` method to `Graph`, providing an async API that allows using dagrs within existing Tokio runtime environments. `start()` method now serves as a synchronous wrapper around the async API, maintaining backward compatibility while providing better async support
+- **Loop Node (REQ-001)**: Introduced `LoopNode` and `FlowControl::Loop` to support iterative DAG execution.
+- **Checkpoint Mechanism (REQ-002)**: Added checkpoint persistence and resume support for graph execution state.
+- **Dynamic Router (REQ-003)**: Added `RouterNode` for runtime branch selection and automatic branch pruning.
+- **Typed Channels (REQ-004)**: Added typed channel wrappers for safer node-to-node data transfer.
+- **Execution Hooks (REQ-006)**: Enhanced `ExecutionHook` with retry lifecycle callbacks.
+- **State Subscription (REQ-007)**: Added graph event subscription based on `tokio::sync::broadcast`.
 
 #### 💡 Usage Recommendations
 
-- In environments with an existing Tokio runtime (e.g., async main functions, web services), use `run_async().await` instead of `start()`
-- In simple standalone applications or testing scenarios, you can continue using the `start()` method
+- Use loop nodes and router nodes to model iterative and branching workflows.
+- Use checkpoints and event subscriptions when you need resumability and runtime observability.
 
 ## Contribution
 

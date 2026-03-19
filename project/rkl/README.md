@@ -62,15 +62,11 @@ $ docker export $(docker create busybox) | tar -C rootfs -xvf -
 For the Pause container, a `config.json` file must be provided.
 The project already includes a bundle and `config.json` file for the Pause container (located in `test/bundle-file/pause`) and the following usage examples are based on them.
 ### Set up network 
-To run the pods and the containers successfully, you need to set up the `libbridge`, which is a CNI plugin that rk8s provides, in your computer. Details refers to [here](../libbridge/README.md). 
-
-After building `libbridge` to an executable program, you need to put it into `/opt/cni/bin`, which is the default path of the CNI plugins:
+Prepare network config:
 ```bash
-$ cd rk8s/project
-$ cargo build -p libbridge
-$ mv ./libbridge /opt/cni/bin 
+$ cp rk8s/project/test/test.conflist /etc/cni/net.d
 ```
-Now you are ready to go. 
+
 ## Usage Details
 
 Below are usage examples of **RKL**, illustrating how to run each of the supported workloads.

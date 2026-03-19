@@ -43,6 +43,7 @@ impl Action for Compute {
     }
 }
 
+#[allow(deprecated)]
 fn main() {
     // Initialization log.
     env_logger::init();
@@ -91,9 +92,13 @@ fn main() {
     let mut env = EnvVar::new(node_table);
     env.set("base", 2usize);
     graph.set_env(env);
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("failed to create tokio runtime");
 
     // Start executing this dag.
-    match graph.start() {
+    match graph.start_with_runtime(&runtime) {
         Ok(_) => {
             let res = graph
                 .get_results::<usize>()

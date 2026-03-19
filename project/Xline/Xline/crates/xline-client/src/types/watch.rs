@@ -1,11 +1,13 @@
 use std::{
     fmt::Debug,
-    ops::{Deref, DerefMut},
+    pin::Pin,
+    task::{Context, Poll},
 };
 
 use super::range_end::RangeOption;
 use crate::error::{Result, XlineClientError};
-use futures::channel::mpsc::Sender;
+use crate::transport::Streaming;
+use futures::{Stream, channel::mpsc::Sender};
 pub use xlineapi::{Event, EventType, KeyValue, WatchResponse};
 use xlineapi::{RequestUnion, WatchCancelRequest, WatchProgressRequest};
 
@@ -233,8 +235,8 @@ impl From<WatchFilterType> for i32 {
 /// Watch response stream
 #[derive(Debug)]
 pub struct WatchStreaming {
-    /// Inner tonic stream
-    inner: tonic::Streaming<WatchResponse>,
+    /// Inner QUIC stream
+    inner: Streaming<WatchResponse>,
     /// A sender of `WatchResponse`, used to keep response stream alive
     _sender: Sender<xlineapi::WatchRequest>,
 }
@@ -243,8 +245,8 @@ impl WatchStreaming {
     /// Create a new watch streaming
     #[inline]
     #[must_use]
-    pub fn new(
-        inner: tonic::Streaming<WatchResponse>,
+    pub(crate) fn new(
+        inner: Streaming<WatchResponse>,
         sender: Sender<xlineapi::WatchRequest>,
     ) -> Self {
         Self {
@@ -252,21 +254,24 @@ impl WatchStreaming {
             _sender: sender,
         }
     }
-}
 
-impl Deref for WatchStreaming {
-    type Target = tonic::Streaming<WatchResponse>;
-
+    /// Receive the next watch response from the stream.
     #[inline]
-    fn deref(&self) -> &Self::Target {
-        &self.inner
+    pub async fn message(&mut self) -> Result<Option<WatchResponse>> {
+        self.inner.message().await.map_err(Into::into)
     }
 }
 
-impl DerefMut for WatchStreaming {
-    #[inline]
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.inner
+impl Stream for WatchStreaming {
+    type Item = Result<WatchResponse>;
+
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        match Pin::new(&mut self.get_mut().inner).poll_next(cx) {
+            Poll::Ready(Some(Ok(resp))) => Poll::Ready(Some(Ok(resp))),
+            Poll::Ready(Some(Err(err))) => Poll::Ready(Some(Err(err.into()))),
+            Poll::Ready(None) => Poll::Ready(None),
+            Poll::Pending => Poll::Pending,
+        }
     }
 }
 

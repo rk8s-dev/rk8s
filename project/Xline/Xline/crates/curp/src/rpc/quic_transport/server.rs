@@ -26,25 +26,67 @@ use crate::{
 
 use super::super::{CurpService, InnerCurpService, Metadata};
 
+/// Extension hook for non-CURP QUIC RPCs layered on the shared frame codec.
+pub trait QuicServiceExt: Clone + Send + Sync + 'static {
+    /// Handle a method that is outside the built-in CURP protocol surface.
+    fn handle<S, R>(
+        &self,
+        method: MethodId,
+        send: S,
+        recv: R,
+        meta: Metadata,
+    ) -> BoxFuture<'static, Result<(), CurpError>>
+    where
+        S: AsyncWrite + Unpin + Send + 'static,
+        R: AsyncRead + Unpin + Send + 'static;
+}
+
+/// Default extension that leaves all extra methods unhandled.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct NoopQuicServiceExt;
+
+impl QuicServiceExt for NoopQuicServiceExt {
+    fn handle<S, R>(
+        &self,
+        _method: MethodId,
+        _send: S,
+        _recv: R,
+        _meta: Metadata,
+    ) -> BoxFuture<'static, Result<(), CurpError>>
+    where
+        S: AsyncWrite + Unpin + Send + 'static,
+        R: AsyncRead + Unpin + Send + 'static,
+    {
+        Box::pin(async {
+            Err(CurpError::internal(
+                "no QUIC extension handler registered for xline method",
+            ))
+        })
+    }
+}
+
 /// QUIC gRPC server
 ///
 /// Generic over the same type parameters as `Rpc<C, CE, RC>`.
 /// Internally erases to `Arc<dyn CurpService>` and `Arc<dyn InnerCurpService>`.
-pub struct QuicGrpcServer<C, CE, RC>
+pub struct QuicGrpcServer<C, CE, RC, XH = NoopQuicServiceExt>
 where
     C: Command,
     CE: CommandExecutor<C>,
     RC: RoleChange,
+    XH: QuicServiceExt,
 {
     /// Service for external protocol
     service: Arc<dyn CurpService>,
     /// Service for internal protocol
     inner_service: Arc<dyn InnerCurpService>,
+    /// Extension service for xline-facing QUIC RPCs
+    ext_service: XH,
     /// Phantom data for type parameters
     _phantom: PhantomData<(C, CE, RC)>,
 }
 
-impl<C, CE, RC> QuicGrpcServer<C, CE, RC>
+impl<C, CE, RC> QuicGrpcServer<C, CE, RC, NoopQuicServiceExt>
 where
     C: Command,
     CE: CommandExecutor<C>,
@@ -56,6 +98,43 @@ where
         Self {
             service: Arc::new(rpc.clone()),
             inner_service: Arc::new(rpc),
+            ext_service: NoopQuicServiceExt,
+            _phantom: PhantomData,
+        }
+    }
+
+    /// Create a new QUIC gRPC server with a custom external service implementation.
+    ///
+    /// This allows wrapping the external `CurpService` (e.g., with an auth layer)
+    /// while keeping the internal Raft protocol handled by `Rpc` directly.
+    #[inline]
+    pub fn new_with_service(external_service: impl CurpService, rpc: Rpc<C, CE, RC>) -> Self {
+        Self {
+            service: Arc::new(external_service),
+            inner_service: Arc::new(rpc),
+            ext_service: NoopQuicServiceExt,
+            _phantom: PhantomData,
+        }
+    }
+}
+
+impl<C, CE, RC, XH> QuicGrpcServer<C, CE, RC, XH>
+where
+    C: Command,
+    CE: CommandExecutor<C>,
+    RC: RoleChange,
+    XH: QuicServiceExt,
+{
+    /// Attach an extension handler for xline-facing QUIC RPCs.
+    #[inline]
+    pub fn with_extension<NH>(self, ext_service: NH) -> QuicGrpcServer<C, CE, RC, NH>
+    where
+        NH: QuicServiceExt,
+    {
+        QuicGrpcServer {
+            service: self.service,
+            inner_service: self.inner_service,
+            ext_service,
             _phantom: PhantomData,
         }
     }
@@ -67,6 +146,7 @@ where
     pub async fn serve(self, listeners: Arc<QuicListeners>) -> Result<(), CurpError> {
         let service = self.service;
         let inner_service = self.inner_service;
+        let ext_service = self.ext_service;
 
         loop {
             match listeners.accept().await {
@@ -79,10 +159,11 @@ where
 
                     let svc = Arc::clone(&service);
                     let inner_svc = Arc::clone(&inner_service);
+                    let ext_svc = ext_service.clone();
 
                     let _handle = tokio::spawn(
                         async move {
-                            Self::handle_connection(conn, svc, inner_svc).await;
+                            Self::handle_connection(conn, svc, inner_svc, ext_svc).await;
                         }
                         .instrument(tracing::debug_span!("quic_conn")),
                     );
@@ -105,8 +186,9 @@ where
     pub fn spawn_connection(&self, conn: Connection) -> JoinHandle<()> {
         let svc = Arc::clone(&self.service);
         let inner_svc = Arc::clone(&self.inner_service);
+        let ext_svc = self.ext_service.clone();
         tokio::spawn(async move {
-            Self::handle_connection(conn, svc, inner_svc).await;
+            Self::handle_connection(conn, svc, inner_svc, ext_svc).await;
         })
     }
 
@@ -115,6 +197,7 @@ where
         conn: Connection,
         service: Arc<dyn CurpService>,
         inner_service: Arc<dyn InnerCurpService>,
+        ext_service: XH,
     ) {
         loop {
             match conn.accept_bi_stream().await {
@@ -122,10 +205,13 @@ where
                     let _ = stream_id;
                     let svc = Arc::clone(&service);
                     let inner_svc = Arc::clone(&inner_service);
+                    let ext_svc = ext_service.clone();
 
                     let _handle = tokio::spawn(
                         async move {
-                            if let Err(e) = Self::handle_stream(send, recv, svc, inner_svc).await {
+                            if let Err(e) =
+                                Self::handle_stream(send, recv, svc, inner_svc, ext_svc).await
+                            {
                                 debug!("stream handler error: {e:?}");
                             }
                         }
@@ -146,6 +232,7 @@ where
         mut recv: R,
         service: Arc<dyn CurpService>,
         inner_service: Arc<dyn InnerCurpService>,
+        ext_service: XH,
     ) -> Result<(), CurpError>
     where
         S: AsyncWrite + Unpin + Send + 'static,
@@ -186,6 +273,25 @@ where
             }
             MethodId::InstallSnapshot => {
                 return Self::handle_install_snapshot(recv, send, &inner_service).await;
+            }
+
+            // --- xline direct-RPC methods routed through extension handler ---
+            MethodId::XlineAuthenticate
+            | MethodId::XlineLeaseRevoke
+            | MethodId::XlineLeaseKeepAlive
+            | MethodId::XlineLeaseTtl
+            | MethodId::XlineWatch
+            | MethodId::XlineSnapshot
+            | MethodId::XlineAlarm
+            | MethodId::XlineMaintStatus
+            | MethodId::XlineMemberAdd
+            | MethodId::XlineMemberRemove
+            | MethodId::XlineMemberPromote
+            | MethodId::XlineMemberUpdate
+            | MethodId::XlineMemberList
+            | MethodId::XlineCompact => {
+                ext_service.handle(method, send, recv, meta).await?;
+                return Ok(());
             }
 
             // --- Unary RPCs: explicitly listed ---
@@ -268,6 +374,22 @@ where
                     "streaming method {} routed to unary dispatch",
                     method.name()
                 )))
+            }
+            MethodId::XlineAuthenticate
+            | MethodId::XlineLeaseRevoke
+            | MethodId::XlineLeaseKeepAlive
+            | MethodId::XlineLeaseTtl
+            | MethodId::XlineWatch
+            | MethodId::XlineSnapshot
+            | MethodId::XlineAlarm
+            | MethodId::XlineMaintStatus
+            | MethodId::XlineMemberAdd
+            | MethodId::XlineMemberRemove
+            | MethodId::XlineMemberPromote
+            | MethodId::XlineMemberUpdate
+            | MethodId::XlineMemberList
+            | MethodId::XlineCompact => {
+                unreachable!("xline QUIC methods are dispatched before unary dispatch")
             }
         }
     }
@@ -763,11 +885,12 @@ where
     }
 }
 
-impl<C, CE, RC> std::fmt::Debug for QuicGrpcServer<C, CE, RC>
+impl<C, CE, RC, XH> std::fmt::Debug for QuicGrpcServer<C, CE, RC, XH>
 where
     C: Command,
     CE: CommandExecutor<C>,
     RC: RoleChange,
+    XH: QuicServiceExt,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("QuicGrpcServer").finish_non_exhaustive()

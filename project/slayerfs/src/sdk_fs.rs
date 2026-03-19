@@ -360,7 +360,7 @@ impl Client {
 #[async_trait]
 impl<S, M> ClientBackend for crate::vfs::sdk::VfsClient<S, M>
 where
-    S: crate::chuck::store::BlockStore + Send + Sync + 'static,
+    S: crate::chunk::store::BlockStore + Send + Sync + 'static,
     M: crate::meta::MetaStore + Send + Sync + 'static,
 {
     async fn mkdir(&self, path: &str) -> io::Result<()> {
@@ -1236,7 +1236,7 @@ bitflags::bitflags! {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::chuck::chunk::ChunkLayout;
+    use crate::chunk::layout::ChunkLayout;
     use crate::fs::{CallerIdentity, FileSystemConfig};
     use crate::vfs::sdk::LocalClient;
     use futures::task::noop_waker;

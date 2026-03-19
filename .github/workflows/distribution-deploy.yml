@@ -5,12 +5,12 @@ on:
       - main
     paths:
       - ".github/workflows/distribution-deploy.yml"
-      - "/project/distribution/**"
+      - "project/distribution/**"
 
 env:
   REGISTRY_ALIAS: m8q5m4u3
-  REPOSITORY: rk8s
-  IMAGE_TAG_BASE: distribution-0.1.0-pre-release
+  REPOSITORY: rk8s/distribution
+  IMAGE_TAG_BASE: latest
 
 permissions:
   id-token: write

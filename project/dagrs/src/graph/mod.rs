@@ -975,6 +975,18 @@ impl Graph {
         self.event_sender.subscribe()
     }
 
+    fn try_lock_node_for_build<'a>(
+        node: &'a Arc<Mutex<dyn Node>>,
+        context: &str,
+    ) -> tokio::sync::MutexGuard<'a, dyn Node> {
+        node.try_lock().unwrap_or_else(|_| {
+            panic!(
+                "Failed to acquire node lock while building graph ({context}). \
+                 Build the graph from a single context without concurrent mutations."
+            )
+        })
+    }
+
     /// Adds a new node to the `Graph`
     pub fn add_node(&mut self, node: impl Node + 'static) {
         if let Some(loop_structure) = node.loop_structure() {
@@ -986,12 +998,13 @@ impl Graph {
                 abstract_node_id,
                 loop_structure
                     .iter()
-                    .map(|n| n.blocking_lock().id())
+                    .map(|n| Self::try_lock_node_for_build(n, "loop_structure node id").id())
                     .collect(),
             );
 
             for node in loop_structure {
-                let concrete_id = node.blocking_lock().id();
+                let concrete_id =
+                    Self::try_lock_node_for_build(&node, "loop_structure concrete id").id();
                 log::debug!("Add node {:?} to concrete graph", concrete_id);
                 self.nodes.insert(concrete_id, node.clone());
             }
@@ -1017,7 +1030,8 @@ impl Graph {
         // Update channels
         {
             let from_node_lock = self.nodes.get_mut(&from_id).unwrap();
-            let mut from_node = from_node_lock.blocking_lock();
+            let mut from_node =
+                Self::try_lock_node_for_build(from_node_lock, "add_edge from node output channels");
             let from_channel = from_node.output_channels();
 
             for to_id in &to_ids {
@@ -1037,7 +1051,8 @@ impl Graph {
         }
         for to_id in &to_ids {
             if let Some(to_node_lock) = self.nodes.get_mut(to_id) {
-                let mut to_node = to_node_lock.blocking_lock();
+                let mut to_node =
+                    Self::try_lock_node_for_build(to_node_lock, "add_edge to node input channels");
                 let to_channel = to_node.input_channels();
                 if let Some(rx) = rx_map.remove(to_id) {
                     to_channel.insert(from_id, Arc::new(Mutex::new(InChannel::Mpsc(rx))));
@@ -1055,33 +1070,47 @@ impl Graph {
         });
     }
 
-    /// This function is used for the execution of a single dag.
-    pub fn start(&mut self) -> Result<(), GraphError> {
-        let runtime = tokio::runtime::Runtime::new()
-            .map_err(|e| GraphError::RuntimeCreationFailed(e.to_string()))?;
-        runtime.block_on(async { self.async_start().await })
+    fn ensure_blocking_context() -> Result<(), GraphError> {
+        if tokio::runtime::Handle::try_current().is_ok() {
+            return Err(GraphError::BlockingCallInAsyncContext(
+                "A Tokio runtime is already active on this thread. Use `async_start().await` \
+                 instead of a blocking start API."
+                    .to_string(),
+            ));
+        }
+        Ok(())
+    }
+
+    /// Executes a single DAG synchronously with an externally managed Tokio runtime.
+    ///
+    /// This is a legacy compatibility adapter for synchronous callers.
+    /// It blocks the current thread until execution completes, but it does
+    /// not create or own the runtime.
+    ///
+    /// Prefer [`Graph::async_start`] in new code.
+    ///
+    /// # Deprecation
+    ///
+    /// This method is planned for removal in the next major version.
+    /// Migrate synchronous callers by moving graph execution into an async
+    /// context and awaiting [`Graph::async_start`].
+    #[deprecated(
+        note = "start_with_runtime() is a legacy sync adapter and will be removed in the next major version. Prefer async_start().await."
+    )]
+    pub fn start_with_runtime(
+        &mut self,
+        runtime: &tokio::runtime::Runtime,
+    ) -> Result<(), GraphError> {
+        Self::ensure_blocking_context()?;
+        runtime.block_on(self.async_start())
     }
     /// Executes a single DAG within an existing async runtime.
     ///
-    /// Use this method when you are already running inside an async context
-    /// (for example, inside a `tokio::main` function or a task spawned on a
-    /// Tokio runtime) and you do **not** want `Graph` to create and manage
-    /// its own Tokio runtime.
+    /// Use this method when you are already running inside an async context,
+    /// for example inside `#[tokio::main]` or inside a Tokio task.
     ///
-    /// Unlike [`Graph::start`], this method:
-    /// - Does not create a new Tokio runtime.
-    /// - Assumes it is called on a thread where a Tokio runtime is already
-    ///   active.
-    /// - Can be `await`-ed like any other async function.
-    ///
-    /// # Requirements
-    ///
-    /// - A Tokio runtime must be active on the current thread when this
-    ///   method is called.
-    /// - The graph must have been properly configured (nodes and edges
-    ///   added) before calling this method.
-    ///
-    /// If those conditions are not met, execution may fail at runtime.
+    /// Runtime ownership stays with the caller. `dagrs` does not create a
+    /// runtime in this path.
     ///
     /// # Examples
     ///
@@ -1759,7 +1788,7 @@ mod tests {
 
     impl HelloAction {
         pub fn new() -> Self {
-            Self::default()
+            Self
         }
     }
 
@@ -1774,6 +1803,7 @@ mod tests {
     /// Step 4: Run the graph and verify the output saved in the graph structure.
 
     #[test]
+    #[allow(deprecated)]
     fn test_graph_execution() {
         let mut graph = Graph::new();
         let mut node_table = NodeTable::new();
@@ -1795,7 +1825,11 @@ mod tests {
 
         graph.add_edge(node_id, vec![node1_id]);
 
-        match graph.start() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        match graph.start_with_runtime(&runtime) {
             Ok(_) => {
                 let out = graph.execute_states[&node1_id].get_output().unwrap();
                 let out: &String = out.get().unwrap();
@@ -1828,6 +1862,7 @@ mod tests {
     ///
     /// Step 4: Run the graph and verify the conditional node fails as expected.
     #[test]
+    #[allow(deprecated)]
     fn test_conditional_execution() {
         let mut graph = Graph::new();
         let mut node_table = NodeTable::new();
@@ -1858,7 +1893,11 @@ mod tests {
         graph.add_edge(node_a_id, vec![node_b_id]);
 
         // Execute graph
-        match graph.start() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        match graph.start_with_runtime(&runtime) {
             Ok(_) => {
                 // Node A should have failed
                 assert!(graph.execute_states[&node_a_id].get_output().is_none());
@@ -1867,5 +1906,40 @@ mod tests {
                 assert!(matches!(e, GraphError::ExecutionFailed { .. }));
             }
         }
+    }
+
+    #[test]
+    #[allow(deprecated)]
+    fn test_blocking_start_rejected_in_async_context() {
+        let mut graph = Graph::new();
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let err_from_runtime =
+            runtime.block_on(async { graph.start_with_runtime(&runtime).unwrap_err() });
+        assert!(matches!(
+            err_from_runtime,
+            GraphError::BlockingCallInAsyncContext(_)
+        ));
+    }
+
+    #[tokio::test]
+    async fn test_add_edge_works_in_async_context() {
+        let mut graph = Graph::new();
+        let mut node_table = NodeTable::new();
+
+        let node_a = DefaultNode::new(NodeName::from("Node A"), &mut node_table);
+        let node_b = DefaultNode::new(NodeName::from("Node B"), &mut node_table);
+
+        let node_a_id = node_a.id();
+        let node_b_id = node_b.id();
+
+        graph.add_node(node_a);
+        graph.add_node(node_b);
+        graph.add_edge(node_a_id, vec![node_b_id]);
+
+        let result = graph.async_start().await;
+        assert!(result.is_ok());
     }
 }

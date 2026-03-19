@@ -19,6 +19,10 @@ pub trait ObjectBackend: Send + Sync {
     async fn get_object(&self, key: &str) -> Result<Option<Vec<u8>>>;
 
     /// Get a range of bytes from an object.
+    ///
+    /// Returns the number of bytes actually read into `buf`, which may be less than `buf.len()`
+    /// if the object is smaller than the requested range. Returns `Ok(0)` when the object is
+    /// missing or `offset` is beyond the end. Partial reads are allowed.
     /// Used for small range reads in intelligent read strategy.
     async fn get_object_range(&self, key: &str, offset: u64, buf: &mut [u8]) -> Result<usize>;
 
@@ -52,6 +56,10 @@ impl<B: ObjectBackend> ObjectClient<B> {
     }
 
     /// Get a range of bytes from an object.
+    ///
+    /// Returns the number of bytes actually read into `buf`, which may be less than `buf.len()`
+    /// if the object is smaller than the requested range. Returns `Ok(0)` when the object is
+    /// missing or `offset` is beyond the end. Partial reads are allowed.
     /// Used for small range reads in intelligent read strategy.
     pub async fn get_object_range(&self, key: &str, offset: u64, buf: &mut [u8]) -> Result<usize> {
         self.backend.get_object_range(key, offset, buf).await

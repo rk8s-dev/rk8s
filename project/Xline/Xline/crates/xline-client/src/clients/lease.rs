@@ -1,16 +1,16 @@
 use std::{fmt::Debug, sync::Arc};
 
 use futures::channel::mpsc::channel;
-use tonic::{Streaming, transport::Channel};
 use xlineapi::{
     LeaseGrantResponse, LeaseKeepAliveResponse, LeaseLeasesResponse, LeaseRevokeResponse,
     LeaseTimeToLiveResponse, RequestWrapper, command::Command,
 };
 
 use crate::{
-    AuthService, CurpClient,
+    CurpClient,
     error::{Result, XlineClientError},
     lease_gen::LeaseIdGenerator,
+    transport::{Channel, MethodId, Streaming},
     types::lease::LeaseKeeper,
 };
 
@@ -19,9 +19,9 @@ use crate::{
 pub struct LeaseClient {
     /// The client running the CURP protocol, communicate with all servers.
     curp_client: Arc<CurpClient>,
-    /// The lease RPC client, only communicate with one server at a time
+    /// The lease transport
     #[allow(clippy::struct_field_names)]
-    lease_client: xlineapi::LeaseClient<AuthService<Channel>>,
+    lease_client: Channel,
     /// Auth token
     token: Option<String>,
     /// Lease Id generator
@@ -42,7 +42,7 @@ impl Debug for LeaseClient {
 impl LeaseClient {
     /// Creates a new `LeaseClient`
     #[inline]
-    pub fn new(
+    pub(crate) fn new(
         curp_client: Arc<CurpClient>,
         channel: Channel,
         token: Option<String>,
@@ -50,10 +50,7 @@ impl LeaseClient {
     ) -> Self {
         Self {
             curp_client,
-            lease_client: xlineapi::LeaseClient::new(AuthService::new(
-                channel,
-                token.as_ref().and_then(|t| t.parse().ok().map(Arc::new)),
-            )),
+            lease_client: channel,
             token,
             id_gen,
         }
@@ -138,11 +135,13 @@ impl LeaseClient {
     /// ```
     #[inline]
     pub async fn revoke(&mut self, id: i64) -> Result<LeaseRevokeResponse> {
-        let res = self
-            .lease_client
-            .lease_revoke(xlineapi::LeaseRevokeRequest { id })
-            .await?;
-        Ok(res.into_inner())
+        self.lease_client
+            .unary(
+                MethodId::XlineLeaseRevoke,
+                xlineapi::LeaseRevokeRequest { id },
+            )
+            .await
+            .map_err(Into::into)
     }
 
     /// Keeps the lease alive by streaming keep alive requests from the client
@@ -192,11 +191,10 @@ impl LeaseClient {
             .try_send(xlineapi::LeaseKeepAliveRequest { id })
             .map_err(|e| XlineClientError::LeaseError(e.to_string()))?;
 
-        let mut stream = self
+        let mut stream: Streaming<LeaseKeepAliveResponse> = self
             .lease_client
-            .lease_keep_alive(receiver)
-            .await?
-            .into_inner();
+            .client_streaming(MethodId::XlineLeaseKeepAlive, receiver)
+            .await?;
 
         let resp_id = match stream.message().await? {
             Some(resp) => resp.id,
@@ -246,9 +244,11 @@ impl LeaseClient {
     pub async fn time_to_live(&mut self, id: i64, keys: bool) -> Result<LeaseTimeToLiveResponse> {
         Ok(self
             .lease_client
-            .lease_time_to_live(xlineapi::LeaseTimeToLiveRequest { id, keys })
-            .await?
-            .into_inner())
+            .unary(
+                MethodId::XlineLeaseTtl,
+                xlineapi::LeaseTimeToLiveRequest { id, keys },
+            )
+            .await?)
     }
 
     /// Lists all existing leases.

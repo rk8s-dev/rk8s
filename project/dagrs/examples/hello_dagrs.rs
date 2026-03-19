@@ -19,22 +19,24 @@ impl Action for HelloAction {
     }
 }
 
+#[allow(deprecated)]
 fn main() {
     // create an empty `NodeTable`
     let mut node_table = NodeTable::new();
     // create a `DefaultNode` with action `HelloAction`
-    let hello_node = DefaultNode::with_action(
-        "Hello Dagrs".to_string(),
-        HelloAction::default(),
-        &mut node_table,
-    );
+    let hello_node =
+        DefaultNode::with_action("Hello Dagrs".to_string(), HelloAction, &mut node_table);
     let id: &dagrs::NodeId = &hello_node.id();
 
     // create a graph with this node and run
     let mut graph = Graph::new();
     graph.add_node(hello_node);
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("failed to create tokio runtime");
 
-    match graph.start() {
+    match graph.start_with_runtime(&runtime) {
         Ok(_) => {
             // verify the output of this node
             let outputs = graph.get_outputs();

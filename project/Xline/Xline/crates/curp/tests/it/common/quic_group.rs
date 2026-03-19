@@ -1,7 +1,7 @@
 //! QUIC-based CurpGroup for integration testing
 //!
-//! This module provides a QUIC variant of `CurpGroup` that uses gm-quic
-//! instead of tonic gRPC for transport. All nodes share a single `QuicListeners`
+//! This module provides a QUIC-based `CurpGroup` that uses gm-quic
+//! for transport. All nodes share a single `QuicListeners`
 //! (gm-quic global singleton) with per-node virtual hosts routed by SNI.
 
 use std::{collections::HashMap, sync::Arc, time::Duration};
@@ -170,7 +170,7 @@ impl QuicCurpGroup {
                 Box::<MemorySnapshotAllocator>::default() as Box<dyn engine::SnapshotAllocator>;
             let cluster_info = Arc::new(ClusterInfo::from_members_map(
                 all_members_addrs.clone(),
-                [],
+                &[],
                 name,
             ));
             let id = cluster_info.self_id();
@@ -188,7 +188,7 @@ impl QuicCurpGroup {
             let role_change_arc = role_change_cb.get_inner_arc();
             let curp_storage = Arc::new(DB::open(&config.engine_cfg).unwrap());
 
-            let rpc = Rpc::new_with_quic_for_test(
+            let rpc = Rpc::new_for_test(
                 cluster_info,
                 name == leader_name,
                 ce,
@@ -197,11 +197,11 @@ impl QuicCurpGroup {
                 config,
                 curp_storage,
                 Arc::clone(&task_manager),
-                None,
                 vec![Box::<TestSpecPool>::default()],
                 vec![Box::<TestUncomPool>::default()],
                 Arc::clone(&quic_client),
-            );
+            )
+            .unwrap();
 
             servers.insert(server_names[i].clone(), QuicGrpcServer::new(rpc));
 
@@ -265,11 +265,11 @@ impl QuicCurpGroup {
     /// Create a QUIC-based client
     pub async fn new_client(
         &self,
-    ) -> impl ClientApi<Error = tonic::Status, Cmd = TestCommand> + use<> {
+    ) -> impl ClientApi<Error = xlinerpc::status::Status, Cmd = TestCommand> + use<> {
         let addrs: Vec<String> = self.all_addrs().cloned().collect();
         ClientBuilder::new(ClientConfig::default(), true)
             .quic_transport_for_test(Arc::clone(&self.quic_client))
-            .quic_discover_from(addrs)
+            .discover_from(addrs)
             .await
             .unwrap()
             .build()

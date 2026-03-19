@@ -39,7 +39,15 @@ pub async fn config_interface(if_name: &str, exec_result: &SuccessReply) -> anyh
     let routes = &exec_result.routes;
     if !routes.is_empty() {
         for route in routes {
-            link::route_add(route.clone()).await?;
+            link::route_add_on_link(route.clone(), link.header.index)
+                .await
+                .map_err(|e| {
+                    anyhow!(
+                        "failed to add route dst={} gw={:?}: {e}",
+                        route.dst,
+                        route.gw
+                    )
+                })?;
         }
     }
 

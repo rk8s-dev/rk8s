@@ -34,6 +34,7 @@ const MIN_PAGE_SIZE: u64 = 512;
 pub(crate) const MAINTENANCE_SNAPSHOT_CHUNK_SIZE: u64 = 64 * 1024;
 
 /// Maintenance Server
+#[derive(Clone)]
 pub(crate) struct MaintenanceServer {
     /// Kv Storage
     kv_store: Arc<KvStore>,

@@ -21,6 +21,7 @@ use xlineapi::{
 use crate::header_gen::HeaderGenerator;
 
 /// Cluster Server
+#[derive(Clone)]
 pub(crate) struct ClusterServer {
     /// Consensus client
     client: Arc<CurpClient>,

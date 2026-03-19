@@ -36,7 +36,6 @@ pub enum DnsFallback {
     Disabled,
     /// Fall back to 127.0.0.1 with the original hostname as SNI.
     /// Only for testing with fake hostnames like "s0.test".
-    #[cfg(any(test, feature = "quic-test"))]
     LocalhostForTest,
 }
 
@@ -91,7 +90,6 @@ impl QuicChannel {
     ///
     /// When DNS resolution fails, falls back to 127.0.0.1 with the original
     /// server name as SNI. This is needed for fake hostnames like "s0.test".
-    #[cfg(any(test, feature = "quic-test"))]
     #[inline]
     pub fn new_for_test(client: Arc<QuicClient>) -> Self {
         Self {
@@ -169,7 +167,6 @@ impl QuicChannel {
                 DnsFallback::Disabled => Err(CurpError::internal(format!(
                     "QUIC connect error for {addr_str}: {e}"
                 ))),
-                #[cfg(any(test, feature = "quic-test"))]
                 DnsFallback::LocalhostForTest => {
                     // Test mode: unconditionally fall back to 127.0.0.1
                     let (server_name, port_str) = addr_str.rsplit_once(':').ok_or_else(|| {
@@ -457,7 +454,6 @@ impl QuicChannel {
     }
 
     /// Connect to a single address with localhost fallback (test only)
-    #[cfg(any(test, feature = "quic-test"))]
     pub async fn connect_single_for_test(
         addr: &str,
         client: Arc<QuicClient>,
@@ -486,7 +482,6 @@ impl QuicChannel {
 
 /// Test-only: send a raw method ID to test unknown-method error path.
 #[doc(hidden)]
-#[cfg(feature = "quic-test")]
 impl QuicChannel {
     /// Send a raw u16 method ID (bypasses `MethodId` type safety).
     /// Response validation is identical to `unary_call`.

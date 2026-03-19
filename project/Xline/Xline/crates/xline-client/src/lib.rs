@@ -158,18 +158,19 @@
         clippy::arithmetic_side_effects
     )
 )]
-use std::{
-    fmt::Debug,
-    sync::Arc,
-    task::{Context, Poll},
-};
+use std::{fmt::Debug, sync::Arc};
 
-use curp::client::ClientBuilder as CurpClientBuilder;
-use http::{HeaderValue, Request, header::AUTHORIZATION};
-use tonic::transport::Channel;
-use tonic::transport::ClientTlsConfig;
-use tower::Service;
-use utils::{build_endpoint, config::ClientConfig};
+use curp::{
+    client::ClientBuilder as CurpClientBuilder,
+    rpc::{FetchClusterRequest, FetchClusterResponse},
+};
+use http::uri::PathAndQuery;
+use tonic::{
+    client::Grpc,
+    codec::ProstCodec,
+    transport::{Channel as TonicChannel, ClientTlsConfig},
+};
+use utils::config::ClientConfig;
 use xlineapi::command::{Command, CurpClient};
 
 use crate::{
@@ -178,6 +179,7 @@ use crate::{
         MaintenanceClient, WatchClient,
     },
     error::XlineClientBuildError,
+    transport::Channel,
 };
 
 /// Sub-clients for each type of API
@@ -186,10 +188,14 @@ pub mod clients;
 mod lease_gen;
 /// Request type definitions.
 pub mod types;
+pub use transport::Streaming;
 
 /// Error definitions for `xline-client`.
 pub mod error;
+mod transport;
 
+/// Perform a FetchCluster unary RPC via tonic's low-level Grpc client.
+///
 /// Xline client
 #[derive(Clone, Debug)]
 pub struct Client {
@@ -214,9 +220,14 @@ pub struct Client {
 impl Client {
     /// New `Client`
     ///
+    /// Connects to the cluster by first performing a `FetchCluster` RPC via tonic
+    /// to discover peer URLs, then building a QUIC-based curp client for peer
+    /// communication. This means the cluster must be reachable at construction time;
+    /// a transient network failure will cause `connect()` to return an error.
+    ///
     /// # Errors
     ///
-    /// If `Self::build_channel` fails.
+    /// If `Self::build_channel` fails, or if the initial `FetchCluster` RPC fails.
     #[inline]
     #[allow(clippy::pattern_type_mismatch)] // allow mismatch in map
     #[allow(clippy::as_conversions)] // cast to dyn
@@ -233,11 +244,22 @@ impl Client {
             .into_iter()
             .map(|addr| addr.as_ref().to_owned())
             .collect();
-        let channel = Self::build_channel(addrs.clone(), options.tls_config.as_ref()).await?;
+        let discovery_channel =
+            Self::build_discovery_channel(addrs.clone(), options.tls_config.as_ref()).await?;
+        let peer_addrs = Self::discover_peer_addrs(discovery_channel).await?;
+        let quic_client = Arc::new(Self::build_quic_client(&options)?);
+        let channel = Self::build_channel(
+            peer_addrs.clone(),
+            Arc::clone(&quic_client),
+            *options.client_config.propose_timeout(),
+        );
+
+        // Use discover_from to connect via QUIC and discover cluster topology
+        // Use is_raw_curp=true so state refresh uses peer URLs (not client URLs)
         let curp_client = Arc::new(
-            CurpClientBuilder::new(options.client_config, false)
-                .tls_config(options.tls_config)
-                .discover_from(addrs)
+            CurpClientBuilder::new(options.client_config, true)
+                .quic_transport(quic_client)
+                .discover_from(peer_addrs)
                 .await?
                 .build::<Command>()?,
         ) as Arc<CurpClient>;
@@ -256,23 +278,28 @@ impl Client {
             None => None,
         };
 
-        let kv = KvClient::new(Arc::clone(&curp_client), channel.clone(), token.clone());
+        let authed_channel = channel.with_token(token.clone());
+        let kv = KvClient::new(
+            Arc::clone(&curp_client),
+            authed_channel.clone(),
+            token.clone(),
+        );
         let lease = LeaseClient::new(
             Arc::clone(&curp_client),
-            channel.clone(),
+            authed_channel.clone(),
             token.clone(),
             Arc::clone(&id_gen),
         );
         let lock = LockClient::new(
             Arc::clone(&curp_client),
-            channel.clone(),
+            authed_channel.clone(),
             token.clone(),
             id_gen,
         );
-        let auth = AuthClient::new(curp_client, channel.clone(), token.clone());
-        let maintenance = MaintenanceClient::new(channel.clone(), token.clone());
-        let cluster = ClusterClient::new(channel.clone(), token.clone());
-        let watch = WatchClient::new(channel, token);
+        let auth = AuthClient::new(curp_client, authed_channel.clone(), token.clone());
+        let maintenance = MaintenanceClient::new(authed_channel.clone());
+        let cluster = ClusterClient::new(authed_channel.clone());
+        let watch = WatchClient::new(authed_channel);
         let election = ElectionClient::new();
 
         Ok(Self {
@@ -287,21 +314,84 @@ impl Client {
         })
     }
 
-    /// Build a tonic load balancing channel.
-    async fn build_channel(
+    /// Build a QUIC client with optional peer CA certificate for identity verification.
+    fn build_quic_client(
+        options: &ClientOptions,
+    ) -> Result<gm_quic::prelude::QuicClient, XlineClientBuildError> {
+        let mut root_store = rustls::RootCertStore::empty();
+
+        if let Some(ca_pem) = &options.quic_peer_ca_cert {
+            let certs: Vec<_> = rustls_pemfile::certs(&mut ca_pem.as_slice())
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|e| {
+                    XlineClientBuildError::InvalidArguments(format!(
+                        "failed to parse QUIC peer CA cert: {e}"
+                    ))
+                })?;
+            for cert in certs {
+                root_store.add(cert).map_err(|e| {
+                    XlineClientBuildError::InvalidArguments(format!(
+                        "failed to add QUIC peer CA cert: {e}"
+                    ))
+                })?;
+            }
+        } else {
+            tracing::warn!("No QUIC peer CA certificate configured; peer identity is not verified");
+        }
+
+        Ok(gm_quic::prelude::QuicClient::builder()
+            .with_root_certificates(root_store)
+            .without_cert()
+            .build())
+    }
+
+    /// Build a discovery channel over client endpoints.
+    async fn build_discovery_channel(
         addrs: Vec<String>,
         tls_config: Option<&ClientTlsConfig>,
-    ) -> Result<Channel, XlineClientBuildError> {
-        let (channel, tx) = Channel::balance_channel(64);
+    ) -> Result<TonicChannel, XlineClientBuildError> {
+        let (channel, tx) = TonicChannel::balance_channel(64);
 
         for addr in addrs {
-            let endpoint = build_endpoint(&addr, tls_config)?;
+            let endpoint = utils::build_endpoint(&addr, tls_config)?;
             tx.send(tower::discover::Change::Insert(addr, endpoint))
                 .await
                 .unwrap_or_else(|_| unreachable!("The channel will not closed"));
         }
 
         Ok(channel)
+    }
+
+    /// Fetch peer URLs from the public client endpoints before switching to QUIC.
+    async fn discover_peer_addrs(
+        channel: TonicChannel,
+    ) -> Result<Vec<String>, XlineClientBuildError> {
+        let path = PathAndQuery::from_static("/commandpb.Protocol/FetchCluster");
+        let request = tonic::Request::new(FetchClusterRequest::default());
+        let response = Grpc::new(channel)
+            .unary(
+                request,
+                path,
+                ProstCodec::<FetchClusterRequest, FetchClusterResponse>::default(),
+            )
+            .await?;
+
+        let addrs = response
+            .into_inner()
+            .members
+            .into_iter()
+            .flat_map(|member| member.peer_urls)
+            .collect();
+        Ok(addrs)
+    }
+
+    /// Build a QUIC channel over discovered peer endpoints.
+    fn build_channel(
+        addrs: Vec<String>,
+        quic_client: Arc<gm_quic::prelude::QuicClient>,
+        timeout: std::time::Duration,
+    ) -> Channel {
+        Channel::new(quic_client, addrs, None, timeout)
     }
 
     /// Gets a KV client.
@@ -370,6 +460,10 @@ pub struct ClientOptions {
     tls_config: Option<ClientTlsConfig>,
     /// config for the curp client
     client_config: ClientConfig,
+    /// Peer CA certificate (PEM bytes) for QUIC peer identity verification.
+    /// When set, the QUIC client will verify the server's certificate against
+    /// this CA. When `None`, an empty trust store is used (no verification).
+    quic_peer_ca_cert: Option<Vec<u8>>,
 }
 
 impl ClientOptions {
@@ -385,6 +479,7 @@ impl ClientOptions {
             user,
             tls_config,
             client_config,
+            quic_peer_ca_cert: None,
         }
     }
 
@@ -438,46 +533,17 @@ impl ClientOptions {
             ..self
         }
     }
-}
 
-/// Authentication service.
-#[derive(Debug, Clone)]
-struct AuthService<S> {
-    /// A `Service` trait object
-    inner: S,
-    /// Auth token
-    token: Option<Arc<HeaderValue>>,
-}
-
-impl<S> AuthService<S> {
-    /// Create a new `AuthService`
+    /// Set the peer CA certificate (PEM bytes) for QUIC peer identity verification.
+    ///
+    /// When set, the QUIC client will verify the server's certificate against
+    /// this CA during curp peer communication.
     #[inline]
-    fn new(inner: S, token: Option<Arc<HeaderValue>>) -> Self {
-        Self { inner, token }
-    }
-}
-
-impl<S, Body, Response> Service<Request<Body>> for AuthService<S>
-where
-    S: Service<Request<Body>, Response = Response>,
-{
-    type Response = S::Response;
-    type Error = S::Error;
-    type Future = S::Future;
-
-    #[inline]
-    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.inner.poll_ready(cx)
-    }
-
-    #[inline]
-    fn call(&mut self, mut request: Request<Body>) -> Self::Future {
-        if let Some(token) = self.token.as_ref() {
-            let _: Option<HeaderValue> = request
-                .headers_mut()
-                .insert(AUTHORIZATION, token.as_ref().clone());
+    #[must_use]
+    pub fn with_quic_peer_ca_cert(self, ca_cert_pem: Vec<u8>) -> Self {
+        Self {
+            quic_peer_ca_cert: Some(ca_cert_pem),
+            ..self
         }
-
-        self.inner.call(request)
     }
 }

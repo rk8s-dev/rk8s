@@ -28,10 +28,11 @@ struct Args {
 }
 
 /// Process config file and adjust SQLite path to absolute path
+/// Returns (processed_config, is_sqlite)
 fn process_config_for_backend(
     config_content: &str,
     meta_dir: &std::path::Path,
-) -> Result<String, Box<dyn std::error::Error>> {
+) -> Result<(String, bool), Box<dyn std::error::Error>> {
     let config: serde_yaml::Value = serde_yaml::from_str(config_content)?;
 
     if let Some(database) = config.get("database") {
@@ -50,19 +51,19 @@ fn process_config_for_backend(
                     );
 
                     println!("SQLite database path: {}", db_path.display());
-                    Ok(processed_config)
+                    Ok((processed_config, true))
                 }
                 "postgres" => {
                     println!("Using PostgreSQL database backend");
-                    Ok(config_content.to_string())
+                    Ok((config_content.to_string(), false))
                 }
                 "etcd" => {
                     println!("Using etcd distributed backend");
-                    Ok(config_content.to_string())
+                    Ok((config_content.to_string(), false))
                 }
                 "redis" => {
                     println!("Using Redis metadata backend");
-                    Ok(config_content.to_string())
+                    Ok((config_content.to_string(), false))
                 }
                 _ => Err(format!("Unsupported database type: {}", db_type).into()),
             }
@@ -146,14 +147,28 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .map_err(|e| format!("Cannot read config file: {}", e))?;
 
         let meta_config_dir = backend_storage.join(".slayerfs");
-        std::fs::create_dir_all(&meta_config_dir)?;
 
-        let target_config_path = meta_config_dir.join("slayerfs.yml");
-        let processed_config = process_config_for_backend(&config_content, &meta_config_dir)?;
-        std::fs::write(&target_config_path, processed_config)?;
+        // Process config and decide whether we must write a backend_storage-local copy.
+        // For sqlite we must rewrite the URL to point into backend_storage/.slayerfs/metadata.db
+        // and write the rewritten config there. For non-sqlite backends (postgres/etcd/redis)
+        // we must NOT write any shared config under backend_storage to avoid multi-client races;
+        // instead load config directly from the provided --config path.
+        let (processed_config, is_sqlite) =
+            process_config_for_backend(&config_content, &meta_config_dir)?;
 
-        let config = slayerfs::Config::from_file(&target_config_path)
-            .map_err(|e| format!("Failed to load config file: {}", e))?;
+        let config = if is_sqlite {
+            // Ensure meta config dir exists only for sqlite case where we write files there
+            std::fs::create_dir_all(&meta_config_dir)?;
+            let target_config_path = meta_config_dir.join("slayerfs.yml");
+            std::fs::write(&target_config_path, processed_config)?;
+
+            slayerfs::Config::from_file(&target_config_path)
+                .map_err(|e| format!("Failed to load config file: {}", e))?
+        } else {
+            // Non-sqlite: load config directly from the user-provided file path
+            slayerfs::Config::from_file(&config_file)
+                .map_err(|e| format!("Failed to load config file: {}", e))?
+        };
         let meta_store: Arc<dyn MetaStore> = match &config.database.db_config {
             DatabaseType::Sqlite { .. } | DatabaseType::Postgres { .. } => {
                 MetaStoreFactory::<DatabaseMetaStore>::create_from_config(config.clone())

@@ -1,5 +1,5 @@
 mod cadapter;
-mod chuck;
+mod chunk;
 mod daemon;
 #[allow(dead_code)]
 mod fs;
@@ -27,19 +27,20 @@ use std::sync::Arc;
 use std::sync::{LazyLock, Mutex as StdMutex};
 
 use clap::{Args, Parser, Subcommand, ValueEnum};
+#[cfg(not(feature = "profiling"))]
 use tracing_subscriber::fmt::format::FmtSpan;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 
 use crate::cadapter::client::ObjectClient;
 use crate::cadapter::localfs::LocalFsBackend;
-use crate::chuck::chunk::{ChunkLayout, DEFAULT_BLOCK_SIZE, DEFAULT_CHUNK_SIZE};
-use crate::chuck::store::ObjectBlockStore;
+use crate::chunk::layout::{ChunkLayout, DEFAULT_BLOCK_SIZE, DEFAULT_CHUNK_SIZE};
+use crate::chunk::store::ObjectBlockStore;
 use crate::fuse::mount::mount_vfs_unprivileged;
 use crate::meta::MetaStore;
 use crate::meta::config::{CacheConfig, ClientOptions, Config, DatabaseConfig, DatabaseType};
 use crate::meta::factory::MetaStoreFactory;
-use crate::meta::stores::{DatabaseMetaStore, EtcdMetaStore};
+use crate::meta::stores::{DatabaseMetaStore, EtcdMetaStore, RedisMetaStore};
 use crate::vfs::fs::VFS;
 
 #[derive(Parser)]
@@ -65,11 +66,11 @@ struct MountArgs {
     #[arg(long, value_name = "DIR", default_value = "./data")]
     data_dir: PathBuf,
 
-    /// Metadata backend (sqlx or etcd).
+    /// Metadata backend (sqlx, etcd or redis).
     #[arg(long, value_enum, default_value_t = MetaBackendKind::Sqlx)]
     meta_backend: MetaBackendKind,
 
-    /// Metadata backend URL (sqlx only, e.g. sqlite::memory: or postgres://...).
+    /// Metadata backend URL (sqlx or redis, e.g. sqlite::memory:, postgres://... or redis://...).
     #[arg(long, value_name = "URL", default_value = "sqlite::memory:")]
     meta_url: String,
 
@@ -90,6 +91,7 @@ struct MountArgs {
 enum MetaBackendKind {
     Sqlx,
     Etcd,
+    Redis,
 }
 
 #[tokio::main]
@@ -269,6 +271,7 @@ async fn create_meta_store(args: &MountArgs) -> anyhow::Result<Arc<dyn MetaStore
             if args.meta_etcd_urls.is_empty() {
                 anyhow::bail!("--meta-etcd-urls must be set when --meta-backend etcd");
             }
+
             let client = ClientOptions::default();
 
             let config = Config {
@@ -281,6 +284,21 @@ async fn create_meta_store(args: &MountArgs) -> anyhow::Result<Arc<dyn MetaStore
                 client,
             };
             let handle = MetaStoreFactory::<EtcdMetaStore>::create_from_config(config).await?;
+            Ok(handle.store() as Arc<dyn MetaStore>)
+        }
+        MetaBackendKind::Redis => {
+            let client = ClientOptions::default();
+
+            let config = Config {
+                database: DatabaseConfig {
+                    db_config: DatabaseType::Redis {
+                        url: args.meta_url.clone(),
+                    },
+                },
+                cache: CacheConfig::default(),
+                client,
+            };
+            let handle = MetaStoreFactory::<RedisMetaStore>::create_from_config(config).await?;
             Ok(handle.store() as Arc<dyn MetaStore>)
         }
     }

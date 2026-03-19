@@ -137,6 +137,7 @@ impl TypedAction for ReceiverAction {
     }
 }
 
+#[allow(deprecated)]
 fn main() {
     // Create a node table
     let mut node_table = NodeTable::new();
@@ -154,11 +155,8 @@ fn main() {
     );
 
     // Create receiver node
-    let receiver = DefaultNode::with_action(
-        "Receiver".to_string(),
-        ReceiverAction::default(),
-        &mut node_table,
-    );
+    let receiver =
+        DefaultNode::with_action("Receiver".to_string(), ReceiverAction, &mut node_table);
 
     // Get node IDs before adding nodes to the graph
     let sender1_id = sender1.id();
@@ -176,9 +174,13 @@ fn main() {
     // Add edges: both senders connect to the receiver
     graph.add_edge(sender1_id, vec![receiver_id]);
     graph.add_edge(sender2_id, vec![receiver_id]);
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("failed to create tokio runtime");
 
     // Run the graph
-    match graph.start() {
+    match graph.start_with_runtime(&runtime) {
         Ok(_) => (),
         Err(e) => {
             eprintln!("Graph execution failed: {:?}", e);
