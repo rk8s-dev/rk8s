@@ -4,9 +4,7 @@
 // server::NamedService,
 // Status,
 // };
-use super::{
-    Body, Error as GlobalError, HeaderValue, Router, h3wrapper::QuicIncomingBody,
-};
+use super::{Body, Error as GlobalError, HeaderValue, Router, h3wrapper::QuicIncomingBody};
 use bytes::Bytes;
 use gm_quic::prelude::{BindUri, ParseBindUriError, QuicListeners, handy};
 use h3::{
@@ -15,12 +13,7 @@ use h3::{
 };
 use h3_shim;
 use http::{Request, Response};
-use std::{
-    convert::Infallible,
-    future::poll_fn,
-    sync::Arc,
-    collections::HashMap,
-};
+use std::{collections::HashMap, convert::Infallible, future::poll_fn, sync::Arc};
 use tower::Service;
 use utils::config::TlsConfig;
 // use anyhow::Result;
@@ -79,28 +72,33 @@ impl RouterBuilder {
 
 pub(crate) struct Server {
     // servername: (router, peer_urls)
-    routers: HashMap<String, (RouterBuilder, Vec<String>)>
+    routers: HashMap<String, (RouterBuilder, Vec<String>)>,
 }
 
 impl Server {
     pub(crate) fn new() -> Self {
         Server {
-            routers: HashMap::new()
+            routers: HashMap::new(),
         }
     }
 
     /// Add a router nested to the router
-    pub(crate) fn add_server(mut self, name: &str, router: RouterBuilder, peer_urls: impl IntoIterator<Item = String>) -> Self {
-        if let Some(_) = self.routers.insert(name.to_string(), (router, peer_urls.into_iter().collect())) {
+    pub(crate) fn add_server(
+        mut self,
+        name: &str,
+        router: RouterBuilder,
+        peer_urls: impl IntoIterator<Item = String>,
+    ) -> Self {
+        if let Some(_) = self
+            .routers
+            .insert(name.to_string(), (router, peer_urls.into_iter().collect()))
+        {
             panic!("{}", format!("duplicate server name {name}"));
         }
         self
     }
 
-    pub(crate) async fn serve(
-        self,
-    ) -> Result<(), super::Error>
-    {
+    pub(crate) async fn serve(self) -> Result<(), super::Error> {
         let listeners = QuicListeners::builder().map(|builder| {
             builder
                 .without_client_cert_verifier()
@@ -111,12 +109,14 @@ impl Server {
         for (server_name, (router_builder, peer_urls)) in &self.routers {
             listeners.add_server(
                 server_name,
-                router_builder.tls_config
+                router_builder
+                    .tls_config
                     .peer_cert_path()
                     .clone()
                     .expect("server tls cert config is needed")
                     .as_path(),
-                router_builder.tls_config
+                router_builder
+                    .tls_config
                     .peer_key_path()
                     .clone()
                     .expect("server tls key config is needed")
@@ -129,14 +129,14 @@ impl Server {
             )?;
 
             let _ = listeners
-                    .get_server(&server_name)
-                    .unwrap()
-                    .bind_interfaces()
-                    .iter()
-                    .next()
-                    .unwrap()
-                    .1
-                    .borrow()?;
+                .get_server(&server_name)
+                .unwrap()
+                .bind_interfaces()
+                .iter()
+                .next()
+                .unwrap()
+                .1
+                .borrow()?;
         }
 
         // tracing::info!("yes quic is serving");
@@ -156,7 +156,7 @@ impl Server {
                         continue;
                     }
                 };
-            if let Some((RouterBuilder { router, ..}, _)) = self.routers.get(&server) {
+            if let Some((RouterBuilder { router, .. }, _)) = self.routers.get(&server) {
                 let _ = tokio::spawn(Self::handle_connection(router.clone(), h3_conn));
             }
         }
@@ -188,11 +188,11 @@ impl Server {
                 Ok(None) => {
                     tracing::error!("failed to accept a conenction");
                     break;
-                },
+                }
                 Err(_) => {
                     // tracing::error!("encounter an error: {e:?}");
-                    break
-                },
+                    break;
+                }
             }
         }
     }
@@ -264,8 +264,8 @@ where
                 if let Ok(trailers) = frame.into_trailers() {
                     send.send_trailers(trailers).await?;
                 }
-                continue
-            },
+                continue;
+            }
         }
     }
 

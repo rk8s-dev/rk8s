@@ -268,9 +268,7 @@ pub use self::{
     },
     leasepb::Lease as PbLease,
     mvccpb::{Event, KeyValue, event::EventType},
-    v3lockpb::{
-        LockRequest, LockResponse, UnlockRequest, UnlockResponse,
-    },
+    v3lockpb::{LockRequest, LockResponse, UnlockRequest, UnlockResponse},
 };
 
 impl User {

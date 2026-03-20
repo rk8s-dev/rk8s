@@ -6,6 +6,8 @@ mod auth_wrapper;
 mod cluster_server;
 /// Command to be executed
 pub(crate) mod command;
+/// curp server
+mod curp_server;
 /// Xline kv server
 mod kv_server;
 /// Xline lease server
@@ -20,8 +22,6 @@ mod quic_service;
 mod watch_server;
 /// Xline server
 mod xline_server;
-/// curp server
-mod curp_server;
 
 pub use self::xline_server::XlineServer;
 pub(crate) use self::{auth_server::get_token, maintenance::MAINTENANCE_SNAPSHOT_CHUNK_SIZE};

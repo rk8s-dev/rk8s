@@ -17,8 +17,8 @@ use xlineapi::{
 // use xlinerpc::status::Status;
 use super::command::CommandExecutor;
 use crate::{
-    router::endpoint::EndPoint as RouterEndpoint,
     header_gen::HeaderGenerator,
+    router::endpoint::EndPoint as RouterEndpoint,
     rpc::{
         AlarmRequest, AlarmResponse, DefragmentRequest, DefragmentResponse, DowngradeRequest,
         DowngradeResponse, HashKvRequest, HashKvResponse, HashRequest, HashResponse,
@@ -188,7 +188,10 @@ impl MaintenanceServer {
     pub(crate) async fn snapshot(
         &self,
         _request: tonic::Request<SnapshotRequest>,
-    ) -> Result<tonic::Response<Pin<Box<dyn Stream<Item = Result<SnapshotResponse, Status>> + Send>>>, Status> {
+    ) -> Result<
+        tonic::Response<Pin<Box<dyn Stream<Item = Result<SnapshotResponse, Status>> + Send>>>,
+        Status,
+    > {
         let stream = snapshot_stream(self.header_gen.as_ref(), self.db.as_ref())?;
 
         Ok(tonic::Response::new(Box::pin(stream)))
@@ -282,9 +285,7 @@ impl Server {
     }
     #[allow(unused)]
     pub(crate) fn from_arc(server: Arc<MaintenanceServer>) -> Self {
-        Self {
-            server: server,
-        }
+        Self { server: server }
     }
     pub(crate) fn endpoint(self) -> RouterEndpoint<Arc<MaintenanceServer>> {
         RouterEndpoint::new(self.server)

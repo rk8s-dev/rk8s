@@ -21,12 +21,12 @@ use xlineapi::{
 // use xlinerpc::status::{Code,Status};
 
 use crate::{
-    router::endpoint::EndPoint as RouterEndpoint,
     revision_check::RevisionCheck,
+    router::endpoint::EndPoint as RouterEndpoint,
     rpc::{
-        CompactionRequest, CompactionResponse, DeleteRangeRequest, DeleteRangeResponse,
-        PutRequest, PutResponse, RangeRequest, RangeResponse, RequestWrapper, Response, ResponseOp,
-        TxnRequest, TxnResponse,
+        CompactionRequest, CompactionResponse, DeleteRangeRequest, DeleteRangeResponse, PutRequest,
+        PutResponse, RangeRequest, RangeResponse, RequestWrapper, Response, ResponseOp, TxnRequest,
+        TxnResponse,
     },
     storage::{AuthStore, KvStore},
 };

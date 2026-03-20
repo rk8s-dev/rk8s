@@ -1,23 +1,22 @@
 use std::sync::Arc;
 
-use curp::rpc::{
-        FetchClusterRequest, FetchReadStateRequest, ProposeConfChangeRequest, ProposeRequest, PublishRequest, ReadIndexRequest, RecordRequest, ShutdownRequest,
-        MoveLeaderRequest, LeaseKeepAliveMsg, CurpService, CurpError,
-    };
 use crate::{
     router::endpoint::EndPoint as RouterEndpoint,
     server::auth_wrapper::{curp_error_to_tonic_status, metadata_from_tonic},
 };
-use futures::{
-    Stream, StreamExt,
+use curp::rpc::{
+    CurpError, CurpService, FetchClusterRequest, FetchReadStateRequest, LeaseKeepAliveMsg,
+    MoveLeaderRequest, ProposeConfChangeRequest, ProposeRequest, PublishRequest, ReadIndexRequest,
+    RecordRequest, ShutdownRequest,
 };
+use futures::{Stream, StreamExt};
 
 pub(crate) struct Server<T> {
     server: Arc<T>,
 }
 impl<T> Server<T>
 where
-    T: CurpService
+    T: CurpService,
 {
     #[allow(unused)]
     pub(crate) fn new(server: T) -> Self {
@@ -27,9 +26,7 @@ where
     }
     #[allow(unused)]
     pub(crate) fn from_arc(server: Arc<T>) -> Self {
-        Self {
-            server: server,
-        }
+        Self { server: server }
     }
     pub(crate) fn endpoint(self) -> RouterEndpoint<Arc<T>> {
         RouterEndpoint::new(self.server)

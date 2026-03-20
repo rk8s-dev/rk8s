@@ -18,10 +18,7 @@ use tracing::debug;
 use xlineapi::command::Command;
 
 use super::xline_server::CurpServer;
-use crate::{
-    router::endpoint::EndPoint as RouterEndpoint,
-    storage::AuthStore,
-};
+use crate::{router::endpoint::EndPoint as RouterEndpoint, storage::AuthStore};
 
 /// Build transport-agnostic `Metadata` from `tonic::metadata::MetadataMap`
 pub(crate) fn metadata_from_tonic(map: &tonic::metadata::MetadataMap) -> Metadata {
@@ -311,9 +308,7 @@ impl Server {
     }
     #[allow(unused)]
     pub(crate) fn from_arc(server: Arc<AuthWrapper>) -> Self {
-        Self {
-            server: server,
-        }
+        Self { server: server }
     }
     pub(crate) fn endpoint(self) -> RouterEndpoint<Arc<AuthWrapper>> {
         RouterEndpoint::new(self.server)

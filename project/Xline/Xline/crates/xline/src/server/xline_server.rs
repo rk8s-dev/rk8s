@@ -6,9 +6,9 @@ use anyhow::{Result, anyhow};
 use clippy_utilities::{NumericCast, OverflowArithmetic};
 use curp::{
     self,
-    rpc::TransportConfig,
     client::ClientBuilder as CurpClientBuilder,
     members::{ClusterInfo, get_cluster_info_from_remote},
+    rpc::TransportConfig,
     server::{DB as CurpDB, Rpc, StorageApi as _},
 };
 use dashmap::DashMap;
@@ -17,12 +17,9 @@ use jsonwebtoken::{DecodingKey, EncodingKey};
 use tonic::{
     // TODO: use our own status type
     // use xlinerpc::status::Status;
-    transport::{
-        Certificate, ClientTlsConfig, Identity, ServerTlsConfig
-    },
+    transport::{Certificate, ClientTlsConfig, Identity, ServerTlsConfig},
 };
 use tracing::{info, warn};
-
 
 use utils::{
     barrier::IdBarrier,
@@ -35,44 +32,23 @@ use utils::{
 use xlineapi::command::{Command, CurpClient};
 
 use super::{
-    auth_server::{
-        AuthServer,
-        Server as AuthEndpointServer,
-    },
-    auth_wrapper::{
-        Server as AuthWrapperEndpointServer,
-        AuthWrapper,
-    },
-    cluster_server::{
-        ClusterServer,
-        Server as ClusterEndpointServer,
-    },
+    auth_server::{AuthServer, Server as AuthEndpointServer},
+    auth_wrapper::{AuthWrapper, Server as AuthWrapperEndpointServer},
+    cluster_server::{ClusterServer, Server as ClusterEndpointServer},
     command::{Alarmer, CommandExecutor},
-    kv_server::{
-        KvServer,
-        Server as KvEndpointServer,
-    },
-    lease_server::{
-        LeaseServer,
-        Server as LeaseEndpointServer,
-    },
-    lock_server::{LockServer, Server as LockEndPointServer},
-    maintenance::{
-        MaintenanceServer,
-        Server as MaintenanceEndpointServer,
-    },
-    watch_server::{CHANNEL_SIZE, WatchServer, Server as WatchEndpointServer},
     curp_server::Server as ProtocolEndpointServer,
+    kv_server::{KvServer, Server as KvEndpointServer},
+    lease_server::{LeaseServer, Server as LeaseEndpointServer},
+    lock_server::{LockServer, Server as LockEndPointServer},
+    maintenance::{MaintenanceServer, Server as MaintenanceEndpointServer},
+    watch_server::{CHANNEL_SIZE, Server as WatchEndpointServer, WatchServer},
 };
 use crate::{
     conflict::{XlineSpeculativePools, XlineUncommittedPools},
     header_gen::HeaderGenerator,
     id_gen::IdGenerator,
     metrics::Metrics,
-    router::{
-        RouterBuilder,
-        Server,
-    },
+    router::{RouterBuilder, Server},
     state::State,
     storage::{
         AlarmStore, AuthStore, KvStore, LeaseStore,
@@ -365,17 +341,55 @@ impl XlineServer {
 
         let xline_router = builder
             .clone()
-        .add_subrouter( "/v3lockpb.Lock", LockEndPointServer::new(lock_server).endpoint().into())
-        .add_subrouter( "/etcdserverpb.Auth", AuthEndpointServer::new(auth_server).endpoint().into())
-        .add_subrouter( "/etcdserverpb.Lease", LeaseEndpointServer::from_arc(lease_server).endpoint().into())
-        .add_subrouter( "/etcdserverpb.KV", KvEndpointServer::new(kv_server).endpoint().into())
-        .add_subrouter( "/etcdserverpb.Watch", WatchEndpointServer::new(watch_server).endpoint().into())
-        .add_subrouter( "/etcdserverpb.Maintenance", MaintenanceEndpointServer::new(maintenance_server).endpoint().into())
-        .add_subrouter( "/etcdserverpb.Cluster", ClusterEndpointServer::new(cluster_server).endpoint().into())
-        .add_subrouter( "/commandpb.Protocol", AuthWrapperEndpointServer::new(auth_wrapper).endpoint().into());
+            .add_subrouter(
+                "/v3lockpb.Lock",
+                LockEndPointServer::new(lock_server).endpoint().into(),
+            )
+            .add_subrouter(
+                "/etcdserverpb.Auth",
+                AuthEndpointServer::new(auth_server).endpoint().into(),
+            )
+            .add_subrouter(
+                "/etcdserverpb.Lease",
+                LeaseEndpointServer::from_arc(lease_server)
+                    .endpoint()
+                    .into(),
+            )
+            .add_subrouter(
+                "/etcdserverpb.KV",
+                KvEndpointServer::new(kv_server).endpoint().into(),
+            )
+            .add_subrouter(
+                "/etcdserverpb.Watch",
+                WatchEndpointServer::new(watch_server).endpoint().into(),
+            )
+            .add_subrouter(
+                "/etcdserverpb.Maintenance",
+                MaintenanceEndpointServer::new(maintenance_server)
+                    .endpoint()
+                    .into(),
+            )
+            .add_subrouter(
+                "/etcdserverpb.Cluster",
+                ClusterEndpointServer::new(cluster_server).endpoint().into(),
+            )
+            .add_subrouter(
+                "/commandpb.Protocol",
+                AuthWrapperEndpointServer::new(auth_wrapper)
+                    .endpoint()
+                    .into(),
+            );
         let curp_router = builder
-            .add_subrouter("/commandpb.Protocol", ProtocolEndpointServer::new(curp_server.clone()).endpoint().into())
-            .add_subrouter("/inner_messagepb.InnerProtocol", ProtocolEndpointServer::new(curp_server).endpoint().into());
+            .add_subrouter(
+                "/commandpb.Protocol",
+                ProtocolEndpointServer::new(curp_server.clone())
+                    .endpoint()
+                    .into(),
+            )
+            .add_subrouter(
+                "/inner_messagepb.InnerProtocol",
+                ProtocolEndpointServer::new(curp_server).endpoint().into(),
+            );
 
         let xline_router = {
             let (mut reporter, health_server) = tonic_health::server::health_reporter();

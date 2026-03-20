@@ -18,10 +18,7 @@ use xlineapi::{
     MemberUpdateRequest, MemberUpdateResponse, command::CurpClient,
 };
 
-use crate::{
-    header_gen::HeaderGenerator,
-    router::endpoint::EndPoint as RouterEndpoint,
-};
+use crate::{header_gen::HeaderGenerator, router::endpoint::EndPoint as RouterEndpoint};
 
 /// Cluster Server
 #[derive(Clone)]
@@ -176,9 +173,7 @@ impl Server {
     }
     #[allow(unused)]
     pub(crate) fn from_arc(server: Arc<ClusterServer>) -> Self {
-        Self {
-            server: server,
-        }
+        Self { server: server }
     }
     pub(crate) fn endpoint(self) -> RouterEndpoint<Arc<ClusterServer>> {
         RouterEndpoint::new(self.server)

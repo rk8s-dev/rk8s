@@ -3,15 +3,15 @@ use http_body::Body;
 use prost::Message;
 use std::sync::Arc;
 use std::task::{Context, Poll};
+use tokio_stream::Stream;
 use tonic::{
     body::BoxBody,
+    codec::Streaming,
     codec::{EnabledCompressionEncodings, ProstCodec},
     codegen::BoxFuture,
     server::Grpc,
-    codec::Streaming,
 };
 use tower::Service;
-use tokio_stream::Stream;
 
 #[derive(Clone)]
 pub(crate) struct WithEncodingOption<T> {
@@ -156,12 +156,13 @@ where
     Output: Message + Default + Send + 'static + Clone,
     RspStream: Stream<Item = Result<Output, tonic::Status>> + Send + 'static,
     SVC: Service<
-        tonic::Request<Streaming<Input>>,
-        Response = tonic::Response<
-            // RspStream<Output>
-            RspStream
-        >, Error = tonic::Status
-    >
+            tonic::Request<Streaming<Input>>,
+            Response = tonic::Response<
+                // RspStream<Output>
+                RspStream,
+            >,
+            Error = tonic::Status,
+        >
         + Clone
         + 'static
         + Send
@@ -228,12 +229,7 @@ where
     Input: Message + Default + Send + 'static,
     Output: Message + Default + Send + 'static + Clone,
     RspStream: Stream<Item = Result<Output, tonic::Status>> + Send + 'static,
-    SVC: Service<
-        tonic::Request<Input>,
-        Response = tonic::Response<
-            RspStream
-        >, Error = tonic::Status
-    >
+    SVC: Service<tonic::Request<Input>, Response = tonic::Response<RspStream>, Error = tonic::Status>
         + Clone
         + 'static
         + Send
@@ -300,11 +296,10 @@ where
     Input: Message + Default + Send + 'static,
     Output: Message + Default + Send + 'static + Clone,
     SVC: Service<
-        tonic::Request<Streaming<Input>>,
-        Response = tonic::Response<
-            Output
-        >, Error = tonic::Status
-    >
+            tonic::Request<Streaming<Input>>,
+            Response = tonic::Response<Output>,
+            Error = tonic::Status,
+        >
         + Clone
         + 'static
         + Send

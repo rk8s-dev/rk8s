@@ -1,19 +1,13 @@
 use crate::router::makesvc::WithEncodingOption;
 
 use super::{
-    Router,
-    StateRouter,
-    makesvc::{
-        MakeUnarySVC,
-        MakeStreamingSvc,
-        MakeServerStreamingSvc,
-        MakeClientStreamingSvc,
-    },
+    Router, StateRouter,
+    makesvc::{MakeClientStreamingSvc, MakeServerStreamingSvc, MakeStreamingSvc, MakeUnarySVC},
 };
 use prost::Message;
-use tower::{Service, service_fn};
-use tonic::codec::Streaming;
 use tokio_stream::Stream;
+use tonic::codec::Streaming;
+use tower::{Service, service_fn};
 
 #[derive(Debug)]
 pub struct EndPoint<T> {
@@ -80,7 +74,11 @@ where
         self
     }
 
-    pub fn add_streaming_fn<InputScheme, OutputScheme, RspStream, F, Fut>(mut self, name: &str, handler: F) -> Self
+    pub fn add_streaming_fn<InputScheme, OutputScheme, RspStream, F, Fut>(
+        mut self,
+        name: &str,
+        handler: F,
+    ) -> Self
     where
         InputScheme: Clone + Default + Message + Send + 'static,
         OutputScheme: Clone + Default + Message + Send + 'static,
@@ -104,7 +102,11 @@ where
         self
     }
 
-    pub fn add_server_streaming_fn<InputScheme, OutputScheme, RspStream, F, Fut>(mut self, name: &str, handler: F) -> Self
+    pub fn add_server_streaming_fn<InputScheme, OutputScheme, RspStream, F, Fut>(
+        mut self,
+        name: &str,
+        handler: F,
+    ) -> Self
     where
         InputScheme: Clone + Default + Message + Send + 'static,
         OutputScheme: Clone + Default + Message + Send + 'static,
@@ -128,7 +130,11 @@ where
         self
     }
 
-    pub fn add_client_streaming_fn<InputScheme, OutputScheme, F, Fut>(mut self, name: &str, handler: F) -> Self
+    pub fn add_client_streaming_fn<InputScheme, OutputScheme, F, Fut>(
+        mut self,
+        name: &str,
+        handler: F,
+    ) -> Self
     where
         InputScheme: Clone + Default + Message + Send + 'static,
         OutputScheme: Clone + Default + Message + Send + 'static,
@@ -144,11 +150,9 @@ where
 
         self.router = self.router.route_service(
             name,
-            axum::routing::post_service(
-                WithEncodingOption::new(MakeClientStreamingSvc::new(
-                    handler_service,
-                )
-            )),
+            axum::routing::post_service(WithEncodingOption::new(MakeClientStreamingSvc::new(
+                handler_service,
+            ))),
         );
         self
     }

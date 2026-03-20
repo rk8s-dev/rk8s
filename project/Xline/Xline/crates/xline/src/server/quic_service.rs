@@ -16,10 +16,9 @@ use super::{
     lease_server::LeaseServer, maintenance::MaintenanceServer, watch_server::WatchServer,
 };
 use crate::rpc::{
-    AlarmRequest, AuthenticateRequest, CompactionRequest,
-    LeaseKeepAliveRequest, LeaseRevokeRequest, LeaseTimeToLiveRequest,
-    MemberAddRequest, MemberListRequest, MemberPromoteRequest, MemberRemoveRequest,
-    MemberUpdateRequest, SnapshotRequest, WatchRequest,
+    AlarmRequest, AuthenticateRequest, CompactionRequest, LeaseKeepAliveRequest,
+    LeaseRevokeRequest, LeaseTimeToLiveRequest, MemberAddRequest, MemberListRequest,
+    MemberPromoteRequest, MemberRemoveRequest, MemberUpdateRequest, SnapshotRequest, WatchRequest,
 };
 
 #[derive(Clone)]

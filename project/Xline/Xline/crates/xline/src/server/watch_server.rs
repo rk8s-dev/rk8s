@@ -14,11 +14,11 @@ use xlineapi::command::KeyRange;
 // TODO: use our own status type
 // use xlinerpc::status::Status;
 use crate::{
-    router::endpoint::EndPoint as RouterEndpoint,
     header_gen::HeaderGenerator,
+    router::endpoint::EndPoint as RouterEndpoint,
     rpc::{
-        RequestUnion, ResponseHeader, WatchCancelRequest, WatchCreateRequest,
-        WatchProgressRequest, WatchRequest, WatchResponse,
+        RequestUnion, ResponseHeader, WatchCancelRequest, WatchCreateRequest, WatchProgressRequest,
+        WatchRequest, WatchResponse,
     },
     storage::kvwatcher::{KvWatcher, KvWatcherOps, WatchEvent, WatchId, WatchIdGenerator},
 };
@@ -418,7 +418,6 @@ where
     }
 }
 
-
 pub(crate) struct Server {
     watch_server: Arc<WatchServer>,
 }
@@ -436,13 +435,13 @@ impl Server {
         }
     }
     pub(crate) fn endpoint(self) -> RouterEndpoint<Arc<WatchServer>> {
-        RouterEndpoint::new(self.watch_server)
-            .add_streaming_fn(
-                "/Watch",
-                move |this: Arc<WatchServer>, request: tonic::Request<tonic::Streaming<WatchRequest>>| async move {
-                    this.watch(request).await
-                },
-            )
+        RouterEndpoint::new(self.watch_server).add_streaming_fn(
+            "/Watch",
+            move |this: Arc<WatchServer>,
+                  request: tonic::Request<tonic::Streaming<WatchRequest>>| async move {
+                this.watch(request).await
+            },
+        )
     }
 }
 

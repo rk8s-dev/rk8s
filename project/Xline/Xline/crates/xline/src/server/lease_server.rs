@@ -3,10 +3,7 @@ use std::{pin::Pin, sync::Arc, time::Duration};
 use async_stream::{stream, try_stream};
 use clippy_utilities::NumericCast;
 use curp::members::ClusterInfo;
-use futures::{
-    StreamExt,
-    stream::Stream
-};
+use futures::{StreamExt, stream::Stream};
 use tokio::time;
 use tonic::Status;
 use tonic::transport::{ClientTlsConfig, Endpoint};
@@ -22,9 +19,9 @@ use xlineapi::{
 // TODO: use our own status type
 // use xlinerpc::status::Status;
 use crate::{
-    router::endpoint::EndPoint as RouterEndpoint,
     id_gen::IdGenerator,
     metrics,
+    router::endpoint::EndPoint as RouterEndpoint,
     rpc::{
         LeaseClient, LeaseGrantRequest, LeaseGrantResponse, LeaseKeepAliveRequest,
         LeaseKeepAliveResponse, LeaseLeasesRequest, LeaseLeasesResponse, LeaseRevokeRequest,
@@ -340,13 +337,15 @@ impl LeaseServer {
         Ok(tonic::Response::new(res))
     }
 
-
     /// `LeaseKeepAlive` keeps the lease alive by streaming keep alive requests from the client
     /// to the server and streaming keep alive responses from the server to the client.
     async fn lease_keep_alive(
         &self,
         request: tonic::Request<tonic::Streaming<LeaseKeepAliveRequest>>,
-    ) -> Result<tonic::Response<Pin<Box<dyn Stream<Item = Result<LeaseKeepAliveResponse, Status>> + Send>>>, Status> {
+    ) -> Result<
+        tonic::Response<Pin<Box<dyn Stream<Item = Result<LeaseKeepAliveResponse, Status>> + Send>>>,
+        Status,
+    > {
         debug!("Receive LeaseKeepAliveRequest {:?}", request);
         let stream = self.lease_keep_alive_stream(request.into_inner()).await?;
         Ok(tonic::Response::new(stream))
