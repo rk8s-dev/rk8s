@@ -31,7 +31,7 @@ rust_library(
     rustc_flags = ["@$(location :prost-build-manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/heck/0.4.1:heck",
+        "//third-party/rust/crates/heck/0.5.0:heck",
         "//third-party/rust/crates/itertools/0.14.0:itertools",
         "//third-party/rust/crates/log/0.4.29:log",
         "//third-party/rust/crates/multimap/0.10.1:multimap",

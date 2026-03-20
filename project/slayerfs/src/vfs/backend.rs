@@ -1,4 +1,4 @@
-use crate::chuck::BlockStore;
+use crate::chunk::BlockStore;
 use crate::meta::MetaLayer;
 use std::sync::Arc;
 

@@ -4,13 +4,6 @@ use std::{
     time::{Duration, Instant},
 };
 
-use curp_test_utils::test_cmd::{LogIndexResult, TestCommand, TestCommandResult};
-use futures::{Stream, future::BoxFuture};
-use tonic::Status;
-use tonic::transport::ClientTlsConfig;
-use tracing_test::traced_test;
-// TODO: use our own status type
-// use xlinerpc::status::Status;
 use super::{
     state::State,
     stream::{Streaming, StreamingConfig},
@@ -31,6 +24,10 @@ use crate::{
         connect::{ConnectApi, MockConnectApi},
     },
 };
+use curp_test_utils::test_cmd::{LogIndexResult, TestCommand, TestCommandResult};
+use futures::{Stream, future::BoxFuture};
+use tracing_test::traced_test;
+use xlinerpc::status::Status;
 
 /// Create a mocked connects with server id from 0~size
 #[allow(trivial_casts)] // Trait object with high ranked type inferences failed, cast manually
@@ -57,16 +54,8 @@ fn init_unary_client(
     leader: Option<ServerId>,
     term: u64,
     cluster_version: u64,
-    tls_config: Option<ClientTlsConfig>,
 ) -> Unary<TestCommand> {
-    let state = State::new_arc(
-        connects,
-        local_server,
-        leader,
-        term,
-        cluster_version,
-        tls_config,
-    );
+    let state = State::new_arc(connects, local_server, leader, term, cluster_version);
     Unary::new(
         state,
         UnaryConfig::new(Duration::from_secs(0), Duration::from_secs(0)),
@@ -93,7 +82,7 @@ async fn test_unary_fetch_clusters_serializable() {
             })
         });
     });
-    let unary = init_unary_client(connects, None, None, 0, 0, None);
+    let unary = init_unary_client(connects, None, None, 0, 0);
     let res = unary.fetch_cluster(false).await.unwrap();
     assert_eq!(
         res.into_peer_urls(),
@@ -126,7 +115,7 @@ async fn test_unary_fetch_clusters_serializable_local_first() {
                 })
             });
     });
-    let unary = init_unary_client(connects, Some(1), None, 0, 0, None);
+    let unary = init_unary_client(connects, Some(1), None, 0, 0);
     let res = unary.fetch_cluster(false).await.unwrap();
     assert!(res.members.is_empty());
 }
@@ -243,7 +232,7 @@ async fn test_unary_fetch_clusters_linearizable() {
                 Ok(resp)
             });
     });
-    let unary = init_unary_client(connects, None, None, 0, 0, None);
+    let unary = init_unary_client(connects, None, None, 0, 0);
     let res = unary.fetch_cluster(true).await.unwrap();
     assert_eq!(
         res.into_peer_urls(),
@@ -376,7 +365,7 @@ async fn test_unary_fetch_clusters_linearizable_failed() {
                 Ok(resp)
             });
     });
-    let unary = init_unary_client(connects, None, None, 0, 0, None);
+    let unary = init_unary_client(connects, None, None, 0, 0);
     let res = unary.fetch_cluster(true).await.unwrap_err();
     // only server(0, 1)'s responses are valid, less than majority quorum(3), got a
     // mocked RpcTransport to retry
@@ -426,7 +415,7 @@ async fn test_unary_propose_fast_path_works() {
             Ok(resp)
         });
     });
-    let unary = init_unary_client(connects, None, Some(0), 1, 0, None);
+    let unary = init_unary_client(connects, None, Some(0), 1, 0);
     let res = unary
         .propose(&TestCommand::new_put(vec![1], 1), None, true)
         .await
@@ -460,7 +449,7 @@ async fn test_unary_propose_slow_path_works() {
         });
     });
 
-    let unary = init_unary_client(connects, None, Some(0), 1, 0, None);
+    let unary = init_unary_client(connects, None, Some(0), 1, 0);
     let start_at = Instant::now();
     let res = unary
         .propose(&TestCommand::new_put(vec![1], 1), None, false)
@@ -503,7 +492,7 @@ async fn test_unary_propose_fast_path_fallback_slow_path() {
             Ok(resp)
         });
     });
-    let unary = init_unary_client(connects, None, Some(0), 1, 0, None);
+    let unary = init_unary_client(connects, None, Some(0), 1, 0);
     let start_at = Instant::now();
     let res = unary
         .propose(&TestCommand::new_put(vec![1], 1), None, true)
@@ -549,7 +538,7 @@ async fn test_unary_propose_return_early_err() {
             conn.expect_record()
                 .return_once(move |_req, _timeout| Err(err));
         });
-        let unary = init_unary_client(connects, None, Some(0), 1, 0, None);
+        let unary = init_unary_client(connects, None, Some(0), 1, 0);
         let err = unary
             .propose(&TestCommand::new_put(vec![1], 1), None, true)
             .await
@@ -586,7 +575,7 @@ async fn test_retry_propose_return_no_retry_error() {
             conn.expect_record()
                 .return_once(move |_req, _timeout| Err(err));
         });
-        let unary = init_unary_client(connects, None, Some(0), 1, 0, None);
+        let unary = init_unary_client(connects, None, Some(0), 1, 0);
         let retry = Retry::new(
             unary,
             RetryConfig::new_fixed(Duration::from_millis(100), 5),
@@ -666,7 +655,7 @@ async fn test_retry_propose_return_retry_error() {
             conn.expect_record()
                 .returning(move |_req, _timeout| Err(err.clone()));
         });
-        let unary = init_unary_client(connects, None, Some(0), 1, 0, None);
+        let unary = init_unary_client(connects, None, Some(0), 1, 0);
         let retry = Retry::new(
             unary,
             RetryConfig::new_fixed(Duration::from_millis(10), 5),
@@ -705,7 +694,7 @@ async fn test_read_index_success() {
             Ok(resp)
         });
     });
-    let unary = init_unary_client(connects, None, Some(0), 1, 0, None);
+    let unary = init_unary_client(connects, None, Some(0), 1, 0);
     let res = unary
         .propose(&TestCommand::default(), None, true)
         .await
@@ -738,7 +727,7 @@ async fn test_read_index_fail() {
             Ok(resp)
         });
     });
-    let unary = init_unary_client(connects, None, Some(0), 1, 0, None);
+    let unary = init_unary_client(connects, None, Some(0), 1, 0);
     let res = unary.propose(&TestCommand::default(), None, true).await;
     assert!(res.is_err());
 }
@@ -884,7 +873,7 @@ fn init_stream_client(
     term: u64,
     cluster_version: u64,
 ) -> Streaming {
-    let state = State::new_arc(connects, local_server, leader, term, cluster_version, None);
+    let state = State::new_arc(connects, local_server, leader, term, cluster_version);
     Streaming::new(state, StreamingConfig::new(Duration::from_secs(1)))
 }
 

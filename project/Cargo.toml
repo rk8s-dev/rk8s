@@ -1,13 +1,11 @@
 [workspace]
 members = [
     "distribution",
-    "libbridge",
     "libcni",
     "libcsi",
     "libnetwork",
     "libfuse-fs", 
     "rfuse3", 
-    "libipam", 
     "rkforge",
     "rkl",
     "rks",
@@ -21,17 +19,15 @@ members = [
     "aardvark-dns"
 ]
 
-default-members = ["distribution", "rkl", "libbridge", "libipam", "rkforge", "libnetwork", "rks"]
+default-members = ["distribution", "rkl", "rkforge", "rks"]
 resolver = "2"
 
 [workspace.dependencies]
 common = { path = "common" }
 distribution = { path = "distribution" }
-libbridge = { path = "libbridge" }
 libcni = { path = "libcni" }
 libcsi = { path = "libcsi" }
 libfuse-fs = { path = "libfuse-fs" }
-libipam = { path = "libipam" }
 libnetwork = { path = "libnetwork" }
 libscheduler = { path = "libscheduler" }
 libvault = { path = "libvault" }
@@ -73,6 +69,7 @@ blake2b_simd = "1.0"
 blake3 = "1.8"
 builder-pattern = "0.4.2"
 bytes = "1.10.1"
+object_store = { version = "0.13", features = ["aws"] }
 caps = "0.5.5"
 chrono = { version = "0.4.42", features = ["serde"] }
 clap = { version = "4.5.49", features = ["derive"] }
@@ -139,7 +136,7 @@ memmap2 = "0.9.7"
 moka = "0.12.11"
 native-tls = "0.2.14"
 nc = "0.9.6"
-netlink-packet-route = "0.22.0"
+netlink-packet-route = "0.25.1"
 nftables = "0.6.3"
 nix = "0.29.0"
 oci-client = "0.15.0"
@@ -166,7 +163,7 @@ rcgen = "0.12.1"
 regex = "1.12.2"
 reqwest = "0.12.24"
 ring = "0.17.14"
-rtnetlink = "0.16.0"
+rtnetlink = "0.18.1"
 rust-criu = "0.4.0"
 rustls = "0.23.16"
 rustls-pemfile = "2.1.0"
@@ -208,6 +205,7 @@ tower = "0.5.2"
 tower-http = "0.6.6"
 tower-sessions = { version = "0.12.3", features = ["memory-store"] }
 tracing = "0.1.41"
+tracing-log = "0.2.0"
 tracing-appender = "0.2.3"
 tracing-journald = "0.3.1"
 tracing-subscriber = "0.3.20"

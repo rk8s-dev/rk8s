@@ -15,16 +15,14 @@ mod quic;
 mod task;
 
 use commands::{
-    compose::ComposeCommand, container::ContainerCommand, deployment::DeploymentCommand,
-    pod::PodCommand, replicaset::ReplicaSetCommand, service::ServiceCommand,
+    container::ContainerCommand, deployment::DeploymentCommand, logs::LogCommand, pod::PodCommand,
+    replicaset::ReplicaSetCommand, service::ServiceCommand,
 };
 use commands::{
-    compose::compose_execute, container::container_execute, deployment::deployment_execute,
+    container::container_execute, deployment::deployment_execute, logs::logs_execute,
     pod::pod_execute, replicaset::replicaset_execute, service::service_execute,
 };
 use tracing::error;
-
-use crate::commands::volume::{VolumeCommand, volume_execute};
 
 use rkforge::overlayfs::MountArgs;
 
@@ -49,11 +47,10 @@ impl Cli {
         match self.workload {
             Workload::Pod(cmd) => pod_execute(cmd),
             Workload::Container(cmd) => container_execute(cmd),
-            Workload::Compose(cmd) => compose_execute(cmd),
-            Workload::Volume(cmd) => volume_execute(cmd),
             Workload::Replicaset(cmd) => replicaset_execute(cmd),
             Workload::Deployment(cmd) => deployment_execute(cmd),
             Workload::Service(cmd) => service_execute(cmd),
+            Workload::Logs(cmd) => logs_execute(cmd),
             Workload::Mount(args) => rkforge::overlayfs::do_mount(args),
         }
     }
@@ -67,15 +64,6 @@ enum Workload {
     #[command(subcommand, about = "Manage standalone containers", alias = "c")]
     Container(ContainerCommand),
 
-    #[command(
-        subcommand,
-        about = "Manage multi-container apps using compose",
-        alias = "C"
-    )]
-    Compose(ComposeCommand),
-
-    #[command(subcommand, about = "Manage the volume type", alias = "v")]
-    Volume(VolumeCommand),
     #[command(subcommand, about = "Manage ReplicaSets", alias = "rs")]
     Replicaset(ReplicaSetCommand),
 
@@ -84,6 +72,9 @@ enum Workload {
 
     #[command(subcommand, about = "Manage Services", alias = "svc")]
     Service(ServiceCommand),
+
+    #[command(about = "Get logs from a pod's container")]
+    Logs(LogCommand),
 
     /// Internal: overlay mount daemon (hidden from help)
     #[command(hide = true)]
@@ -103,11 +94,19 @@ fn main() -> Result<(), anyhow::Error> {
 }
 
 fn init_tracing(is_daemon: bool) -> Result<(), anyhow::Error> {
-    let console_filter = EnvFilter::from_default_env().add_directive(
-        "rfuse3=off"
-            .parse()
-            .expect("failed to filter [rfuse3]'s log"),
-    );
+    tracing_log::LogTracer::init().map_err(|e| anyhow::anyhow!("log tracer init failed: {e}"))?;
+
+    let console_filter = EnvFilter::from_default_env()
+        .add_directive(
+            "rfuse3=off"
+                .parse()
+                .expect("failed to filter [rfuse3]'s log"),
+        )
+        .add_directive(
+            "netlink_packet_route=error"
+                .parse()
+                .expect("failed to filter [netlink_packet_route]'s log"),
+        );
     let console_layer = tracing_subscriber::fmt::layer()
         .with_ansi(true)
         .with_filter(console_filter);

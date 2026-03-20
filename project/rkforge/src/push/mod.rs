@@ -2,11 +2,14 @@ mod pusher;
 
 use crate::config::auth::AuthConfig;
 use crate::push::pusher::{PushTask, Pusher};
+use crate::registry::{
+    parse_registry_host, parse_registry_host_arg, resolve_client_ref_auth as resolve_ref_with_auth,
+};
 use crate::rt::block_on;
 use crate::storage::{DigestExt, parse_image_ref};
 use anyhow::{Context, bail};
 use clap::Parser;
-use oci_client::client::{ClientConfig, ImageLayer};
+use oci_client::client::ImageLayer;
 use oci_client::manifest::{OciImageIndex, OciManifest};
 use oci_client::secrets::RegistryAuth;
 use oci_client::{Client, client};
@@ -36,19 +39,32 @@ pub struct PushArgs {
     /// Image path (default current directory)
     #[arg(long)]
     path: Option<String>,
-    #[arg(long)]
+    /// Registry host in `host[:port]` format.
+    #[arg(long, value_parser = parse_registry_host_arg)]
     url: Option<String>,
+    /// Skip TLS certificate verification for HTTPS registry.
+    #[arg(long)]
+    skip_tls_verify: bool,
 }
 
 pub fn push(args: PushArgs) -> anyhow::Result<()> {
     let path = args.path.unwrap_or(".".to_string());
-    push_from_layout(args.image_ref, path, args.url)
+    push_from_layout_with_tls(args.image_ref, path, args.url, args.skip_tls_verify)
 }
 
 pub fn push_from_layout(
     image_ref: impl Into<String>,
     path: impl AsRef<Path>,
     url: Option<String>,
+) -> anyhow::Result<()> {
+    push_from_layout_with_tls(image_ref, path, url, false)
+}
+
+fn push_from_layout_with_tls(
+    image_ref: impl Into<String>,
+    path: impl AsRef<Path>,
+    url: Option<String>,
+    skip_tls_verify: bool,
 ) -> anyhow::Result<()> {
     let image_ref = image_ref.into();
     let path = path.as_ref().to_path_buf();
@@ -60,28 +76,20 @@ pub fn push_from_layout(
     let requested_repo = parsed_input_ref.repository().to_string();
 
     let url = match url {
-        Some(url) => auth_config.resolve_url(Some(url)),
-        None if has_explicit_registry(&image_ref) => parsed_input_ref.registry().to_string(),
-        None => auth_config.resolve_url(None::<String>),
+        Some(url) => auth_config.resolve_url(Some(url))?,
+        None if has_explicit_registry(&image_ref) => {
+            parse_registry_host(parsed_input_ref.registry())?
+        }
+        None => auth_config.resolve_url(None::<String>)?,
     };
-
-    let auth_method = auth_config
-        .find_entry_by_url(&url)
-        .map(|entry| RegistryAuth::Bearer(entry.pat.clone()))
-        .unwrap_or(RegistryAuth::Anonymous);
-
-    let client_config = ClientConfig {
-        protocol: client::ClientProtocol::Http,
-        ..Default::default()
-    };
-    let client = Client::new(client_config);
 
     let normalized_image_ref = if let Some(tag) = parsed_input_ref.tag() {
         format!("{requested_repo}:{}", tag)
     } else {
         requested_repo.clone()
     };
-    let image_ref = parse_image_ref(url, normalized_image_ref, None::<String>)?;
+    let (client, image_ref, auth_method) =
+        resolve_ref_with_auth(&auth_config, &url, &normalized_image_ref, skip_tls_verify)?;
     let registry_url = image_ref.registry().to_string();
 
     block_on(async move {

@@ -1,8 +1,7 @@
-use std::sync::Arc;
-
-use tonic::transport::Channel;
-
-use crate::{AuthService, error::Result};
+use crate::{
+    error::Result,
+    transport::{Channel, MethodId},
+};
 use xlineapi::{
     MemberAddResponse, MemberListResponse, MemberPromoteResponse, MemberRemoveResponse,
     MemberUpdateResponse,
@@ -12,21 +11,16 @@ use xlineapi::{
 #[derive(Clone, Debug)]
 #[non_exhaustive]
 pub struct ClusterClient {
-    /// Inner client
-    inner: xlineapi::ClusterClient<AuthService<Channel>>,
+    /// Inner transport
+    inner: Channel,
 }
 
 impl ClusterClient {
     /// Create a new cluster client
     #[inline]
     #[must_use]
-    pub fn new(channel: Channel, token: Option<String>) -> Self {
-        Self {
-            inner: xlineapi::ClusterClient::new(AuthService::new(
-                channel,
-                token.and_then(|t| t.parse().ok().map(Arc::new)),
-            )),
-        }
+    pub(crate) fn new(channel: Channel) -> Self {
+        Self { inner: channel }
     }
 
     /// Add a new member to the cluster.
@@ -65,14 +59,16 @@ impl ClusterClient {
         peer_urls: P,
         is_learner: bool,
     ) -> Result<MemberAddResponse> {
-        Ok(self
-            .inner
-            .member_add(xlineapi::MemberAddRequest {
-                peer_ur_ls: peer_urls.into().into_iter().map(Into::into).collect(),
-                is_learner,
-            })
-            .await?
-            .into_inner())
+        self.inner
+            .unary(
+                MethodId::XlineMemberAdd,
+                xlineapi::MemberAddRequest {
+                    peer_ur_ls: peer_urls.into().into_iter().map(Into::into).collect(),
+                    is_learner,
+                },
+            )
+            .await
+            .map_err(Into::into)
     }
 
     /// Remove an existing member from the cluster.
@@ -103,11 +99,13 @@ impl ClusterClient {
     ///
     #[inline]
     pub async fn member_remove(&mut self, id: u64) -> Result<MemberRemoveResponse> {
-        Ok(self
-            .inner
-            .member_remove(xlineapi::MemberRemoveRequest { id })
-            .await?
-            .into_inner())
+        self.inner
+            .unary(
+                MethodId::XlineMemberRemove,
+                xlineapi::MemberRemoveRequest { id },
+            )
+            .await
+            .map_err(Into::into)
     }
 
     /// Promote an existing member to be the leader of the cluster.
@@ -138,11 +136,13 @@ impl ClusterClient {
     ///
     #[inline]
     pub async fn member_promote(&mut self, id: u64) -> Result<MemberPromoteResponse> {
-        Ok(self
-            .inner
-            .member_promote(xlineapi::MemberPromoteRequest { id })
-            .await?
-            .into_inner())
+        self.inner
+            .unary(
+                MethodId::XlineMemberPromote,
+                xlineapi::MemberPromoteRequest { id },
+            )
+            .await
+            .map_err(Into::into)
     }
 
     /// Update an existing member in the cluster.
@@ -177,14 +177,16 @@ impl ClusterClient {
         id: u64,
         peer_urls: P,
     ) -> Result<MemberUpdateResponse> {
-        Ok(self
-            .inner
-            .member_update(xlineapi::MemberUpdateRequest {
-                id,
-                peer_ur_ls: peer_urls.into().into_iter().map(Into::into).collect(),
-            })
-            .await?
-            .into_inner())
+        self.inner
+            .unary(
+                MethodId::XlineMemberUpdate,
+                xlineapi::MemberUpdateRequest {
+                    id,
+                    peer_ur_ls: peer_urls.into().into_iter().map(Into::into).collect(),
+                },
+            )
+            .await
+            .map_err(Into::into)
     }
 
     /// List all members in the cluster.
@@ -214,10 +216,12 @@ impl ClusterClient {
     /// }
     #[inline]
     pub async fn member_list(&mut self, linearizable: bool) -> Result<MemberListResponse> {
-        Ok(self
-            .inner
-            .member_list(xlineapi::MemberListRequest { linearizable })
-            .await?
-            .into_inner())
+        self.inner
+            .unary(
+                MethodId::XlineMemberList,
+                xlineapi::MemberListRequest { linearizable },
+            )
+            .await
+            .map_err(Into::into)
     }
 }

@@ -19,7 +19,7 @@ pub enum ServerError {
 
     /// Rpc Error
     #[error("rpc error: {0}")]
-    RpcError(#[from] tonic::transport::Error),
+    RpcError(String),
 
     /// Storage Error
     #[error("storage error: {0}")]

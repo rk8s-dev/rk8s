@@ -44,7 +44,20 @@ pub(crate) struct KvServer {
     /// Compact events
     compact_events: Arc<DashMap<u64, Arc<Event>>>,
     /// Next `compact_id`
-    next_compact_id: AtomicU64,
+    next_compact_id: Arc<AtomicU64>,
+}
+
+impl Clone for KvServer {
+    fn clone(&self) -> Self {
+        Self {
+            kv_storage: Arc::clone(&self.kv_storage),
+            auth_storage: Arc::clone(&self.auth_storage),
+            compact_timeout: self.compact_timeout,
+            client: Arc::clone(&self.client),
+            compact_events: Arc::clone(&self.compact_events),
+            next_compact_id: Arc::clone(&self.next_compact_id),
+        }
+    }
 }
 
 impl KvServer {
@@ -63,7 +76,7 @@ impl KvServer {
             compact_timeout,
             client,
             compact_events,
-            next_compact_id: AtomicU64::new(0),
+            next_compact_id: Arc::new(AtomicU64::new(0)),
         }
     }
 
@@ -234,7 +247,7 @@ impl KvServer {
     /// key-value store should be periodically compacted or the event
     /// history will continue to grow indefinitely.
     #[instrument(skip_all)]
-    async fn compact(
+    pub(crate) async fn compact(
         &self,
         request: tonic::Request<CompactionRequest>,
     ) -> Result<tonic::Response<CompactionResponse>, Status> {

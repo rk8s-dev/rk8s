@@ -30,6 +30,7 @@ use crate::{
 };
 
 /// Auth Server
+#[derive(Clone)]
 pub(crate) struct AuthServer {
     /// Consensus client
     client: Arc<CurpClient>,
@@ -83,7 +84,7 @@ impl AuthServer {
         Ok(tonic::Response::new(res_wrapper.into()))
     }
 
-    async fn auth_enable(
+    pub(crate) async fn auth_enable(
         &self,
         request: tonic::Request<AuthEnableRequest>,
     ) -> Result<tonic::Response<AuthEnableResponse>, Status> {
@@ -91,7 +92,7 @@ impl AuthServer {
         self.handle_req(request).await
     }
 
-    async fn auth_disable(
+    pub(crate) async fn auth_disable(
         &self,
         request: tonic::Request<AuthDisableRequest>,
     ) -> Result<tonic::Response<AuthDisableResponse>, Status> {
@@ -99,7 +100,7 @@ impl AuthServer {
         self.handle_req(request).await
     }
 
-    async fn auth_status(
+    pub(crate) async fn auth_status(
         &self,
         request: tonic::Request<AuthStatusRequest>,
     ) -> Result<tonic::Response<AuthStatusResponse>, Status> {
@@ -107,7 +108,7 @@ impl AuthServer {
         self.handle_req(request).await
     }
 
-    async fn authenticate(
+    pub(crate) async fn authenticate(
         &self,
         request: tonic::Request<AuthenticateRequest>,
     ) -> Result<tonic::Response<AuthenticateResponse>, Status> {
@@ -115,7 +116,7 @@ impl AuthServer {
         self.handle_req(request).await
     }
 
-    async fn user_add(
+    pub(crate) async fn user_add(
         &self,
         mut request: tonic::Request<AuthUserAddRequest>,
     ) -> Result<tonic::Response<AuthUserAddResponse>, Status> {
@@ -129,7 +130,7 @@ impl AuthServer {
         self.handle_req(request).await
     }
 
-    async fn user_get(
+    pub(crate) async fn user_get(
         &self,
         request: tonic::Request<AuthUserGetRequest>,
     ) -> Result<tonic::Response<AuthUserGetResponse>, Status> {
@@ -137,7 +138,7 @@ impl AuthServer {
         self.handle_req(request).await
     }
 
-    async fn user_list(
+    pub(crate) async fn user_list(
         &self,
         request: tonic::Request<AuthUserListRequest>,
     ) -> Result<tonic::Response<AuthUserListResponse>, Status> {
@@ -145,7 +146,7 @@ impl AuthServer {
         self.handle_req(request).await
     }
 
-    async fn user_delete(
+    pub(crate) async fn user_delete(
         &self,
         request: tonic::Request<AuthUserDeleteRequest>,
     ) -> Result<tonic::Response<AuthUserDeleteResponse>, Status> {
@@ -153,7 +154,7 @@ impl AuthServer {
         self.handle_req(request).await
     }
 
-    async fn user_change_password(
+    pub(crate) async fn user_change_password(
         &self,
         mut request: tonic::Request<AuthUserChangePasswordRequest>,
     ) -> Result<tonic::Response<AuthUserChangePasswordResponse>, Status> {
@@ -166,7 +167,7 @@ impl AuthServer {
         self.handle_req(request).await
     }
 
-    async fn user_grant_role(
+    pub(crate) async fn user_grant_role(
         &self,
         request: tonic::Request<AuthUserGrantRoleRequest>,
     ) -> Result<tonic::Response<AuthUserGrantRoleResponse>, Status> {
@@ -174,7 +175,7 @@ impl AuthServer {
         self.handle_req(request).await
     }
 
-    async fn user_revoke_role(
+    pub(crate) async fn user_revoke_role(
         &self,
         request: tonic::Request<AuthUserRevokeRoleRequest>,
     ) -> Result<tonic::Response<AuthUserRevokeRoleResponse>, Status> {
@@ -182,7 +183,7 @@ impl AuthServer {
         self.handle_req(request).await
     }
 
-    async fn role_add(
+    pub(crate) async fn role_add(
         &self,
         request: tonic::Request<AuthRoleAddRequest>,
     ) -> Result<tonic::Response<AuthRoleAddResponse>, Status> {
@@ -191,7 +192,7 @@ impl AuthServer {
         self.handle_req(request).await
     }
 
-    async fn role_get(
+    pub(crate) async fn role_get(
         &self,
         request: tonic::Request<AuthRoleGetRequest>,
     ) -> Result<tonic::Response<AuthRoleGetResponse>, Status> {
@@ -199,7 +200,7 @@ impl AuthServer {
         self.handle_req(request).await
     }
 
-    async fn role_list(
+    pub(crate) async fn role_list(
         &self,
         request: tonic::Request<AuthRoleListRequest>,
     ) -> Result<tonic::Response<AuthRoleListResponse>, Status> {
@@ -207,7 +208,7 @@ impl AuthServer {
         self.handle_req(request).await
     }
 
-    async fn role_delete(
+    pub(crate) async fn role_delete(
         &self,
         request: tonic::Request<AuthRoleDeleteRequest>,
     ) -> Result<tonic::Response<AuthRoleDeleteResponse>, Status> {
@@ -215,7 +216,7 @@ impl AuthServer {
         self.handle_req(request).await
     }
 
-    async fn role_grant_permission(
+    pub(crate) async fn role_grant_permission(
         &self,
         request: tonic::Request<AuthRoleGrantPermissionRequest>,
     ) -> Result<tonic::Response<AuthRoleGrantPermissionResponse>, Status> {

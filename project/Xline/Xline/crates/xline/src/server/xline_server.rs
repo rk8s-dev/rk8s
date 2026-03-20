@@ -6,6 +6,7 @@ use anyhow::{Result, anyhow};
 use clippy_utilities::{NumericCast, OverflowArithmetic};
 use curp::{
     self,
+    rpc::TransportConfig,
     client::ClientBuilder as CurpClientBuilder,
     members::{ClusterInfo, get_cluster_info_from_remote},
     server::{DB as CurpDB, Rpc, StorageApi as _},
@@ -14,7 +15,6 @@ use dashmap::DashMap;
 use engine::{MemorySnapshotAllocator, RocksSnapshotAllocator, SnapshotAllocator};
 use jsonwebtoken::{DecodingKey, EncodingKey};
 use tonic::{
-    Status,
     // TODO: use our own status type
     // use xlinerpc::status::Status;
     transport::{
@@ -89,7 +89,7 @@ use crate::{
 pub(crate) type CurpServer = Rpc<Command, CommandExecutor, State<Arc<CurpClient>>>;
 
 /// Xline server
-#[derive(Debug)]
+#[allow(unused)]
 pub struct XlineServer {
     /// Cluster information
     cluster_info: Arc<ClusterInfo>,
@@ -105,12 +105,33 @@ pub struct XlineServer {
     client_tls_config: Option<ClientTlsConfig>,
     /// Server tls config
     _server_tls_config: Option<ServerTlsConfig>,
+    /// QUIC client for curp peer communication
+    quic_client: Arc<gm_quic::prelude::QuicClient>,
+    /// Peer TLS certificate (DER) for QUIC server, None = self-signed fallback
+    peer_cert_der: Option<Vec<u8>>,
+    /// Peer TLS private key (DER) for QUIC server
+    peer_key_der: Option<Vec<u8>>,
+    /// Peer CA certificate (DER) for QUIC server mTLS client verification
+    peer_ca_cert_der: Option<Vec<u8>>,
     /// Task Manager
     task_manager: Arc<TaskManager>,
     /// Curp storage
     curp_storage: Arc<CurpDB<Command>>,
     /// TLS Config
     tls_config: TlsConfig,
+}
+
+impl std::fmt::Debug for XlineServer {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("XlineServer")
+            .field("cluster_info", &self.cluster_info)
+            .field("cluster_config", &self.cluster_config)
+            .field("storage_config", &self.storage_config)
+            .field("compact_config", &self.compact_config)
+            .field("auth_config", &self.auth_config)
+            .field("quic_client", &"QuicClient(..)")
+            .finish()
+    }
 }
 
 impl XlineServer {
@@ -129,13 +150,26 @@ impl XlineServer {
     ) -> Result<Self> {
         let (client_tls_config, server_tls_config) = Self::read_tls_config(&tls_config).await?;
         let curp_storage = Arc::new(CurpDB::open(&cluster_config.curp_config().engine_cfg)?);
+
+        // Read peer TLS certs for QUIC server (DER format)
+        let (peer_cert_der, peer_key_der) = Self::read_peer_tls_der(&tls_config).await?;
+
+        // Read peer CA cert for QUIC server mTLS
+        let peer_ca_cert_der = if let Some(ca_path) = tls_config.peer_ca_cert_path() {
+            Some(fs::read(ca_path).await?)
+        } else {
+            None
+        };
+
+        // Build QUIC client for curp peer communication with proper TLS
+        let quic_client = Arc::new(Self::build_quic_client(&tls_config).await?);
+        let transport = TransportConfig {
+            client: Arc::clone(&quic_client),
+            dns_fallback: curp::rpc::DnsFallback::Disabled,
+        };
+
         let cluster_info = Arc::new(
-            Self::init_cluster_info(
-                &cluster_config,
-                curp_storage.as_ref(),
-                client_tls_config.as_ref(),
-            )
-            .await?,
+            Self::init_cluster_info(&cluster_config, curp_storage.as_ref(), &transport).await?,
         );
         Ok(Self {
             cluster_info,
@@ -145,6 +179,10 @@ impl XlineServer {
             auth_config,
             client_tls_config,
             _server_tls_config: server_tls_config,
+            quic_client,
+            peer_cert_der,
+            peer_key_der,
+            peer_ca_cert_der,
             task_manager: Arc::new(TaskManager::new()),
             curp_storage,
             tls_config,
@@ -155,7 +193,7 @@ impl XlineServer {
     async fn init_cluster_info(
         cluster_config: &ClusterConfig,
         curp_storage: &CurpDB<Command>,
-        tls_config: Option<&ClientTlsConfig>,
+        transport: &TransportConfig,
     ) -> Result<ClusterInfo> {
         info!("name = {:?}", cluster_config.name());
         info!("cluster_peers = {:?}", cluster_config.peers());
@@ -186,7 +224,7 @@ impl XlineServer {
                     &self_peer_urls,
                     cluster_config.name(),
                     *cluster_config.client_config().wait_synced_timeout(),
-                    tls_config,
+                    transport,
                 )
                 .await
                 .ok_or_else(|| anyhow!("Failed to get cluster info from remote"))?;
@@ -297,6 +335,7 @@ impl XlineServer {
             Arc::new(IdGenerator::new(member_id)),
         )
     }
+
     /// Init xline and curp router
     ///
     /// # Errors
@@ -356,9 +395,10 @@ impl XlineServer {
     /// Will return `Err` when `tonic::Server` serve return an error
     #[inline]
     pub async fn start_with_quic(&self) -> Result<()> {
-        // parse peer_listen_urls to listen
+        // Start QUIC server for curp peer communication
         let client_listen_urls = self.cluster_config.client_listen_urls().clone();
         let peer_listen_urls = self.cluster_config.peer_listen_urls().clone();
+
         info!("start xline server on {:?}", client_listen_urls);
         info!("start curp server on {:?}", peer_listen_urls);
         let db = DB::open(&self.storage_config.engine)?;
@@ -366,9 +406,10 @@ impl XlineServer {
         let (xline_router, curp_router, curp_client) = self.init_routers(db, key_pair).await?;
         let server = Server::new()
             .add_server("localhost", xline_router, client_listen_urls)
-            .add_server("127.0.0.1", curp_router, peer_listen_urls);
+            .add_server("127.0.0.1", curp_router, peer_listen_urls.clone());
+
         self.task_manager
-            .spawn(TaskName::TonicServer, |n| async move {
+            .spawn(TaskName::CurpServer, |n| async move {
                 tokio::select! {
                     _ = server.serve() => {},
                     _ = n.wait() => {},
@@ -467,14 +508,15 @@ impl XlineServer {
             Arc::clone(&curp_config),
             Arc::clone(&self.curp_storage),
             Arc::clone(&self.task_manager),
-            self.client_tls_config.clone(),
             XlineSpeculativePools::new(Arc::clone(&lease_collection)).into_inner(),
             XlineUncommittedPools::new(lease_collection).into_inner(),
-        );
+            Arc::clone(&self.quic_client),
+        )
+        .map_err(|e| anyhow::anyhow!("failed to create curp service: {e:?}"))?;
 
         let client = Arc::new(
             CurpClientBuilder::new(*self.cluster_config.client_config(), false)
-                .tls_config(self.client_tls_config.clone())
+                .quic_transport(Arc::clone(&self.quic_client))
                 .cluster_version(self.cluster_info.cluster_version())
                 .all_members(self.cluster_info.all_members_peer_urls())
                 .bypass(self.cluster_info.self_id(), curp_server.clone())
@@ -543,7 +585,7 @@ impl XlineServer {
     }
 
     /// Publish the name of current node to cluster
-    async fn publish(&self, curp_client: Arc<CurpClient>) -> Result<(), Status> {
+    async fn publish(&self, curp_client: Arc<CurpClient>) -> Result<(), xlinerpc::Status> {
         curp_client
             .propose_publish(
                 self.cluster_info.self_id(),
@@ -633,5 +675,64 @@ impl XlineServer {
             _ => None,
         };
         Ok((client_tls_config, server_tls_config))
+    }
+
+    /// Build a QUIC client with proper TLS configuration from `TlsConfig`.
+    ///
+    /// If `peer_ca_cert_path` is configured, the CA cert is loaded into the root
+    /// store so the client verifies server identity. If `peer_cert_path` and
+    /// `peer_key_path` are also set, mTLS client authentication is enabled.
+    /// Without any peer TLS config, the client uses an empty trust store (no
+    /// verification) and logs a warning.
+    async fn build_quic_client(tls_config: &TlsConfig) -> Result<gm_quic::prelude::QuicClient> {
+        let mut root_store = rustls::RootCertStore::empty();
+
+        if let Some(ca_path) = tls_config.peer_ca_cert_path() {
+            let ca_pem = fs::read(ca_path).await?;
+            let certs: Vec<_> =
+                rustls_pemfile::certs(&mut &ca_pem[..]).collect::<Result<Vec<_>, _>>()?;
+            for cert in certs {
+                root_store
+                    .add(cert)
+                    .map_err(|e| anyhow!("failed to add peer CA cert: {e}"))?;
+            }
+        } else {
+            warn!(
+                "No peer CA certificate configured; QUIC peer connections will not verify server identity"
+            );
+        }
+
+        let builder = gm_quic::prelude::QuicClient::builder().with_root_certificates(root_store);
+
+        let client = match (tls_config.peer_cert_path(), tls_config.peer_key_path()) {
+            (Some(cert_path), Some(key_path)) => {
+                // gm-quic's with_cert accepts &Path directly (handles PEM/DER parsing)
+                builder
+                    .with_cert(cert_path.as_path(), key_path.as_path())
+                    .build()
+            }
+            _ => builder.without_cert().build(),
+        };
+
+        Ok(client)
+    }
+
+    /// Read peer TLS certificate and private key files as raw bytes for the
+    /// QUIC server. Returns `(None, None)` if not configured. The raw bytes
+    /// (PEM or DER) are passed directly to gm-quic which handles parsing.
+    async fn read_peer_tls_der(
+        tls_config: &TlsConfig,
+    ) -> Result<(Option<Vec<u8>>, Option<Vec<u8>>)> {
+        match (tls_config.peer_cert_path(), tls_config.peer_key_path()) {
+            (Some(cert_path), Some(key_path)) => {
+                let cert_bytes = fs::read(cert_path).await?;
+                let key_bytes = fs::read(key_path).await?;
+                Ok((Some(cert_bytes), Some(key_bytes)))
+            }
+            (Some(_), None) | (None, Some(_)) => {
+                Err(anyhow!("peer_cert_path and peer_key_path must be both set"))
+            }
+            _ => Ok((None, None)),
+        }
     }
 }

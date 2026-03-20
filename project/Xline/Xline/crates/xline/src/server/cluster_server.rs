@@ -24,6 +24,7 @@ use crate::{
 };
 
 /// Cluster Server
+#[derive(Clone)]
 pub(crate) struct ClusterServer {
     /// Consensus client
     client: Arc<CurpClient>,
@@ -54,7 +55,7 @@ impl ClusterServer {
             .collect())
     }
 
-    async fn member_add(
+    pub(crate) async fn member_add(
         &self,
         request: Request<MemberAddRequest>,
     ) -> Result<Response<MemberAddResponse>, Status> {
@@ -82,7 +83,7 @@ impl ClusterServer {
         Ok(Response::new(resp))
     }
 
-    async fn member_remove(
+    pub(crate) async fn member_remove(
         &self,
         request: Request<MemberRemoveRequest>,
     ) -> Result<Response<MemberRemoveResponse>, Status> {
@@ -101,7 +102,7 @@ impl ClusterServer {
         Ok(Response::new(resp))
     }
 
-    async fn member_update(
+    pub(crate) async fn member_update(
         &self,
         request: Request<MemberUpdateRequest>,
     ) -> Result<Response<MemberUpdateResponse>, Status> {
@@ -120,7 +121,7 @@ impl ClusterServer {
         Ok(Response::new(resp))
     }
 
-    async fn member_list(
+    pub(crate) async fn member_list(
         &self,
         request: Request<MemberListRequest>,
     ) -> Result<Response<MemberListResponse>, Status> {
@@ -143,7 +144,7 @@ impl ClusterServer {
         Ok(Response::new(resp))
     }
 
-    async fn member_promote(
+    pub(crate) async fn member_promote(
         &self,
         request: Request<MemberPromoteRequest>,
     ) -> Result<Response<MemberPromoteResponse>, Status> {

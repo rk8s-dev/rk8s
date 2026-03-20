@@ -76,7 +76,6 @@ rust_library(
         "//third-party/rust/crates/pem/3.0.6:pem",
         "//third-party/rust/crates/pgp/0.19.0:pgp",
         "//third-party/rust/crates/priority-queue/2.7.0:priority-queue",
-        "//third-party/rust/crates/qlean/0.2.3:qlean",
         "//third-party/rust/crates/radix_trie/0.2.1:radix_trie",
         "//third-party/rust/crates/rand/0.9.2:rand",
         "//third-party/rust/crates/rand_chacha/0.3.1:rand_chacha",
@@ -138,7 +137,7 @@ buildscript_run(
         "etcd-client",
         "storage_xline",
     ],
-    version = "0.1.0",
+    version = "0.2.2",
     manifest_dir = ":libvault-vendor",
     visibility = ["PUBLIC"],
 )

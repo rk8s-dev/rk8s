@@ -13,7 +13,7 @@ use libcontainer::syscall::syscall::create_syscall;
 use liboci_cli::{Delete, List};
 
 use serde::{Deserialize, Serialize};
-use tracing::debug;
+use tracing::{debug, warn};
 
 use crate::commands::{
     compose::{
@@ -158,10 +158,11 @@ impl ComposeManager {
             let id = container.id.clone();
             let netns_path = format!("/proc/{pid}/ns/net");
             if !Path::new(&netns_path).exists() {
-                return Err(anyhow!(
-                    "[container {}] netns path not found: {netns_path}",
-                    id
-                ));
+                warn!(
+                    "Failed to find {} file, skipping teardown, you may need to manually clean up the network namespace",
+                    &netns_path
+                );
+                return Ok(());
             }
             self.teardown_network(netns_path, id)?;
             remove_container(&self.root_path, container)?;
@@ -301,16 +302,6 @@ impl ComposeManager {
 
                 debug!("get mount: {:#?}", mounts);
 
-                //  setup the network_conf file
-                self.network_manager
-                    .setup_network_conf(&network_name)
-                    .map_err(|e| {
-                        anyhow!(
-                            "Service [{}] create network Config file failed: {}",
-                            srv_name,
-                            e
-                        )
-                    })?;
                 let configs_mounts = self.config_manager.get_mounts_by_service(&srv_name);
 
                 let mut runner = ContainerRunner::from_spec(

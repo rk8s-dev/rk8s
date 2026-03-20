@@ -93,7 +93,7 @@ impl Action for ProcAction {
         _env: Arc<EnvVar>,
     ) -> Output {
         let mut times = 0usize;
-        while let Ok(_) = in_channels.recv_from(&self.inter_node).await {
+        while in_channels.recv_from(&self.inter_node).await.is_ok() {
             log::info!("`Proc` send {} to INTER node", times);
             out_channels
                 .send_to(
@@ -110,6 +110,7 @@ impl Action for ProcAction {
     }
 }
 
+#[allow(deprecated)]
 fn main() {
     unsafe {
         env::set_var("RUST_LOG", "info");
@@ -150,9 +151,13 @@ fn main() {
     graph.add_edge(in_id, vec![inter_id]);
     graph.add_edge(inter_id, vec![proc_id]);
     graph.add_edge(proc_id, vec![inter_id]);
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("failed to create tokio runtime");
 
     // Execute graph
-    match graph.start() {
+    match graph.start_with_runtime(&runtime) {
         Ok(_) => println!("Graph executed successfully"),
         Err(e) => panic!("Graph execution failed: {:?}", e),
     }

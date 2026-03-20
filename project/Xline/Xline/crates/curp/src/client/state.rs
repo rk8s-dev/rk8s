@@ -5,23 +5,20 @@ use std::{
     time::Duration,
 };
 
-use event_listener::Event;
-use futures::{Future, stream::FuturesUnordered};
-use rand::seq::IteratorRandom;
-use tokio::sync::RwLock;
-use tonic::Status;
-use tonic::transport::ClientTlsConfig;
-use tracing::{debug, info};
-// TODO: use our own status type
-// use xlinerpc::status::Status;
 use crate::{
     members::ServerId,
     rpc::{
-        self, CurpError, FetchClusterRequest, FetchClusterResponse, Protocol,
+        self, CurpError, CurpService, FetchClusterRequest, FetchClusterResponse,
         connect::{BypassedConnect, ConnectApi},
         transport::TransportConfig,
     },
 };
+use event_listener::Event;
+use futures::{Future, stream::FuturesUnordered};
+use rand::seq::IteratorRandom;
+use tokio::sync::RwLock;
+use tracing::{debug, info};
+use xlinerpc::status::Status;
 
 /// The client state
 #[derive(Debug)]
@@ -43,8 +40,6 @@ struct StateStatic {
     local_server: Option<ServerId>,
     /// Notifier of leader update
     leader_notifier: Arc<Event>,
-    /// Client tls config
-    tls_config: Option<ClientTlsConfig>,
     /// Transport configuration
     transport: TransportConfig,
 }
@@ -81,8 +76,16 @@ impl State {
         leader: Option<ServerId>,
         term: u64,
         cluster_version: u64,
-        tls_config: Option<ClientTlsConfig>,
     ) -> Arc<Self> {
+        use crate::rpc::quic_transport::channel::DnsFallback;
+        use gm_quic::prelude::QuicClient;
+
+        let quic_client = Arc::new(
+            QuicClient::builder()
+                .with_root_certificates(rustls::RootCertStore::empty())
+                .without_cert()
+                .build(),
+        );
         Arc::new(Self {
             mutable: RwLock::new(StateMut {
                 leader,
@@ -93,9 +96,11 @@ impl State {
             immutable: StateStatic {
                 local_server,
                 leader_notifier: Arc::new(Event::new()),
-                tls_config,
                 is_raw_curp: true,
-                transport: TransportConfig::default(),
+                transport: TransportConfig {
+                    client: quic_client,
+                    dns_fallback: DnsFallback::Disabled,
+                },
             },
             // Sets the client id to non-zero to avoid waiting for client id in tests
             client_id: Arc::new(AtomicU64::new(1)),
@@ -332,15 +337,12 @@ impl State {
                     .remove(&diff)
                     .unwrap_or_else(|| unreachable!("{diff} must in new member addrs"));
                 debug!("client connects to a new server({diff}), address({addrs:?})");
-                let new_conn = match self.immutable.transport {
-                    TransportConfig::Tonic => {
-                        rpc::connect(diff, addrs, self.immutable.tls_config.clone())
-                    }
-                    #[cfg(feature = "quic")]
-                    TransportConfig::Quic(ref client, dns_fallback) => {
-                        rpc::quic_connect(diff, addrs, client, dns_fallback)
-                    }
-                };
+                let new_conn = rpc::quic_connect(
+                    diff,
+                    addrs,
+                    &self.immutable.transport.client,
+                    self.immutable.transport.dns_fallback,
+                );
                 let _ig = e.insert(new_conn);
             } else {
                 debug!("client removes old server({diff})");
@@ -393,8 +395,6 @@ pub(super) struct StateBuilder {
     leader_state: Option<(ServerId, u64)>,
     /// Initial cluster version (optional)
     cluster_version: Option<u64>,
-    /// Client Tls config
-    tls_config: Option<ClientTlsConfig>,
     /// is current client send request to raw curp server
     is_raw_curp: bool,
     /// Transport configuration
@@ -405,15 +405,14 @@ impl StateBuilder {
     /// Create a state builder
     pub(super) fn new(
         all_members: HashMap<ServerId, Vec<String>>,
-        tls_config: Option<ClientTlsConfig>,
+        transport: TransportConfig,
     ) -> Self {
         Self {
             all_members,
             leader_state: None,
             cluster_version: None,
-            tls_config,
             is_raw_curp: false,
-            transport: TransportConfig::default(),
+            transport,
         }
     }
 
@@ -432,13 +431,8 @@ impl StateBuilder {
         self.cluster_version = Some(cluster_version);
     }
 
-    /// Set the transport configuration
-    pub(super) fn set_transport(&mut self, transport: TransportConfig) {
-        self.transport = transport;
-    }
-
     /// Build the state with local server
-    pub(super) fn build_bypassed<P: Protocol>(
+    pub(super) fn build_bypassed<P: CurpService>(
         mut self,
         local_server_id: ServerId,
         local_server: P,
@@ -462,7 +456,6 @@ impl StateBuilder {
             immutable: StateStatic {
                 local_server: Some(local_server_id),
                 leader_notifier: Arc::new(Event::new()),
-                tls_config: self.tls_config.take(),
                 is_raw_curp: self.is_raw_curp,
                 transport: self.transport,
             },
@@ -483,7 +476,6 @@ impl StateBuilder {
             immutable: StateStatic {
                 local_server: None,
                 leader_notifier: Arc::new(Event::new()),
-                tls_config: self.tls_config,
                 is_raw_curp: self.is_raw_curp,
                 transport: self.transport,
             },
@@ -493,14 +485,11 @@ impl StateBuilder {
 
     /// Create connects based on transport configuration
     fn make_connects(&self) -> HashMap<ServerId, Arc<dyn ConnectApi>> {
-        match self.transport {
-            TransportConfig::Tonic => {
-                rpc::connects(self.all_members.clone(), self.tls_config.as_ref()).collect()
-            }
-            #[cfg(feature = "quic")]
-            TransportConfig::Quic(ref client, dns_fallback) => {
-                rpc::quic_connects(self.all_members.clone(), client, dns_fallback).collect()
-            }
-        }
+        rpc::quic_connects(
+            self.all_members.clone(),
+            &self.transport.client,
+            self.transport.dns_fallback,
+        )
+        .collect()
     }
 }

@@ -21,6 +21,8 @@ pub static HOSTS_CONFIG: &str = "/etc/hosts";
 pub static SHM_CONFIG: &str = "/dev/shm";
 pub static SECRETS_DIR: &str = "/run/secrets";
 pub static RKFORGE_SSH_DIR: &str = "/run/rkforge/ssh";
+static SECRETS_CREATED_MARKER: &str = "runtime-secrets-dir-created";
+static SSH_CREATED_MARKER: &str = "runtime-rkforge-ssh-dir-created";
 pub static BIND_MOUNTS: [&str; 3] = ["/dev", "/proc", "/sys"];
 
 #[derive(Parser, Debug)]
@@ -621,6 +623,18 @@ fn runtime_temp_file(name: &str) -> PathBuf {
     CONFIG.build_dir.join(format!("{name}.{mount_pid}"))
 }
 
+fn mark_runtime_dir_created(marker_name: &str, existed_before: bool) -> Result<()> {
+    let marker = runtime_temp_file(marker_name);
+    if existed_before {
+        remove_temp_file(&marker);
+        return Ok(());
+    }
+
+    fs::write(&marker, b"1")
+        .with_context(|| format!("Failed to write runtime marker {}", marker.display()))?;
+    Ok(())
+}
+
 fn ensure_no_symlink_components(root: &Path, target: &Path) -> Result<()> {
     let relative = target.strip_prefix(root).with_context(|| {
         format!(
@@ -794,6 +808,7 @@ pub fn prepare_secrets<P: AsRef<Path>>(mountpoint: P, secrets: &[BuildSecret]) -
 
     let mountpoint = mountpoint.as_ref();
     let target_dir = mountpoint.join(SECRETS_DIR.strip_prefix('/').unwrap());
+    mark_runtime_dir_created(SECRETS_CREATED_MARKER, target_dir.exists())?;
     fs::create_dir_all(&target_dir)
         .with_context(|| format!("Failed to create {}", target_dir.display()))?;
 
@@ -839,6 +854,7 @@ pub fn prepare_ssh<P: AsRef<Path>>(mountpoint: P, ssh_agents: &[BuildSshAgent]) 
 
     let mountpoint = mountpoint.as_ref();
     let target_dir = mountpoint.join(RKFORGE_SSH_DIR.strip_prefix('/').unwrap());
+    mark_runtime_dir_created(SSH_CREATED_MARKER, target_dir.exists())?;
     fs::create_dir_all(&target_dir)
         .with_context(|| format!("Failed to create {}", target_dir.display()))?;
 
@@ -882,10 +898,20 @@ pub fn prepare_ssh<P: AsRef<Path>>(mountpoint: P, ssh_agents: &[BuildSshAgent]) 
     Ok(())
 }
 
-fn umount_and_remove_dir(path: &Path) -> Result<()> {
+fn umount_and_remove_dir(path: &Path, created_marker_name: &str) -> Result<()> {
     umount_if_mounted(path)?;
-    if path.exists() {
-        let _ = fs::remove_dir_all(path);
+    let marker = runtime_temp_file(created_marker_name);
+    if marker.exists() {
+        if path.exists()
+            && let Err(err) = fs::remove_dir_all(path)
+        {
+            tracing::warn!(
+                error = ?err,
+                path = %path.display(),
+                "Failed to remove runtime directory during cleanup"
+            );
+        }
+        remove_temp_file(&marker);
     }
     Ok(())
 }
@@ -905,8 +931,14 @@ fn remove_temp_file(path: &Path) {
 fn cleanup_network<P: AsRef<Path>>(mountpoint: P) -> Result<()> {
     let mountpoint = mountpoint.as_ref();
 
-    umount_and_remove_dir(&mountpoint.join(RKFORGE_SSH_DIR.strip_prefix('/').unwrap()))?;
-    umount_and_remove_dir(&mountpoint.join(SECRETS_DIR.strip_prefix('/').unwrap()))?;
+    umount_and_remove_dir(
+        &mountpoint.join(RKFORGE_SSH_DIR.strip_prefix('/').unwrap()),
+        SSH_CREATED_MARKER,
+    )?;
+    umount_and_remove_dir(
+        &mountpoint.join(SECRETS_DIR.strip_prefix('/').unwrap()),
+        SECRETS_CREATED_MARKER,
+    )?;
     umount_if_mounted(&mountpoint.join(SHM_CONFIG.strip_prefix('/').unwrap()))?;
     umount_if_mounted(&mountpoint.join(HOSTS_CONFIG.strip_prefix('/').unwrap()))?;
     umount_if_mounted(&mountpoint.join(DNS_CONFIG.strip_prefix('/').unwrap()))?;

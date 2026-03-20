@@ -13,12 +13,11 @@ use rfuse3::raw::logfs::LoggingFileSystem;
 #[cfg(target_os = "linux")]
 use tracing::info;
 
-use crate::chuck::store::BlockStore;
+use crate::chunk::store::BlockStore;
 use crate::meta::MetaLayer;
 use crate::vfs::fs::VFS;
 
 /// Build default mount options for SlayerFS.
-#[allow(dead_code)]
 fn default_mount_options() -> MountOptions {
     let mut mo = MountOptions::default();
     mo.fs_name("slayerfs");
@@ -44,7 +43,6 @@ fn fuse_op_log_enabled() -> bool {
 
 /// Mount a VFS instance to the given empty directory using unprivileged mode when available.
 #[cfg(target_os = "linux")]
-#[allow(dead_code)]
 pub async fn mount_vfs_unprivileged<S, M>(
     fs: VFS<S, M>,
     mount_point: impl AsRef<Path>,

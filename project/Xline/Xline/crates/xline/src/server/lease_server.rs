@@ -3,7 +3,10 @@ use std::{pin::Pin, sync::Arc, time::Duration};
 use async_stream::{stream, try_stream};
 use clippy_utilities::NumericCast;
 use curp::members::ClusterInfo;
-use futures::stream::Stream;
+use futures::{
+    StreamExt,
+    stream::Stream
+};
 use tokio::time;
 use tonic::Status;
 use tonic::transport::{ClientTlsConfig, Endpoint};
@@ -134,14 +137,31 @@ impl LeaseServer {
 
     /// Handle keep alive at leader
     #[allow(
+        dead_code,
         clippy::arithmetic_side_effects,
         clippy::ignored_unit_patterns,
         clippy::result_large_err
     )] // Introduced by tokio::select!
     fn leader_keep_alive(
         &self,
-        mut request_stream: tonic::Streaming<LeaseKeepAliveRequest>,
+        request_stream: tonic::Streaming<LeaseKeepAliveRequest>,
     ) -> Result<KeepAliveStream, Status> {
+        self.leader_keep_alive_stream(request_stream)
+    }
+
+    /// Handle keep alive at leader from an arbitrary request stream source.
+    #[allow(
+        clippy::arithmetic_side_effects,
+        clippy::ignored_unit_patterns,
+        clippy::result_large_err
+    )]
+    fn leader_keep_alive_stream<ST>(
+        &self,
+        mut request_stream: ST,
+    ) -> Result<KeepAliveStream, Status>
+    where
+        ST: Stream<Item = Result<LeaseKeepAliveRequest, Status>> + Unpin + Send + 'static,
+    {
         let shutdown_listener = self
             .task_manager
             .get_shutdown_listener(TaskName::LeaseKeepAlive)
@@ -154,8 +174,8 @@ impl LeaseServer {
                         debug!("Lease keep alive shutdown");
                         break;
                     }
-                    res = request_stream.message() => {
-                        if let Ok(Some(keep_alive_req)) = res {
+                    res = request_stream.next() => {
+                        if let Some(Ok(keep_alive_req)) = res {
                             keep_alive_req
                         } else {
                             break;
@@ -187,12 +207,30 @@ impl LeaseServer {
     }
 
     /// Handle keep alive at follower
-    #[allow(clippy::arithmetic_side_effects, clippy::ignored_unit_patterns)] // Introduced by tokio::select!
+    #[allow(
+        dead_code,
+        clippy::arithmetic_side_effects,
+        clippy::ignored_unit_patterns
+    )] // Introduced by tokio::select!
     async fn follower_keep_alive(
         &self,
-        mut request_stream: tonic::Streaming<LeaseKeepAliveRequest>,
+        request_stream: tonic::Streaming<LeaseKeepAliveRequest>,
         leader_addrs: &[String],
     ) -> Result<KeepAliveStream, Status> {
+        self.follower_keep_alive_stream(request_stream, leader_addrs)
+            .await
+    }
+
+    /// Handle keep alive at follower from an arbitrary request stream source.
+    #[allow(clippy::arithmetic_side_effects, clippy::ignored_unit_patterns)]
+    async fn follower_keep_alive_stream<ST>(
+        &self,
+        mut request_stream: ST,
+        leader_addrs: &[String],
+    ) -> Result<KeepAliveStream, Status>
+    where
+        ST: Stream<Item = Result<LeaseKeepAliveRequest, Status>> + Send + Unpin + 'static,
+    {
         let shutdown_listener = self
             .task_manager
             .get_shutdown_listener(TaskName::LeaseKeepAlive)
@@ -208,8 +246,8 @@ impl LeaseServer {
                         debug!("Lease keep alive shutdown");
                         break;
                     }
-                    res = request_stream.message() => {
-                        if let Ok(Some(keep_alive_req)) = res {
+                    res = request_stream.next() => {
+                        if let Some(Ok(keep_alive_req)) = res {
                             yield keep_alive_req;
                         } else {
                             break;
@@ -226,6 +264,33 @@ impl LeaseServer {
             .into_inner();
 
         Ok(Box::pin(stream))
+    }
+
+    /// Start a lease keep-alive stream from an arbitrary request stream source.
+    pub(crate) async fn lease_keep_alive_stream<ST>(
+        &self,
+        request_stream: ST,
+    ) -> Result<KeepAliveStream, Status>
+    where
+        ST: Stream<Item = Result<LeaseKeepAliveRequest, Status>> + Send + Unpin + 'static,
+    {
+        loop {
+            if self.lease_storage.is_primary() {
+                break Ok(self.leader_keep_alive_stream(request_stream)?);
+            }
+            let leader_id = self.client.fetch_leader_id(false).await?;
+            if !self.lease_storage.is_primary() {
+                let leader_addrs = self.cluster_info.client_urls(leader_id).unwrap_or_else(|| {
+                    unreachable!(
+                        "The address of leader {} not found in all_members {:?}",
+                        leader_id, self.cluster_info
+                    )
+                });
+                break Ok(self
+                    .follower_keep_alive_stream(request_stream, &leader_addrs)
+                    .await?);
+            }
+        }
     }
 
     /// `LeaseGrant` creates a lease which expires if the server does not receive a `keepAlive`
@@ -255,7 +320,7 @@ impl LeaseServer {
     }
 
     /// `LeaseRevoke` revokes a lease. All keys attached to the lease will expire and be deleted.
-    async fn lease_revoke(
+    pub(crate) async fn lease_revoke(
         &self,
         request: tonic::Request<LeaseRevokeRequest>,
     ) -> Result<tonic::Response<LeaseRevokeResponse>, Status> {
@@ -283,32 +348,12 @@ impl LeaseServer {
         request: tonic::Request<tonic::Streaming<LeaseKeepAliveRequest>>,
     ) -> Result<tonic::Response<Pin<Box<dyn Stream<Item = Result<LeaseKeepAliveResponse, Status>> + Send>>>, Status> {
         debug!("Receive LeaseKeepAliveRequest {:?}", request);
-        let request_stream = request.into_inner();
-        let stream = loop {
-            if self.lease_storage.is_primary() {
-                break self.leader_keep_alive(request_stream)?;
-            }
-            let leader_id = self.client.fetch_leader_id(false).await?;
-            // Given that a candidate server may become a leader when it won the election or
-            // a follower when it lost the election. Therefore we need to double check here.
-            // We can directly invoke leader_keep_alive when a candidate becomes a leader.
-            if !self.lease_storage.is_primary() {
-                let leader_addrs = self.cluster_info.client_urls(leader_id).unwrap_or_else(|| {
-                    unreachable!(
-                        "The address of leader {} not found in all_members {:?}",
-                        leader_id, self.cluster_info
-                    )
-                });
-                break self
-                    .follower_keep_alive(request_stream, &leader_addrs)
-                    .await?;
-            }
-        };
+        let stream = self.lease_keep_alive_stream(request.into_inner()).await?;
         Ok(tonic::Response::new(stream))
     }
 
     /// `LeaseTimeToLive` retrieves lease information.
-    async fn lease_time_to_live(
+    pub(crate) async fn lease_time_to_live(
         &self,
         request: tonic::Request<LeaseTimeToLiveRequest>,
     ) -> Result<tonic::Response<LeaseTimeToLiveResponse>, Status> {

@@ -1,4 +1,6 @@
 use crate::commands::{ComposeCommand, PodCommand, VolumeCommand, config_cli::ConfigArgs};
+use crate::sandbox::cli::SandboxCommand;
+use crate::sandbox::vm::SandboxShimArgs;
 use crate::{copy, image, images, login, logout, overlayfs, pull, push, repo, run};
 use clap::{Parser, Subcommand};
 
@@ -58,6 +60,11 @@ pub enum Commands {
     Run(RunArgs),
     /// Save an image to a tar archive
     Save(images::SaveArgs),
+    /// Manage AI sandboxes
+    #[command(subcommand)]
+    Sandbox(SandboxCommand),
+    #[command(hide = true, name = "sandbox-shim")]
+    SandboxShim(SandboxShimArgs),
     /// Start one or more containers
     Start(StartArgs),
     /// Display the status of a container

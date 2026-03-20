@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 use std::time::Duration;
 
-use crate::chuck::SliceDesc;
+use crate::chunk::SliceDesc;
 use crate::meta::entities::etcd::EtcdEntryInfo;
 use crate::meta::store::{DirEntry, FileAttr, MetaError, MetaStore};
 use crate::vfs::fs::FileType;

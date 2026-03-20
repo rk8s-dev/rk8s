@@ -19,6 +19,7 @@ pub mod cert;
 mod dispatch;
 mod heartbeat;
 mod lease_sync;
+mod local_node;
 mod register;
 mod server;
 mod watcher;
@@ -59,16 +60,29 @@ impl NodeRegistry {
         };
 
         if let Some(session) = session {
-            let cleanup_rules = build_delete_table_ruleset();
-            if let Err(e) = session
-                .tx
-                .try_send(RksMessage::SetNftablesRules(cleanup_rules))
-            {
-                warn!("Failed to send nftables cleanup to node {}: {}", node_id, e);
-            }
-
-            session.cancel_notify.notify_one();
+            Self::cleanup_session(node_id, session);
         }
+    }
+
+    pub async fn unregister_if_matches(
+        &self,
+        node_id: &str,
+        expected: &Arc<WorkerSession>,
+    ) -> bool {
+        let session = {
+            let mut inner = self.inner.lock().await;
+            match inner.get(node_id) {
+                Some(current) if Arc::ptr_eq(current, expected) => inner.remove(node_id),
+                _ => None,
+            }
+        };
+
+        if let Some(session) = session {
+            Self::cleanup_session(node_id, session);
+            return true;
+        }
+
+        false
     }
 
     pub async fn get(&self, node_id: &str) -> Option<Arc<WorkerSession>> {
@@ -80,6 +94,40 @@ impl NodeRegistry {
     pub async fn list_sessions(&self) -> Vec<(String, Arc<WorkerSession>)> {
         let inner = self.inner.lock().await;
         inner.iter().map(|(k, v)| (k.clone(), v.clone())).collect()
+    }
+
+    fn cleanup_session(node_id: &str, session: Arc<WorkerSession>) {
+        let cleanup_rules = build_delete_table_ruleset();
+        if let Err(e) = session
+            .tx
+            .try_send(RksMessage::SetNftablesRules(cleanup_rules))
+        {
+            warn!("Failed to send nftables cleanup to node {}: {}", node_id, e);
+        }
+
+        session.cancel_notify.notify_one();
+    }
+}
+
+/// Registry that maps a pod log request key to a channel sender,
+/// so that log chunks arriving from a worker can be forwarded to the waiting user connection.
+#[derive(Default)]
+pub struct LogResponseRegistry {
+    inner: Mutex<HashMap<String, mpsc::Sender<RksMessage>>>,
+}
+
+impl LogResponseRegistry {
+    pub async fn register(&self, key: String) -> mpsc::Receiver<RksMessage> {
+        let (tx, rx) = mpsc::channel(64);
+        self.inner.lock().await.insert(key, tx);
+        rx
+    }
+
+    pub async fn send(&self, key: &str, msg: RksMessage) {
+        let inner = self.inner.lock().await;
+        if let Some(tx) = inner.get(key) {
+            let _ = tx.try_send(msg);
+        }
     }
 }
 
@@ -127,6 +175,14 @@ impl RksNode {
         );
         info!("Heartbeat monitor started");
 
+        let shared_clone = self.shared.clone();
+        let addr_clone = self.addr.clone();
+        tokio::spawn(async move {
+            if let Err(e) = local_node::bootstrap(shared_clone, &addr_clone).await {
+                warn!("Failed to bootstrap local rks node networking: {e:#}");
+            }
+        });
+
         // Spawn task to propagate lease updates to workers
         LeaseSynchronizer::spawn(
             self.shared.local_manager.clone(),
@@ -141,6 +197,7 @@ pub struct Shared {
     pub local_manager: Arc<LocalManager>,
     pub vault: Option<Arc<Vault>>,
     pub node_registry: Arc<NodeRegistry>,
+    pub log_response_registry: Arc<LogResponseRegistry>,
 }
 
 impl Shared {
@@ -155,6 +212,7 @@ impl Shared {
             local_manager,
             vault,
             node_registry,
+            log_response_registry: Arc::new(LogResponseRegistry::default()),
         }
     }
 }

@@ -10,8 +10,8 @@
 //   While flushing, new writes are blocked via flush_waiting/write_waiting gates.
 
 use super::reader::DataReader;
-use crate::chuck::writer::DataUploader;
-use crate::chuck::{BlockStore, SliceDesc};
+use crate::chunk::writer::DataUploader;
+use crate::chunk::{BlockStore, SliceDesc};
 use crate::meta::backoff::backoff;
 use crate::meta::store::MetaError;
 use crate::meta::{MetaLayer, SLICE_ID_KEY};
@@ -1289,9 +1289,9 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::chuck::ChunkLayout;
-    use crate::chuck::reader::DataFetcher;
-    use crate::chuck::store::{BlockKey, BlockStore, InMemoryBlockStore};
+    use crate::chunk::ChunkLayout;
+    use crate::chunk::reader::DataFetcher;
+    use crate::chunk::store::{BlockKey, BlockStore, InMemoryBlockStore};
     use crate::meta::MetaLayer;
     use crate::meta::factory::create_meta_store_from_url;
     use crate::meta::store::MetaStore;

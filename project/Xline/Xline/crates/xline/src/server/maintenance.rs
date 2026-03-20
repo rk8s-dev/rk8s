@@ -35,6 +35,7 @@ const MIN_PAGE_SIZE: u64 = 512;
 pub(crate) const MAINTENANCE_SNAPSHOT_CHUNK_SIZE: u64 = 64 * 1024;
 
 /// Maintenance Server
+#[derive(Clone)]
 pub(crate) struct MaintenanceServer {
     /// Kv Storage
     kv_store: Arc<KvStore>,
@@ -98,7 +99,7 @@ impl MaintenanceServer {
         Ok(res)
     }
 
-    async fn alarm(
+    pub(crate) async fn alarm(
         &self,
         request: tonic::Request<AlarmRequest>,
     ) -> Result<tonic::Response<AlarmResponse>, Status> {
@@ -114,7 +115,7 @@ impl MaintenanceServer {
         Ok(tonic::Response::new(res))
     }
 
-    async fn status(
+    pub(crate) async fn status(
         &self,
         _request: tonic::Request<StatusRequest>,
     ) -> Result<tonic::Response<StatusResponse>, Status> {
@@ -184,7 +185,7 @@ impl MaintenanceServer {
         }))
     }
 
-    async fn snapshot(
+    pub(crate) async fn snapshot(
         &self,
         _request: tonic::Request<SnapshotRequest>,
     ) -> Result<tonic::Response<Pin<Box<dyn Stream<Item = Result<SnapshotResponse, Status>> + Send>>>, Status> {

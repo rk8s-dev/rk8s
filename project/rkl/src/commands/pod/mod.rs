@@ -136,6 +136,41 @@ pub enum PodCommand {
         #[clap(flatten)]
         tls_cfg: TLSConnectionArgs,
     },
+
+    #[command(about = "Get logs from a pod's container")]
+    Logs {
+        #[arg(value_name = "POD_NAME")]
+        pod_name: String,
+
+        #[arg(short = 'c', long, value_name = "CONTAINER")]
+        container: Option<String>,
+
+        #[arg(short = 'f', long)]
+        follow: bool,
+
+        #[arg(long, value_name = "LINES", default_value = "-1")]
+        tail: i64,
+
+        #[arg(long, value_name = "TIMESTAMP")]
+        since: Option<String>,
+
+        #[arg(long)]
+        timestamps: bool,
+
+        #[arg(short = 'p', long)]
+        previous: bool,
+
+        #[arg(
+            long,
+            value_name = "RKS_ADDRESS",
+            env = "RKS_ADDRESS",
+            required = false
+        )]
+        cluster: Option<String>,
+
+        #[clap(flatten)]
+        tls_cfg: TLSConnectionArgs,
+    },
 }
 
 // store infomation of pod
@@ -350,6 +385,27 @@ pub fn pod_execute(cmd: PodCommand) -> Result<()> {
             cluster,
             tls_cfg,
         } => pod_get(&pod_name, cluster, tls_cfg),
+        PodCommand::Logs {
+            pod_name,
+            container,
+            follow,
+            tail,
+            since,
+            timestamps,
+            previous,
+            cluster,
+            tls_cfg,
+        } => pod_logs(
+            &pod_name,
+            container.as_deref(),
+            follow,
+            tail,
+            since.as_deref(),
+            timestamps,
+            previous,
+            cluster,
+            tls_cfg,
+        ),
     }
 }
 
@@ -403,5 +459,29 @@ fn pod_create(pod_yaml: &str, addr: Option<String>, tls_cfg: TLSConnectionArgs) 
             }
             None => standalone::create_pod(pod_yaml),
         },
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn pod_logs(
+    pod_name: &str,
+    container: Option<&str>,
+    follow: bool,
+    tail: i64,
+    since: Option<&str>,
+    timestamps: bool,
+    previous: bool,
+    addr: Option<String>,
+    tls_cfg: TLSConnectionArgs,
+) -> Result<()> {
+    let env_addr = env::var("RKS_ADDRESS").ok();
+    let rt = tokio::runtime::Runtime::new()?;
+    match addr.or(env_addr) {
+        Some(rks_addr) => rt.block_on(cluster::get_pod_logs(
+            pod_name, container, follow, tail, since, timestamps, previous, &rks_addr, tls_cfg,
+        )),
+        None => Err(anyhow!(
+            "No RKS address provided. Set RKS_ADDRESS or use --cluster"
+        )),
     }
 }

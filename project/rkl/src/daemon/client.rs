@@ -1,5 +1,6 @@
 use anyhow::Result;
 use std::collections::HashMap;
+use std::io::{BufRead, BufReader, Seek, SeekFrom};
 use std::{env, fs, net::SocketAddr, path::Path, sync::Arc, time::Duration};
 // use tokio::sync::OnceCell;
 
@@ -12,11 +13,7 @@ use crate::task::TaskRunner;
 use chrono::Utc;
 use common::*;
 use gethostname::gethostname;
-use ipnetwork::Ipv4Network;
-use libnetwork::{
-    config::{NetworkConfig, validate_network_config},
-    ip::{IPStack, PublicIPOpts, lookup_ext_iface},
-};
+use libnetwork::ip::{IPStack, PublicIPOpts, lookup_ext_iface};
 
 use crate::commands::pod::TLSConnectionArgs;
 use crate::quic::client::{Daemon as ClientDaemon, QUICClient};
@@ -182,7 +179,7 @@ pub async fn run_once(
     loop {
         match client.accept_uni().await {
             Ok(mut recv) => {
-                let mut buf = vec![0u8; 4096];
+                let mut buf = vec![0u8; 8192];
                 match recv.read(&mut buf).await {
                     Ok(Some(n)) => match serde_json::from_slice::<RksMessage>(&buf[..n]) {
                         Ok(RksMessage::Ack) => {
@@ -191,10 +188,13 @@ pub async fn run_once(
                         Ok(RksMessage::Error(e)) => {
                             error!("[worker] register error: {e}");
                         }
-                        Ok(RksMessage::SetNetwork(cfg)) => {
-                            info!("[worker] received network config: {cfg:?}");
-
-                            if let Err(e) = handle_network_config(&network_receiver, &cfg).await {
+                        Ok(RksMessage::SetNetwork(node_cfg)) => {
+                            info!("[worker] received network config: {node_cfg:?}");
+                            let config_msg = NetworkConfigMessage::SubnetConfig {
+                                subnet_env: node_cfg.subnet_env.clone(),
+                            };
+                            if let Err(e) = network_receiver.handle_network_config(config_msg).await
+                            {
                                 error!("[worker] failed to apply network config: {e}");
                                 let _ = client
                                     .send_msg(&RksMessage::Error(format!(
@@ -312,7 +312,7 @@ pub async fn run_once(
                         }
                         Ok(RksMessage::DeletePod(name)) => {
                             info!("[worker] DeletePod {name}");
-                            match pod::standalone::delete_pod(&name) {
+                            match pod::standalone::delete_pod_async(&name).await {
                                 Ok(_) => {
                                     // Ensure probe deregistration completes before sending the Ack.
                                     // Previously this was spawned as a detached task which could
@@ -398,6 +398,45 @@ pub async fn run_once(
                                 }
                             }
                         }
+                        Ok(RksMessage::GetPodLogs {
+                            pod_name,
+                            namespace,
+                            container_name,
+                            follow,
+                            tail_lines,
+                            since_time: _,
+                            timestamps,
+                            previous: _,
+                        }) => {
+                            info!(
+                                "[worker] GetPodLogs pod={pod_name} container={container_name:?}"
+                            );
+                            let client_clone = client.clone();
+                            let pod_name_clone = pod_name.clone();
+                            let namespace_clone = namespace.clone();
+                            tokio::spawn(async move {
+                                if let Err(e) = stream_pod_logs(
+                                    &client_clone,
+                                    &pod_name_clone,
+                                    &namespace_clone,
+                                    container_name.as_deref(),
+                                    follow,
+                                    tail_lines,
+                                    timestamps,
+                                )
+                                .await
+                                {
+                                    error!("[worker] stream_pod_logs error: {e}");
+                                    let _ = client_clone
+                                        .send_msg(&RksMessage::PodLogsError {
+                                            namespace: namespace_clone,
+                                            pod_name: pod_name_clone,
+                                            error: e.to_string(),
+                                        })
+                                        .await;
+                                }
+                            });
+                        }
                         Ok(other) => {
                             warn!("[worker] unexpected message: {other:?}");
                         }
@@ -421,64 +460,6 @@ pub async fn run_once(
             }
         }
     }
-}
-
-async fn handle_network_config(
-    network_receiver: &NetworkReceiver,
-    node_cfg: &NodeNetworkConfig,
-) -> Result<()> {
-    info!(
-        "[worker] Processing network configuration for node: {}",
-        node_cfg.node_id
-    );
-
-    let mut network = None;
-    let mut subnet = None;
-    let mut ip_masq = true;
-    let mut mtu = 1500;
-
-    for line in node_cfg.subnet_env.lines() {
-        if let Some((key, value)) = line.split_once('=') {
-            match key {
-                "RKL_NETWORK" => network = Some(value.parse::<Ipv4Network>()?),
-                "RKL_SUBNET" => subnet = Some(value.parse::<Ipv4Network>()?),
-                "RKL_MTU" => mtu = value.parse().unwrap_or(1500),
-                "RKL_IPMASQ" => ip_masq = value.parse().unwrap_or(true),
-                _ => {}
-            }
-        }
-    }
-
-    let mut cfg = NetworkConfig {
-        enable_ipv4: true,
-        enable_ipv6: false,
-        enable_nftables: false,
-        network,
-        ipv6_network: None,
-        subnet_min: None,
-        subnet_max: None,
-        ipv6_subnet_min: None,
-        ipv6_subnet_max: None,
-        subnet_len: 24,
-        ipv6_subnet_len: 64,
-        backend_type: env::var("BACKEND_TYPE").unwrap_or_else(|_| "hostgw".to_string()),
-        backend: None,
-    };
-
-    validate_network_config(&mut cfg)?;
-
-    let config_msg = NetworkConfigMessage::SubnetConfig {
-        network_config: cfg,
-        ip_masq,
-        ipv4_subnet: subnet,
-        ipv6_subnet: None,
-        mtu,
-    };
-
-    network_receiver.handle_network_config(config_msg).await?;
-
-    info!("[worker] Network configuration processed successfully");
-    Ok(())
 }
 
 /// Generate NodeStatus for heartbeat
@@ -695,5 +676,166 @@ pub fn network_condition() -> NodeCondition {
 }
 
 async fn handle_dns_config(_dns_ip: String, _dns_port: u16) -> Result<()> {
+    Ok(())
+}
+
+/// Find the log file for a pod/container by scanning /var/log/pods/
+/// Log path format: /var/log/pods/{namespace}_{pod_name}_{uid}/{container_name}/0.log
+fn find_log_path(
+    namespace: &str,
+    pod_name: &str,
+    container_name: Option<&str>,
+) -> Result<std::path::PathBuf> {
+    let pods_dir = std::path::Path::new("/var/log/pods");
+    let prefix = format!("{namespace}_{pod_name}_");
+
+    // Find the pod directory matching namespace_podname_uid
+    let pod_dir = std::fs::read_dir(pods_dir)?
+        .filter_map(|e| e.ok())
+        .find(|e| e.file_name().to_string_lossy().starts_with(prefix.as_str()))
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "No log directory found for pod {}/{} in /var/log/pods",
+                namespace,
+                pod_name
+            )
+        })?;
+
+    let pod_dir_path = pod_dir.path();
+
+    // Determine container directory
+    let container_dir = if let Some(cname) = container_name {
+        pod_dir_path.join(cname)
+    } else {
+        // Pick the first container directory
+        std::fs::read_dir(&pod_dir_path)?
+            .filter_map(|e| e.ok())
+            .find(|e| e.path().is_dir())
+            .ok_or_else(|| {
+                anyhow::anyhow!("No container log directory found under {:?}", pod_dir_path)
+            })?
+            .path()
+    };
+
+    let log_path = container_dir.join("0.log");
+    if !log_path.exists() {
+        return Err(anyhow::anyhow!("Log file not found: {:?}", log_path));
+    }
+
+    Ok(log_path)
+}
+
+/// Parse a CRI log line and return the output text.
+/// CRI format: `<timestamp> <stream> <flags> <log>\n`
+/// e.g. `2024-01-01T00:00:00.000000000Z stdout F hello world\n`
+fn parse_cri_log_line(line: &str, include_timestamp: bool) -> String {
+    // CRI log format: timestamp stream flags message
+    let mut parts = line.splitn(4, ' ');
+    let timestamp = parts.next().unwrap_or("");
+    let _stream = parts.next().unwrap_or("");
+    let _flags = parts.next().unwrap_or("");
+    let message = parts.next().unwrap_or(line);
+
+    if include_timestamp {
+        format!("{} {}", timestamp, message)
+    } else {
+        message.to_string()
+    }
+}
+
+/// Stream container logs back to RKS via the QUIC client.
+async fn stream_pod_logs(
+    client: &crate::quic::client::QUICClient<crate::quic::client::Daemon>,
+    pod_name: &str,
+    namespace: &str,
+    container_name: Option<&str>,
+    follow: bool,
+    tail_lines: i64,
+    timestamps: bool,
+) -> Result<()> {
+    let log_path = find_log_path(namespace, pod_name, container_name)?;
+    info!("[worker] streaming logs from {:?}", log_path);
+
+    let file = std::fs::File::open(&log_path)?;
+    let mut reader = BufReader::new(file);
+
+    // If tail_lines > 0, seek to the last N lines
+    if tail_lines > 0 {
+        let tail = tail_lines as usize;
+        // Read all lines to find offset of the Nth-from-last line
+        let mut line_offsets: Vec<u64> = Vec::new();
+        let mut pos: u64 = 0;
+        let mut line = String::new();
+        loop {
+            line.clear();
+            let n = reader.read_line(&mut line)?;
+            if n == 0 {
+                break;
+            }
+            line_offsets.push(pos);
+            pos += n as u64;
+        }
+        let start = if line_offsets.len() > tail {
+            line_offsets[line_offsets.len() - tail]
+        } else {
+            0
+        };
+        reader.seek(SeekFrom::Start(start))?;
+    }
+
+    const CHUNK_SIZE: usize = 4096;
+    let mut buf = String::new();
+    let mut output = Vec::with_capacity(CHUNK_SIZE);
+
+    loop {
+        buf.clear();
+        let n = reader.read_line(&mut buf)?;
+        if n == 0 {
+            if follow {
+                if !output.is_empty() {
+                    client
+                        .send_msg(&RksMessage::PodLogsChunk {
+                            namespace: namespace.to_string(),
+                            pod_name: pod_name.to_string(),
+                            data: output.clone(),
+                            is_final: false,
+                        })
+                        .await?;
+                    output.clear();
+                }
+                tokio::time::sleep(Duration::from_millis(200)).await;
+                continue;
+            } else {
+                break;
+            }
+        }
+
+        let line_out = parse_cri_log_line(buf.trim_end_matches('\n'), timestamps);
+        output.extend_from_slice(line_out.as_bytes());
+        output.push(b'\n');
+
+        if output.len() >= CHUNK_SIZE {
+            client
+                .send_msg(&RksMessage::PodLogsChunk {
+                    namespace: namespace.to_string(),
+                    pod_name: pod_name.to_string(),
+                    data: output.clone(),
+                    is_final: false,
+                })
+                .await?;
+            output.clear();
+        }
+    }
+
+    // Send remaining data as final chunk
+    client
+        .send_msg(&RksMessage::PodLogsChunk {
+            namespace: namespace.to_string(),
+            pod_name: pod_name.to_string(),
+            data: output,
+            is_final: true,
+        })
+        .await?;
+
     Ok(())
 }

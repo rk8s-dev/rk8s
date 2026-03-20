@@ -4,14 +4,15 @@ pub mod media;
 
 use crate::config::auth::AuthConfig;
 use crate::pull::layer::pull_layers;
-use crate::storage::{parse_image_ref, write_manifest};
+use crate::registry::{parse_registry_host_arg, resolve_client_ref_auth as resolve_ref_with_auth};
+use crate::storage::write_manifest;
 use anyhow::Context;
 use anyhow::anyhow;
 use clap::Parser;
-use oci_client::client::ClientConfig;
+use oci_client::Client;
 use oci_client::manifest::OciManifest;
 use oci_client::secrets::RegistryAuth;
-use oci_client::{Client, client};
+use oci_spec::distribution::Reference;
 use std::path::PathBuf;
 use std::sync::OnceLock;
 use std::thread;
@@ -23,13 +24,22 @@ static RUNTIME: OnceLock<Runtime> = OnceLock::new();
 pub struct PullArgs {
     /// Image reference. (e.g "ubuntu:latest" or "me.org/ubuntu:latest")
     image_ref: String,
-    /// URL of the distribution server (optional if only one server is configured)
-    #[arg(long)]
+    /// Registry host in `host[:port]` format.
+    #[arg(long, value_parser = parse_registry_host_arg)]
     url: Option<String>,
+    /// Skip TLS certificate verification for HTTPS registry.
+    #[arg(long)]
+    skip_tls_verify: bool,
 }
 
 pub fn pull(args: PullArgs) -> anyhow::Result<()> {
-    sync_pull_or_get_image(args.image_ref, args.url)?;
+    sync_pull_or_get_image_with_policy_and_output_with_tls(
+        args.image_ref,
+        args.url,
+        false,
+        false,
+        args.skip_tls_verify,
+    )?;
     Ok(())
 }
 
@@ -38,7 +48,7 @@ pub fn sync_pull_or_get_image_with_policy(
     url: Option<impl AsRef<str>>,
     no_cache: bool,
 ) -> anyhow::Result<(PathBuf, Vec<PathBuf>)> {
-    sync_pull_or_get_image_with_policy_and_output(image_ref, url, no_cache, false)
+    sync_pull_or_get_image_with_policy_and_output_with_tls(image_ref, url, no_cache, false, false)
 }
 
 pub fn sync_pull_or_get_image_with_policy_and_output(
@@ -47,24 +57,20 @@ pub fn sync_pull_or_get_image_with_policy_and_output(
     no_cache: bool,
     quiet: bool,
 ) -> anyhow::Result<(PathBuf, Vec<PathBuf>)> {
+    sync_pull_or_get_image_with_policy_and_output_with_tls(image_ref, url, no_cache, quiet, false)
+}
+
+fn sync_pull_or_get_image_with_policy_and_output_with_tls(
+    image_ref: impl AsRef<str>,
+    url: Option<impl AsRef<str>>,
+    no_cache: bool,
+    quiet: bool,
+    skip_tls_verify: bool,
+) -> anyhow::Result<(PathBuf, Vec<PathBuf>)> {
     let image_ref = image_ref.as_ref();
-
-    let auth_config = AuthConfig::load()?;
-
-    let url = auth_config.resolve_url(url);
-
-    let auth_method = match auth_config.find_entry_by_url(&url) {
-        Ok(entry) => RegistryAuth::Bearer(entry.pat.clone()),
-        Err(_) => RegistryAuth::Anonymous,
-    };
-
-    let client_config = ClientConfig {
-        protocol: client::ClientProtocol::Http,
-        ..Default::default()
-    };
-    let client = Client::new(client_config);
-
-    let image_ref = parse_image_ref(url, image_ref, None::<String>)?;
+    let url = url.map(|u| u.as_ref().to_string());
+    let (client, image_ref, auth_method) =
+        resolve_client_ref_auth(image_ref, url, skip_tls_verify)?;
     let do_pull = async move {
         let (manifest, digest) = client
             .pull_manifest(&image_ref, &auth_method)
@@ -141,24 +147,19 @@ pub async fn pull_or_get_image_with_policy(
     url: Option<impl AsRef<str>>,
     no_cache: bool,
 ) -> anyhow::Result<(PathBuf, Vec<PathBuf>)> {
+    pull_or_get_image_with_policy_and_tls(image_ref, url, no_cache, false).await
+}
+
+async fn pull_or_get_image_with_policy_and_tls(
+    image_ref: impl AsRef<str>,
+    url: Option<impl AsRef<str>>,
+    no_cache: bool,
+    skip_tls_verify: bool,
+) -> anyhow::Result<(PathBuf, Vec<PathBuf>)> {
     let image_ref = image_ref.as_ref();
-
-    let auth_config = AuthConfig::load()?;
-
-    let url = auth_config.resolve_url(url);
-
-    let auth_method = match auth_config.find_entry_by_url(&url) {
-        Ok(entry) => RegistryAuth::Bearer(entry.pat.clone()),
-        Err(_) => RegistryAuth::Anonymous,
-    };
-
-    let client_config = ClientConfig {
-        protocol: client::ClientProtocol::Http,
-        ..Default::default()
-    };
-    let client = Client::new(client_config);
-
-    let image_ref = parse_image_ref(url, image_ref, None::<String>)?;
+    let url = url.map(|u| u.as_ref().to_string());
+    let (client, image_ref, auth_method) =
+        resolve_client_ref_auth(image_ref, url, skip_tls_verify)?;
     let (manifest, digest) = client
         .pull_manifest(&image_ref, &auth_method)
         .await
@@ -173,4 +174,14 @@ pub async fn pull_or_get_image_with_policy(
 
     let manifest_path = write_manifest(&image_ref, &manifest, &digest).await?;
     Ok((manifest_path, layers))
+}
+
+fn resolve_client_ref_auth(
+    image_ref: &str,
+    url: Option<String>,
+    skip_tls_verify: bool,
+) -> anyhow::Result<(Client, Reference, RegistryAuth)> {
+    let auth_config = AuthConfig::load()?;
+    let url = auth_config.resolve_url(url)?;
+    resolve_ref_with_auth(&auth_config, &url, image_ref, skip_tls_verify)
 }

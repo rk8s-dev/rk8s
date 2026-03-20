@@ -104,7 +104,6 @@ async fn quic_synced_propose() {
 }
 
 /// Test that an unknown method ID returns a structured error (not a disconnect)
-#[cfg(feature = "quic-test")]
 #[tokio::test(flavor = "multi_thread")]
 #[abort_on_panic]
 #[serial_test::serial]

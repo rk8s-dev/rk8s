@@ -3,7 +3,7 @@
 #![allow(clippy::upper_case_acronyms)]
 
 pub mod cadapter;
-pub mod chuck;
+pub mod chunk;
 pub mod daemon;
 pub(crate) mod fs;
 pub mod fuse;
@@ -25,8 +25,8 @@ pub use crate::vfs::sdk::{LocalClient, VfsClient};
 pub use crate::cadapter::client::{ObjectBackend, ObjectClient};
 pub use crate::cadapter::localfs::LocalFsBackend;
 pub use crate::cadapter::s3::{S3Backend, S3Config};
-pub use crate::chuck::chunk::ChunkLayout;
-pub use crate::chuck::store::{BlockKey, BlockStore, InMemoryBlockStore, ObjectBlockStore};
+pub use crate::chunk::layout::ChunkLayout;
+pub use crate::chunk::store::{BlockKey, BlockStore, InMemoryBlockStore, ObjectBlockStore};
 pub use crate::meta::client::MetaClient;
 pub use crate::meta::config::{CacheConfig, ClientOptions, Config, DatabaseConfig, DatabaseType};
 pub use crate::meta::factory::MetaStoreFactory;

@@ -18,7 +18,7 @@ on:
 
 jobs:
   unit-and-integration:
-    name: cargo test -p slayerfs
+    name: slayerfs basic test
     runs-on: [self-hosted]
     env:
       CARGO_TERM_COLOR: always
@@ -43,11 +43,21 @@ jobs:
             guestfish \
             xorriso
 
+      - name: Start backend services
+        run: |
+          docker compose -f project/slayerfs/docker-compose.yml up -d
+
       - name: Run tests
         run: |
           cd project
-          cargo test -p slayerfs
-          
+          cargo build -p slayerfs --example persistence_demo --release
+          cargo test -p slayerfs --test test_slayerfs_qlean_multinode_smoke -- --ignored
+
+      - name: Stop backend services
+        if: always()
+        run: |
+          docker compose -f project/slayerfs/docker-compose.yml down -v
+
       - name: Install nightly toolchain and cargo-fuzz
         run: |
           rustup toolchain install nightly --profile minimal
@@ -83,7 +93,7 @@ jobs:
           cd project/slayerfs
           rm -rf fuzz/artifacts/fs_ops/*
           rm -rf fuzz/.tmp*
-          
+
   xfstests:
     name: xfstests
     if: false

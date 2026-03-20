@@ -1,8 +1,12 @@
 #![allow(dead_code)]
 use crate::network::{route::RouteReceiver, subnet::SubnetReceiver};
 use anyhow::Result;
+use ipnetwork::Ipv4Network;
 use libcni::ip::route::Route;
-use libnetwork::{config::NetworkConfig, route::RouteManager};
+use libnetwork::{
+    config::{NetworkConfig, validate_network_config},
+    route::RouteManager,
+};
 use log::{error, info, warn};
 use nftables::{helper, schema};
 use quinn::{ClientConfig, Endpoint};
@@ -81,15 +85,45 @@ impl NetworkReceiver {
         );
 
         match config {
-            NetworkConfigMessage::SubnetConfig {
-                network_config,
-                ip_masq,
-                ipv4_subnet,
-                ipv6_subnet,
-                mtu,
-            } => {
+            NetworkConfigMessage::SubnetConfig { subnet_env } => {
+                let mut network = None;
+                let mut subnet = None;
+                let mut ip_masq = true;
+                let mut mtu = 1500;
+
+                for line in subnet_env.lines() {
+                    if let Some((key, value)) = line.split_once('=') {
+                        match key {
+                            "RKL_NETWORK" => network = Some(value.parse::<Ipv4Network>()?),
+                            "RKL_SUBNET" => subnet = Some(value.parse::<Ipv4Network>()?),
+                            "RKL_MTU" => mtu = value.parse().unwrap_or(1500),
+                            "RKL_IPMASQ" => ip_masq = value.parse().unwrap_or(true),
+                            _ => {}
+                        }
+                    }
+                }
+
+                let mut network_config = NetworkConfig {
+                    enable_ipv4: true,
+                    enable_ipv6: false,
+                    enable_nftables: false,
+                    network,
+                    ipv6_network: None,
+                    subnet_min: None,
+                    subnet_max: None,
+                    ipv6_subnet_min: None,
+                    ipv6_subnet_max: None,
+                    subnet_len: 24,
+                    ipv6_subnet_len: 64,
+                    backend_type: std::env::var("BACKEND_TYPE")
+                        .unwrap_or_else(|_| "hostgw".to_string()),
+                    backend: None,
+                };
+
+                validate_network_config(&mut network_config)?;
+
                 self.subnet_receiver
-                    .handle_subnet_config(&network_config, ip_masq, ipv4_subnet, ipv6_subnet, mtu)
+                    .handle_subnet_config(&network_config, ip_masq, subnet, None, mtu)
                     .await?;
             }
             NetworkConfigMessage::Route { routes } => {
@@ -412,13 +446,7 @@ pub enum RksMessage {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum NetworkConfigMessage {
     /// Subnet configuration only
-    SubnetConfig {
-        network_config: NetworkConfig,
-        ip_masq: bool,
-        ipv4_subnet: Option<ipnetwork::Ipv4Network>,
-        ipv6_subnet: Option<ipnetwork::Ipv6Network>,
-        mtu: u32,
-    },
+    SubnetConfig { subnet_env: String },
     /// Route configuration only
     Route { routes: Vec<Route> },
     /// Full network configuration (subnet + routes)
@@ -663,16 +691,13 @@ mod tests {
             .unwrap();
 
         let config_msg = NetworkConfigMessage::SubnetConfig {
-            network_config: NetworkConfig {
-                enable_ipv4: true,
-                enable_ipv6: false,
-                network: Some("10.0.0.0/16".parse().unwrap()),
-                ..Default::default()
-            },
-            ip_masq: true,
-            ipv4_subnet: Some("10.0.1.0/24".parse().unwrap()),
-            ipv6_subnet: None,
-            mtu: 1500,
+            subnet_env: [
+                "RKL_NETWORK=10.0.0.0/16",
+                "RKL_SUBNET=10.0.1.0/24",
+                "RKL_MTU=1500",
+                "RKL_IPMASQ=true",
+            ]
+            .join("\n"),
         };
 
         let result = receiver.handle_network_config(config_msg).await;

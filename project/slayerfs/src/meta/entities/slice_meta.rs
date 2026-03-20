@@ -1,4 +1,4 @@
-use crate::chuck::SliceDesc;
+use crate::chunk::SliceDesc;
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
 

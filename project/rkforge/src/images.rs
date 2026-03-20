@@ -725,14 +725,33 @@ fn resolve_image_digest(image_ref: &str) -> Result<String> {
 
 /// Normalize an image reference: ensure it has a namespace and tag.
 fn normalize_image_ref(image_ref: &str) -> String {
-    if image_ref.contains(':') {
-        let (repo, tag) = image_ref.rsplit_once(':').unwrap();
-        if tag.chars().all(|c| c.is_ascii_digit()) && !repo.contains('/') {
-            return full_image_ref(image_ref, Some("latest"));
+    let (name, digest) = match image_ref.split_once('@') {
+        Some((n, d)) => (n, Some(d)),
+        None => (image_ref, None),
+    };
+
+    let last_slash = name.rfind('/');
+    let last_colon = name.rfind(':');
+    let has_tag = match (last_colon, last_slash) {
+        (Some(c), Some(s)) => c > s,
+        (Some(_), None) => true,
+        _ => false,
+    };
+
+    let normalized = if has_tag {
+        let (repo, tag) = name.rsplit_once(':').unwrap();
+        if last_slash.is_none() && tag.chars().all(|c| c.is_ascii_digit()) {
+            full_image_ref(name, Some("latest"))
+        } else {
+            full_image_ref(repo, Some(tag))
         }
-        full_image_ref(repo, Some(tag))
     } else {
-        full_image_ref(image_ref, Some("latest"))
+        full_image_ref(name, Some("latest"))
+    };
+
+    match digest {
+        Some(d) => format!("{normalized}@{d}"),
+        None => normalized,
     }
 }
 

@@ -1,6 +1,5 @@
 pub mod bundle;
 pub mod cri;
-pub mod dns;
 pub mod network;
 pub mod oci;
 pub mod ops;
