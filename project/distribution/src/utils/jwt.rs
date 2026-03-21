@@ -7,6 +7,10 @@ use serde::{Deserialize, Serialize};
 pub struct Claims {
     pub sub: String,
     pub exp: i64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub iss: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub iat: Option<i64>,
 }
 
 pub fn encode(secret: impl AsRef<str>, claims: &Claims) -> String {
@@ -22,7 +26,11 @@ pub fn decode(secret: impl AsRef<str>, token: impl AsRef<str>) -> Result<Claims,
     Ok(jsonwebtoken::decode::<Claims>(
         token.as_ref(),
         &DecodingKey::from_secret(secret.as_ref().as_bytes()),
-        &Validation::default(),
+        &{
+            let mut validation = Validation::default();
+            validation.set_issuer(&["libra.tools"]);
+            validation
+        },
     )
     .map_err(|e| OciError::Unauthorized {
         msg: e.to_string(),
@@ -35,6 +43,8 @@ pub fn gen_token(lifetime_secs: i64, secret: impl AsRef<str>, id: impl AsRef<str
     let claims = Claims {
         sub: id.as_ref().to_string(),
         exp: (Utc::now() + Duration::seconds(lifetime_secs)).timestamp(),
+        iss: None,
+        iat: None,
     };
     encode(secret, &claims)
 }
