@@ -26,8 +26,11 @@ pub fn open(url: &str) {
 
         #[cfg(target_os = "windows")]
         {
+            // `cmd /C start` treats `&` as a command separator unless quoted.
+            // Our login URL always contains query params, so quote it explicitly.
+            let quoted_url = format!("\"{url}\"");
             Command::new("cmd")
-                .args(["/C", "start", "", url])
+                .args(["/C", "start", "", quoted_url.as_str()])
                 .stdout(Stdio::null())
                 .stderr(Stdio::null())
                 .spawn()

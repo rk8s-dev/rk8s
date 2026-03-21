@@ -2,6 +2,7 @@ use crate::config::auth::AuthConfig;
 use crate::registry::parse_registry_host;
 use crate::rt::block_on;
 use clap::Parser;
+use std::net::IpAddr;
 
 mod browser;
 mod callback_server;
@@ -10,23 +11,17 @@ mod oauth;
 mod types;
 
 fn is_private_ip(host: &str) -> bool {
-    let host_lower = host.to_lowercase();
-    if host_lower.starts_with("localhost") || host_lower.starts_with("127.") {
+    if host.eq_ignore_ascii_case("localhost") {
         return true;
     }
-    // Check common private network ranges
-    if host_lower.starts_with("10.") || host_lower.starts_with("192.168.") {
-        return true;
+
+    // Accept bracketed IPv6 host literals like "[::1]".
+    let normalized = host.trim().trim_start_matches('[').trim_end_matches(']');
+    match normalized.parse::<IpAddr>() {
+        Ok(IpAddr::V4(ip)) => ip.is_loopback() || ip.is_private(),
+        Ok(IpAddr::V6(ip)) => ip.is_loopback() || ip.is_unique_local(),
+        Err(_) => false,
     }
-    // 172.16.0.0 - 172.31.255.255
-    if host_lower.starts_with("172.")
-        && let Some(second_octet) = host_lower.split('.').nth(1)
-        && let Ok(n) = second_octet.parse::<u8>()
-        && (16..=31).contains(&n)
-    {
-        return true;
-    }
-    false
 }
 
 fn parse_server_url(s: &str) -> Result<String, String> {
