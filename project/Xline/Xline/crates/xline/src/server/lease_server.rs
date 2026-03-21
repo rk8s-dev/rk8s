@@ -439,14 +439,14 @@ pub(crate) struct Server {
 }
 impl Server {
     #[allow(unused)]
-    pub(crate) fn new(lock_server: LeaseServer) -> Self {
+    pub(crate) fn new(lease_server: LeaseServer) -> Self {
         Self {
-            lease_server: Arc::new(lock_server),
+            lease_server: Arc::new(lease_server),
         }
     }
-    pub(crate) fn from_arc(lock_server: Arc<LeaseServer>) -> Self {
+    pub(crate) fn from_arc(lease_server: Arc<LeaseServer>) -> Self {
         Self {
-            lease_server: lock_server,
+            lease_server,
         }
     }
     pub(crate) fn endpoint(self) -> RouterEndpoint<Arc<LeaseServer>> {
