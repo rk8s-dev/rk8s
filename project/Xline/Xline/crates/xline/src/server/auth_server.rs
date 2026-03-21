@@ -244,9 +244,9 @@ pub(crate) struct Server {
     auth_server: Arc<AuthServer>,
 }
 impl Server {
-    pub(crate) fn new(lock_server: AuthServer) -> Self {
+    pub(crate) fn new(auth_server: AuthServer) -> Self {
         Self {
-            auth_server: Arc::new(lock_server),
+            auth_server: Arc::new(auth_server),
         }
     }
     pub(crate) fn endpoint(self) -> RouterEndpoint<Arc<AuthServer>> {
