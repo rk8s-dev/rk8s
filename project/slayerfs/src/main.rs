@@ -26,7 +26,10 @@ use std::sync::Arc;
 #[cfg(feature = "profiling")]
 use std::sync::{LazyLock, Mutex as StdMutex};
 
-use clap::{Args, Parser, Subcommand, ValueEnum};
+pub mod config;
+use config::*;
+
+use clap::Parser;
 #[cfg(not(feature = "profiling"))]
 use tracing_subscriber::fmt::format::FmtSpan;
 use tracing_subscriber::layer::SubscriberExt;
@@ -34,8 +37,9 @@ use tracing_subscriber::util::SubscriberInitExt;
 
 use crate::cadapter::client::ObjectClient;
 use crate::cadapter::localfs::LocalFsBackend;
-use crate::chunk::layout::{ChunkLayout, DEFAULT_BLOCK_SIZE, DEFAULT_CHUNK_SIZE};
-use crate::chunk::store::ObjectBlockStore;
+use crate::cadapter::s3::{S3Backend, S3Config};
+use crate::chunk::layout::ChunkLayout;
+use crate::chunk::store::{BlockStore, ObjectBlockStore};
 use crate::fuse::mount::mount_vfs_unprivileged;
 use crate::meta::MetaStore;
 use crate::meta::config::{CacheConfig, ClientOptions, Config, DatabaseConfig, DatabaseType};
@@ -43,64 +47,13 @@ use crate::meta::factory::MetaStoreFactory;
 use crate::meta::stores::{DatabaseMetaStore, EtcdMetaStore, RedisMetaStore};
 use crate::vfs::fs::VFS;
 
-#[derive(Parser)]
-#[command(name = "slayerfs", version, about = "SlayerFS FUSE CLI")]
-struct Cli {
-    #[command(subcommand)]
-    cmd: Command,
-}
-
-#[derive(Subcommand)]
-enum Command {
-    /// Mount SlayerFS via FUSE.
-    Mount(MountArgs),
-}
-
-#[derive(Args)]
-struct MountArgs {
-    /// Directory to mount the filesystem.
-    #[arg(value_name = "MOUNT_POINT")]
-    mount_point: PathBuf,
-
-    /// Local directory used as object storage backend.
-    #[arg(long, value_name = "DIR", default_value = "./data")]
-    data_dir: PathBuf,
-
-    /// Metadata backend (sqlx, etcd or redis).
-    #[arg(long, value_enum, default_value_t = MetaBackendKind::Sqlx)]
-    meta_backend: MetaBackendKind,
-
-    /// Metadata backend URL (sqlx or redis, e.g. sqlite::memory:, postgres://... or redis://...).
-    #[arg(long, value_name = "URL", default_value = "sqlite::memory:")]
-    meta_url: String,
-
-    /// Etcd endpoint URLs (comma-separated).
-    #[arg(long, value_name = "URLS", value_delimiter = ',')]
-    meta_etcd_urls: Vec<String>,
-
-    /// Chunk size in bytes.
-    #[arg(long, default_value_t = DEFAULT_CHUNK_SIZE)]
-    chunk_size: u64,
-
-    /// Block size in bytes.
-    #[arg(long, default_value_t = DEFAULT_BLOCK_SIZE)]
-    block_size: u32,
-}
-
-#[derive(ValueEnum, Clone, Copy)]
-enum MetaBackendKind {
-    Sqlx,
-    Etcd,
-    Redis,
-}
-
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     init_tracing();
 
     let cli = Cli::parse();
     let result = match cli.cmd {
-        Command::Mount(args) => mount_cmd(args).await,
+        Command::Mount(args) => mount_cmd(MountConfig::from_sources(args)?).await,
     };
     shutdown_flame();
     shutdown_chrome();
@@ -168,19 +121,12 @@ fn init_tracing() {
         .init();
 }
 
-async fn mount_cmd(args: MountArgs) -> anyhow::Result<()> {
+async fn mount_cmd(args: MountConfig) -> anyhow::Result<()> {
     if !args.mount_point.exists() {
         std::fs::create_dir_all(&args.mount_point)?;
     }
     if !args.mount_point.is_dir() {
         anyhow::bail!("mount point must be a directory");
-    }
-
-    if !args.data_dir.exists() {
-        std::fs::create_dir_all(&args.data_dir)?;
-    }
-    if !args.data_dir.is_dir() {
-        anyhow::bail!("data dir must be a directory");
     }
 
     if args.chunk_size < args.block_size as u64 {
@@ -192,16 +138,74 @@ async fn mount_cmd(args: MountArgs) -> anyhow::Result<()> {
         block_size: args.block_size,
     };
 
-    let client = ObjectClient::new(LocalFsBackend::new(&args.data_dir));
-    let store = ObjectBlockStore::new(client);
     let meta_store = create_meta_store(&args).await?;
 
+    match args.data_backend {
+        DataBackendKind::LocalFs => {
+            let client = create_localfs_client(&args)?;
+            let store = ObjectBlockStore::new(client);
+            mount_with_store(layout, store, meta_store, &args.mount_point).await
+        }
+        DataBackendKind::S3 => {
+            let client = create_s3_client(&args).await?;
+            let store = ObjectBlockStore::new(client);
+            mount_with_store(layout, store, meta_store, &args.mount_point).await
+        }
+    }
+}
+
+fn create_localfs_client(args: &MountConfig) -> anyhow::Result<ObjectClient<LocalFsBackend>> {
+    if !args.data_dir.exists() {
+        std::fs::create_dir_all(&args.data_dir)?;
+    }
+    if !args.data_dir.is_dir() {
+        anyhow::bail!("data dir must be a directory");
+    }
+    Ok(ObjectClient::new(LocalFsBackend::new(&args.data_dir)))
+}
+
+async fn create_s3_client(args: &MountConfig) -> anyhow::Result<ObjectClient<S3Backend>> {
+    let bucket = args
+        .s3_bucket
+        .clone()
+        .ok_or_else(|| anyhow::anyhow!("s3 bucket must be set when data backend is s3"))?;
+
+    if args.s3_part_size == 0 {
+        anyhow::bail!("--s3-part-size must be greater than 0");
+    }
+    if args.s3_max_concurrency == 0 {
+        anyhow::bail!("--s3-max-concurrency must be greater than 0");
+    }
+
+    let config = S3Config {
+        bucket,
+        region: args.s3_region.clone(),
+        part_size: args.s3_part_size,
+        max_concurrency: args.s3_max_concurrency,
+        endpoint: args.s3_endpoint.clone(),
+        force_path_style: args.s3_force_path_style,
+        ..Default::default()
+    };
+
+    let backend = S3Backend::with_config(config).await?;
+    Ok(ObjectClient::new(backend))
+}
+
+async fn mount_with_store<S>(
+    layout: ChunkLayout,
+    store: S,
+    meta_store: Arc<dyn MetaStore>,
+    mount_point: &PathBuf,
+) -> anyhow::Result<()>
+where
+    S: BlockStore + Send + Sync + 'static,
+{
     let fs = VFS::new(layout, store, meta_store)
         .await
         .map_err(anyhow::Error::from)?;
-    let handle = mount_vfs_unprivileged(fs, &args.mount_point).await?;
+    let handle = mount_vfs_unprivileged(fs, mount_point).await?;
 
-    println!("mounted at {}", args.mount_point.display());
+    println!("mounted at {}", mount_point.display());
     tokio::signal::ctrl_c().await?;
     println!("unmounting...");
     handle.unmount().await?;
@@ -252,7 +256,7 @@ fn shutdown_chrome() {
 #[cfg(not(feature = "profiling"))]
 fn shutdown_chrome() {}
 
-async fn create_meta_store(args: &MountArgs) -> anyhow::Result<Arc<dyn MetaStore>> {
+async fn create_meta_store(args: &MountConfig) -> anyhow::Result<Arc<dyn MetaStore>> {
     match args.meta_backend {
         MetaBackendKind::Sqlx => {
             let client = ClientOptions::default();
@@ -269,7 +273,7 @@ async fn create_meta_store(args: &MountArgs) -> anyhow::Result<Arc<dyn MetaStore
         }
         MetaBackendKind::Etcd => {
             if args.meta_etcd_urls.is_empty() {
-                anyhow::bail!("--meta-etcd-urls must be set when --meta-backend etcd");
+                anyhow::bail!("etcd urls must be set when meta backend is etcd");
             }
 
             let client = ClientOptions::default();

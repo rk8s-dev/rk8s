@@ -46,8 +46,8 @@ utils = { path = "../utils", version = "0.1.0" }
 xlinerpc = { path = "../xlinerpc"}
 
 # QUIC dependencies
-gm-quic = { git = "https://github.com/genmeta/gm-quic", rev = "4cbd9d93" }
-rustls = { version = "0.23", default-features = false, features = ["std", "ring"] }
+gm-quic = "0.4.0"
+tonic.workspace = true
 
 [dev-dependencies]
 anyhow = { workspace = true }

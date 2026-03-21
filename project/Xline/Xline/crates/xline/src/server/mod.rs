@@ -6,6 +6,8 @@ mod auth_wrapper;
 mod cluster_server;
 /// Command to be executed
 pub(crate) mod command;
+/// curp server
+mod curp_server;
 /// Xline kv server
 mod kv_server;
 /// Xline lease server

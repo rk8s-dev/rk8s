@@ -5,21 +5,21 @@ use tokio::fs;
 use anyhow::{Result, anyhow};
 use clippy_utilities::{NumericCast, OverflowArithmetic};
 use curp::{
+    self,
     client::ClientBuilder as CurpClientBuilder,
     members::{ClusterInfo, get_cluster_info_from_remote},
-    rpc::{QuicGrpcServer, TransportConfig},
+    rpc::TransportConfig,
     server::{DB as CurpDB, Rpc, StorageApi as _},
 };
 use dashmap::DashMap;
 use engine::{MemorySnapshotAllocator, RocksSnapshotAllocator, SnapshotAllocator};
-use futures::Stream;
 use jsonwebtoken::{DecodingKey, EncodingKey};
-use tokio::io::{AsyncRead, AsyncWrite};
-use tonic::transport::server::{Connected, Router};
-use tonic::transport::{Certificate, ClientTlsConfig, Identity, Server, ServerTlsConfig};
+use tonic::{
+    // TODO: use our own status type
+    // use xlinerpc::status::Status;
+    transport::{Certificate, ClientTlsConfig, Identity, ServerTlsConfig},
+};
 use tracing::{info, warn};
-
-use xlinerpc::status::Status;
 
 use utils::{
     barrier::IdBarrier,
@@ -32,28 +32,23 @@ use utils::{
 use xlineapi::command::{Command, CurpClient};
 
 use super::{
-    auth_server::AuthServer,
-    auth_wrapper::AuthWrapper,
-    cluster_server::ClusterServer,
+    auth_server::{AuthServer, Server as AuthEndpointServer},
+    auth_wrapper::{AuthWrapper, Server as AuthWrapperEndpointServer},
+    cluster_server::{ClusterServer, Server as ClusterEndpointServer},
     command::{Alarmer, CommandExecutor},
-    kv_server::KvServer,
-    lease_server::LeaseServer,
-    lock_server::LockServer,
-    maintenance::MaintenanceServer,
-    quic_service::XlineQuicService,
-    watch_server::{CHANNEL_SIZE, WatchServer},
+    curp_server::Server as ProtocolEndpointServer,
+    kv_server::{KvServer, Server as KvEndpointServer},
+    lease_server::{LeaseServer, Server as LeaseEndpointServer},
+    lock_server::{LockServer, Server as LockEndPointServer},
+    maintenance::{MaintenanceServer, Server as MaintenanceEndpointServer},
+    watch_server::{CHANNEL_SIZE, Server as WatchEndpointServer, WatchServer},
 };
 use crate::{
     conflict::{XlineSpeculativePools, XlineUncommittedPools},
-    curp_proto::commandpb::protocol_server::ProtocolServer,
     header_gen::HeaderGenerator,
     id_gen::IdGenerator,
     metrics::Metrics,
-    rpc::{
-        AuthServer as RpcAuthServer, ClusterServer as RpcClusterServer, KvServer as RpcKvServer,
-        LeaseServer as RpcLeaseServer, LockServer as RpcLockServer,
-        MaintenanceServer as RpcMaintenanceServer, WatchServer as RpcWatchServer,
-    },
+    router::{RouterBuilder, Server},
     state::State,
     storage::{
         AlarmStore, AuthStore, KvStore, LeaseStore,
@@ -70,6 +65,7 @@ use crate::{
 pub(crate) type CurpServer = Rpc<Command, CommandExecutor, State<Arc<CurpClient>>>;
 
 /// Xline server
+#[allow(unused)]
 pub struct XlineServer {
     /// Cluster information
     cluster_info: Arc<ClusterInfo>,
@@ -81,10 +77,10 @@ pub struct XlineServer {
     compact_config: CompactConfig,
     /// Auth config
     auth_config: AuthConfig,
-    /// Client tls config (for tonic xline services)
+    /// Client tls config
     client_tls_config: Option<ClientTlsConfig>,
-    /// Server tls config (for tonic xline services)
-    server_tls_config: Option<ServerTlsConfig>,
+    /// Server tls config
+    _server_tls_config: Option<ServerTlsConfig>,
     /// QUIC client for curp peer communication
     quic_client: Arc<gm_quic::prelude::QuicClient>,
     /// Peer TLS certificate (DER) for QUIC server, None = self-signed fallback
@@ -97,6 +93,8 @@ pub struct XlineServer {
     task_manager: Arc<TaskManager>,
     /// Curp storage
     curp_storage: Arc<CurpDB<Command>>,
+    /// TLS Config
+    tls_config: TlsConfig,
 }
 
 impl std::fmt::Debug for XlineServer {
@@ -156,13 +154,14 @@ impl XlineServer {
             compact_config,
             auth_config,
             client_tls_config,
-            server_tls_config,
+            _server_tls_config: server_tls_config,
             quic_client,
             peer_cert_der,
             peer_key_der,
             peer_ca_cert_der,
             task_manager: Arc::new(TaskManager::new()),
             curp_storage,
+            tls_config,
         })
     }
 
@@ -319,15 +318,11 @@ impl XlineServer {
     ///
     /// Will return `Err` when `init_servers` return an error
     #[inline]
-    pub(crate) async fn init_router(
+    pub async fn init_routers(
         &self,
         db: Arc<DB>,
         key_pair: Option<(EncodingKey, DecodingKey)>,
-    ) -> Result<(
-        Router,
-        QuicGrpcServer<Command, CommandExecutor, State<Arc<CurpClient>>, XlineQuicService>,
-        Arc<CurpClient>,
-    )> {
+    ) -> Result<(RouterBuilder, RouterBuilder, Arc<CurpClient>)> {
         let (
             kv_server,
             lock_server,
@@ -340,231 +335,104 @@ impl XlineServer {
             auth_wrapper,
             curp_client,
         ) = self.init_servers(db, key_pair).await?;
-        let mut builder = Server::builder();
+        let mut builder = RouterBuilder::new();
 
-        if let Some(ref cfg) = self.server_tls_config {
-            builder = builder.tls_config(cfg.clone())?;
-        }
+        builder = builder.tls_config(&self.tls_config);
+
         let xline_router = builder
-            .add_service(RpcLockServer::new(lock_server))
-            .add_service(RpcKvServer::new(kv_server.clone()))
-            .add_service(RpcLeaseServer::from_arc(lease_server.clone()))
-            .add_service(RpcAuthServer::new(auth_server.clone()))
-            .add_service(RpcWatchServer::new(watch_server.clone()))
-            .add_service(RpcMaintenanceServer::new(maintenance_server.clone()))
-            .add_service(RpcClusterServer::new(cluster_server.clone()))
-            .add_service(ProtocolServer::new(auth_wrapper.clone()));
-
-        // Curp peer communication uses QUIC, with AuthWrapper for token-based auth
-        let quic_server = QuicGrpcServer::new_with_service(auth_wrapper, curp_server)
-            .with_extension(XlineQuicService::new(
-                auth_server,
-                cluster_server,
-                kv_server,
-                lease_server,
-                maintenance_server,
-                watch_server,
-            ));
+            .clone()
+            .add_subrouter(
+                "/v3lockpb.Lock",
+                LockEndPointServer::new(lock_server).endpoint().into(),
+            )
+            .add_subrouter(
+                "/etcdserverpb.Auth",
+                AuthEndpointServer::new(auth_server).endpoint().into(),
+            )
+            .add_subrouter(
+                "/etcdserverpb.Lease",
+                LeaseEndpointServer::from_arc(lease_server)
+                    .endpoint()
+                    .into(),
+            )
+            .add_subrouter(
+                "/etcdserverpb.KV",
+                KvEndpointServer::new(kv_server).endpoint().into(),
+            )
+            .add_subrouter(
+                "/etcdserverpb.Watch",
+                WatchEndpointServer::new(watch_server).endpoint().into(),
+            )
+            .add_subrouter(
+                "/etcdserverpb.Maintenance",
+                MaintenanceEndpointServer::new(maintenance_server)
+                    .endpoint()
+                    .into(),
+            )
+            .add_subrouter(
+                "/etcdserverpb.Cluster",
+                ClusterEndpointServer::new(cluster_server).endpoint().into(),
+            )
+            .add_subrouter(
+                "/commandpb.Protocol",
+                AuthWrapperEndpointServer::new(auth_wrapper)
+                    .endpoint()
+                    .into(),
+            );
+        let curp_router = builder
+            .add_subrouter(
+                "/commandpb.Protocol",
+                ProtocolEndpointServer::new(curp_server.clone())
+                    .endpoint()
+                    .into(),
+            )
+            .add_subrouter(
+                "/inner_messagepb.InnerProtocol",
+                ProtocolEndpointServer::new(curp_server).endpoint().into(),
+            );
 
         let xline_router = {
             let (mut reporter, health_server) = tonic_health::server::health_reporter();
             reporter
                 .set_service_status("", tonic_health::ServingStatus::Serving)
                 .await;
-            xline_router.add_service(health_server)
+            xline_router.add_service("/", health_server)
         };
-        Ok((xline_router, quic_server, curp_client))
+
+        Ok((xline_router, curp_router, curp_client))
     }
 
-    /// Start `XlineServer`
+    /// Start `XlineServer` using gm-quic as transport protocol
     ///
     /// # Errors
     ///
-    /// Will return `Err` when server fails to start
+    /// Will return `Err` when `tonic::Server` serve return an error
     #[inline]
-    /// inner start method shared by `start` and `start_from_listener`
-    async fn start_inner<I1, IO, IE>(&self, xline_incoming: I1) -> Result<()>
-    where
-        I1: Stream<Item = Result<IO, IE>> + Send + 'static,
-        IO: AsyncRead + AsyncWrite + Connected + Unpin + Send + 'static,
-        IO::ConnectInfo: Clone + Send + Sync + 'static,
-        IE: Into<Box<dyn std::error::Error + Send + Sync>> + Send,
-    {
+    pub async fn start_with_quic(&self) -> Result<()> {
+        // Start QUIC server for curp peer communication
+        let client_listen_urls = self.cluster_config.client_listen_urls().clone();
+        let peer_listen_urls = self.cluster_config.peer_listen_urls().clone();
+
+        info!("start xline server on {:?}", client_listen_urls);
+        info!("start curp server on {:?}", peer_listen_urls);
         let db = DB::open(&self.storage_config.engine)?;
         let key_pair = Self::read_key_pair(&self.auth_config).await?;
-        let (xline_router, quic_server, curp_client) = self.init_router(db, key_pair).await?;
-
-        // Start tonic server for xline client-facing services
-        self.task_manager
-            .spawn(TaskName::CurpServer, |n1| async move {
-                let _ig = xline_router
-                    .serve_with_incoming_shutdown(xline_incoming, n1.wait())
-                    .await;
-            });
-
-        // Start QUIC server for curp peer communication
-        let peer_listen_urls = self.cluster_config.peer_listen_urls().clone();
-        let self_name = self.cluster_info.self_name();
-        let peer_cert_der = self.peer_cert_der.clone();
-        let peer_key_der = self.peer_key_der.clone();
-        let peer_ca_cert_der = self.peer_ca_cert_der.clone();
-
-        // Pre-validate peer listen URLs and build cert/key before spawning
-        // to avoid panics inside the spawned task
-        let (cert_der, key_der) = match (peer_cert_der, peer_key_der) {
-            (Some(cert), Some(key)) => (cert, key),
-            _ => {
-                tracing::warn!(
-                    "No peer TLS certificate configured; using ephemeral self-signed cert for QUIC server"
-                );
-                let key = rcgen::KeyPair::generate().expect("generate key");
-                // Use hostnames/IPs from peer_listen_urls as SANs
-                let sans: Vec<String> = peer_listen_urls
-                    .iter()
-                    .filter_map(|url| {
-                        url.strip_prefix("http://")
-                            .or_else(|| url.strip_prefix("https://"))
-                            .unwrap_or(url)
-                            .split(':')
-                            .next()
-                            .map(String::from)
-                    })
-                    .collect();
-                let sans = if sans.is_empty() {
-                    vec![self_name.clone()]
-                } else {
-                    sans
-                };
-                let params = rcgen::CertificateParams::new(sans).expect("cert params");
-                let cert = params.self_signed(&key).expect("self-sign cert");
-                (cert.der().to_vec(), key.serialize_der())
-            }
-        };
-
-        // Pre-parse bind URIs to catch errors early
-        let bind_uris: Vec<(String, gm_quic::qbase::net::addr::BindUri)> = peer_listen_urls
-            .iter()
-            .map(|url| {
-                let addr = url
-                    .strip_prefix("http://")
-                    .or_else(|| url.strip_prefix("https://"))
-                    .unwrap_or(url);
-                let bind_uri: gm_quic::qbase::net::addr::BindUri = format!("inet://{addr}")
-                    .parse()
-                    .unwrap_or_else(|e| panic!("invalid peer listen url {addr}: {e}"));
-                (addr.to_owned(), bind_uri)
-            })
-            .collect();
+        let (xline_router, curp_router, curp_client) = self.init_routers(db, key_pair).await?;
+        let server = Server::new()
+            .add_server("localhost", xline_router, client_listen_urls)
+            .add_server("127.0.0.1", curp_router, peer_listen_urls.clone());
 
         self.task_manager
             .spawn(TaskName::CurpServer, |n| async move {
-                // Build QUIC listeners with conditional mTLS
-                let listeners = if let Some(ca_pem) = peer_ca_cert_der {
-                    // Parse CA certs and build a client cert verifier for mTLS
-                    let ca_certs: Vec<_> = match rustls_pemfile::certs(&mut ca_pem.as_slice())
-                        .collect::<Result<Vec<_>, _>>()
-                    {
-                        Ok(certs) => certs,
-                        Err(e) => {
-                            tracing::error!("Failed to parse peer CA cert for QUIC mTLS: {e}");
-                            return;
-                        }
-                    };
-                    let mut root_store = rustls::RootCertStore::empty();
-                    for cert in ca_certs {
-                        if let Err(e) = root_store.add(cert) {
-                            tracing::error!("Failed to add peer CA cert to root store: {e}");
-                            return;
-                        }
-                    }
-                    let verifier =
-                        match rustls::server::WebPkiClientVerifier::builder(Arc::new(root_store))
-                            .build()
-                        {
-                            Ok(v) => v,
-                            Err(e) => {
-                                tracing::error!("Failed to build client cert verifier: {e}");
-                                return;
-                            }
-                        };
-                    gm_quic::prelude::QuicListeners::builder()
-                        .expect("QuicListeners::builder")
-                        .with_client_cert_verifier(verifier)
-                        .listen(64)
-                } else {
-                    gm_quic::prelude::QuicListeners::builder()
-                        .expect("QuicListeners::builder")
-                        .without_client_cert_verifier()
-                        .listen(64)
-                };
-
-                for (addr, bind_uri) in &bind_uris {
-                    if let Err(e) = listeners.add_server(
-                        &self_name,
-                        cert_der.as_slice(),
-                        key_der.as_slice(),
-                        vec![bind_uri.clone()],
-                        None::<Vec<u8>>,
-                    ) {
-                        tracing::error!("Failed to add QUIC server on {addr}: {e}");
-                        return;
-                    }
-                }
-
-                // Use tokio::select! to respect shutdown signal
                 tokio::select! {
-                    result = quic_server.serve(listeners.clone()) => {
-                        if let Err(e) = result {
-                            tracing::error!("QUIC server error: {e:?}");
-                        }
-                    }
-                    _ = n.wait() => {
-                        tracing::info!("QUIC server shutting down");
-                        listeners.shutdown();
-                    }
+                    _ = server.serve() => {},
+                    _ = n.wait() => {},
                 }
             });
-
         if let Err(e) = self.publish(curp_client).await {
             warn!("publish name to cluster failed: {e:?}");
         }
         Ok(())
-    }
-
-    /// Start `XlineServer`
-    ///
-    /// # Errors
-    ///
-    /// Will return `Err` when server fails to start
-    #[inline]
-    pub async fn start(&self) -> Result<()> {
-        let client_listen_urls = self.cluster_config.client_listen_urls();
-        let xline_incoming = bind_addrs(client_listen_urls)?;
-        info!("start xline server on {:?}", client_listen_urls);
-        info!(
-            "start curp server (QUIC) on {:?}",
-            self.cluster_config.peer_listen_urls()
-        );
-        self.start_inner(xline_incoming).await
-    }
-
-    /// Start `XlineServer` from listeners
-    ///
-    /// Note: `_curp_listener` is unused since curp peer communication now uses QUIC.
-    /// The parameter is kept for API compatibility.
-    ///
-    /// # Errors
-    ///
-    /// Will return `Err` when server fails to start
-    #[inline]
-    pub async fn start_from_listener(
-        &self,
-        xline_listener: tokio::net::TcpListener,
-        _curp_listener: tokio::net::TcpListener,
-    ) -> Result<()> {
-        let xline_incoming = tokio_stream::wrappers::TcpListenerStream::new(xline_listener);
-        // curp_listener is no longer used — curp peer communication uses QUIC
-        self.start_inner(xline_incoming).await
     }
 
     /// Init `KvServer`, `LockServer`, `LeaseServer`, `WatchServer` and
@@ -731,7 +599,7 @@ impl XlineServer {
     }
 
     /// Publish the name of current node to cluster
-    async fn publish(&self, curp_client: Arc<CurpClient>) -> Result<(), Status> {
+    async fn publish(&self, curp_client: Arc<CurpClient>) -> Result<(), xlinerpc::Status> {
         curp_client
             .propose_publish(
                 self.cluster_info.self_id(),
@@ -881,32 +749,4 @@ impl XlineServer {
             _ => Ok((None, None)),
         }
     }
-}
-
-/// Bind multiple addresses
-fn bind_addrs(
-    addrs: &[String],
-) -> Result<impl Stream<Item = Result<tokio::net::TcpStream, std::io::Error>> + use<>> {
-    use std::net::ToSocketAddrs;
-    if addrs.is_empty() {
-        return Err(anyhow!("No address to bind"));
-    }
-    let incoming = addrs
-        .iter()
-        .map(|addr| {
-            let address = match addr.split_once("://") {
-                Some((_, address)) => address,
-                None => addr,
-            };
-            address.to_socket_addrs()
-        })
-        .collect::<Result<Vec<_>, _>>()?
-        .into_iter()
-        .flatten()
-        .map(|addr| {
-            tonic::transport::server::TcpIncoming::new(addr, true, None)
-                .map_err(|e| anyhow::anyhow!("Failed to bind to {}, err: {e}", addr))
-        })
-        .collect::<Result<Vec<_>>>()?;
-    Ok(futures::stream::select_all(incoming))
 }

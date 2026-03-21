@@ -1,0 +1,10 @@
+# Minimal config example relying on defaults where possible
+# Defaults:
+# - data.backend: local-fs
+# - data.localfs.data_dir: ./data
+# - meta.backend: sqlx
+# - meta.sqlx.url: sqlite::memory:
+# - layout.chunk_size: 67108864
+# - layout.block_size: 4194304
+
+mount_point: /tmp/slayerfs-minimal

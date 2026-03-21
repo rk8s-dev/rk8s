@@ -11,8 +11,9 @@ use xlineapi::{
 };
 
 use crate::{
+    router::endpoint::EndPoint as RouterEndpoint,
     rpc::{
-        Auth, AuthDisableRequest, AuthDisableResponse, AuthEnableRequest, AuthEnableResponse,
+        AuthDisableRequest, AuthDisableResponse, AuthEnableRequest, AuthEnableResponse,
         AuthRoleAddRequest, AuthRoleAddResponse, AuthRoleDeleteRequest, AuthRoleDeleteResponse,
         AuthRoleGetRequest, AuthRoleGetResponse, AuthRoleGrantPermissionRequest,
         AuthRoleGrantPermissionResponse, AuthRoleListRequest, AuthRoleListResponse,
@@ -79,13 +80,10 @@ impl AuthServer {
         if let Some(sync_res) = sync_res {
             res_wrapper.update_revision(sync_res.revision());
         }
-        Ok(xlinerpc::Response::from_data(res_wrapper.into()))
+        Ok(tonic::Response::new(res_wrapper.into()))
     }
-}
 
-
-impl Auth for AuthServer {
-    async fn auth_enable(
+    pub(crate) async fn auth_enable(
         &self,
         request: xlinerpc::Request<AuthEnableRequest>,
     ) -> Result<xlinerpc::Response<AuthEnableResponse>, Status> {
@@ -93,7 +91,7 @@ impl Auth for AuthServer {
         self.handle_req(request).await
     }
 
-    async fn auth_disable(
+    pub(crate) async fn auth_disable(
         &self,
         request: xlinerpc::Request<AuthDisableRequest>,
     ) -> Result<xlinerpc::Response<AuthDisableResponse>, Status> {
@@ -101,7 +99,7 @@ impl Auth for AuthServer {
         self.handle_req(request).await
     }
 
-    async fn auth_status(
+    pub(crate) async fn auth_status(
         &self,
         request: xlinerpc::Request<AuthStatusRequest>,
     ) -> Result<xlinerpc::Response<AuthStatusResponse>, Status> {
@@ -109,7 +107,7 @@ impl Auth for AuthServer {
         self.handle_req(request).await
     }
 
-    async fn authenticate(
+    pub(crate) async fn authenticate(
         &self,
         request: xlinerpc::Request<AuthenticateRequest>,
     ) -> Result<xlinerpc::Response<AuthenticateResponse>, Status> {
@@ -117,7 +115,7 @@ impl Auth for AuthServer {
         self.handle_req(request).await
     }
 
-    async fn user_add(
+    pub(crate) async fn user_add(
         &self,
         mut request: xlinerpc::Request<AuthUserAddRequest>,
     ) -> Result<xlinerpc::Response<AuthUserAddResponse>, Status> {
@@ -131,7 +129,7 @@ impl Auth for AuthServer {
         self.handle_req(request).await
     }
 
-    async fn user_get(
+    pub(crate) async fn user_get(
         &self,
         request: xlinerpc::Request<AuthUserGetRequest>,
     ) -> Result<xlinerpc::Response<AuthUserGetResponse>, Status> {
@@ -139,7 +137,7 @@ impl Auth for AuthServer {
         self.handle_req(request).await
     }
 
-    async fn user_list(
+    pub(crate) async fn user_list(
         &self,
         request: xlinerpc::Request<AuthUserListRequest>,
     ) -> Result<xlinerpc::Response<AuthUserListResponse>, Status> {
@@ -147,7 +145,7 @@ impl Auth for AuthServer {
         self.handle_req(request).await
     }
 
-    async fn user_delete(
+    pub(crate) async fn user_delete(
         &self,
         request: xlinerpc::Request<AuthUserDeleteRequest>,
     ) -> Result<xlinerpc::Response<AuthUserDeleteResponse>, Status> {
@@ -155,7 +153,7 @@ impl Auth for AuthServer {
         self.handle_req(request).await
     }
 
-    async fn user_change_password(
+    pub(crate) async fn user_change_password(
         &self,
         mut request: xlinerpc::Request<AuthUserChangePasswordRequest>,
     ) -> Result<xlinerpc::Response<AuthUserChangePasswordResponse>, Status> {
@@ -168,7 +166,7 @@ impl Auth for AuthServer {
         self.handle_req(request).await
     }
 
-    async fn user_grant_role(
+    pub(crate) async fn user_grant_role(
         &self,
         request: xlinerpc::Request<AuthUserGrantRoleRequest>,
     ) -> Result<xlinerpc::Response<AuthUserGrantRoleResponse>, Status> {
@@ -176,7 +174,7 @@ impl Auth for AuthServer {
         self.handle_req(request).await
     }
 
-    async fn user_revoke_role(
+    pub(crate) async fn user_revoke_role(
         &self,
         request: xlinerpc::Request<AuthUserRevokeRoleRequest>,
     ) -> Result<xlinerpc::Response<AuthUserRevokeRoleResponse>, Status> {
@@ -184,7 +182,7 @@ impl Auth for AuthServer {
         self.handle_req(request).await
     }
 
-    async fn role_add(
+    pub(crate) async fn role_add(
         &self,
         request: xlinerpc::Request<AuthRoleAddRequest>,
     ) -> Result<xlinerpc::Response<AuthRoleAddResponse>, Status> {
@@ -193,7 +191,7 @@ impl Auth for AuthServer {
         self.handle_req(request).await
     }
 
-    async fn role_get(
+    pub(crate) async fn role_get(
         &self,
         request: xlinerpc::Request<AuthRoleGetRequest>,
     ) -> Result<xlinerpc::Response<AuthRoleGetResponse>, Status> {
@@ -201,7 +199,7 @@ impl Auth for AuthServer {
         self.handle_req(request).await
     }
 
-    async fn role_list(
+    pub(crate) async fn role_list(
         &self,
         request: xlinerpc::Request<AuthRoleListRequest>,
     ) -> Result<xlinerpc::Response<AuthRoleListResponse>, Status> {
@@ -209,7 +207,7 @@ impl Auth for AuthServer {
         self.handle_req(request).await
     }
 
-    async fn role_delete(
+    pub(crate) async fn role_delete(
         &self,
         request: xlinerpc::Request<AuthRoleDeleteRequest>,
     ) -> Result<xlinerpc::Response<AuthRoleDeleteResponse>, Status> {
@@ -217,7 +215,7 @@ impl Auth for AuthServer {
         self.handle_req(request).await
     }
 
-    async fn role_grant_permission(
+    pub(crate) async fn role_grant_permission(
         &self,
         request: xlinerpc::Request<AuthRoleGrantPermissionRequest>,
     ) -> Result<xlinerpc::Response<AuthRoleGrantPermissionResponse>, Status> {
@@ -238,5 +236,121 @@ impl Auth for AuthServer {
             request.get_ref()
         );
         self.handle_req(request).await
+    }
+}
+
+pub(crate) struct Server {
+    auth_server: Arc<AuthServer>,
+}
+impl Server {
+    pub(crate) fn new(auth_server: AuthServer) -> Self {
+        Self {
+            auth_server: Arc::new(auth_server),
+        }
+    }
+    pub(crate) fn endpoint(self) -> RouterEndpoint<Arc<AuthServer>> {
+        RouterEndpoint::new(self.auth_server)
+            .add_unary_fn(
+                "/AuthEnable",
+                move |this: Arc<AuthServer>, request: tonic::Request<AuthEnableRequest>| async move {
+                    this.auth_enable(request).await
+                },
+            )
+            .add_unary_fn(
+                "/AuthDisable",
+                move |this: Arc<AuthServer>, request: tonic::Request<AuthDisableRequest>| async move {
+                    this.auth_disable(request).await
+                },
+            )
+            .add_unary_fn(
+                "/AuthStatus",
+                move |this: Arc<AuthServer>, request: tonic::Request<AuthStatusRequest>| async move {
+                    this.auth_status(request).await
+                },
+            )
+            .add_unary_fn(
+                "/Authenticate",
+                move |this: Arc<AuthServer>, request: tonic::Request<AuthenticateRequest>| async move {
+                    this.authenticate(request).await
+                },
+            )
+            .add_unary_fn(
+                "/UserAdd",
+                move |this: Arc<AuthServer>, request: tonic::Request<AuthUserAddRequest>| async move {
+                    this.user_add(request).await
+                },
+            )
+            .add_unary_fn(
+                "/UserGet",
+                move |this: Arc<AuthServer>, request: tonic::Request<AuthUserGetRequest>| async move {
+                    this.user_get(request).await
+                },
+            )
+            .add_unary_fn(
+                "/UserList",
+                move |this: Arc<AuthServer>, request: tonic::Request<AuthUserListRequest>| async move {
+                    this.user_list(request).await
+                },
+            )
+            .add_unary_fn(
+                "/UserDelete",
+                move |this: Arc<AuthServer>, request: tonic::Request<AuthUserDeleteRequest>| async move {
+                    this.user_delete(request).await
+                },
+            )
+            .add_unary_fn(
+                "/UserChangePassword",
+                move |this: Arc<AuthServer>, request: tonic::Request<AuthUserChangePasswordRequest>| async move {
+                    this.user_change_password(request).await
+                },
+            )
+            .add_unary_fn(
+                "/UserGrantRole",
+                move |this: Arc<AuthServer>, request: tonic::Request<AuthUserGrantRoleRequest>| async move {
+                    this.user_grant_role(request).await
+                },
+            )
+            .add_unary_fn(
+                "/UserRevokeRole",
+                move |this: Arc<AuthServer>, request: tonic::Request<AuthUserRevokeRoleRequest>| async move {
+                    this.user_revoke_role(request).await
+                },
+            )
+            .add_unary_fn(
+                "/RoleAdd",
+                move |this: Arc<AuthServer>, request: tonic::Request<AuthRoleAddRequest>| async move {
+                    this.role_add(request).await
+                },
+            )
+            .add_unary_fn(
+                "/RoleGet",
+                move |this: Arc<AuthServer>, request: tonic::Request<AuthRoleGetRequest>| async move {
+                    this.role_get(request).await
+                },
+            )
+            .add_unary_fn(
+                "/RoleList",
+                move |this: Arc<AuthServer>, request: tonic::Request<AuthRoleListRequest>| async move {
+                    this.role_list(request).await
+                },
+            )
+            .add_unary_fn(
+                "/RoleDelete",
+                move |this: Arc<AuthServer>, request: tonic::Request<AuthRoleDeleteRequest>| async move {
+                    this.role_delete(request).await
+                },
+            )
+            .add_unary_fn(
+                "/RoleGrantPermission",
+                move |this: Arc<AuthServer>, request: tonic::Request<AuthRoleGrantPermissionRequest>| async move {
+                    this.role_grant_permission(request).await
+                },
+            )
+            .add_unary_fn(
+                "/RoleRevokePermission",
+                move |this: Arc<AuthServer>, request: tonic::Request<AuthRoleRevokePermissionRequest>| async move {
+                    this.role_revoke_permission(request).await
+                },
+            )
     }
 }

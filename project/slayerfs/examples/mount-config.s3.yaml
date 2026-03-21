@@ -1,0 +1,22 @@
+# S3 object storage + etcd metadata
+mount_point: /tmp/slayerfs
+
+data:
+  backend: s3
+  s3:
+    bucket: my-bucket
+    endpoint: "http://127.0.0.1:9000"
+    region: us-east-1
+    part_size: 16777216
+    max_concurrency: 8
+    force_path_style: true
+
+meta:
+  backend: etcd
+  etcd:
+    urls:
+      - "http://127.0.0.1:2379"
+
+layout:
+  chunk_size: 67108864
+  block_size: 4194304

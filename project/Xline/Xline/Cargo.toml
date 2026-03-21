@@ -26,7 +26,7 @@ async-stream = "0.3.5"
 async-trait = "0.1.81"
 axum = "0.7.0"
 bincode = "1.3.3"
-bytes = "1.7.1"
+bytes = "1.11.1"
 clap = { version = "4", features = ["derive"] }
 clippy-utilities = "0.2.0"
 dashmap = "6.1.0"
@@ -46,12 +46,11 @@ pbkdf2 = { version = "0.12.2", features = ["simple"] }
 priority-queue = "2.0.2"
 prost = "0.13.3"
 prost-build = "0.13.0"
-gm-quic = "0.4"
 rand = "0.8.5"
 serde = { version = "1.0.204", features = ["derive", "rc"] }
 tempfile = "3"
 thiserror = "1.0.61"
-tokio = { version = "1.41", features = ["full"] }
+tokio = { version = "1.50", features = ["full"] }
 tokio-stream = { version = "0.1", features = ["net"] }
 tokio-util = { version = "0.7.11", features = ["io"] }
 toml = "0.8.14"
@@ -61,7 +60,6 @@ tracing = "0.1.37"
 tracing-appender = "0.2"
 tracing-opentelemetry = "0.25.0"
 tracing-subscriber = { version = "0.3.16", features = ["env-filter"] }
-uuid = { version = "1.10.0", features = ["v4"] }
 
 [workspace.package]
 edition = "2024"

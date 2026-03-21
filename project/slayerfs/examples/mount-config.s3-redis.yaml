@@ -1,0 +1,20 @@
+# S3 object storage + Redis metadata
+mount_point: /tmp/slayerfs-redis
+
+data:
+  backend: s3
+  s3:
+    bucket: slayerfs-prod
+    region: us-east-1
+    part_size: 16777216
+    max_concurrency: 8
+    force_path_style: false
+
+meta:
+  backend: redis
+  redis:
+    url: "redis://127.0.0.1:6379/0"
+
+layout:
+  chunk_size: 67108864
+  block_size: 4194304

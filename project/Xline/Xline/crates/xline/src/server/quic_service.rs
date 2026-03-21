@@ -16,10 +16,9 @@ use super::{
     lease_server::LeaseServer, maintenance::MaintenanceServer, watch_server::WatchServer,
 };
 use crate::rpc::{
-    AlarmRequest, Auth, AuthenticateRequest, Cluster, CompactionRequest, Kv, Lease,
-    LeaseKeepAliveRequest, LeaseRevokeRequest, LeaseTimeToLiveRequest, Maintenance,
-    MemberAddRequest, MemberListRequest, MemberPromoteRequest, MemberRemoveRequest,
-    MemberUpdateRequest, SnapshotRequest, WatchRequest,
+    AlarmRequest, AuthenticateRequest, CompactionRequest, LeaseKeepAliveRequest,
+    LeaseRevokeRequest, LeaseTimeToLiveRequest, MemberAddRequest, MemberListRequest,
+    MemberPromoteRequest, MemberRemoveRequest, MemberUpdateRequest, SnapshotRequest, WatchRequest,
 };
 
 #[derive(Clone)]
@@ -32,6 +31,7 @@ pub(crate) struct XlineQuicService {
     watch: WatchServer,
 }
 
+#[allow(unused)]
 impl XlineQuicService {
     pub(crate) fn new(
         auth: AuthServer,

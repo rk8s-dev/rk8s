@@ -173,7 +173,8 @@ async fn main() -> Result<()> {
     )
     .await?;
     debug!("{:?}", server);
-    server.start().await?;
+    server.start_with_quic().await?;
+    // server.start().await?;
 
     let _ig = tokio::signal::ctrl_c().await;
 
