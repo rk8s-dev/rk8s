@@ -433,15 +433,15 @@ pub(crate) struct Server {
 }
 impl Server {
     #[allow(unused)]
-    pub(crate) fn new(lock_server: KvServer) -> Self {
+    pub(crate) fn new(kv_server: KvServer) -> Self {
         Self {
-            kvserver: Arc::new(lock_server),
+            kvserver: Arc::new(kv_server),
         }
     }
     #[allow(unused)]
-    pub(crate) fn from_arc(lock_server: Arc<KvServer>) -> Self {
+    pub(crate) fn from_arc(kv_server: Arc<KvServer>) -> Self {
         Self {
-            kvserver: lock_server,
+            kvserver: kv_server,
         }
     }
     pub(crate) fn endpoint(self) -> RouterEndpoint<Arc<KvServer>> {
