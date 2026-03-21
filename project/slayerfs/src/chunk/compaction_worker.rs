@@ -1,0 +1,295 @@
+use crate::chuck::{BlockGcConfig, BlockStoreGC, CompactResult, Compactor};
+use crate::meta::config::LockTtlConfig;
+use crate::meta::store::{LockName, MetaStore};
+use std::collections::HashSet;
+use std::sync::Arc;
+use std::time::Duration;
+use tokio::sync::RwLock;
+use tokio::time::interval;
+use tracing::{debug, error, info, warn};
+
+pub struct ChunkLockGuard<M: MetaStore> {
+    chunk_id: u64,
+    locked_chunks: Arc<RwLock<HashSet<u64>>>,
+    meta_store: Arc<M>,
+    unlocked: bool,
+}
+
+impl<M: MetaStore> ChunkLockGuard<M> {
+    fn new(chunk_id: u64, locked_chunks: Arc<RwLock<HashSet<u64>>>, meta_store: Arc<M>) -> Self {
+        Self {
+            chunk_id,
+            locked_chunks,
+            meta_store,
+            unlocked: false,
+        }
+    }
+
+    pub async fn unlock(&mut self) {
+        if self.unlocked {
+            return;
+        }
+        self.unlocked = true;
+
+        // NOTE: Best-effort locking design - we only release the local lock here.
+        // The global lock (via MetaStore TTL) is not explicitly released; it
+        // expires automatically after the dynamic TTL calculated based on
+        // compaction type and slice count. This simplifies crash recovery
+        // and cross-process synchronization at the cost of potential write
+        // blocking for up to TTL seconds after compaction completes.
+
+        let mut locked = self.locked_chunks.write().await;
+        locked.remove(&self.chunk_id);
+    }
+}
+
+impl<M: MetaStore> Drop for ChunkLockGuard<M> {
+    fn drop(&mut self) {
+        if !self.unlocked {
+            let chunk_id = self.chunk_id;
+            let locked_chunks = Arc::clone(&self.locked_chunks);
+            tokio::spawn(async move {
+                let mut locked = locked_chunks.write().await;
+                locked.remove(&chunk_id);
+            });
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct CompactionWorkerConfig {
+    pub scan_interval: Duration,
+    pub max_chunks_per_run: usize,
+    pub enabled: bool,
+}
+
+impl Default for CompactionWorkerConfig {
+    fn default() -> Self {
+        Self {
+            scan_interval: Duration::from_secs(3600),
+            max_chunks_per_run: 100,
+            enabled: true,
+        }
+    }
+}
+
+/// Chunk compaction lock manager with both local and global lock support.
+///
+/// Uses local in-memory locks for fast checking within the same process,
+/// and global locks (via MetaStore) for cross-process synchronization.
+/// Supports dynamic TTL calculation based on compaction type and slice count.
+#[derive(Debug)]
+pub struct CompactLockManager<M: MetaStore> {
+    locked_chunks: Arc<RwLock<HashSet<u64>>>,
+    meta_store: Arc<M>,
+    ttl_config: LockTtlConfig,
+}
+
+impl<M: MetaStore> CompactLockManager<M> {
+    pub fn new(meta_store: Arc<M>) -> Self {
+        Self {
+            locked_chunks: Arc::new(RwLock::new(HashSet::new())),
+            meta_store,
+            ttl_config: LockTtlConfig::default(),
+        }
+    }
+
+    pub fn with_ttl_config(meta_store: Arc<M>, ttl_config: LockTtlConfig) -> Self {
+        Self {
+            locked_chunks: Arc::new(RwLock::new(HashSet::new())),
+            meta_store,
+            ttl_config,
+        }
+    }
+
+    /// Try to acquire lock for chunk compaction with dynamic TTL.
+    ///
+    /// # Arguments
+    /// * `chunk_id` - The chunk ID to lock
+    /// * `slice_count` - Number of slices in the chunk (used for TTL calculation)
+    /// * `is_sync` - Whether this is a sync compaction (needs longer TTL)
+    pub async fn try_lock(
+        &self,
+        chunk_id: u64,
+        slice_count: usize,
+        is_sync: bool,
+    ) -> Option<ChunkLockGuard<M>> {
+        // Calculate dynamic TTL based on compaction type and slice count
+        let ttl_secs = self.ttl_config.calculate_ttl(is_sync, slice_count);
+
+        {
+            let mut locked = self.locked_chunks.write().await;
+            if locked.contains(&chunk_id) {
+                return None;
+            }
+            locked.insert(chunk_id);
+        }
+
+        let global_acquired = self
+            .meta_store
+            .get_global_lock(LockName::ChunkCompactLock(chunk_id), ttl_secs)
+            .await;
+
+        if !global_acquired {
+            let mut locked = self.locked_chunks.write().await;
+            locked.remove(&chunk_id);
+            return None;
+        }
+
+        info!(
+            chunk_id,
+            ttl_secs, slice_count, is_sync, "Acquired compact lock with dynamic TTL"
+        );
+
+        Some(ChunkLockGuard::new(
+            chunk_id,
+            Arc::clone(&self.locked_chunks),
+            Arc::clone(&self.meta_store),
+        ))
+    }
+
+    pub async fn is_locally_locked(&self, chunk_id: u64) -> bool {
+        let locked = self.locked_chunks.read().await;
+        locked.contains(&chunk_id)
+    }
+}
+
+pub struct CompactionWorker<M, B>
+where
+    M: MetaStore,
+{
+    meta_store: Arc<M>,
+    compactor: Arc<Compactor<B>>,
+    lock_manager: Arc<CompactLockManager<M>>,
+}
+
+impl<M, B> CompactionWorker<M, B>
+where
+    M: MetaStore + Send + Sync + 'static,
+    B: crate::chuck::BlockStore + Send + Sync + 'static,
+{
+    pub fn new(meta_store: Arc<M>, block_store: Arc<B>) -> Self {
+        let meta_store_dyn: Arc<dyn MetaStore> = meta_store.clone();
+        let compactor: Arc<Compactor<B>> = Arc::new(Compactor::new(meta_store_dyn, block_store));
+        let lock_manager = Arc::new(CompactLockManager::new(Arc::clone(&meta_store)));
+        Self {
+            meta_store,
+            compactor,
+            lock_manager,
+        }
+    }
+
+    pub fn start(
+        self,
+        worker_config: CompactionWorkerConfig,
+        gc_config: BlockGcConfig,
+    ) -> (tokio::task::JoinHandle<()>, tokio::task::JoinHandle<()>) {
+        let compactor = self.compactor.clone();
+        let meta_store = self.meta_store.clone();
+        let lock_manager = self.lock_manager.clone();
+        let compaction_handle = tokio::spawn(async move {
+            if !worker_config.enabled {
+                return;
+            }
+
+            let mut ticker = interval(worker_config.scan_interval);
+            loop {
+                ticker.tick().await;
+
+                if let Err(e) =
+                    run_compaction_cycle(&meta_store, &compactor, &lock_manager, &worker_config)
+                        .await
+                {
+                    error!(error = %e, "Compaction cycle failed");
+                }
+            }
+        });
+        let gc_handle = BlockStoreGC::new(self.meta_store, self.compactor.block_store().clone())
+            .start(gc_config);
+
+        (compaction_handle, gc_handle)
+    }
+
+    pub async fn is_chunk_locally_locked(&self, chunk_id: u64) -> bool {
+        self.lock_manager.is_locally_locked(chunk_id).await
+    }
+}
+
+async fn run_compaction_cycle<M, B>(
+    meta_store: &Arc<M>,
+    compactor: &Arc<Compactor<B>>,
+    lock_manager: &Arc<CompactLockManager<M>>,
+    config: &CompactionWorkerConfig,
+) -> anyhow::Result<()>
+where
+    M: MetaStore + Send + Sync + 'static,
+    B: crate::chuck::BlockStore + Send + Sync + 'static,
+{
+    let chunk_ids = meta_store
+        .list_chunk_ids(config.max_chunks_per_run)
+        .await
+        .map_err(|e| anyhow::anyhow!("Failed to list chunk IDs: {}", e))?;
+
+    for chunk_id in chunk_ids {
+        match compactor.should_compact(chunk_id).await {
+            Ok((true, is_sync)) => {
+                // Get slice count for dynamic TTL calculation
+                let slice_count = match compactor.analyze_chunk(chunk_id).await {
+                    Ok((count, _, _)) => count,
+                    Err(e) => {
+                        warn!(chunk_id, error = %e, "Failed to analyze chunk for lock TTL");
+                        continue;
+                    }
+                };
+
+                if is_sync {
+                    let mut lock_guard =
+                        lock_manager.try_lock(chunk_id, slice_count, is_sync).await;
+
+                    if lock_guard.is_none() {
+                        warn!(
+                            chunk_id,
+                            "Could not acquire compact lock (local or global), skipping"
+                        );
+                        continue;
+                    }
+
+                    info!(chunk_id, "Acquired sync compact lock, blocking writes");
+
+                    let result = compactor.compact_chunk(chunk_id).await;
+                    if let Some(ref mut guard) = lock_guard {
+                        guard.unlock().await;
+                    }
+
+                    match result {
+                        Ok(CompactResult::Skipped) => {
+                            debug!(chunk_id, "Sync compaction skipped");
+                        }
+                        Ok(_) => {
+                            info!(chunk_id, "Sync compaction completed successfully");
+                        }
+                        Err(e) => {
+                            warn!(chunk_id, error = %e, "Sync compaction failed");
+                        }
+                    }
+                } else {
+                    match compactor.compact_chunk(chunk_id).await {
+                        Ok(CompactResult::Skipped) => {}
+                        Ok(_) => {
+                            debug!(chunk_id, "Async compaction completed");
+                        }
+                        Err(e) => {
+                            warn!(chunk_id, error = %e, "Async compaction failed");
+                        }
+                    }
+                }
+            }
+            Ok((false, _)) => {}
+            Err(e) => {
+                warn!(chunk_id, error = %e, "Error checking compaction status");
+            }
+        }
+    }
+
+    Ok(())
+}

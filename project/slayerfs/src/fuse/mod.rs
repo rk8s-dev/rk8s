@@ -180,7 +180,9 @@ where
     M: MetaLayer + Send + Sync + 'static,
 {
     async fn init(&self, _req: Request) -> FuseResult<ReplyInit> {
-        Ok(ReplyInit::default())
+        Ok(ReplyInit {
+            max_write: std::num::NonZeroU32::new(4 * 1024 * 1024).unwrap(),
+        })
     }
 
     async fn destroy(&self, _req: Request) {}
@@ -645,23 +647,22 @@ where
         p.push_str(&name);
 
         // Extract file type from mode
-        let file_type = mode & libc::S_IFMT;
+        let file_type = mode & (libc::S_IFMT as u32);
 
-        let ino = match file_type {
-            libc::S_IFREG => {
-                // Regular file - use create_file
-                self.create_file(&p).await.map_err(Errno::from)?
-            }
-            libc::S_IFDIR => {
-                // Directory - use mkdir_p
-                self.mkdir_p(&p).await.map_err(Errno::from)?
-            }
-            libc::S_IFIFO | libc::S_IFSOCK | libc::S_IFCHR | libc::S_IFBLK => {
-                return Err(libc::ENOSYS.into());
-            }
-            _ => {
-                return Err(libc::EINVAL.into());
-            }
+        let ino = if file_type == libc::S_IFREG as u32 {
+            // Regular file - use create_file
+            self.create_file(&p).await.map_err(Errno::from)?
+        } else if file_type == libc::S_IFDIR as u32 {
+            // Directory - use mkdir_p
+            self.mkdir_p(&p).await.map_err(Errno::from)?
+        } else if file_type == libc::S_IFIFO as u32
+            || file_type == libc::S_IFSOCK as u32
+            || file_type == libc::S_IFCHR as u32
+            || file_type == libc::S_IFBLK as u32
+        {
+            return Err(libc::ENOSYS.into());
+        } else {
+            return Err(libc::EINVAL.into());
         };
 
         // Apply mode after stripping special bits unsupported by SlayerFS.
@@ -1239,10 +1240,10 @@ where
     ) -> FuseResult<ReplyLock> {
         debug!(inode, lock_owner, start, end, lock_type, "fuse.getlk");
         // Convert FUSE lock type to our internal type
-        let fl_type = match lock_type as i32 {
-            libc::F_RDLCK => FileLockType::Read,
-            libc::F_WRLCK => FileLockType::Write,
-            libc::F_UNLCK => FileLockType::UnLock,
+        let fl_type = match lock_type {
+            x if x == libc::F_RDLCK as u32 => FileLockType::Read,
+            x if x == libc::F_WRLCK as u32 => FileLockType::Write,
+            x if x == libc::F_UNLCK as u32 => FileLockType::UnLock,
             _ => return Err(libc::EINVAL.into()),
         };
 
@@ -1289,10 +1290,10 @@ where
             lock_owner, start, end, lock_type, pid, block, "fuse.setlk"
         );
         // Convert FUSE lock type to our internal type
-        let fl_type = match lock_type as i32 {
-            libc::F_RDLCK => FileLockType::Read,
-            libc::F_WRLCK => FileLockType::Write,
-            libc::F_UNLCK => FileLockType::UnLock,
+        let fl_type = match lock_type {
+            x if x == libc::F_RDLCK as u32 => FileLockType::Read,
+            x if x == libc::F_WRLCK as u32 => FileLockType::Write,
+            x if x == libc::F_UNLCK as u32 => FileLockType::UnLock,
             _ => return Err(libc::EINVAL.into()),
         };
 

@@ -42,7 +42,9 @@ use crate::chunk::layout::ChunkLayout;
 use crate::chunk::store::{BlockStore, ObjectBlockStore};
 use crate::fuse::mount::mount_vfs_unprivileged;
 use crate::meta::MetaStore;
-use crate::meta::config::{CacheConfig, ClientOptions, Config, DatabaseConfig, DatabaseType};
+use crate::meta::config::{
+    CacheConfig, ClientOptions, CompactConfig, Config, DatabaseConfig, DatabaseType,
+};
 use crate::meta::factory::MetaStoreFactory;
 use crate::meta::stores::{DatabaseMetaStore, EtcdMetaStore, RedisMetaStore};
 use crate::vfs::fs::VFS;
@@ -260,6 +262,7 @@ async fn create_meta_store(args: &MountConfig) -> anyhow::Result<Arc<dyn MetaSto
     match args.meta_backend {
         MetaBackendKind::Sqlx => {
             let client = ClientOptions::default();
+            let compact = CompactConfig::default();
 
             let config = Config {
                 database: DatabaseConfig {
@@ -267,6 +270,7 @@ async fn create_meta_store(args: &MountConfig) -> anyhow::Result<Arc<dyn MetaSto
                 },
                 cache: CacheConfig::default(),
                 client,
+                compact,
             };
             let handle = MetaStoreFactory::<DatabaseMetaStore>::create_from_config(config).await?;
             Ok(handle.store() as Arc<dyn MetaStore>)
@@ -277,6 +281,7 @@ async fn create_meta_store(args: &MountConfig) -> anyhow::Result<Arc<dyn MetaSto
             }
 
             let client = ClientOptions::default();
+            let compact = CompactConfig::default();
 
             let config = Config {
                 database: DatabaseConfig {
@@ -286,6 +291,7 @@ async fn create_meta_store(args: &MountConfig) -> anyhow::Result<Arc<dyn MetaSto
                 },
                 cache: CacheConfig::default(),
                 client,
+                compact,
             };
             let handle = MetaStoreFactory::<EtcdMetaStore>::create_from_config(config).await?;
             Ok(handle.store() as Arc<dyn MetaStore>)
