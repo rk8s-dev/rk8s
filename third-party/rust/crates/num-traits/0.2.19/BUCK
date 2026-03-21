@@ -4,27 +4,26 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "buildscript_run", "rust_binary", "rust_library")
 
 http_archive(
-    name = "num-traits-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/num-traits/num-traits-0.2.19.crate"],
     sha256 = "071dfc062690e90b734c0b2273ce72ad0ffa95f0c74596bc250dcfd960262841",
     type = "tar.gz",
     strip_prefix = "num-traits-0.2.19",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "num-traits-manifest",
-    vendor = ":num-traits-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "num-traits",
-    srcs = [":num-traits-vendor"],
+    srcs = [":vendor"],
     crate = "num_traits",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
-        "OUT_DIR": "$(location :num-traits-build-script-run[out_dir])",
+        "OUT_DIR": "$(location :build-script-run[out_dir])",
     },
     features = [
         "default",
@@ -33,16 +32,16 @@ rust_library(
         "std",
     ],
     rustc_flags = [
-        "@$(location :num-traits-build-script-run[rustc_flags])",
-        "@$(location :num-traits-manifest[env_flags])",
+        "@$(location :build-script-run[rustc_flags])",
+        "@$(location :manifest[env_flags])",
     ],
     visibility = ["PUBLIC"],
     deps = ["//third-party/rust/crates/libm/0.2.16:libm"],
 )
 
 rust_binary(
-    name = "num-traits-build-script-build",
-    srcs = [":num-traits-vendor"],
+    name = "build-script-build",
+    srcs = [":vendor"],
     crate = "build_script_build",
     crate_root = "vendor/build.rs",
     edition = "2021",
@@ -52,16 +51,16 @@ rust_binary(
         "libm",
         "std",
     ],
-    rustc_flags = ["@$(location :num-traits-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = [],
     deps = ["//third-party/rust/crates/autocfg/1.5.0:autocfg"],
 )
 
 buildscript_run(
-    name = "num-traits-build-script-run",
+    name = "build-script-run",
     package_name = "num-traits",
-    buildscript_rule = ":num-traits-build-script-build",
-    env_srcs = [":num-traits-manifest[env_dict]"],
+    buildscript_rule = ":build-script-build",
+    env_srcs = [":manifest[env_dict]"],
     features = [
         "default",
         "i128",
@@ -69,6 +68,6 @@ buildscript_run(
         "std",
     ],
     version = "0.2.19",
-    manifest_dir = ":num-traits-vendor",
+    manifest_dir = ":vendor",
     visibility = ["PUBLIC"],
 )

@@ -4,25 +4,24 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "unsafe-libyaml-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/unsafe-libyaml/unsafe-libyaml-0.2.11.crate"],
     sha256 = "673aac59facbab8a9007c7f6108d11f63b603f7cabff99fabf650fea5c32b861",
     type = "tar.gz",
     strip_prefix = "unsafe-libyaml-0.2.11",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "unsafe-libyaml-manifest",
-    vendor = ":unsafe-libyaml-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "unsafe-libyaml",
-    srcs = [":unsafe-libyaml-vendor"],
+    srcs = [":vendor"],
     crate = "unsafe_libyaml",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
-    rustc_flags = ["@$(location :unsafe-libyaml-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
 )

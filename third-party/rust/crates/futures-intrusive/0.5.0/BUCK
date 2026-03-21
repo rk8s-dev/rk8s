@@ -4,22 +4,21 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "futures-intrusive-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/futures-intrusive/futures-intrusive-0.5.0.crate"],
     sha256 = "1d930c203dd0b6ff06e0201a4a2fe9149b43c684fd4420555b26d21b1a02956f",
     type = "tar.gz",
     strip_prefix = "futures-intrusive-0.5.0",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "futures-intrusive-manifest",
-    vendor = ":futures-intrusive-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "futures-intrusive",
-    srcs = [":futures-intrusive-vendor"],
+    srcs = [":vendor"],
     crate = "futures_intrusive",
     crate_root = "vendor/src/lib.rs",
     edition = "2018",
@@ -29,7 +28,7 @@ rust_library(
         "parking_lot",
         "std",
     ],
-    rustc_flags = ["@$(location :futures-intrusive-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/futures-core/0.3.31:futures-core",

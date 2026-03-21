@@ -4,27 +4,26 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "zerofrom-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/zerofrom/zerofrom-0.1.6.crate"],
     sha256 = "50cc42e0333e05660c3587f3bf9d0478688e15d870fab3346451ce7f8c9fbea5",
     type = "tar.gz",
     strip_prefix = "zerofrom-0.1.6",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "zerofrom-manifest",
-    vendor = ":zerofrom-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "zerofrom",
-    srcs = [":zerofrom-vendor"],
+    srcs = [":vendor"],
     crate = "zerofrom",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
     features = ["derive"],
-    rustc_flags = ["@$(location :zerofrom-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = ["//third-party/rust/crates/zerofrom-derive/0.1.6:zerofrom-derive"],
 )

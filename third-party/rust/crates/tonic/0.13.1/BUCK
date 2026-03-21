@@ -4,22 +4,21 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "tonic-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/tonic/tonic-0.13.1.crate"],
     sha256 = "7e581ba15a835f4d9ea06c55ab1bd4dce26fc53752c69a04aac00703bfb49ba9",
     type = "tar.gz",
     strip_prefix = "tonic-0.13.1",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "tonic-manifest",
-    vendor = ":tonic-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "tonic",
-    srcs = [":tonic-vendor"],
+    srcs = [":vendor"],
     crate = "tonic",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
@@ -32,7 +31,7 @@ rust_library(
         "server",
         "transport",
     ],
-    rustc_flags = ["@$(location :tonic-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/async-trait/0.1.89:async-trait",

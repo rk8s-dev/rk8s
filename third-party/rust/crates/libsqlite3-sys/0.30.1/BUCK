@@ -4,27 +4,26 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "buildscript_run", "rust_binary", "rust_library")
 
 http_archive(
-    name = "libsqlite3-sys-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/libsqlite3-sys/libsqlite3-sys-0.30.1.crate"],
     sha256 = "2e99fb7a497b1e3339bc746195567ed8d3e24945ecd636e3619d20b9de9e9149",
     type = "tar.gz",
     strip_prefix = "libsqlite3-sys-0.30.1",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "libsqlite3-sys-manifest",
-    vendor = ":libsqlite3-sys-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "libsqlite3-sys",
-    srcs = [":libsqlite3-sys-vendor"],
+    srcs = [":vendor"],
     crate = "libsqlite3_sys",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
-        "OUT_DIR": "$(location :libsqlite3-sys-build-script-run[out_dir])",
+        "OUT_DIR": "$(location :build-script-run[out_dir])",
     },
     features = [
         "bundled",
@@ -35,15 +34,15 @@ rust_library(
         "vcpkg",
     ],
     rustc_flags = [
-        "@$(location :libsqlite3-sys-build-script-run[rustc_flags])",
-        "@$(location :libsqlite3-sys-manifest[env_flags])",
+        "@$(location :build-script-run[rustc_flags])",
+        "@$(location :manifest[env_flags])",
     ],
     visibility = ["PUBLIC"],
 )
 
 rust_binary(
-    name = "libsqlite3-sys-build-script-build",
-    srcs = [":libsqlite3-sys-vendor"],
+    name = "build-script-build",
+    srcs = [":vendor"],
     crate = "build_script_build",
     crate_root = "vendor/build.rs",
     edition = "2021",
@@ -55,7 +54,7 @@ rust_binary(
         "unlock_notify",
         "vcpkg",
     ],
-    rustc_flags = ["@$(location :libsqlite3-sys-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = [],
     deps = [
         "//third-party/rust/crates/cc/1.2.56:cc",
@@ -65,10 +64,10 @@ rust_binary(
 )
 
 buildscript_run(
-    name = "libsqlite3-sys-build-script-run",
+    name = "build-script-run",
     package_name = "libsqlite3-sys",
-    buildscript_rule = ":libsqlite3-sys-build-script-build",
-    env_srcs = [":libsqlite3-sys-manifest[env_dict]"],
+    buildscript_rule = ":build-script-build",
+    env_srcs = [":manifest[env_dict]"],
     features = [
         "bundled",
         "bundled_bindings",
@@ -78,6 +77,6 @@ buildscript_run(
         "vcpkg",
     ],
     version = "0.30.1",
-    manifest_dir = ":libsqlite3-sys-vendor",
+    manifest_dir = ":vendor",
     visibility = ["PUBLIC"],
 )

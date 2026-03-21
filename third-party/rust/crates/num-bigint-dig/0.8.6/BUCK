@@ -4,27 +4,26 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "buildscript_run", "rust_binary", "rust_library")
 
 http_archive(
-    name = "num-bigint-dig-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/num-bigint-dig/num-bigint-dig-0.8.6.crate"],
     sha256 = "e661dda6640fad38e827a6d4a310ff4763082116fe217f279885c97f511bb0b7",
     type = "tar.gz",
     strip_prefix = "num-bigint-dig-0.8.6",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "num-bigint-dig-manifest",
-    vendor = ":num-bigint-dig-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "num-bigint-dig",
-    srcs = [":num-bigint-dig-vendor"],
+    srcs = [":vendor"],
     crate = "num_bigint_dig",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
-        "OUT_DIR": "$(location :num-bigint-dig-build-script-run[out_dir])",
+        "OUT_DIR": "$(location :build-script-run[out_dir])",
     },
     features = [
         "default",
@@ -37,8 +36,8 @@ rust_library(
         "zeroize",
     ],
     rustc_flags = [
-        "@$(location :num-bigint-dig-build-script-run[rustc_flags])",
-        "@$(location :num-bigint-dig-manifest[env_flags])",
+        "@$(location :build-script-run[rustc_flags])",
+        "@$(location :manifest[env_flags])",
     ],
     visibility = ["PUBLIC"],
     deps = [
@@ -55,8 +54,8 @@ rust_library(
 )
 
 rust_binary(
-    name = "num-bigint-dig-build-script-build",
-    srcs = [":num-bigint-dig-vendor"],
+    name = "build-script-build",
+    srcs = [":vendor"],
     crate = "build_script_build",
     crate_root = "vendor/build.rs",
     edition = "2021",
@@ -70,15 +69,15 @@ rust_binary(
         "u64_digit",
         "zeroize",
     ],
-    rustc_flags = ["@$(location :num-bigint-dig-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = [],
 )
 
 buildscript_run(
-    name = "num-bigint-dig-build-script-run",
+    name = "build-script-run",
     package_name = "num-bigint-dig",
-    buildscript_rule = ":num-bigint-dig-build-script-build",
-    env_srcs = [":num-bigint-dig-manifest[env_dict]"],
+    buildscript_rule = ":build-script-build",
+    env_srcs = [":manifest[env_dict]"],
     features = [
         "default",
         "i128",
@@ -90,6 +89,6 @@ buildscript_run(
         "zeroize",
     ],
     version = "0.8.6",
-    manifest_dir = ":num-bigint-dig-vendor",
+    manifest_dir = ":vendor",
     visibility = ["PUBLIC"],
 )

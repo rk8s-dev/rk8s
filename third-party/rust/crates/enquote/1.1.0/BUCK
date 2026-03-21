@@ -4,26 +4,25 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "enquote-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/enquote/enquote-1.1.0.crate"],
     sha256 = "06c36cb11dbde389f4096111698d8b567c0720e3452fd5ac3e6b4e47e1939932",
     type = "tar.gz",
     strip_prefix = "enquote-1.1.0",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "enquote-manifest",
-    vendor = ":enquote-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "enquote",
-    srcs = [":enquote-vendor"],
+    srcs = [":vendor"],
     crate = "enquote",
     crate_root = "vendor/src/lib.rs",
     edition = "2018",
-    rustc_flags = ["@$(location :enquote-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = ["//third-party/rust/crates/thiserror/1.0.69:thiserror"],
 )

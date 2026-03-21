@@ -4,22 +4,21 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "aws-runtime-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/aws-runtime/aws-runtime-1.7.0.crate"],
     sha256 = "b0f92058d22a46adf53ec57a6a96f34447daf02bff52e8fb956c66bcd5c6ac12",
     type = "tar.gz",
     strip_prefix = "aws-runtime-1.7.0",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "aws-runtime-manifest",
-    vendor = ":aws-runtime-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "aws-runtime",
-    srcs = [":aws-runtime-vendor"],
+    srcs = [":vendor"],
     crate = "aws_runtime",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
@@ -28,7 +27,7 @@ rust_library(
         "http-02x",
         "sigv4a",
     ],
-    rustc_flags = ["@$(location :aws-runtime-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     named_deps = {
         "http_02x": "//third-party/rust/crates/http/0.2.12:http",
         "http_1x": "//third-party/rust/crates/http/1.4.0:http",

@@ -4,22 +4,21 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "simplelog-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/simplelog/simplelog-0.10.2.crate"],
     sha256 = "85d04ae642154220ef00ee82c36fb07853c10a4f2a0ca6719f9991211d2eb959",
     type = "tar.gz",
     strip_prefix = "simplelog-0.10.2",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "simplelog-manifest",
-    vendor = ":simplelog-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "simplelog",
-    srcs = [":simplelog-vendor"],
+    srcs = [":vendor"],
     crate = "simplelog",
     crate_root = "vendor/src/lib.rs",
     edition = "2018",
@@ -27,7 +26,7 @@ rust_library(
         "default",
         "termcolor",
     ],
-    rustc_flags = ["@$(location :simplelog-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/chrono/0.4.43:chrono",

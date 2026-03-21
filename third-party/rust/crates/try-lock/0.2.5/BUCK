@@ -4,25 +4,24 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "try-lock-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/try-lock/try-lock-0.2.5.crate"],
     sha256 = "e421abadd41a4225275504ea4d6566923418b7f05506fbc9c0fe86ba7396114b",
     type = "tar.gz",
     strip_prefix = "try-lock-0.2.5",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "try-lock-manifest",
-    vendor = ":try-lock-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "try-lock",
-    srcs = [":try-lock-vendor"],
+    srcs = [":vendor"],
     crate = "try_lock",
     crate_root = "vendor/src/lib.rs",
     edition = "2015",
-    rustc_flags = ["@$(location :try-lock-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
 )

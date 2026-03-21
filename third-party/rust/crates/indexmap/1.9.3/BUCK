@@ -4,27 +4,26 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "buildscript_run", "rust_binary", "rust_library")
 
 http_archive(
-    name = "indexmap-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/indexmap/indexmap-1.9.3.crate"],
     sha256 = "bd070e393353796e801d209ad339e89596eb4c8d430d18ede6a1cced8fafbd99",
     type = "tar.gz",
     strip_prefix = "indexmap-1.9.3",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "indexmap-manifest",
-    vendor = ":indexmap-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "indexmap",
-    srcs = [":indexmap-vendor"],
+    srcs = [":vendor"],
     crate = "indexmap",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
-        "OUT_DIR": "$(location :indexmap-build-script-run[out_dir])",
+        "OUT_DIR": "$(location :build-script-run[out_dir])",
     },
     features = [
         "serde",
@@ -32,8 +31,8 @@ rust_library(
         "std",
     ],
     rustc_flags = [
-        "@$(location :indexmap-build-script-run[rustc_flags])",
-        "@$(location :indexmap-manifest[env_flags])",
+        "@$(location :build-script-run[rustc_flags])",
+        "@$(location :manifest[env_flags])",
     ],
     visibility = ["PUBLIC"],
     deps = [
@@ -43,8 +42,8 @@ rust_library(
 )
 
 rust_binary(
-    name = "indexmap-build-script-build",
-    srcs = [":indexmap-vendor"],
+    name = "build-script-build",
+    srcs = [":vendor"],
     crate = "build_script_build",
     crate_root = "vendor/build.rs",
     edition = "2021",
@@ -53,22 +52,22 @@ rust_binary(
         "serde-1",
         "std",
     ],
-    rustc_flags = ["@$(location :indexmap-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = [],
     deps = ["//third-party/rust/crates/autocfg/1.5.0:autocfg"],
 )
 
 buildscript_run(
-    name = "indexmap-build-script-run",
+    name = "build-script-run",
     package_name = "indexmap",
-    buildscript_rule = ":indexmap-build-script-build",
-    env_srcs = [":indexmap-manifest[env_dict]"],
+    buildscript_rule = ":build-script-build",
+    env_srcs = [":manifest[env_dict]"],
     features = [
         "serde",
         "serde-1",
         "std",
     ],
     version = "1.9.3",
-    manifest_dir = ":indexmap-vendor",
+    manifest_dir = ":vendor",
     visibility = ["PUBLIC"],
 )

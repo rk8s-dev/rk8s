@@ -4,22 +4,21 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "blake2b_simd-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/blake2b_simd/blake2b_simd-1.0.4.crate"],
     sha256 = "b79834656f71332577234b50bfc009996f7449e0c056884e6a02492ded0ca2f3",
     type = "tar.gz",
     strip_prefix = "blake2b_simd-1.0.4",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "blake2b_simd-manifest",
-    vendor = ":blake2b_simd-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "blake2b_simd",
-    srcs = [":blake2b_simd-vendor"],
+    srcs = [":vendor"],
     crate = "blake2b_simd",
     crate_root = "vendor/src/lib.rs",
     edition = "2024",
@@ -27,7 +26,7 @@ rust_library(
         "default",
         "std",
     ],
-    rustc_flags = ["@$(location :blake2b_simd-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/arrayref/0.3.9:arrayref",

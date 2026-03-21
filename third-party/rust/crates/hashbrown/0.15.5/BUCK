@@ -4,22 +4,21 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "hashbrown-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/hashbrown/hashbrown-0.15.5.crate"],
     sha256 = "9229cfe53dfd69f0609a49f65461bd93001ea1ef889cd5529dd176593f5338a1",
     type = "tar.gz",
     strip_prefix = "hashbrown-0.15.5",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "hashbrown-manifest",
-    vendor = ":hashbrown-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "hashbrown",
-    srcs = [":hashbrown-vendor"],
+    srcs = [":vendor"],
     crate = "hashbrown",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
@@ -31,7 +30,7 @@ rust_library(
         "inline-more",
         "raw-entry",
     ],
-    rustc_flags = ["@$(location :hashbrown-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/allocator-api2/0.2.21:allocator-api2",

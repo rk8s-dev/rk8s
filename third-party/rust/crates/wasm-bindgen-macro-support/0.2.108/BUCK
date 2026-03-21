@@ -4,26 +4,25 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "wasm-bindgen-macro-support-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/wasm-bindgen-macro-support/wasm-bindgen-macro-support-0.2.108.crate"],
     sha256 = "5256bae2d58f54820e6490f9839c49780dff84c65aeab9e772f15d5f0e913a55",
     type = "tar.gz",
     strip_prefix = "wasm-bindgen-macro-support-0.2.108",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "wasm-bindgen-macro-support-manifest",
-    vendor = ":wasm-bindgen-macro-support-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "wasm-bindgen-macro-support",
-    srcs = [":wasm-bindgen-macro-support-vendor"],
+    srcs = [":vendor"],
     crate = "wasm_bindgen_macro_support",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
-    rustc_flags = ["@$(location :wasm-bindgen-macro-support-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/bumpalo/3.19.1:bumpalo",

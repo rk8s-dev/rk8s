@@ -4,22 +4,21 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "k256-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/k256/k256-0.13.4.crate"],
     sha256 = "f6e3919bbaa2945715f0bb6d3934a173d1e9a59ac23767fbaaef277265a7411b",
     type = "tar.gz",
     strip_prefix = "k256-0.13.4",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "k256-manifest",
-    vendor = ":k256-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "k256",
-    srcs = [":k256-vendor"],
+    srcs = [":vendor"],
     crate = "k256",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
@@ -39,7 +38,7 @@ rust_library(
         "signature",
         "std",
     ],
-    rustc_flags = ["@$(location :k256-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     named_deps = {
         "ecdsa_core": "//third-party/rust/crates/ecdsa/0.16.9:ecdsa",
     },

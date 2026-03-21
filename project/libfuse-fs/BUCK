@@ -4,23 +4,22 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 filegroup(
-    name = "libfuse-fs-vendor",
+    name = "vendor",
     srcs = glob(["**/**"]),
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "libfuse-fs-manifest",
-    vendor = ":libfuse-fs-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "libfuse_fs",
-    srcs = [":libfuse-fs-vendor"],
+    srcs = [":vendor"],
     crate = "libfuse_fs",
     crate_root = "vendor/src/lib.rs",
     edition = "2024",
-    rustc_flags = ["@$(location :libfuse-fs-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
         "//project/rfuse3:rfuse3",

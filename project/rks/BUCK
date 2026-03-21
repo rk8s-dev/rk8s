@@ -4,36 +4,35 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_binary", "rust_library")
 
 filegroup(
-    name = "rks-vendor",
+    name = "vendor",
     srcs = glob(["**/**"]),
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "rks-manifest",
-    vendor = ":rks-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_binary(
     name = "rks",
-    srcs = [":rks-vendor"],
+    srcs = [":vendor"],
     crate = "rks",
     crate_root = "vendor/src/main.rs",
     edition = "2024",
-    rustc_flags = ["@$(location :rks-manifest[env_flags])"] + select({
+    rustc_flags = ["@$(location :manifest[env_flags])"] + select({
         "prelude//os/constraints:windows": select({
             "prelude//abi/constraints:gnu": [
-                "@$(location //third-party/rust/crates/windows_x86_64_gnu/0.42.2:windows_x86_64_gnu-build-script-run[rustc_flags])",
-                "@$(location //third-party/rust/crates/windows_x86_64_gnu/0.48.5:windows_x86_64_gnu-build-script-run[rustc_flags])",
-                "@$(location //third-party/rust/crates/windows_x86_64_gnu/0.52.6:windows_x86_64_gnu-build-script-run[rustc_flags])",
-                "@$(location //third-party/rust/crates/windows_x86_64_gnu/0.53.1:windows_x86_64_gnu-build-script-run[rustc_flags])",
-                "@$(location //third-party/rust/crates/winapi-x86_64-pc-windows-gnu/0.4.0:winapi-x86_64-pc-windows-gnu-build-script-run[rustc_flags])",
+                "@$(location //third-party/rust/crates/windows_x86_64_gnu/0.42.2:build-script-run[rustc_flags])",
+                "@$(location //third-party/rust/crates/windows_x86_64_gnu/0.48.5:build-script-run[rustc_flags])",
+                "@$(location //third-party/rust/crates/windows_x86_64_gnu/0.52.6:build-script-run[rustc_flags])",
+                "@$(location //third-party/rust/crates/windows_x86_64_gnu/0.53.1:build-script-run[rustc_flags])",
+                "@$(location //third-party/rust/crates/winapi-x86_64-pc-windows-gnu/0.4.0:build-script-run[rustc_flags])",
             ],
             "DEFAULT": [
-                "@$(location //third-party/rust/crates/windows_x86_64_msvc/0.42.2:windows_x86_64_msvc-build-script-run[rustc_flags])",
-                "@$(location //third-party/rust/crates/windows_x86_64_msvc/0.48.5:windows_x86_64_msvc-build-script-run[rustc_flags])",
-                "@$(location //third-party/rust/crates/windows_x86_64_msvc/0.52.6:windows_x86_64_msvc-build-script-run[rustc_flags])",
-                "@$(location //third-party/rust/crates/windows_x86_64_msvc/0.53.1:windows_x86_64_msvc-build-script-run[rustc_flags])",
+                "@$(location //third-party/rust/crates/windows_x86_64_msvc/0.42.2:build-script-run[rustc_flags])",
+                "@$(location //third-party/rust/crates/windows_x86_64_msvc/0.48.5:build-script-run[rustc_flags])",
+                "@$(location //third-party/rust/crates/windows_x86_64_msvc/0.52.6:build-script-run[rustc_flags])",
+                "@$(location //third-party/rust/crates/windows_x86_64_msvc/0.53.1:build-script-run[rustc_flags])",
             ],
         }),
         "DEFAULT": [],
@@ -42,6 +41,7 @@ rust_binary(
     deps = [
         "//project/common:common",
         "//project/libcni:libcni",
+        "//project/libcsi:libcsi",
         "//project/libnetwork:libnetwork",
         "//project/libscheduler:libscheduler",
         "//project/libvault:libvault",
@@ -53,6 +53,7 @@ rust_binary(
         "//third-party/rust/crates/chrono/0.4.43:chrono",
         "//third-party/rust/crates/clap/4.5.58:clap",
         "//third-party/rust/crates/context/3.0.0:context",
+        "//third-party/rust/crates/dashmap/6.1.0:dashmap",
         "//third-party/rust/crates/dotenvy/0.15.7:dotenvy",
         "//third-party/rust/crates/either/1.15.0:either",
         "//third-party/rust/crates/env_logger/0.11.9:env_logger",
@@ -96,15 +97,16 @@ rust_binary(
 
 rust_library(
     name = "rks-lib",
-    srcs = [":rks-vendor"],
+    srcs = [":vendor"],
     crate = "rks",
     crate_root = "vendor/src/lib.rs",
     edition = "2024",
-    rustc_flags = ["@$(location :rks-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
         "//project/common:common",
         "//project/libcni:libcni",
+        "//project/libcsi:libcsi",
         "//project/libnetwork:libnetwork",
         "//project/libscheduler:libscheduler",
         "//project/libvault:libvault",
@@ -116,6 +118,7 @@ rust_library(
         "//third-party/rust/crates/chrono/0.4.43:chrono",
         "//third-party/rust/crates/clap/4.5.58:clap",
         "//third-party/rust/crates/context/3.0.0:context",
+        "//third-party/rust/crates/dashmap/6.1.0:dashmap",
         "//third-party/rust/crates/dotenvy/0.15.7:dotenvy",
         "//third-party/rust/crates/either/1.15.0:either",
         "//third-party/rust/crates/env_logger/0.11.9:env_logger",

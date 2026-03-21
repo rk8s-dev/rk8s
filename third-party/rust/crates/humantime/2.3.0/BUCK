@@ -4,25 +4,24 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "humantime-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/humantime/humantime-2.3.0.crate"],
     sha256 = "135b12329e5e3ce057a9f972339ea52bc954fe1e9358ef27f95e89716fbc5424",
     type = "tar.gz",
     strip_prefix = "humantime-2.3.0",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "humantime-manifest",
-    vendor = ":humantime-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "humantime",
-    srcs = [":humantime-vendor"],
+    srcs = [":vendor"],
     crate = "humantime",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
-    rustc_flags = ["@$(location :humantime-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
 )

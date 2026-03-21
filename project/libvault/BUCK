@@ -4,24 +4,23 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "buildscript_run", "rust_binary", "rust_library")
 
 filegroup(
-    name = "libvault-vendor",
+    name = "vendor",
     srcs = glob(["**/**"]),
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "libvault-manifest",
-    vendor = ":libvault-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "libvault",
-    srcs = [":libvault-vendor"],
+    srcs = [":vendor"],
     crate = "libvault",
     crate_root = "vendor/src/lib.rs",
     edition = "2024",
     env = {
-        "OUT_DIR": "$(location :libvault-build-script-run[out_dir])",
+        "OUT_DIR": "$(location :build-script-run[out_dir])",
     },
     features = [
         "crypto_adaptor_openssl",
@@ -30,8 +29,8 @@ rust_library(
         "storage_xline",
     ],
     rustc_flags = [
-        "@$(location :libvault-build-script-run[rustc_flags])",
-        "@$(location :libvault-manifest[env_flags])",
+        "@$(location :build-script-run[rustc_flags])",
+        "@$(location :manifest[env_flags])",
     ],
     named_deps = {
         "hcl": "//third-party/rust/crates/hcl-rs/0.18.7:hcl-rs",
@@ -107,8 +106,8 @@ rust_library(
 )
 
 rust_binary(
-    name = "libvault-build-script-build",
-    srcs = [":libvault-vendor"],
+    name = "build-script-build",
+    srcs = [":vendor"],
     crate = "build_script_build",
     crate_root = "vendor/build.rs",
     edition = "2024",
@@ -118,18 +117,18 @@ rust_binary(
         "etcd-client",
         "storage_xline",
     ],
-    rustc_flags = ["@$(location :libvault-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = [],
     deps = ["//third-party/rust/crates/toml/0.8.23:toml"],
 )
 
 buildscript_run(
-    name = "libvault-build-script-run",
+    name = "build-script-run",
     package_name = "libvault",
-    buildscript_rule = ":libvault-build-script-build",
+    buildscript_rule = ":build-script-build",
     env_srcs = [
-        "//third-party/rust/crates/openssl-sys/0.9.111:openssl-sys-build-script-main-run[metadata]",
-        ":libvault-manifest[env_dict]",
+        "//third-party/rust/crates/openssl-sys/0.9.111:build-script-main-run[metadata]",
+        ":manifest[env_dict]",
     ],
     features = [
         "crypto_adaptor_openssl",
@@ -138,6 +137,6 @@ buildscript_run(
         "storage_xline",
     ],
     version = "0.2.2",
-    manifest_dir = ":libvault-vendor",
+    manifest_dir = ":vendor",
     visibility = ["PUBLIC"],
 )

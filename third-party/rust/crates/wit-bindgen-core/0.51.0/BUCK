@@ -4,26 +4,25 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "wit-bindgen-core-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/wit-bindgen-core/wit-bindgen-core-0.51.0.crate"],
     sha256 = "ea61de684c3ea68cb082b7a88508a8b27fcc8b797d738bfc99a82facf1d752dc",
     type = "tar.gz",
     strip_prefix = "wit-bindgen-core-0.51.0",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "wit-bindgen-core-manifest",
-    vendor = ":wit-bindgen-core-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "wit-bindgen-core",
-    srcs = [":wit-bindgen-core-vendor"],
+    srcs = [":vendor"],
     crate = "wit_bindgen_core",
     crate_root = "vendor/src/lib.rs",
     edition = "2024",
-    rustc_flags = ["@$(location :wit-bindgen-core-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/anyhow/1.0.101:anyhow",

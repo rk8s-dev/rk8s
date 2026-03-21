@@ -4,22 +4,21 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "crossbeam-epoch-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/crossbeam-epoch/crossbeam-epoch-0.9.18.crate"],
     sha256 = "5b82ac4a3c2ca9c3460964f020e1402edd5753411d7737aa39c3714ad1b5420e",
     type = "tar.gz",
     strip_prefix = "crossbeam-epoch-0.9.18",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "crossbeam-epoch-manifest",
-    vendor = ":crossbeam-epoch-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "crossbeam-epoch",
-    srcs = [":crossbeam-epoch-vendor"],
+    srcs = [":vendor"],
     crate = "crossbeam_epoch",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
@@ -28,7 +27,7 @@ rust_library(
         "default",
         "std",
     ],
-    rustc_flags = ["@$(location :crossbeam-epoch-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = ["//third-party/rust/crates/crossbeam-utils/0.8.21:crossbeam-utils"],
 )

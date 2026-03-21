@@ -4,31 +4,30 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "buildscript_run", "rust_binary", "rust_library")
 
 http_archive(
-    name = "wit-bindgen-rust-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/wit-bindgen-rust/wit-bindgen-rust-0.51.0.crate"],
     sha256 = "b7c566e0f4b284dd6561c786d9cb0142da491f46a9fbed79ea69cdad5db17f21",
     type = "tar.gz",
     strip_prefix = "wit-bindgen-rust-0.51.0",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "wit-bindgen-rust-manifest",
-    vendor = ":wit-bindgen-rust-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "wit-bindgen-rust",
-    srcs = [":wit-bindgen-rust-vendor"],
+    srcs = [":vendor"],
     crate = "wit_bindgen_rust",
     crate_root = "vendor/src/lib.rs",
     edition = "2024",
     env = {
-        "OUT_DIR": "$(location :wit-bindgen-rust-build-script-run[out_dir])",
+        "OUT_DIR": "$(location :build-script-run[out_dir])",
     },
     rustc_flags = [
-        "@$(location :wit-bindgen-rust-build-script-run[rustc_flags])",
-        "@$(location :wit-bindgen-rust-manifest[env_flags])",
+        "@$(location :build-script-run[rustc_flags])",
+        "@$(location :manifest[env_flags])",
     ],
     visibility = ["PUBLIC"],
     deps = [
@@ -44,24 +43,24 @@ rust_library(
 )
 
 rust_binary(
-    name = "wit-bindgen-rust-build-script-build",
-    srcs = [":wit-bindgen-rust-vendor"],
+    name = "build-script-build",
+    srcs = [":vendor"],
     crate = "build_script_build",
     crate_root = "vendor/build.rs",
     edition = "2024",
-    rustc_flags = ["@$(location :wit-bindgen-rust-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = [],
 )
 
 buildscript_run(
-    name = "wit-bindgen-rust-build-script-run",
+    name = "build-script-run",
     package_name = "wit-bindgen-rust",
-    buildscript_rule = ":wit-bindgen-rust-build-script-build",
+    buildscript_rule = ":build-script-build",
     env_srcs = [
-        "//third-party/rust/crates/prettyplease/0.2.37:prettyplease-build-script-run[metadata]",
-        ":wit-bindgen-rust-manifest[env_dict]",
+        "//third-party/rust/crates/prettyplease/0.2.37:build-script-run[metadata]",
+        ":manifest[env_dict]",
     ],
     version = "0.51.0",
-    manifest_dir = ":wit-bindgen-rust-vendor",
+    manifest_dir = ":vendor",
     visibility = ["PUBLIC"],
 )

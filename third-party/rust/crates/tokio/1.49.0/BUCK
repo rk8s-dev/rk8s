@@ -4,22 +4,21 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "tokio-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/tokio/tokio-1.49.0.crate"],
     sha256 = "72a2903cd7736441aac9df9d7688bd0ce48edccaadf181c3b90be801e81d3d86",
     type = "tar.gz",
     strip_prefix = "tokio-1.49.0",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "tokio-manifest",
-    vendor = ":tokio-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "tokio",
-    srcs = [":tokio-vendor"],
+    srcs = [":vendor"],
     crate = "tokio",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
@@ -48,7 +47,7 @@ rust_library(
         "tracing",
         "windows-sys",
     ],
-    rustc_flags = ["@$(location :tokio-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     os_deps = {
         "linux": [
             "//third-party/rust/crates/signal-hook-registry/1.4.8:signal-hook-registry",

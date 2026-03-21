@@ -4,27 +4,26 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "parking_lot-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/parking_lot/parking_lot-0.12.5.crate"],
     sha256 = "93857453250e3077bd71ff98b6a65ea6621a19bb0f559a85248955ac12c45a1a",
     type = "tar.gz",
     strip_prefix = "parking_lot-0.12.5",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "parking_lot-manifest",
-    vendor = ":parking_lot-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "parking_lot",
-    srcs = [":parking_lot-vendor"],
+    srcs = [":vendor"],
     crate = "parking_lot",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
     features = ["default"],
-    rustc_flags = ["@$(location :parking_lot-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/lock_api/0.4.14:lock_api",

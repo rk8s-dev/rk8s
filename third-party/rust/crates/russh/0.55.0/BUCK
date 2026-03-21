@@ -4,22 +4,21 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "russh-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/russh/russh-0.55.0.crate"],
     sha256 = "82b4d036bb45d7bbe99dbfef4ec60eaeb614708d22ff107124272f8ef6b54548",
     type = "tar.gz",
     strip_prefix = "russh-0.55.0",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "russh-manifest",
-    vendor = ":russh-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "russh",
-    srcs = [":russh-vendor"],
+    srcs = [":vendor"],
     crate = "russh",
     crate_root = "vendor/src/lib.rs",
     edition = "2024",
@@ -29,7 +28,7 @@ rust_library(
         "flate2",
         "rsa",
     ],
-    rustc_flags = ["@$(location :russh-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     named_deps = {
         "ssh_key": "//third-party/rust/crates/internal-russh-forked-ssh-key/0.6.11+upstream-0.6.7:internal-russh-forked-ssh-key",
     },

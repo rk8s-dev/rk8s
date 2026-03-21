@@ -4,35 +4,34 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "buildscript_run", "rust_binary", "rust_library")
 
 http_archive(
-    name = "polling-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/polling/polling-2.8.0.crate"],
     sha256 = "4b2d323e8ca7996b3e23126511a523f7e62924d93ecd5ae73b333815b0eb3dce",
     type = "tar.gz",
     strip_prefix = "polling-2.8.0",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "polling-manifest",
-    vendor = ":polling-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "polling",
-    srcs = [":polling-vendor"],
+    srcs = [":vendor"],
     crate = "polling",
     crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
-        "OUT_DIR": "$(location :polling-build-script-run[out_dir])",
+        "OUT_DIR": "$(location :build-script-run[out_dir])",
     },
     features = [
         "default",
         "std",
     ],
     rustc_flags = [
-        "@$(location :polling-build-script-run[rustc_flags])",
-        "@$(location :polling-manifest[env_flags])",
+        "@$(location :build-script-run[rustc_flags])",
+        "@$(location :manifest[env_flags])",
     ],
     os_deps = {
         "linux": ["//third-party/rust/crates/libc/0.2.182:libc"],
@@ -52,8 +51,8 @@ rust_library(
 )
 
 rust_binary(
-    name = "polling-build-script-build",
-    srcs = [":polling-vendor"],
+    name = "build-script-build",
+    srcs = [":vendor"],
     crate = "build_script_build",
     crate_root = "vendor/build.rs",
     edition = "2018",
@@ -61,21 +60,21 @@ rust_binary(
         "default",
         "std",
     ],
-    rustc_flags = ["@$(location :polling-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = [],
     deps = ["//third-party/rust/crates/autocfg/1.5.0:autocfg"],
 )
 
 buildscript_run(
-    name = "polling-build-script-run",
+    name = "build-script-run",
     package_name = "polling",
-    buildscript_rule = ":polling-build-script-build",
-    env_srcs = [":polling-manifest[env_dict]"],
+    buildscript_rule = ":build-script-build",
+    env_srcs = [":manifest[env_dict]"],
     features = [
         "default",
         "std",
     ],
     version = "2.8.0",
-    manifest_dir = ":polling-vendor",
+    manifest_dir = ":vendor",
     visibility = ["PUBLIC"],
 )

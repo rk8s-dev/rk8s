@@ -4,22 +4,21 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "pem-rfc7468-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/pem-rfc7468/pem-rfc7468-0.7.0.crate"],
     sha256 = "88b39c9bfcfc231068454382784bb460aae594343fb030d46e9f50a645418412",
     type = "tar.gz",
     strip_prefix = "pem-rfc7468-0.7.0",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "pem-rfc7468-manifest",
-    vendor = ":pem-rfc7468-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "pem-rfc7468",
-    srcs = [":pem-rfc7468-vendor"],
+    srcs = [":vendor"],
     crate = "pem_rfc7468",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
@@ -27,7 +26,7 @@ rust_library(
         "alloc",
         "std",
     ],
-    rustc_flags = ["@$(location :pem-rfc7468-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = ["//third-party/rust/crates/base64ct/1.8.3:base64ct"],
 )

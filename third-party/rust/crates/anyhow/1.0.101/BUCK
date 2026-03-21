@@ -4,42 +4,41 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "buildscript_run", "rust_binary", "rust_library")
 
 http_archive(
-    name = "anyhow-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/anyhow/anyhow-1.0.101.crate"],
     sha256 = "5f0e0fee31ef5ed1ba1316088939cea399010ed7731dba877ed44aeb407a75ea",
     type = "tar.gz",
     strip_prefix = "anyhow-1.0.101",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "anyhow-manifest",
-    vendor = ":anyhow-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "anyhow",
-    srcs = [":anyhow-vendor"],
+    srcs = [":vendor"],
     crate = "anyhow",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
-        "OUT_DIR": "$(location :anyhow-build-script-run[out_dir])",
+        "OUT_DIR": "$(location :build-script-run[out_dir])",
     },
     features = [
         "default",
         "std",
     ],
     rustc_flags = [
-        "@$(location :anyhow-build-script-run[rustc_flags])",
-        "@$(location :anyhow-manifest[env_flags])",
+        "@$(location :build-script-run[rustc_flags])",
+        "@$(location :manifest[env_flags])",
     ],
     visibility = ["PUBLIC"],
 )
 
 rust_binary(
-    name = "anyhow-build-script-build",
-    srcs = [":anyhow-vendor"],
+    name = "build-script-build",
+    srcs = [":vendor"],
     crate = "build_script_build",
     crate_root = "vendor/build.rs",
     edition = "2021",
@@ -47,20 +46,20 @@ rust_binary(
         "default",
         "std",
     ],
-    rustc_flags = ["@$(location :anyhow-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = [],
 )
 
 buildscript_run(
-    name = "anyhow-build-script-run",
+    name = "build-script-run",
     package_name = "anyhow",
-    buildscript_rule = ":anyhow-build-script-build",
-    env_srcs = [":anyhow-manifest[env_dict]"],
+    buildscript_rule = ":build-script-build",
+    env_srcs = [":manifest[env_dict]"],
     features = [
         "default",
         "std",
     ],
     version = "1.0.101",
-    manifest_dir = ":anyhow-vendor",
+    manifest_dir = ":vendor",
     visibility = ["PUBLIC"],
 )

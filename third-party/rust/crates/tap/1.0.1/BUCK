@@ -4,25 +4,24 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "tap-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/tap/tap-1.0.1.crate"],
     sha256 = "55937e1799185b12863d447f42597ed69d9928686b8d88a1df17376a097d8369",
     type = "tar.gz",
     strip_prefix = "tap-1.0.1",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "tap-manifest",
-    vendor = ":tap-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "tap",
-    srcs = [":tap-vendor"],
+    srcs = [":vendor"],
     crate = "tap",
     crate_root = "vendor/src/lib.rs",
     edition = "2015",
-    rustc_flags = ["@$(location :tap-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
 )

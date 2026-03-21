@@ -4,22 +4,21 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "sha2-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/sha2/sha2-0.10.9.crate"],
     sha256 = "a7507d819769d01a365ab707794a4084392c824f54a7a6a7862f8c3d0892b283",
     type = "tar.gz",
     strip_prefix = "sha2-0.10.9",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "sha2-manifest",
-    vendor = ":sha2-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "sha2",
-    srcs = [":sha2-vendor"],
+    srcs = [":vendor"],
     crate = "sha2",
     crate_root = "vendor/src/lib.rs",
     edition = "2018",
@@ -28,7 +27,7 @@ rust_library(
         "oid",
         "std",
     ],
-    rustc_flags = ["@$(location :sha2-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     os_deps = {
         "linux": ["//third-party/rust/crates/cpufeatures/0.2.17:cpufeatures"],
         "macos": ["//third-party/rust/crates/cpufeatures/0.2.17:cpufeatures"],

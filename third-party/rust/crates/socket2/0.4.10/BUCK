@@ -4,27 +4,26 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "socket2-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/socket2/socket2-0.4.10.crate"],
     sha256 = "9f7916fc008ca5542385b89a3d3ce689953c143e9304a9bf8beec1de48994c0d",
     type = "tar.gz",
     strip_prefix = "socket2-0.4.10",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "socket2-manifest",
-    vendor = ":socket2-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "socket2",
-    srcs = [":socket2-vendor"],
+    srcs = [":vendor"],
     crate = "socket2",
     crate_root = "vendor/src/lib.rs",
     edition = "2018",
     features = ["all"],
-    rustc_flags = ["@$(location :socket2-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     os_deps = {
         "linux": ["//third-party/rust/crates/libc/0.2.182:libc"],
         "macos": ["//third-party/rust/crates/libc/0.2.182:libc"],

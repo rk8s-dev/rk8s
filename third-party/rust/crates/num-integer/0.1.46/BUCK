@@ -4,22 +4,21 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "num-integer-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/num-integer/num-integer-0.1.46.crate"],
     sha256 = "7969661fd2958a5cb096e56c8e1ad0444ac2bbcd0061bd28660485a44879858f",
     type = "tar.gz",
     strip_prefix = "num-integer-0.1.46",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "num-integer-manifest",
-    vendor = ":num-integer-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "num-integer",
-    srcs = [":num-integer-vendor"],
+    srcs = [":vendor"],
     crate = "num_integer",
     crate_root = "vendor/src/lib.rs",
     edition = "2018",
@@ -28,7 +27,7 @@ rust_library(
         "i128",
         "std",
     ],
-    rustc_flags = ["@$(location :num-integer-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = ["//third-party/rust/crates/num-traits/0.2.19:num-traits"],
 )

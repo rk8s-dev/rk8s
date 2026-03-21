@@ -4,26 +4,25 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "sct-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/sct/sct-0.7.1.crate"],
     sha256 = "da046153aa2352493d6cb7da4b6e5c0c057d8a1d0a9aa8560baffdd945acd414",
     type = "tar.gz",
     strip_prefix = "sct-0.7.1",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "sct-manifest",
-    vendor = ":sct-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "sct",
-    srcs = [":sct-vendor"],
+    srcs = [":vendor"],
     crate = "sct",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
-    rustc_flags = ["@$(location :sct-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/ring/0.17.14:ring",

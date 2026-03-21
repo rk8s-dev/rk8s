@@ -4,27 +4,26 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "buildscript_run", "rust_binary", "rust_library")
 
 http_archive(
-    name = "libcrux-ml-kem-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/libcrux-ml-kem/libcrux-ml-kem-0.0.4.crate"],
     sha256 = "4bb6a88086bf11bd2ec90926c749c4a427f2e59841437dbdede8cde8a96334ab",
     type = "tar.gz",
     strip_prefix = "libcrux-ml-kem-0.0.4",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "libcrux-ml-kem-manifest",
-    vendor = ":libcrux-ml-kem-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "libcrux-ml-kem",
-    srcs = [":libcrux-ml-kem-vendor"],
+    srcs = [":vendor"],
     crate = "libcrux_ml_kem",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
-        "OUT_DIR": "$(location :libcrux-ml-kem-build-script-run[out_dir])",
+        "OUT_DIR": "$(location :build-script-run[out_dir])",
     },
     features = [
         "alloc",
@@ -37,8 +36,8 @@ rust_library(
         "std",
     ],
     rustc_flags = [
-        "@$(location :libcrux-ml-kem-build-script-run[rustc_flags])",
-        "@$(location :libcrux-ml-kem-manifest[env_flags])",
+        "@$(location :build-script-run[rustc_flags])",
+        "@$(location :manifest[env_flags])",
     ],
     visibility = ["PUBLIC"],
     deps = [
@@ -54,8 +53,8 @@ rust_library(
 )
 
 rust_binary(
-    name = "libcrux-ml-kem-build-script-build",
-    srcs = [":libcrux-ml-kem-vendor"],
+    name = "build-script-build",
+    srcs = [":vendor"],
     crate = "build_script_build",
     crate_root = "vendor/build.rs",
     edition = "2021",
@@ -69,15 +68,15 @@ rust_binary(
         "rand",
         "std",
     ],
-    rustc_flags = ["@$(location :libcrux-ml-kem-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = [],
 )
 
 buildscript_run(
-    name = "libcrux-ml-kem-build-script-run",
+    name = "build-script-run",
     package_name = "libcrux-ml-kem",
-    buildscript_rule = ":libcrux-ml-kem-build-script-build",
-    env_srcs = [":libcrux-ml-kem-manifest[env_dict]"],
+    buildscript_rule = ":build-script-build",
+    env_srcs = [":manifest[env_dict]"],
     features = [
         "alloc",
         "default",
@@ -89,6 +88,6 @@ buildscript_run(
         "std",
     ],
     version = "0.0.4",
-    manifest_dir = ":libcrux-ml-kem-vendor",
+    manifest_dir = ":vendor",
     visibility = ["PUBLIC"],
 )

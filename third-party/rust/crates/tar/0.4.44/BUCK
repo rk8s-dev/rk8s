@@ -4,22 +4,21 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "tar-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/tar/tar-0.4.44.crate"],
     sha256 = "1d863878d212c87a19c1a610eb53bb01fe12951c0501cf5a0d65f724914a667a",
     type = "tar.gz",
     strip_prefix = "tar-0.4.44",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "tar-manifest",
-    vendor = ":tar-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "tar",
-    srcs = [":tar-vendor"],
+    srcs = [":vendor"],
     crate = "tar",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
@@ -27,7 +26,7 @@ rust_library(
         "default",
         "xattr",
     ],
-    rustc_flags = ["@$(location :tar-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     os_deps = {
         "linux": [
             "//third-party/rust/crates/libc/0.2.182:libc",

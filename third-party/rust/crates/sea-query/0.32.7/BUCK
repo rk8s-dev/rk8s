@@ -4,22 +4,21 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "sea-query-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/sea-query/sea-query-0.32.7.crate"],
     sha256 = "8a5d1c518eaf5eda38e5773f902b26ab6d5e9e9e2bb2349ca6c64cf96f80448c",
     type = "tar.gz",
     strip_prefix = "sea-query-0.32.7",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "sea-query-manifest",
-    vendor = ":sea-query-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "sea-query",
-    srcs = [":sea-query-vendor"],
+    srcs = [":vendor"],
     crate = "sea_query",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
@@ -44,7 +43,7 @@ rust_library(
         "with-time",
         "with-uuid",
     ],
-    rustc_flags = ["@$(location :sea-query-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/bigdecimal/0.4.10:bigdecimal",

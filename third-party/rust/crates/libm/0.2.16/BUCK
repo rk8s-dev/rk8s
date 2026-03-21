@@ -4,42 +4,41 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "buildscript_run", "rust_binary", "rust_library")
 
 http_archive(
-    name = "libm-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/libm/libm-0.2.16.crate"],
     sha256 = "b6d2cec3eae94f9f509c767b45932f1ada8350c4bdb85af2fcab4a3c14807981",
     type = "tar.gz",
     strip_prefix = "libm-0.2.16",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "libm-manifest",
-    vendor = ":libm-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "libm",
-    srcs = [":libm-vendor"],
+    srcs = [":vendor"],
     crate = "libm",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
-        "OUT_DIR": "$(location :libm-build-script-run[out_dir])",
+        "OUT_DIR": "$(location :build-script-run[out_dir])",
     },
     features = [
         "arch",
         "default",
     ],
     rustc_flags = [
-        "@$(location :libm-build-script-run[rustc_flags])",
-        "@$(location :libm-manifest[env_flags])",
+        "@$(location :build-script-run[rustc_flags])",
+        "@$(location :manifest[env_flags])",
     ],
     visibility = ["PUBLIC"],
 )
 
 rust_binary(
-    name = "libm-build-script-build",
-    srcs = [":libm-vendor"],
+    name = "build-script-build",
+    srcs = [":vendor"],
     crate = "build_script_build",
     crate_root = "vendor/build.rs",
     edition = "2021",
@@ -47,20 +46,20 @@ rust_binary(
         "arch",
         "default",
     ],
-    rustc_flags = ["@$(location :libm-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = [],
 )
 
 buildscript_run(
-    name = "libm-build-script-run",
+    name = "build-script-run",
     package_name = "libm",
-    buildscript_rule = ":libm-build-script-build",
-    env_srcs = [":libm-manifest[env_dict]"],
+    buildscript_rule = ":build-script-build",
+    env_srcs = [":manifest[env_dict]"],
     features = [
         "arch",
         "default",
     ],
     version = "0.2.16",
-    manifest_dir = ":libm-vendor",
+    manifest_dir = ":vendor",
     visibility = ["PUBLIC"],
 )

@@ -4,22 +4,21 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "form_urlencoded-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/form_urlencoded/form_urlencoded-1.2.2.crate"],
     sha256 = "cb4cb245038516f5f85277875cdaa4f7d2c9a0fa0468de06ed190163b1581fcf",
     type = "tar.gz",
     strip_prefix = "form_urlencoded-1.2.2",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "form_urlencoded-manifest",
-    vendor = ":form_urlencoded-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "form_urlencoded",
-    srcs = [":form_urlencoded-vendor"],
+    srcs = [":vendor"],
     crate = "form_urlencoded",
     crate_root = "vendor/src/lib.rs",
     edition = "2018",
@@ -28,7 +27,7 @@ rust_library(
         "default",
         "std",
     ],
-    rustc_flags = ["@$(location :form_urlencoded-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = ["//third-party/rust/crates/percent-encoding/2.3.2:percent-encoding"],
 )

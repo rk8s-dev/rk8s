@@ -4,27 +4,26 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "buildscript_run", "rust_binary", "rust_library")
 
 http_archive(
-    name = "libc-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/libc/libc-0.2.182.crate"],
     sha256 = "6800badb6cb2082ffd7b6a67e6125bb39f18782f793520caee8cb8846be06112",
     type = "tar.gz",
     strip_prefix = "libc-0.2.182",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "libc-manifest",
-    vendor = ":libc-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "libc",
-    srcs = [":libc-vendor"],
+    srcs = [":vendor"],
     crate = "libc",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
-        "OUT_DIR": "$(location :libc-build-script-run[out_dir])",
+        "OUT_DIR": "$(location :build-script-run[out_dir])",
     },
     features = [
         "default",
@@ -32,15 +31,15 @@ rust_library(
         "std",
     ],
     rustc_flags = [
-        "@$(location :libc-build-script-run[rustc_flags])",
-        "@$(location :libc-manifest[env_flags])",
+        "@$(location :build-script-run[rustc_flags])",
+        "@$(location :manifest[env_flags])",
     ],
     visibility = ["PUBLIC"],
 )
 
 rust_binary(
-    name = "libc-build-script-build",
-    srcs = [":libc-vendor"],
+    name = "build-script-build",
+    srcs = [":vendor"],
     crate = "build_script_build",
     crate_root = "vendor/build.rs",
     edition = "2021",
@@ -49,21 +48,21 @@ rust_binary(
         "extra_traits",
         "std",
     ],
-    rustc_flags = ["@$(location :libc-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = [],
 )
 
 buildscript_run(
-    name = "libc-build-script-run",
+    name = "build-script-run",
     package_name = "libc",
-    buildscript_rule = ":libc-build-script-build",
-    env_srcs = [":libc-manifest[env_dict]"],
+    buildscript_rule = ":build-script-build",
+    env_srcs = [":manifest[env_dict]"],
     features = [
         "default",
         "extra_traits",
         "std",
     ],
     version = "0.2.182",
-    manifest_dir = ":libc-vendor",
+    manifest_dir = ":vendor",
     visibility = ["PUBLIC"],
 )

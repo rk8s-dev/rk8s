@@ -4,32 +4,31 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "buildscript_run", "rust_binary", "rust_library")
 
 http_archive(
-    name = "erased-serde-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/erased-serde/erased-serde-0.4.9.crate"],
     sha256 = "89e8918065695684b2b0702da20382d5ae6065cf3327bc2d6436bd49a71ce9f3",
     type = "tar.gz",
     strip_prefix = "erased-serde-0.4.9",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "erased-serde-manifest",
-    vendor = ":erased-serde-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "erased-serde",
-    srcs = [":erased-serde-vendor"],
+    srcs = [":vendor"],
     crate = "erased_serde",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
-        "OUT_DIR": "$(location :erased-serde-build-script-run[out_dir])",
+        "OUT_DIR": "$(location :build-script-run[out_dir])",
     },
     features = ["alloc"],
     rustc_flags = [
-        "@$(location :erased-serde-build-script-run[rustc_flags])",
-        "@$(location :erased-serde-manifest[env_flags])",
+        "@$(location :build-script-run[rustc_flags])",
+        "@$(location :manifest[env_flags])",
     ],
     visibility = ["PUBLIC"],
     deps = [
@@ -39,23 +38,23 @@ rust_library(
 )
 
 rust_binary(
-    name = "erased-serde-build-script-build",
-    srcs = [":erased-serde-vendor"],
+    name = "build-script-build",
+    srcs = [":vendor"],
     crate = "build_script_build",
     crate_root = "vendor/build.rs",
     edition = "2021",
     features = ["alloc"],
-    rustc_flags = ["@$(location :erased-serde-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = [],
 )
 
 buildscript_run(
-    name = "erased-serde-build-script-run",
+    name = "build-script-run",
     package_name = "erased-serde",
-    buildscript_rule = ":erased-serde-build-script-build",
-    env_srcs = [":erased-serde-manifest[env_dict]"],
+    buildscript_rule = ":build-script-build",
+    env_srcs = [":manifest[env_dict]"],
     features = ["alloc"],
     version = "0.4.9",
-    manifest_dir = ":erased-serde-vendor",
+    manifest_dir = ":vendor",
     visibility = ["PUBLIC"],
 )

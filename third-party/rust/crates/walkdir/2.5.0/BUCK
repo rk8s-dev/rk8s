@@ -4,26 +4,25 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "walkdir-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/walkdir/walkdir-2.5.0.crate"],
     sha256 = "29790946404f91d9c5d06f9874efddea1dc06c5efe94541a7d6863108e3a5e4b",
     type = "tar.gz",
     strip_prefix = "walkdir-2.5.0",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "walkdir-manifest",
-    vendor = ":walkdir-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "walkdir",
-    srcs = [":walkdir-vendor"],
+    srcs = [":vendor"],
     crate = "walkdir",
     crate_root = "vendor/src/lib.rs",
     edition = "2018",
-    rustc_flags = ["@$(location :walkdir-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     os_deps = {
         "windows": ["//third-party/rust/crates/winapi-util/0.1.11:winapi-util"],
     },

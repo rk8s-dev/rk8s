@@ -4,22 +4,21 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "pageant-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/pageant/pageant-0.2.0.crate"],
     sha256 = "1b537f975f6d8dcf48db368d7ec209d583b015713b5df0f5d92d2631e4ff5595",
     type = "tar.gz",
     strip_prefix = "pageant-0.2.0",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "pageant-manifest",
-    vendor = ":pageant-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "pageant",
-    srcs = [":pageant-vendor"],
+    srcs = [":vendor"],
     crate = "pageant",
     crate_root = "vendor/src/lib.rs",
     edition = "2024",
@@ -28,7 +27,7 @@ rust_library(
         "namedpipes",
         "wmmessage",
     ],
-    rustc_flags = ["@$(location :pageant-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     os_deps = {
         "windows": [
             "//third-party/rust/crates/byteorder/1.5.0:byteorder",

@@ -4,35 +4,34 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "buildscript_run", "rust_binary", "rust_library")
 
 http_archive(
-    name = "bytecheck-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/bytecheck/bytecheck-0.6.12.crate"],
     sha256 = "23cdc57ce23ac53c931e88a43d06d070a6fd142f2617be5855eb75efc9beb1c2",
     type = "tar.gz",
     strip_prefix = "bytecheck-0.6.12",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "bytecheck-manifest",
-    vendor = ":bytecheck-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "bytecheck",
-    srcs = [":bytecheck-vendor"],
+    srcs = [":vendor"],
     crate = "bytecheck",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
-        "OUT_DIR": "$(location :bytecheck-build-script-run[out_dir])",
+        "OUT_DIR": "$(location :build-script-run[out_dir])",
     },
     features = [
         "simdutf8",
         "std",
     ],
     rustc_flags = [
-        "@$(location :bytecheck-build-script-run[rustc_flags])",
-        "@$(location :bytecheck-manifest[env_flags])",
+        "@$(location :build-script-run[rustc_flags])",
+        "@$(location :manifest[env_flags])",
     ],
     visibility = ["PUBLIC"],
     deps = [
@@ -43,8 +42,8 @@ rust_library(
 )
 
 rust_binary(
-    name = "bytecheck-build-script-build",
-    srcs = [":bytecheck-vendor"],
+    name = "build-script-build",
+    srcs = [":vendor"],
     crate = "build_script_build",
     crate_root = "vendor/build.rs",
     edition = "2021",
@@ -52,20 +51,20 @@ rust_binary(
         "simdutf8",
         "std",
     ],
-    rustc_flags = ["@$(location :bytecheck-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = [],
 )
 
 buildscript_run(
-    name = "bytecheck-build-script-run",
+    name = "build-script-run",
     package_name = "bytecheck",
-    buildscript_rule = ":bytecheck-build-script-build",
-    env_srcs = [":bytecheck-manifest[env_dict]"],
+    buildscript_rule = ":build-script-build",
+    env_srcs = [":manifest[env_dict]"],
     features = [
         "simdutf8",
         "std",
     ],
     version = "0.6.12",
-    manifest_dir = ":bytecheck-vendor",
+    manifest_dir = ":vendor",
     visibility = ["PUBLIC"],
 )

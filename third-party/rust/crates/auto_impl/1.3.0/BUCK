@@ -4,26 +4,25 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "auto_impl-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/auto_impl/auto_impl-1.3.0.crate"],
     sha256 = "ffdcb70bdbc4d478427380519163274ac86e52916e10f0a8889adf0f96d3fee7",
     type = "tar.gz",
     strip_prefix = "auto_impl-1.3.0",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "auto_impl-manifest",
-    vendor = ":auto_impl-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "auto_impl",
-    srcs = [":auto_impl-vendor"],
+    srcs = [":vendor"],
     crate = "auto_impl",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
-    rustc_flags = ["@$(location :auto_impl-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     proc_macro = True,
     visibility = ["PUBLIC"],
     deps = [

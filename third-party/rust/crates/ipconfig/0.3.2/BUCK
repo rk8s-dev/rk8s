@@ -4,27 +4,26 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "buildscript_run", "rust_binary", "rust_library")
 
 http_archive(
-    name = "ipconfig-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/ipconfig/ipconfig-0.3.2.crate"],
     sha256 = "b58db92f96b720de98181bbbe63c831e87005ab460c1bf306eb2622b4707997f",
     type = "tar.gz",
     strip_prefix = "ipconfig-0.3.2",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "ipconfig-manifest",
-    vendor = ":ipconfig-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "ipconfig",
-    srcs = [":ipconfig-vendor"],
+    srcs = [":vendor"],
     crate = "ipconfig",
     crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
-        "OUT_DIR": "$(location :ipconfig-build-script-run[out_dir])",
+        "OUT_DIR": "$(location :build-script-run[out_dir])",
     },
     features = [
         "computer",
@@ -32,8 +31,8 @@ rust_library(
         "winreg",
     ],
     rustc_flags = [
-        "@$(location :ipconfig-build-script-run[rustc_flags])",
-        "@$(location :ipconfig-manifest[env_flags])",
+        "@$(location :build-script-run[rustc_flags])",
+        "@$(location :manifest[env_flags])",
     ],
     os_deps = {
         "windows": [
@@ -47,8 +46,8 @@ rust_library(
 )
 
 rust_binary(
-    name = "ipconfig-build-script-build",
-    srcs = [":ipconfig-vendor"],
+    name = "build-script-build",
+    srcs = [":vendor"],
     crate = "build_script_build",
     crate_root = "vendor/build.rs",
     edition = "2018",
@@ -57,21 +56,21 @@ rust_binary(
         "default",
         "winreg",
     ],
-    rustc_flags = ["@$(location :ipconfig-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = [],
 )
 
 buildscript_run(
-    name = "ipconfig-build-script-run",
+    name = "build-script-run",
     package_name = "ipconfig",
-    buildscript_rule = ":ipconfig-build-script-build",
-    env_srcs = [":ipconfig-manifest[env_dict]"],
+    buildscript_rule = ":build-script-build",
+    env_srcs = [":manifest[env_dict]"],
     features = [
         "computer",
         "default",
         "winreg",
     ],
     version = "0.3.2",
-    manifest_dir = ":ipconfig-vendor",
+    manifest_dir = ":vendor",
     visibility = ["PUBLIC"],
 )

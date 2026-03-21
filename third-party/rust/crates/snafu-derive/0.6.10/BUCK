@@ -4,26 +4,25 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "snafu-derive-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/snafu-derive/snafu-derive-0.6.10.crate"],
     sha256 = "1508efa03c362e23817f96cde18abed596a25219a8b2c66e8db33c03543d315b",
     type = "tar.gz",
     strip_prefix = "snafu-derive-0.6.10",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "snafu-derive-manifest",
-    vendor = ":snafu-derive-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "snafu-derive",
-    srcs = [":snafu-derive-vendor"],
+    srcs = [":vendor"],
     crate = "snafu_derive",
     crate_root = "vendor/src/lib.rs",
     edition = "2018",
-    rustc_flags = ["@$(location :snafu-derive-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     proc_macro = True,
     visibility = ["PUBLIC"],
     deps = [

@@ -4,25 +4,24 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "sdd-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/sdd/sdd-3.0.10.crate"],
     sha256 = "490dcfcbfef26be6800d11870ff2df8774fa6e86d047e3e8c8a76b25655e41ca",
     type = "tar.gz",
     strip_prefix = "sdd-3.0.10",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "sdd-manifest",
-    vendor = ":sdd-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "sdd",
-    srcs = [":sdd-vendor"],
+    srcs = [":vendor"],
     crate = "sdd",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
-    rustc_flags = ["@$(location :sdd-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
 )

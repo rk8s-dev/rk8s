@@ -4,26 +4,25 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "tokio-native-tls-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/tokio-native-tls/tokio-native-tls-0.3.1.crate"],
     sha256 = "bbae76ab933c85776efabc971569dd6119c580d8f5d448769dec1764bf796ef2",
     type = "tar.gz",
     strip_prefix = "tokio-native-tls-0.3.1",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "tokio-native-tls-manifest",
-    vendor = ":tokio-native-tls-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "tokio-native-tls",
-    srcs = [":tokio-native-tls-vendor"],
+    srcs = [":vendor"],
     crate = "tokio_native_tls",
     crate_root = "vendor/src/lib.rs",
     edition = "2018",
-    rustc_flags = ["@$(location :tokio-native-tls-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/native-tls/0.2.18:native-tls",

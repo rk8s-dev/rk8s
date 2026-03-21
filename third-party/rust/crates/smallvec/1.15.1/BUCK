@@ -4,22 +4,21 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "smallvec-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/smallvec/smallvec-1.15.1.crate"],
     sha256 = "67b1b7a3b5fe4f1376887184045fcf45c69e92af734b7aaddc05fb777b6fbd03",
     type = "tar.gz",
     strip_prefix = "smallvec-1.15.1",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "smallvec-manifest",
-    vendor = ":smallvec-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "smallvec",
-    srcs = [":smallvec-vendor"],
+    srcs = [":vendor"],
     crate = "smallvec",
     crate_root = "vendor/src/lib.rs",
     edition = "2018",
@@ -29,7 +28,7 @@ rust_library(
         "serde",
         "write",
     ],
-    rustc_flags = ["@$(location :smallvec-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = ["//third-party/rust/crates/serde/1.0.228:serde"],
 )

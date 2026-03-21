@@ -4,22 +4,21 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "byteorder-lite-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/byteorder-lite/byteorder-lite-0.1.0.crate"],
     sha256 = "8f1fe948ff07f4bd06c30984e69f5b4899c516a3ef74f34df92a2df2ab535495",
     type = "tar.gz",
     strip_prefix = "byteorder-lite-0.1.0",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "byteorder-lite-manifest",
-    vendor = ":byteorder-lite-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "byteorder-lite",
-    srcs = [":byteorder-lite-vendor"],
+    srcs = [":vendor"],
     crate = "byteorder_lite",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
@@ -27,6 +26,6 @@ rust_library(
         "default",
         "std",
     ],
-    rustc_flags = ["@$(location :byteorder-lite-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
 )

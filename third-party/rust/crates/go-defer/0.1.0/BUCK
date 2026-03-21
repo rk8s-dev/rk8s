@@ -4,25 +4,24 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "go-defer-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/go-defer/go-defer-0.1.0.crate"],
     sha256 = "4053f727e8be72cb6afd9f05955676f4df66b2f6a56c5b29362403df8810062b",
     type = "tar.gz",
     strip_prefix = "go-defer-0.1.0",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "go-defer-manifest",
-    vendor = ":go-defer-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "go-defer",
-    srcs = [":go-defer-vendor"],
+    srcs = [":vendor"],
     crate = "go_defer",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
-    rustc_flags = ["@$(location :go-defer-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
 )

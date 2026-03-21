@@ -4,22 +4,21 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "futures-executor-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/futures-executor/futures-executor-0.3.31.crate"],
     sha256 = "1e28d1d997f585e54aebc3f97d39e72338912123a67330d723fdbb564d646c9f",
     type = "tar.gz",
     strip_prefix = "futures-executor-0.3.31",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "futures-executor-manifest",
-    vendor = ":futures-executor-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "futures-executor",
-    srcs = [":futures-executor-vendor"],
+    srcs = [":vendor"],
     crate = "futures_executor",
     crate_root = "vendor/src/lib.rs",
     edition = "2018",
@@ -27,7 +26,7 @@ rust_library(
         "default",
         "std",
     ],
-    rustc_flags = ["@$(location :futures-executor-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/futures-core/0.3.31:futures-core",

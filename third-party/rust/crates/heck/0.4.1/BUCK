@@ -4,26 +4,25 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "heck-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/heck/heck-0.4.1.crate"],
     sha256 = "95505c38b4572b2d910cecb0281560f54b440a19336cbbcb27bf6ce6adc6f5a8",
     type = "tar.gz",
     strip_prefix = "heck-0.4.1",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "heck-manifest",
-    vendor = ":heck-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "heck",
-    srcs = [":heck-vendor"],
+    srcs = [":vendor"],
     crate = "heck",
     crate_root = "vendor/src/lib.rs",
     edition = "2018",
     features = ["default"],
-    rustc_flags = ["@$(location :heck-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
 )

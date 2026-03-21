@@ -4,26 +4,25 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "builder-pattern-macro-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/builder-pattern-macro/builder-pattern-macro-0.4.2.crate"],
     sha256 = "47d624ef88b39588d113f807ffb38ee968aafc388ca57dd7a9a7b82d3de1f5f4",
     type = "tar.gz",
     strip_prefix = "builder-pattern-macro-0.4.2",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "builder-pattern-macro-manifest",
-    vendor = ":builder-pattern-macro-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "builder-pattern-macro",
-    srcs = [":builder-pattern-macro-vendor"],
+    srcs = [":vendor"],
     crate = "builder_pattern_macro",
     crate_root = "vendor/src/lib.rs",
     edition = "2018",
-    rustc_flags = ["@$(location :builder-pattern-macro-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     proc_macro = True,
     visibility = ["PUBLIC"],
     deps = [

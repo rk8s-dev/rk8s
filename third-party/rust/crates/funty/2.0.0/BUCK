@@ -4,25 +4,24 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "funty-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/funty/funty-2.0.0.crate"],
     sha256 = "e6d5a32815ae3f33302d95fdcb2ce17862f8c65363dcfd29360480ba1001fc9c",
     type = "tar.gz",
     strip_prefix = "funty-2.0.0",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "funty-manifest",
-    vendor = ":funty-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "funty",
-    srcs = [":funty-vendor"],
+    srcs = [":vendor"],
     crate = "funty",
     crate_root = "vendor/src/lib.rs",
     edition = "2018",
-    rustc_flags = ["@$(location :funty-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
 )

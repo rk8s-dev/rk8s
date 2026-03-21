@@ -4,26 +4,25 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "wyz-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/wyz/wyz-0.5.1.crate"],
     sha256 = "05f360fc0b24296329c78fda852a1e9ae82de9cf7b27dae4b7f62f118f77b9ed",
     type = "tar.gz",
     strip_prefix = "wyz-0.5.1",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "wyz-manifest",
-    vendor = ":wyz-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "wyz",
-    srcs = [":wyz-vendor"],
+    srcs = [":vendor"],
     crate = "wyz",
     crate_root = "vendor/src/lib.rs",
     edition = "2018",
-    rustc_flags = ["@$(location :wyz-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = ["//third-party/rust/crates/tap/1.0.1:tap"],
 )

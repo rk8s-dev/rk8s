@@ -4,22 +4,21 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "synstructure-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/synstructure/synstructure-0.13.2.crate"],
     sha256 = "728a70f3dbaf5bab7f0c4b1ac8d7ae5ea60a4b5549c8a5914361c99147a709d2",
     type = "tar.gz",
     strip_prefix = "synstructure-0.13.2",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "synstructure-manifest",
-    vendor = ":synstructure-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "synstructure",
-    srcs = [":synstructure-vendor"],
+    srcs = [":vendor"],
     crate = "synstructure",
     crate_root = "vendor/src/lib.rs",
     edition = "2018",
@@ -27,7 +26,7 @@ rust_library(
         "default",
         "proc-macro",
     ],
-    rustc_flags = ["@$(location :synstructure-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/proc-macro2/1.0.106:proc-macro2",

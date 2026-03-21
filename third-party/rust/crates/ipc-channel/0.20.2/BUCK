@@ -4,27 +4,26 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "ipc-channel-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/ipc-channel/ipc-channel-0.20.2.crate"],
     sha256 = "f93600b5616c2d075f8af8dbd23c1d69278c5d24e4913d220cbc60b14c95c180",
     type = "tar.gz",
     strip_prefix = "ipc-channel-0.20.2",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "ipc-channel-manifest",
-    vendor = ":ipc-channel-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "ipc-channel",
-    srcs = [":ipc-channel-vendor"],
+    srcs = [":vendor"],
     crate = "ipc_channel",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
     features = ["default"],
-    rustc_flags = ["@$(location :ipc-channel-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     os_deps = {
         "linux": [
             "//third-party/rust/crates/mio/1.1.1:mio",

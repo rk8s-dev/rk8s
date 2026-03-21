@@ -4,31 +4,30 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "buildscript_run", "rust_binary", "rust_library")
 
 http_archive(
-    name = "typetag-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/typetag/typetag-0.2.21.crate"],
     sha256 = "be2212c8a9b9bcfca32024de14998494cf9a5dfa59ea1b829de98bac374b86bf",
     type = "tar.gz",
     strip_prefix = "typetag-0.2.21",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "typetag-manifest",
-    vendor = ":typetag-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "typetag",
-    srcs = [":typetag-vendor"],
+    srcs = [":vendor"],
     crate = "typetag",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
-        "OUT_DIR": "$(location :typetag-build-script-run[out_dir])",
+        "OUT_DIR": "$(location :build-script-run[out_dir])",
     },
     rustc_flags = [
-        "@$(location :typetag-build-script-run[rustc_flags])",
-        "@$(location :typetag-manifest[env_flags])",
+        "@$(location :build-script-run[rustc_flags])",
+        "@$(location :manifest[env_flags])",
     ],
     visibility = ["PUBLIC"],
     deps = [
@@ -41,21 +40,21 @@ rust_library(
 )
 
 rust_binary(
-    name = "typetag-build-script-build",
-    srcs = [":typetag-vendor"],
+    name = "build-script-build",
+    srcs = [":vendor"],
     crate = "build_script_build",
     crate_root = "vendor/build.rs",
     edition = "2021",
-    rustc_flags = ["@$(location :typetag-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = [],
 )
 
 buildscript_run(
-    name = "typetag-build-script-run",
+    name = "build-script-run",
     package_name = "typetag",
-    buildscript_rule = ":typetag-build-script-build",
-    env_srcs = [":typetag-manifest[env_dict]"],
+    buildscript_rule = ":build-script-build",
+    env_srcs = [":manifest[env_dict]"],
     version = "0.2.21",
-    manifest_dir = ":typetag-vendor",
+    manifest_dir = ":vendor",
     visibility = ["PUBLIC"],
 )

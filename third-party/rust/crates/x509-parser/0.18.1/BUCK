@@ -4,27 +4,26 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "x509-parser-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/x509-parser/x509-parser-0.18.1.crate"],
     sha256 = "d43b0f71ce057da06bc0851b23ee24f3f86190b07203dd8f567d0b706a185202",
     type = "tar.gz",
     strip_prefix = "x509-parser-0.18.1",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "x509-parser-manifest",
-    vendor = ":x509-parser-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "x509-parser",
-    srcs = [":x509-parser-vendor"],
+    srcs = [":vendor"],
     crate = "x509_parser",
     crate_root = "vendor/src/lib.rs",
     edition = "2018",
     features = ["default"],
-    rustc_flags = ["@$(location :x509-parser-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/asn1-rs/0.7.1:asn1-rs",

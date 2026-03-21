@@ -4,22 +4,21 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "toml-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/toml/toml-0.8.23.crate"],
     sha256 = "dc1beb996b9d83529a9e75c17a1686767d148d70663143c7854d8b4a09ced362",
     type = "tar.gz",
     strip_prefix = "toml-0.8.23",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "toml-manifest",
-    vendor = ":toml-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "toml",
-    srcs = [":toml-vendor"],
+    srcs = [":vendor"],
     crate = "toml",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
@@ -28,7 +27,7 @@ rust_library(
         "display",
         "parse",
     ],
-    rustc_flags = ["@$(location :toml-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/serde/1.0.228:serde",

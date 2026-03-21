@@ -4,26 +4,25 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "num-iter-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/num-iter/num-iter-0.1.45.crate"],
     sha256 = "1429034a0490724d0075ebb2bc9e875d6503c3cf69e235a8941aa757d83ef5bf",
     type = "tar.gz",
     strip_prefix = "num-iter-0.1.45",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "num-iter-manifest",
-    vendor = ":num-iter-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "num-iter",
-    srcs = [":num-iter-vendor"],
+    srcs = [":vendor"],
     crate = "num_iter",
     crate_root = "vendor/src/lib.rs",
     edition = "2018",
-    rustc_flags = ["@$(location :num-iter-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/num-integer/0.1.46:num-integer",

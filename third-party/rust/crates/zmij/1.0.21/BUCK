@@ -4,51 +4,50 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "buildscript_run", "rust_binary", "rust_library")
 
 http_archive(
-    name = "zmij-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/zmij/zmij-1.0.21.crate"],
     sha256 = "b8848ee67ecc8aedbaf3e4122217aff892639231befc6a1b58d29fff4c2cabaa",
     type = "tar.gz",
     strip_prefix = "zmij-1.0.21",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "zmij-manifest",
-    vendor = ":zmij-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "zmij",
-    srcs = [":zmij-vendor"],
+    srcs = [":vendor"],
     crate = "zmij",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
-        "OUT_DIR": "$(location :zmij-build-script-run[out_dir])",
+        "OUT_DIR": "$(location :build-script-run[out_dir])",
     },
     rustc_flags = [
-        "@$(location :zmij-build-script-run[rustc_flags])",
-        "@$(location :zmij-manifest[env_flags])",
+        "@$(location :build-script-run[rustc_flags])",
+        "@$(location :manifest[env_flags])",
     ],
     visibility = ["PUBLIC"],
 )
 
 rust_binary(
-    name = "zmij-build-script-build",
-    srcs = [":zmij-vendor"],
+    name = "build-script-build",
+    srcs = [":vendor"],
     crate = "build_script_build",
     crate_root = "vendor/build.rs",
     edition = "2021",
-    rustc_flags = ["@$(location :zmij-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = [],
 )
 
 buildscript_run(
-    name = "zmij-build-script-run",
+    name = "build-script-run",
     package_name = "zmij",
-    buildscript_rule = ":zmij-build-script-build",
-    env_srcs = [":zmij-manifest[env_dict]"],
+    buildscript_rule = ":build-script-build",
+    env_srcs = [":manifest[env_dict]"],
     version = "1.0.21",
-    manifest_dir = ":zmij-vendor",
+    manifest_dir = ":vendor",
     visibility = ["PUBLIC"],
 )

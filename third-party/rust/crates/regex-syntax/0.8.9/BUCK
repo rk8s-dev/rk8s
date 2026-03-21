@@ -4,22 +4,21 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "regex-syntax-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/regex-syntax/regex-syntax-0.8.9.crate"],
     sha256 = "a96887878f22d7bad8a3b6dc5b7440e0ada9a245242924394987b21cf2210a4c",
     type = "tar.gz",
     strip_prefix = "regex-syntax-0.8.9",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "regex-syntax-manifest",
-    vendor = ":regex-syntax-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "regex-syntax",
-    srcs = [":regex-syntax-vendor"],
+    srcs = [":vendor"],
     crate = "regex_syntax",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
@@ -35,6 +34,6 @@ rust_library(
         "unicode-script",
         "unicode-segment",
     ],
-    rustc_flags = ["@$(location :regex-syntax-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
 )

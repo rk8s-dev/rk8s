@@ -4,22 +4,21 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "sea-orm-macros-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/sea-orm-macros/sea-orm-macros-1.1.19.crate"],
     sha256 = "84c2e64a50a9cc8339f10a27577e10062c7f995488e469f2c95762c5ee847832",
     type = "tar.gz",
     strip_prefix = "sea-orm-macros-1.1.19",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "sea-orm-macros-manifest",
-    vendor = ":sea-orm-macros-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "sea-orm-macros",
-    srcs = [":sea-orm-macros-vendor"],
+    srcs = [":vendor"],
     crate = "sea_orm_macros",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
@@ -29,7 +28,7 @@ rust_library(
         "postgres-array",
         "strum",
     ],
-    rustc_flags = ["@$(location :sea-orm-macros-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     proc_macro = True,
     named_deps = {
         "bae": "//third-party/rust/crates/sea-bae/0.2.1:sea-bae",
