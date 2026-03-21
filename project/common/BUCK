@@ -24,6 +24,7 @@ rust_library(
     visibility = ["PUBLIC"],
     deps = [
         "//project/libcni:libcni",
+        "//project/libcsi:libcsi",
         "//project/libvault:libvault",
         "//third-party/rust/crates/anyhow/1.0.101:anyhow",
         "//third-party/rust/crates/async-trait/0.1.89:async-trait",
