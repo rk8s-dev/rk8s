@@ -184,27 +184,30 @@ pub async fn populate_oci_claims(
     };
 
     let claims = if let Some(t) = token {
-        verify_with_web_app(&state, t, None, None, None).await.ok()
+        Some(verify_with_web_app(&state, t, None, None, None).await)
     } else {
         None
     };
 
     match *req.method() {
         Method::GET | Method::HEAD => {
-            if let Some(claims) = claims {
+            if let Some(Ok(claims)) = claims {
                 req.extensions_mut().insert(claims);
             }
         }
         Method::POST | Method::PUT | Method::PATCH | Method::DELETE => {
-            if let Some(claims) = claims {
-                req.extensions_mut().insert(claims);
-            } else {
-                return Err(OciError::Unauthorized {
-                    msg: "unauthorized".to_string(),
-                    auth_url: Some(state.config.registry_url.clone()),
+            let claims = match claims {
+                Some(Ok(claims)) => claims,
+                Some(Err(err)) => return Err(err),
+                None => {
+                    return Err(OciError::Unauthorized {
+                        msg: "unauthorized".to_string(),
+                        auth_url: Some(state.config.registry_url.clone()),
+                    }
+                    .into());
                 }
-                .into());
-            }
+            };
+            req.extensions_mut().insert(claims);
         }
         _ => unreachable!(),
     }

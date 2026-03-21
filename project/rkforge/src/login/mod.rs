@@ -83,7 +83,7 @@ pub fn login(args: LoginArgs) -> anyhow::Result<()> {
         let user_code = generate_user_code();
         let (port, rx, _shutdown_tx) = callback_server::start().await?;
 
-        // 2. Build login URL and display QR + code
+        // 2. Build login URL and display the URL + one-time code
         let login_url = format!(
             "{}/api/cli/login?user_code={}&callback_port={}&state={}",
             args.server.trim_end_matches('/'),
@@ -115,14 +115,15 @@ pub fn login(args: LoginArgs) -> anyhow::Result<()> {
             .build()?;
         let res = exchange::exchange_auth_code(&client, &args.server, &callback.code).await?;
 
-        // 6. Save the JWT for the target registry (from server config)
-        let registry = match res.registry_url.as_deref().filter(|s| !s.is_empty()) {
-            Some(url) => parse_registry_host(url)
-                .map_err(|e| anyhow::anyhow!("invalid registry_url from server: {e}"))?,
-            None => AuthConfig::load()
-                .and_then(|c| c.resolve_url(None::<&str>))
-                .unwrap_or_else(|_| "127.0.0.1:8968".to_string()),
-        };
+        // 6. Save the JWT for the target registry (must be provided by auth server)
+        let registry_url = res
+            .registry_url
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .ok_or_else(|| anyhow::anyhow!("exchange response missing registry_url"))?;
+        let registry = parse_registry_host(registry_url)
+            .map_err(|e| anyhow::anyhow!("invalid registry_url from server: {e}"))?;
         AuthConfig::login(res.token, &registry)?;
         println!("Logged in as {} successfully!", res.username);
         Ok(())
