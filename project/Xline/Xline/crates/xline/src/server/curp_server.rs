@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use crate::{
     router::endpoint::EndPoint as RouterEndpoint,
-    server::auth_wrapper::{curp_error_to_tonic_status, metadata_from_tonic},
+    server::auth_wrapper::{curp_error_to_xlinerpc_status, metadata_from_xlinerpc},
 };
 use curp::rpc::{
     CurpError, CurpService, FetchClusterRequest, FetchReadStateRequest, LeaseKeepAliveMsg,
@@ -10,6 +10,7 @@ use curp::rpc::{
     RecordRequest, ShutdownRequest,
 };
 use futures::{Stream, StreamExt};
+use xlinerpc::{Request, Response};
 
 pub(crate) struct Server<T> {
     server: Arc<T>,
@@ -32,107 +33,107 @@ where
         RouterEndpoint::new(self.server)
             .add_server_streaming_fn(
                 "/ProposeStream",
-                move |this: Arc<T>, request: tonic::Request<ProposeRequest>| async move {
+                move |this: Arc<T>, request: Request<ProposeRequest>| async move {
                     let req = request.get_ref().clone();
-                    let meta = metadata_from_tonic(request.metadata());
+                    let meta = metadata_from_xlinerpc(request.metadata());
                     let stream = CurpService::propose_stream(&*this, req, meta)
                         .await
-                        .map_err(curp_error_to_tonic_status)?;
-                    let mapped = stream.map(|r| r.map_err(curp_error_to_tonic_status));
-                    Ok(tonic::Response::new(Box::pin(mapped)))
+                        .map_err(curp_error_to_xlinerpc_status)?;
+                    let mapped = stream.map(|r| r.map_err(curp_error_to_xlinerpc_status));
+                    Ok(Response::new(Box::pin(mapped)))
                 },
             )
             .add_unary_fn(
                 "/Record",
-                move |this: Arc<T>, request: tonic::Request<RecordRequest>| async move {
-                    let meta = metadata_from_tonic(request.metadata());
-                    Ok(tonic::Response::new(
+                move |this: Arc<T>, request: Request<RecordRequest>| async move {
+                    let meta = metadata_from_xlinerpc(request.metadata());
+                    Ok(Response::new(
                         CurpService::record(&*this, request.into_inner(), meta)
-                            .map_err(curp_error_to_tonic_status)?,
+                            .map_err(curp_error_to_xlinerpc_status)?,
                     ))
                 },
             )
             .add_unary_fn(
                 "/ReadIndex",
-                move |this: Arc<T>, request: tonic::Request<ReadIndexRequest>| async move {
-                    let meta = metadata_from_tonic(request.metadata());
-                    Ok(tonic::Response::new(
+                move |this: Arc<T>, request: Request<ReadIndexRequest>| async move {
+                    let meta = metadata_from_xlinerpc(request.metadata());
+                    Ok(Response::new(
                         CurpService::read_index(&*this, meta)
-                            .map_err(curp_error_to_tonic_status)?,
+                            .map_err(curp_error_to_xlinerpc_status)?,
                     ))
                 },
             )
             .add_unary_fn(
                 "/ProposeConfChange",
-                move |this: Arc<T>, request: tonic::Request<ProposeConfChangeRequest>| async move {
-                    let meta = metadata_from_tonic(request.metadata());
-                    Ok(tonic::Response::new(
+                move |this: Arc<T>, request: Request<ProposeConfChangeRequest>| async move {
+                    let meta = metadata_from_xlinerpc(request.metadata());
+                    Ok(Response::new(
                         CurpService::propose_conf_change(&*this, request.into_inner(), meta)
                             .await
-                            .map_err(curp_error_to_tonic_status)?,
+                            .map_err(curp_error_to_xlinerpc_status)?,
                     ))
                 },
             )
             .add_unary_fn(
                 "/Publish",
-                move |this: Arc<T>, request: tonic::Request<PublishRequest>| async move {
-                    let meta = metadata_from_tonic(request.metadata());
-                    Ok(tonic::Response::new(
+                move |this: Arc<T>, request: Request<PublishRequest>| async move {
+                    let meta = metadata_from_xlinerpc(request.metadata());
+                    Ok(Response::new(
                         CurpService::publish(&*this, request.into_inner(), meta)
-                            .map_err(curp_error_to_tonic_status)?,
+                            .map_err(curp_error_to_xlinerpc_status)?,
                     ))
                 }
             )
             .add_unary_fn(
                 "/Shutdown",
-                move |this: Arc<T>, request: tonic::Request<ShutdownRequest>| async move {
-                    let meta = metadata_from_tonic(request.metadata());
-                    Ok(tonic::Response::new(
+                move |this: Arc<T>, request: Request<ShutdownRequest>| async move {
+                    let meta = metadata_from_xlinerpc(request.metadata());
+                    Ok(Response::new(
                         CurpService::shutdown(&*this, request.into_inner(), meta)
                             .await
-                            .map_err(curp_error_to_tonic_status)?,
+                            .map_err(curp_error_to_xlinerpc_status)?,
                     ))
                 },
             )
             .add_unary_fn(
                 "/FetchCluster",
-                move |this: Arc<T>, request: tonic::Request<FetchClusterRequest>| async move {
-                    Ok(tonic::Response::new(
+                move |this: Arc<T>, request: Request<FetchClusterRequest>| async move {
+                    Ok(Response::new(
                         CurpService::fetch_cluster(&*this, request.into_inner())
-                            .map_err(curp_error_to_tonic_status)?,
+                            .map_err(curp_error_to_xlinerpc_status)?,
                     ))
                 },
             )
             .add_unary_fn(
                 "/FetchReadState",
-                move |this: Arc<T>, request: tonic::Request<FetchReadStateRequest>| async move {
-                    Ok(tonic::Response::new(
+                move |this: Arc<T>, request: Request<FetchReadStateRequest>| async move {
+                    Ok(Response::new(
                         CurpService::fetch_read_state(&*this, request.into_inner())
-                            .map_err(curp_error_to_tonic_status)?,
+                            .map_err(curp_error_to_xlinerpc_status)?,
                     ))
                 },
             )
             .add_unary_fn(
                 "/MoveLeader",
-                move |this: Arc<T>, request: tonic::Request<MoveLeaderRequest>| async move {
-                    Ok(tonic::Response::new(
+                move |this: Arc<T>, request: Request<MoveLeaderRequest>| async move {
+                    Ok(Response::new(
                         CurpService::move_leader(&*this, request.into_inner())
                             .await
-                            .map_err(curp_error_to_tonic_status)?
+                            .map_err(curp_error_to_xlinerpc_status)?
                     ))
                 },
             )
             .add_client_streaming_fn(
                 "/LeaseKeepAlive",
-                move |this: Arc<T>, request: tonic::Request<tonic::Streaming<LeaseKeepAliveMsg>>| async move {
+                move |this: Arc<T>, request: Request<impl Stream<Item = Result<LeaseKeepAliveMsg, CurpError>> + Send + Unpin>| async move {
                     let stream = request.into_inner();
                     let curp_stream: Box<
                         dyn Stream<Item = Result<LeaseKeepAliveMsg, CurpError>> + Send + Unpin,
-                    > = Box::new(stream.map(|r| r.map_err(CurpError::from)));
-                    Ok(tonic::Response::new(
+                    > = Box::new(stream);
+                    Ok(Response::new(
                         CurpService::lease_keep_alive(&*this, curp_stream)
                             .await
-                            .map_err(curp_error_to_tonic_status)?,
+                            .map_err(curp_error_to_xlinerpc_status)?,
                     ))
                 },
             )

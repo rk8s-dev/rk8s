@@ -13,40 +13,30 @@ use curp::{
     },
 };
 use futures::{Stream, StreamExt};
-use xlinerpc::status::Status;
+use xlinerpc::{Request, Response, Status, MetaData};
 use tracing::debug;
 use xlineapi::command::Command;
 
 use super::xline_server::CurpServer;
 use crate::{router::endpoint::EndPoint as RouterEndpoint, storage::AuthStore};
 
-/// Build transport-agnostic `Metadata` from `tonic::metadata::MetadataMap`
-pub(crate) fn metadata_from_tonic(map: &tonic::metadata::MetadataMap) -> Metadata {
-    let pairs = map
+/// Build transport-agnostic `Metadata` from `xlinerpc::MetaData`
+pub(crate) fn metadata_from_xlinerpc(meta: &MetaData) -> Metadata {
+    let pairs = meta
         .iter()
         .filter_map(|(key, val)| {
             String::from_utf8(val.to_vec())
                 .ok()
-                .map(|v| (key.to_owned(), v))
+                .and_then(|v| String::from_utf8(key.to_vec()).ok())
+                .map(|k| (k, v))
         })
         .collect();
     Metadata::from_pairs(pairs)
 }
 
-/// Convert `CurpError` → `tonic::Status` via `xlinerpc::Status`
-pub(crate) fn curp_error_to_tonic_status(err: CurpError) -> Status {
-    let xlinerpc_status: xlinerpc::status::Status = err.into();
-    let code = tonic::Code::from(i32::from(xlinerpc_status.code()));
-    let details = xlinerpc_status.details();
-    if details.is_empty() {
-        Status::new(code, xlinerpc_status.message())
-    } else {
-        Status::with_details(
-            code,
-            xlinerpc_status.message(),
-            bytes::Bytes::copy_from_slice(details),
-        )
-    }
+/// Convert `CurpError` → `xlinerpc::Status`
+pub(crate) fn curp_error_to_xlinerpc_status(err: CurpError) -> Status {
+    err.into()
 }
 
 /// Auth wrapper
@@ -170,27 +160,21 @@ impl Protocol for AuthWrapper {
 
     async fn propose_stream(
         &self,
-        request: xlinerpc::Request<ProposeRequest>,
-    ) -> Result<xlinerpc::Response<Self::ProposeStreamStream>, Status> {
+        request: Request<ProposeRequest>,
+    ) -> Result<Response<Self::ProposeStreamStream>, Status> {
         debug!(
             "AuthWrapper (xlinerpc) received propose request: {}",
-            request.get_ref().propose_id()
+            request.data().propose_id()
         );
         // Try full xlinerpc auth (token + mTLS peer certs)
-        let mut req = request.get_ref().clone();
+        let mut req = request.data().clone();
     
         let auth_info = if self.auth_store.is_enabled() {
-            if let Some(token) = get_token(request.metadata()) {
+            if let Some(token) = get_token(request.meta()) {
                 Some(self.auth_store.verify(&token)?)
             } else {
-                if let Some(cn) = get_cn_from_xlinerpc_request(&request) {
-                    Some(AuthInfo {
-                        username: cn,
-                        auth_revision: self.auth_store.revision(),
-                    })
-                } else {
-                    None
-                }
+                // TODO: Implement mTLS support for xlinerpc
+                None
             }
         } else {
             None
@@ -207,46 +191,37 @@ impl Protocol for AuthWrapper {
             .await
             .map_err(curp_error_to_xlinerpc_status)?;
         let mapped = stream.map(|r| r.map_err(curp_error_to_xlinerpc_status));
-        Ok(xlinerpc::Response::from_data(Box::pin(mapped)))
-    }
-
-    // Helper function: Get CN from xlinerpc::Request
-    fn get_cn_from_xlinerpc_request<T>(request: &xlinerpc::Request<T>) -> Option<String> {
-        if let Some(tonic_request) = request.inner_tonic_request() {
-            get_cn(tonic_request)
-        } else {
-            None
-        }
+        Ok(Response::from_data(Box::pin(mapped)))
     }
 
     async fn record(
         &self,
-        request: xlinerpc::Request<RecordRequest>,
-    ) -> Result<xlinerpc::Response<RecordResponse>, Status> {
+        request: Request<RecordRequest>,
+    ) -> Result<Response<RecordResponse>, Status> {
         let meta = metadata_from_xlinerpc(request.meta());
-        Ok(xlinerpc::Response::from_data(
-            CurpService::record(self, request.into_inner(), meta)
+        Ok(Response::from_data(
+            CurpService::record(self, request.into_data(), meta)
                 .map_err(curp_error_to_xlinerpc_status)?,
         ))
     }
 
     async fn read_index(
         &self,
-        request: xlinerpc::Request<ReadIndexRequest>,
-    ) -> Result<xlinerpc::Response<ReadIndexResponse>, Status> {
+        request: Request<ReadIndexRequest>,
+    ) -> Result<Response<ReadIndexResponse>, Status> {
         let meta = metadata_from_xlinerpc(request.meta());
-        Ok(xlinerpc::Response::from_data(
+        Ok(Response::from_data(
             CurpService::read_index(self, meta).map_err(curp_error_to_xlinerpc_status)?,
         ))
     }
 
     async fn shutdown(
         &self,
-        request: xlinerpc::Request<ShutdownRequest>,
-    ) -> Result<xlinerpc::Response<ShutdownResponse>, Status> {
+        request: Request<ShutdownRequest>,
+    ) -> Result<Response<ShutdownResponse>, Status> {
         let meta = metadata_from_xlinerpc(request.meta());
-        Ok(xlinerpc::Response::from_data(
-            CurpService::shutdown(self, request.into_inner(), meta)
+        Ok(Response::from_data(
+            CurpService::shutdown(self, request.into_data(), meta)
                 .await
                 .map_err(curp_error_to_xlinerpc_status)?,
         ))
@@ -254,11 +229,11 @@ impl Protocol for AuthWrapper {
 
     async fn propose_conf_change(
         &self,
-        request: xlinerpc::Request<ProposeConfChangeRequest>,
-    ) -> Result<xlinerpc::Response<ProposeConfChangeResponse>, Status> {
+        request: Request<ProposeConfChangeRequest>,
+    ) -> Result<Response<ProposeConfChangeResponse>, Status> {
         let meta = metadata_from_xlinerpc(request.meta());
-        Ok(xlinerpc::Response::from_data(
-            CurpService::propose_conf_change(self, request.into_inner(), meta)
+        Ok(Response::from_data(
+            CurpService::propose_conf_change(self, request.into_data(), meta)
                 .await
                 .map_err(curp_error_to_xlinerpc_status)?,
         ))
@@ -266,41 +241,41 @@ impl Protocol for AuthWrapper {
 
     async fn publish(
         &self,
-        request: xlinerpc::Request<PublishRequest>,
-    ) -> Result<xlinerpc::Response<PublishResponse>, Status> {
+        request: Request<PublishRequest>,
+    ) -> Result<Response<PublishResponse>, Status> {
         let meta = metadata_from_xlinerpc(request.meta());
-        Ok(xlinerpc::Response::from_data(
-            CurpService::publish(self, request.into_inner(), meta)
+        Ok(Response::from_data(
+            CurpService::publish(self, request.into_data(), meta)
                 .map_err(curp_error_to_xlinerpc_status)?,
         ))
     }
 
     async fn fetch_cluster(
         &self,
-        request: xlinerpc::Request<FetchClusterRequest>,
-    ) -> Result<xlinerpc::Response<FetchClusterResponse>, Status> {
-        Ok(xlinerpc::Response::from_data(
-            CurpService::fetch_cluster(self, request.into_inner())
+        request: Request<FetchClusterRequest>,
+    ) -> Result<Response<FetchClusterResponse>, Status> {
+        Ok(Response::from_data(
+            CurpService::fetch_cluster(self, request.into_data())
                 .map_err(curp_error_to_xlinerpc_status)?,
         ))
     }
 
     async fn fetch_read_state(
         &self,
-        request: xlinerpc::Request<FetchReadStateRequest>,
-    ) -> Result<xlinerpc::Response<FetchReadStateResponse>, Status> {
-        Ok(xlinerpc::Response::from_data(
-            CurpService::fetch_read_state(self, request.into_inner())
+        request: Request<FetchReadStateRequest>,
+    ) -> Result<Response<FetchReadStateResponse>, Status> {
+        Ok(Response::from_data(
+            CurpService::fetch_read_state(self, request.into_data())
                 .map_err(curp_error_to_xlinerpc_status)?,
         ))
     }
 
     async fn move_leader(
         &self,
-        request: xlinerpc::Request<MoveLeaderRequest>,
-    ) -> Result<xlinerpc::Response<MoveLeaderResponse>, Status> {
-        Ok(xlinerpc::Response::from_data(
-            CurpService::move_leader(self, request.into_inner())
+        request: Request<MoveLeaderRequest>,
+    ) -> Result<Response<MoveLeaderResponse>, Status> {
+        Ok(Response::from_data(
+            CurpService::move_leader(self, request.into_data())
                 .await
                 .map_err(curp_error_to_xlinerpc_status)?,
         ))
@@ -308,16 +283,16 @@ impl Protocol for AuthWrapper {
 
     async fn lease_keep_alive(
         &self,
-        request: xlinerpc::Request<impl Stream<Item = Result<LeaseKeepAliveMsg, Status>> + Send>,
-    ) -> Result<xlinerpc::Response<LeaseKeepAliveMsg>, Status> {
-        let stream = request.into_inner();
+        request: Request<impl Stream<Item = Result<LeaseKeepAliveMsg, Status>> + Send>,
+    ) -> Result<Response<LeaseKeepAliveMsg>, Status> {
+        let stream = request.into_data();
         let curp_stream: Box<
             dyn Stream<Item = Result<LeaseKeepAliveMsg, CurpError>> + Send + Unpin,
         > = Box::new(stream.map(|r| r.map_err(CurpError::from)));
-        Ok(xlinerpc::Response::from_data(
+        Ok(Response::from_data(
             CurpService::lease_keep_alive(self, curp_stream)
                 .await
-                .map_err(curp_error_to_tonic_status)?,
+                .map_err(curp_error_to_xlinerpc_status)?,
         ))
     }
 }
@@ -340,61 +315,61 @@ impl Server {
         RouterEndpoint::new(self.server)
             .add_server_streaming_fn(
                 "/ProposeStream",
-                move |this: Arc<AuthWrapper>, request: tonic::Request<ProposeRequest>| async move {
+                move |this: Arc<AuthWrapper>, request: Request<ProposeRequest>| async move {
                     Protocol::propose_stream(&*this, request).await
                 },
             )
             .add_unary_fn(
                 "/Record",
-                move |this: Arc<AuthWrapper>, request: tonic::Request<RecordRequest>| async move {
+                move |this: Arc<AuthWrapper>, request: Request<RecordRequest>| async move {
                     Protocol::record(&*this, request).await
                 },
             )
             .add_unary_fn(
                 "/ReadIndex",
-                move |this: Arc<AuthWrapper>, request: tonic::Request<ReadIndexRequest>| async move {
+                move |this: Arc<AuthWrapper>, request: Request<ReadIndexRequest>| async move {
                     Protocol::read_index(&*this, request).await
                 },
             )
             .add_unary_fn(
                 "/ProposeConfChange",
-                move |this: Arc<AuthWrapper>, request: tonic::Request<ProposeConfChangeRequest>| async move {
+                move |this: Arc<AuthWrapper>, request: Request<ProposeConfChangeRequest>| async move {
                     Protocol::propose_conf_change(&*this, request).await
                 },
             )
             .add_unary_fn(
                 "/Publish",
-                move |this: Arc<AuthWrapper>, request: tonic::Request<PublishRequest>| async move {
+                move |this: Arc<AuthWrapper>, request: Request<PublishRequest>| async move {
                     Protocol::publish(&*this, request).await
                 }
             )
             .add_unary_fn(
                 "/Shutdown",
-                move |this: Arc<AuthWrapper>, request: tonic::Request<ShutdownRequest>| async move {
+                move |this: Arc<AuthWrapper>, request: Request<ShutdownRequest>| async move {
                     Protocol::shutdown(&*this, request).await
                 },
             )
             .add_unary_fn(
                 "/FetchCluster",
-                move |this: Arc<AuthWrapper>, request: tonic::Request<FetchClusterRequest>| async move {
+                move |this: Arc<AuthWrapper>, request: Request<FetchClusterRequest>| async move {
                     Protocol::fetch_cluster(&*this, request).await
                 },
             )
             .add_unary_fn(
                 "/FetchReadState",
-                move |this: Arc<AuthWrapper>, request: tonic::Request<FetchReadStateRequest>| async move {
+                move |this: Arc<AuthWrapper>, request: Request<FetchReadStateRequest>| async move {
                     Protocol::fetch_read_state(&*this, request).await
                 },
             )
             .add_unary_fn(
                 "/MoveLeader",
-                move |this: Arc<AuthWrapper>, request: tonic::Request<MoveLeaderRequest>| async move {
+                move |this: Arc<AuthWrapper>, request: Request<MoveLeaderRequest>| async move {
                     Protocol::move_leader(&*this, request).await
                 },
             )
             .add_client_streaming_fn(
                 "/LeaseKeepAlive",
-                move |this: Arc<AuthWrapper>, request: tonic::Request<tonic::Streaming<LeaseKeepAliveMsg>>| async move {
+                move |this: Arc<AuthWrapper>, request: Request<impl Stream<Item = Result<LeaseKeepAliveMsg, Status>> + Send>| async move {
                     Protocol::lease_keep_alive(&*this, request).await
                 },
             )

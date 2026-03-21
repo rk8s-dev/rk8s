@@ -54,8 +54,8 @@ impl ClusterServer {
 
     pub(crate) async fn member_add(
         &self,
-        request: xlinerpc::Request<MemberAddRequest>,
-    ) -> Result<xlinerpc::Response<MemberAddResponse>, Status> {
+        request: Request<MemberAddRequest>,
+    ) -> Result<Response<MemberAddResponse>, Status> {
         let req = request.into_inner();
         let change_type = if req.is_learner {
             i32::from(AddLearner)
@@ -77,13 +77,13 @@ impl ClusterServer {
             member: members.iter().find(|m| m.id == node_id).cloned(),
             members,
         };
-        Ok(xlinerpc::Response::from_data(resp))
+        Ok(Response::from_data(resp))
     }
 
     pub(crate) async fn member_remove(
         &self,
-        request: xlinerpc::Request<MemberRemoveRequest>,
-    ) -> Result<xlinerpc::Response<MemberRemoveResponse>, Status> {
+        request: Request<MemberRemoveRequest>,
+    ) -> Result<Response<MemberRemoveResponse>, Status> {
         let req = request.into_inner();
         let members = self
             .propose_conf_change(vec![ConfChange {
@@ -96,13 +96,13 @@ impl ClusterServer {
             header: Some(self.header_gen.gen_header()),
             members,
         };
-        Ok(xlinerpc::Response::from_data(resp))
+        Ok(Response::from_data(resp))
     }
 
     pub(crate) async fn member_update(
         &self,
-        request: xlinerpc::Request<MemberUpdateRequest>,
-    ) -> Result<xlinerpc::Response<MemberUpdateResponse>, Status> {
+        request: Request<MemberUpdateRequest>,
+    ) -> Result<Response<MemberUpdateResponse>, Status> {
         let req = request.into_inner();
         let members = self
             .propose_conf_change(vec![ConfChange {
@@ -115,13 +115,13 @@ impl ClusterServer {
             header: Some(self.header_gen.gen_header()),
             members,
         };
-        Ok(xlinerpc::Response::from_data(resp))
+        Ok(Response::from_data(resp))
     }
 
     pub(crate) async fn member_list(
         &self,
-        request: xlinerpc::Request<MemberListRequest>,
-    ) -> Result<xlinerpc::Response<MemberListResponse>, Status> {
+        request: Request<MemberListRequest>,
+    ) -> Result<Response<MemberListResponse>, Status> {
         let req = request.into_inner();
         let header = self.header_gen.gen_header();
         let members = self.client.fetch_cluster(req.linearizable).await?.members;
@@ -138,13 +138,13 @@ impl ClusterServer {
                 })
                 .collect(),
         };
-        Ok(xlinerpc::Response::from_data(resp))
+        Ok(Response::from_data(resp))
     }
 
     pub(crate) async fn member_promote(
         &self,
-        request: xlinerpc::Request<MemberPromoteRequest>,
-    ) -> Result<xlinerpc::Response<MemberPromoteResponse>, Status> {
+        request: Request<MemberPromoteRequest>,
+    ) -> Result<Response<MemberPromoteResponse>, Status> {
         let req = request.into_inner();
         let members = self
             .propose_conf_change(vec![ConfChange {
@@ -157,7 +157,7 @@ impl ClusterServer {
             header: Some(self.header_gen.gen_header()),
             members,
         };
-        Ok(xlinerpc::Response::from_data(resp))
+        Ok(Response::from_data(resp))
     }
 }
 

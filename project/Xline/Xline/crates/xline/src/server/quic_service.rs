@@ -9,7 +9,7 @@ use prost::Message;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
-use tonic::{Response, Status};
+use xlinerpc::{Request, Response, Status};
 
 use super::{
     auth_server::AuthServer, cluster_server::ClusterServer, kv_server::KvServer,
@@ -51,28 +51,15 @@ impl XlineQuicService {
         }
     }
 
-    fn tonic_request<T>(message: T, meta: &Metadata) -> Result<tonic::Request<T>, CurpError> {
-        let mut request = tonic::Request::new(message);
+    fn xlinerpc_request<T>(message: T, meta: &Metadata) -> Result<Request<T>, CurpError> {
+        let mut request = Request::new(message);
         for (key, value) in meta.iter() {
-            let key = key
-                .parse::<tonic::metadata::MetadataKey<tonic::metadata::Ascii>>()
-                .map_err(|e| {
-                    CurpError::from(Status::internal(format!(
-                        "invalid metadata key '{key}': {e}"
-                    )))
-                })?;
-            let parsed = value.parse().map_err(|e| {
-                CurpError::from(Status::internal(format!(
-                    "invalid metadata value for key '{key}': {e}"
-                )))
-            })?;
-            let _prev = request.metadata_mut().insert(key, parsed);
+            request.metadata_mut().insert(key.as_bytes().to_vec(), value.as_bytes().to_vec());
         }
         Ok(request)
     }
 
-    fn tonic_status_to_curp(status: Status) -> CurpError {
-        let status: xlinerpc::status::Status = status.into();
+    fn xlinerpc_status_to_curp(status: Status) -> CurpError {
         CurpError::from(status)
     }
 
@@ -81,7 +68,7 @@ impl XlineQuicService {
         W: AsyncWrite + Unpin,
     {
         let wrapper = CurpErrorWrapper {
-            err: Some(Self::tonic_status_to_curp(err)),
+            err: Some(Self::xlinerpc_status_to_curp(err)),
         };
         writer
             .write_frame(&Frame::Status {
@@ -135,13 +122,13 @@ impl XlineQuicService {
         R: AsyncRead + Unpin,
         Req: Message + Default,
         Resp: Message,
-        F: FnOnce(tonic::Request<Req>) -> Fut,
+        F: FnOnce(Request<Req>) -> Fut,
         Fut: Future<Output = Result<Response<Resp>, Status>>,
     {
         let request = Self::read_unary_request::<R, Req>(recv).await?;
         let mut writer = FrameWriter::new(send);
 
-        match f(Self::tonic_request(request, &meta)?).await {
+        match f(Self::xlinerpc_request(request, &meta)?).await {
             Ok(response) => {
                 writer
                     .write_frame(&Frame::Data(response.into_inner().encode_to_vec()))
@@ -171,13 +158,13 @@ impl XlineQuicService {
         Req: Message + Default,
         Resp: Message + Debug,
         St: Stream<Item = Result<Resp, Status>> + Send + Unpin + 'static,
-        F: FnOnce(tonic::Request<Req>) -> Fut,
+        F: FnOnce(Request<Req>) -> Fut,
         Fut: Future<Output = Result<Response<St>, Status>>,
     {
         let request = Self::read_unary_request::<R, Req>(recv).await?;
         let mut writer = FrameWriter::new(send);
 
-        match f(Self::tonic_request(request, &meta)?).await {
+        match f(Self::xlinerpc_request(request, &meta)?).await {
             Ok(response) => {
                 let mut stream = response.into_inner();
                 while let Some(item) = stream.next().await {
@@ -224,8 +211,8 @@ impl XlineQuicService {
                         "unexpected STATUS frame in client-streaming request",
                     )),
                     Err(err) => {
-                        let status: xlinerpc::status::Status = err.into();
-                        Err(status.into())
+                        let status: Status = err.into();
+                        Err(status)
                     }
                 };
 
@@ -293,7 +280,7 @@ impl XlineQuicService {
             .lease
             .lease_keep_alive_stream(Self::spawn_request_pump::<R, LeaseKeepAliveRequest>(recv))
             .await
-            .map_err(Self::tonic_status_to_curp)?;
+            .map_err(Self::xlinerpc_status_to_curp)?;
         Self::write_stream(send, stream).await
     }
 }
@@ -318,7 +305,7 @@ impl QuicServiceExt for XlineQuicService {
                         send,
                         recv,
                         meta,
-                        |req: tonic::Request<AuthenticateRequest>| async move {
+                        |req: Request<AuthenticateRequest>| async move {
                             this.auth.authenticate(req).await
                         },
                     )
@@ -329,7 +316,7 @@ impl QuicServiceExt for XlineQuicService {
                         send,
                         recv,
                         meta,
-                        |req: tonic::Request<LeaseRevokeRequest>| async move {
+                        |req: Request<LeaseRevokeRequest>| async move {
                             this.lease.lease_revoke(req).await
                         },
                     )
@@ -343,7 +330,7 @@ impl QuicServiceExt for XlineQuicService {
                         send,
                         recv,
                         meta,
-                        |req: tonic::Request<LeaseTimeToLiveRequest>| async move {
+                        |req: Request<LeaseTimeToLiveRequest>| async move {
                             this.lease.lease_time_to_live(req).await
                         },
                     )
@@ -357,7 +344,7 @@ impl QuicServiceExt for XlineQuicService {
                         send,
                         recv,
                         meta,
-                        |req: tonic::Request<SnapshotRequest>| async move {
+                        |req: Request<SnapshotRequest>| async move {
                             this.maintenance.snapshot(req).await
                         },
                     )
@@ -368,7 +355,7 @@ impl QuicServiceExt for XlineQuicService {
                         send,
                         recv,
                         meta,
-                        |req: tonic::Request<AlarmRequest>| async move {
+                        |req: Request<AlarmRequest>| async move {
                             this.maintenance.alarm(req).await
                         },
                     )
@@ -385,7 +372,7 @@ impl QuicServiceExt for XlineQuicService {
                         send,
                         recv,
                         meta,
-                        |req: tonic::Request<MemberAddRequest>| async move {
+                        |req: Request<MemberAddRequest>| async move {
                             this.cluster.member_add(req).await
                         },
                     )
@@ -396,7 +383,7 @@ impl QuicServiceExt for XlineQuicService {
                         send,
                         recv,
                         meta,
-                        |req: tonic::Request<MemberRemoveRequest>| async move {
+                        |req: Request<MemberRemoveRequest>| async move {
                             this.cluster.member_remove(req).await
                         },
                     )
@@ -407,7 +394,7 @@ impl QuicServiceExt for XlineQuicService {
                         send,
                         recv,
                         meta,
-                        |req: tonic::Request<MemberPromoteRequest>| async move {
+                        |req: Request<MemberPromoteRequest>| async move {
                             this.cluster.member_promote(req).await
                         },
                     )
@@ -418,7 +405,7 @@ impl QuicServiceExt for XlineQuicService {
                         send,
                         recv,
                         meta,
-                        |req: tonic::Request<MemberUpdateRequest>| async move {
+                        |req: Request<MemberUpdateRequest>| async move {
                             this.cluster.member_update(req).await
                         },
                     )
@@ -429,7 +416,7 @@ impl QuicServiceExt for XlineQuicService {
                         send,
                         recv,
                         meta,
-                        |req: tonic::Request<MemberListRequest>| async move {
+                        |req: Request<MemberListRequest>| async move {
                             this.cluster.member_list(req).await
                         },
                     )
@@ -440,7 +427,7 @@ impl QuicServiceExt for XlineQuicService {
                         send,
                         recv,
                         meta,
-                        |req: tonic::Request<CompactionRequest>| async move {
+                        |req: Request<CompactionRequest>| async move {
                             this.kv.compact(req).await
                         },
                     )

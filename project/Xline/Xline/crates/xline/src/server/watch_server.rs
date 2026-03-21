@@ -7,7 +7,7 @@ use std::{
 use event_listener::Event;
 use tokio::sync::mpsc;
 use tokio_stream::{Stream, StreamExt, wrappers::ReceiverStream};
-use xlinerpc::status::Status;
+use xlinerpc::{Request, Status};
 use tracing::{debug, warn};
 use utils::task_manager::{Listener, TaskManager, tasks::TaskName};
 use xlineapi::command::KeyRange;
@@ -152,10 +152,10 @@ impl WatchServer {
     /// last compaction revision.
     async fn watch(
         &self,
-        request: tonic::Request<tonic::Streaming<WatchRequest>>,
-    ) -> Result<tonic::Response<ReceiverStream<Result<WatchResponse, Status>>>, Status> {
+        request: Request<impl Stream<Item = Result<WatchRequest, Status>> + Send>,
+    ) -> Result<xlinerpc::Response<ReceiverStream<Result<WatchResponse, Status>>>, Status> {
         debug!("Receive Watch Connection {:?}", request);
-        Ok(tonic::Response::new(
+        Ok(xlinerpc::Response::from_data(
             self.watch_stream(request.into_inner()),
         ))
     }
@@ -437,7 +437,7 @@ impl Server {
         RouterEndpoint::new(self.watch_server).add_streaming_fn(
             "/Watch",
             move |this: Arc<WatchServer>,
-                  request: tonic::Request<tonic::Streaming<WatchRequest>>| async move {
+                  request: Request<impl Stream<Item = Result<WatchRequest, Status>> + Send>| async move {
                 this.watch(request).await
             },
         )

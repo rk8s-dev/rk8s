@@ -12,17 +12,15 @@ use dashmap::DashMap;
 use engine::{Snapshot, TransactionApi};
 use event_listener::Event;
 use parking_lot::RwLock;
-use tonic::Status;
 use tracing::warn;
 use utils::{barrier::IdBarrier, table_names::META_TABLE};
+use xlinerpc::Status;
 use xlineapi::{
     AlarmAction, AlarmRequest, AlarmType,
     classifier::RequestClassifier,
     command::{Command, CurpClient, SyncResponse},
     execute_error::ExecuteError,
 };
-// TODO: use our own status type
-// use xlinerpc::status::Status;
 
 use crate::{
     revision_number::RevisionNumberGeneratorState,

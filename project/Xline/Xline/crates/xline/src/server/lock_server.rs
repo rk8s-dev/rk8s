@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use async_stream::stream;
 use clippy_utilities::OverflowArithmetic;
-use xlinerpc::status::Status;
+use xlinerpc::{Request, Response, Status};
 use tonic::transport::{Channel, ClientTlsConfig, Endpoint};
 use tracing::debug;
 use utils::build_endpoint;
@@ -208,8 +208,8 @@ impl LockServer {
     /// lease associate with the owner expires.
     async fn lock(
         &self,
-        request: xlinerpc::Request<LockRequest>,
-    ) -> Result<xlinerpc::Response<LockResponse>, Status> {
+        request: Request<LockRequest>,
+    ) -> Result<Response<LockResponse>, Status> {
         debug!("Receive LockRequest {:?}", request);
         let auth_info = self.auth_store.try_get_auth_info_from_request(&request)?;
         let lock_req = request.into_inner();
@@ -274,7 +274,7 @@ impl LockServer {
             header,
             key: key.into_bytes(),
         };
-        Ok(xlinerpc::Response::from_data(res))
+        Ok(Response::from_data(res))
     }
 
     /// Unlock takes a key returned by Lock and releases the hold on lock. The
@@ -282,12 +282,12 @@ impl LockServer {
     /// ownership of the lock.
     async fn unlock(
         &self,
-        request: xlinerpc::Request<UnlockRequest>,
-    ) -> Result<xlinerpc::Response<UnlockResponse>, Status> {
+        request: Request<UnlockRequest>,
+    ) -> Result<Response<UnlockResponse>, Status> {
         debug!("Receive UnlockRequest {:?}", request);
         let auth_info = self.auth_store.try_get_auth_info_from_request(&request)?;
         let header = self.delete_key(&request.get_ref().key, auth_info).await?;
-        Ok(xlinerpc::Response::from_data(UnlockResponse { header }))
+        Ok(Response::from_data(UnlockResponse { header }))
     }
 }
 
@@ -304,13 +304,13 @@ impl Server {
         RouterEndpoint::new(self.lock_server)
             .add_unary_fn(
                 "/lock",
-                move |this: Arc<LockServer>, request: tonic::Request<LockRequest>| async move {
+                move |this: Arc<LockServer>, request: Request<LockRequest>| async move {
                     this.lock(request).await
                 },
             )
             .add_unary_fn(
                 "/unlock",
-                move |this: Arc<LockServer>, request: tonic::Request<UnlockRequest>| async move {
+                move |this: Arc<LockServer>, request: Request<UnlockRequest>| async move {
                     this.unlock(request).await
                 },
             )
