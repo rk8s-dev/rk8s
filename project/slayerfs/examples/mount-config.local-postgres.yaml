@@ -1,0 +1,16 @@
+# Local object storage + Postgres metadata
+mount_point: /tmp/slayerfs-pg
+
+data:
+  backend: local-fs
+  localfs:
+    data_dir: /var/lib/slayerfs/data
+
+meta:
+  backend: sqlx
+  sqlx:
+    url: "postgres://postgres:postgres@127.0.0.1:5432/slayerfs"
+
+layout:
+  chunk_size: 67108864
+  block_size: 4194304

@@ -1,0 +1,16 @@
+# Local object storage + in-memory sqlite metadata
+mount_point: /tmp/slayerfs
+
+data:
+  backend: local-fs
+  localfs:
+    data_dir: ./data
+
+meta:
+  backend: sqlx
+  sqlx:
+    url: "sqlite::memory:"
+
+layout:
+  chunk_size: 67108864
+  block_size: 4194304
