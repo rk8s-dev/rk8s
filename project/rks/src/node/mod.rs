@@ -202,6 +202,7 @@ pub struct Shared {
     pub vault: Option<Arc<Vault>>,
     pub node_registry: Arc<NodeRegistry>,
     pub log_response_registry: Arc<LogResponseRegistry>,
+    #[allow(unused)]
     pub csi_controller: Arc<RksCsiController>,
     pub volume_orchestrator: Arc<VolumeOrchestrator>,
     pub pending_csi_requests: Arc<DashMap<Uuid, oneshot::Sender<libcsi::CsiMessage>>>,

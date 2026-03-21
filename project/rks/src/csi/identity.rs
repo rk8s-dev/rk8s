@@ -7,6 +7,7 @@ use libcsi::{CsiError, CsiIdentity, PluginCapability, PluginInfo};
 ///
 /// Reports controller-side capabilities. The Node side (RKL) has its own
 /// Identity implementation reporting node capabilities.
+#[allow(unused)]
 pub struct RksCsiIdentity;
 
 #[async_trait]

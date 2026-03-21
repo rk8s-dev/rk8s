@@ -75,39 +75,41 @@ impl PodsWatcher {
 
                         // Then deprovision SlayerFs volumes
                         if let Ok(pod) = serde_yaml::from_str::<PodTask>(&pod_yaml)
-                            && pod.spec.node_name.as_deref() == Some(node_id) {
-                                let orchestrator = &self.shared.volume_orchestrator;
-                                for vol in &pod.spec.volumes {
-                                    if let VolumeSourceType::SlayerFs { .. } = &vol.source {
-                                        let annotation_key = csi_volume_annotation_key(&vol.name);
-                                        let vol_id = match pod.metadata.annotations.get(&annotation_key) {
-                                            Some(id) => libcsi::VolumeId::from(id.as_str()),
-                                            None => {
-                                                error!(
-                                                    target: "rks::node::watch_pods",
-                                                    "no CSI volume annotation for '{}' on pod {}, skipping deprovision",
-                                                    vol.name, pod.metadata.name
-                                                );
-                                                continue;
-                                            }
-                                        };
-                                        let target_path = format!(
-                                            "/var/lib/rkl/pods/{}/volumes/{}",
-                                            pod.metadata.uid, vol.name
-                                        );
-                                        if let Err(e) = orchestrator
-                                            .unmount_and_deprovision(&vol_id, node_id, &target_path)
-                                            .await
-                                        {
+                            && pod.spec.node_name.as_deref() == Some(node_id)
+                        {
+                            let orchestrator = &self.shared.volume_orchestrator;
+                            for vol in &pod.spec.volumes {
+                                if let VolumeSourceType::SlayerFs { .. } = &vol.source {
+                                    let annotation_key = csi_volume_annotation_key(&vol.name);
+                                    let vol_id = match pod.metadata.annotations.get(&annotation_key)
+                                    {
+                                        Some(id) => libcsi::VolumeId::from(id.as_str()),
+                                        None => {
                                             error!(
                                                 target: "rks::node::watch_pods",
-                                                "failed to deprovision volume {} for pod {}: {e}",
+                                                "no CSI volume annotation for '{}' on pod {}, skipping deprovision",
                                                 vol.name, pod.metadata.name
                                             );
+                                            continue;
                                         }
+                                    };
+                                    let target_path = format!(
+                                        "/var/lib/rkl/pods/{}/volumes/{}",
+                                        pod.metadata.uid, vol.name
+                                    );
+                                    if let Err(e) = orchestrator
+                                        .unmount_and_deprovision(&vol_id, node_id, &target_path)
+                                        .await
+                                    {
+                                        error!(
+                                            target: "rks::node::watch_pods",
+                                            "failed to deprovision volume {} for pod {}: {e}",
+                                            vol.name, pod.metadata.name
+                                        );
                                     }
                                 }
                             }
+                        }
                     }
                 }
             }

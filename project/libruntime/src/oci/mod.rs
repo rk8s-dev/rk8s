@@ -122,11 +122,7 @@ impl OCISpecGenerator {
 
         // Convert CRI mounts to OCI mounts
         if !self.container_config.mounts.is_empty() {
-            let mut oci_mounts = self
-                .inner_spec
-                .mounts()
-                .clone()
-                .unwrap_or_default();
+            let mut oci_mounts = self.inner_spec.mounts().clone().unwrap_or_default();
             for m in &self.container_config.mounts {
                 let mut opts = vec![
                     if m.readonly { "ro" } else { "rw" }.to_string(),
