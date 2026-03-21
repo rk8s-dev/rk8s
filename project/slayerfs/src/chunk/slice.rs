@@ -101,6 +101,138 @@ pub struct SliceDesc {
     pub length: u64,
 }
 
+impl SliceDesc {
+    /// Calculate the real fragmentation ratio using interval merging.
+    ///
+    /// Fragmentation = (total_slice_size - deduplicated_coverage) / total_slice_size
+    ///
+    /// This correctly accounts for partially overlapping slices, unlike
+    /// counting only fully-covered slices which would undercount fragmentation.
+    ///
+    /// Example:
+    /// - Slice A: offset=0, length=100
+    /// - Slice B: offset=50, length=100
+    /// - total_size = 200, merged_coverage = 150 (union of [0,100) and [50,150))
+    /// - fragmentation = (200 - 150) / 200 = 0.25
+    pub fn calculate_fragmentation(slices: &[SliceDesc]) -> f64 {
+        if slices.is_empty() {
+            return 0.0;
+        }
+        let total_size: u64 = slices.iter().map(|s| s.length).sum();
+        if total_size == 0 {
+            return 0.0;
+        }
+
+        // Sort intervals by start offset for sweep-line merge
+        let mut intervals: Vec<(u64, u64)> = slices
+            .iter()
+            .filter(|s| s.length > 0)
+            .map(|s| (s.offset, s.offset + s.length))
+            .collect();
+        if intervals.is_empty() {
+            return 0.0;
+        }
+        intervals.sort();
+
+        // Merge overlapping intervals to compute deduplicated coverage
+        let mut merged_coverage: u64 = 0;
+        let (mut cur_start, mut cur_end) = intervals[0];
+        for &(s, e) in &intervals[1..] {
+            if s <= cur_end {
+                cur_end = cur_end.max(e);
+            } else {
+                merged_coverage += cur_end - cur_start;
+                cur_start = s;
+                cur_end = e;
+            }
+        }
+        merged_coverage += cur_end - cur_start;
+
+        (total_size - merged_coverage) as f64 / total_size as f64
+    }
+
+    /// Remove slices that are fully covered by newer slices.
+    ///
+    /// This is a conservative strategy for safe deletion: only slices whose
+    /// entire range `[offset, offset+length)` is contained within a single
+    /// newer slice are removed. Partially covered slices are kept intact
+    /// because their block data addressing depends on the original offset.
+    ///
+    /// Ordering: slices with higher `slice_id` are considered newer.
+    pub fn remove_fully_covered(slices: &[SliceDesc]) -> Vec<SliceDesc> {
+        if slices.is_empty() {
+            return vec![];
+        }
+
+        // Sort by slice_id descending (newest first)
+        let mut sorted: Vec<SliceDesc> = slices.to_vec();
+        sorted.sort_by_key(|s| std::cmp::Reverse(s.slice_id));
+
+        let mut covered_ranges: Vec<(u64, u64)> = Vec::new();
+        let mut result: Vec<SliceDesc> = Vec::new();
+
+        for slice in sorted {
+            let start = slice.offset;
+            let end = slice.offset + slice.length;
+
+            // Check if fully covered by any single newer slice's range
+            let is_fully_covered = covered_ranges
+                .iter()
+                .any(|&(cs, ce)| start >= cs && end <= ce);
+
+            if !is_fully_covered {
+                result.push(slice);
+            }
+
+            covered_ranges.push((start, end));
+        }
+
+        result.sort_by_key(|s| s.offset);
+        result
+    }
+
+    /// Find slice IDs present in original but not in merged
+    pub fn find_replaced_ids(original: &[SliceDesc], merged: &[SliceDesc]) -> Vec<u64> {
+        let merged_ids: std::collections::HashSet<u64> =
+            merged.iter().map(|s| s.slice_id).collect();
+        original
+            .iter()
+            .filter(|s| !merged_ids.contains(&s.slice_id))
+            .map(|s| s.slice_id)
+            .collect()
+    }
+
+    /// Encode replaced slices into the delayed deletion binary format.
+    pub fn encode_delayed_data(slices: &[SliceDesc], replaced_ids: &[u64]) -> Vec<u8> {
+        let replaced_set: std::collections::HashSet<u64> = replaced_ids.iter().copied().collect();
+        let mut buf = Vec::with_capacity(replaced_ids.len() * 20);
+        for s in slices {
+            if replaced_set.contains(&s.slice_id) {
+                buf.extend_from_slice(&s.slice_id.to_le_bytes());
+                buf.extend_from_slice(&s.offset.to_le_bytes());
+                let size = s.length.min(u32::MAX as u64) as u32;
+                buf.extend_from_slice(&size.to_le_bytes());
+            }
+        }
+        buf
+    }
+
+    /// Decode the delayed deletion binary format into (slice_id, offset, size) tuples.
+    pub fn decode_delayed_data(data: &[u8]) -> Option<Vec<(u64, u64, u32)>> {
+        if !data.len().is_multiple_of(20) {
+            return None;
+        }
+        let mut out = Vec::with_capacity(data.len() / 20);
+        for chunk in data.chunks_exact(20) {
+            let slice_id = u64::from_le_bytes(chunk[0..8].try_into().unwrap());
+            let offset = u64::from_le_bytes(chunk[8..16].try_into().unwrap());
+            let size = u32::from_le_bytes(chunk[16..20].try_into().unwrap());
+            out.push((slice_id, offset, size));
+        }
+        Some(out)
+    }
+}
+
 pub fn block_span_iter_range(
     offset: u64,
     length: u64,
@@ -201,5 +333,150 @@ mod tests {
         assert_eq!(desc.chunk_id, 2);
         assert_eq!(desc.offset, 100);
         assert_eq!(desc.length, 4096);
+    }
+
+    // ==================== calculate_fragmentation tests ====================
+
+    fn make_slice(id: u64, offset: u64, length: u64) -> SliceDesc {
+        SliceDesc {
+            slice_id: id,
+            chunk_id: 1,
+            offset,
+            length,
+        }
+    }
+
+    #[test]
+    fn test_fragmentation_empty() {
+        assert_eq!(SliceDesc::calculate_fragmentation(&[]), 0.0);
+    }
+
+    #[test]
+    fn test_fragmentation_single_slice() {
+        let slices = vec![make_slice(1, 0, 100)];
+        assert_eq!(SliceDesc::calculate_fragmentation(&slices), 0.0);
+    }
+
+    #[test]
+    fn test_fragmentation_no_overlap() {
+        // [0,100) + [200,300) → total=200, coverage=200, frag=0
+        let slices = vec![make_slice(1, 0, 100), make_slice(2, 200, 100)];
+        assert_eq!(SliceDesc::calculate_fragmentation(&slices), 0.0);
+    }
+
+    #[test]
+    fn test_fragmentation_partial_overlap() {
+        // [0,100) + [50,150) → total=200, coverage=150, frag=50/200=0.25
+        let slices = vec![make_slice(1, 0, 100), make_slice(2, 50, 100)];
+        let frag = SliceDesc::calculate_fragmentation(&slices);
+        assert!((frag - 0.25).abs() < 1e-9, "expected 0.25, got {frag}");
+    }
+
+    #[test]
+    fn test_fragmentation_full_overlap() {
+        // [0,100) + [0,100) → total=200, coverage=100, frag=100/200=0.5
+        let slices = vec![make_slice(1, 0, 100), make_slice(2, 0, 100)];
+        let frag = SliceDesc::calculate_fragmentation(&slices);
+        assert!((frag - 0.5).abs() < 1e-9, "expected 0.5, got {frag}");
+    }
+
+    #[test]
+    fn test_fragmentation_superset_coverage() {
+        // [10,60) + [0,100) → total=150, coverage=100, frag=50/150≈0.333
+        let slices = vec![make_slice(1, 10, 50), make_slice(2, 0, 100)];
+        let frag = SliceDesc::calculate_fragmentation(&slices);
+        let expected = 50.0 / 150.0;
+        assert!(
+            (frag - expected).abs() < 1e-9,
+            "expected {expected}, got {frag}"
+        );
+    }
+
+    #[test]
+    fn test_fragmentation_chain_overlap() {
+        // [0,100) + [50,150) + [100,200) → total=300, coverage=200, frag=100/300≈0.333
+        let slices = vec![
+            make_slice(1, 0, 100),
+            make_slice(2, 50, 100),
+            make_slice(3, 100, 100),
+        ];
+        let frag = SliceDesc::calculate_fragmentation(&slices);
+        let expected = 100.0 / 300.0;
+        assert!(
+            (frag - expected).abs() < 1e-9,
+            "expected {expected}, got {frag}"
+        );
+    }
+
+    #[test]
+    fn test_fragmentation_zero_length_ignored() {
+        let slices = vec![make_slice(1, 0, 0), make_slice(2, 0, 0)];
+        assert_eq!(SliceDesc::calculate_fragmentation(&slices), 0.0);
+    }
+
+    // ==================== remove_fully_covered tests ====================
+
+    #[test]
+    fn test_remove_fully_covered_empty() {
+        assert!(SliceDesc::remove_fully_covered(&[]).is_empty());
+    }
+
+    #[test]
+    fn test_remove_fully_covered_no_overlap() {
+        let slices = vec![make_slice(1, 0, 50), make_slice(2, 100, 50)];
+        let result = SliceDesc::remove_fully_covered(&slices);
+        assert_eq!(result.len(), 2);
+    }
+
+    #[test]
+    fn test_remove_fully_covered_partial_overlap_kept() {
+        // [0,100) + [50,150) → neither fully covers the other
+        let slices = vec![make_slice(1, 0, 100), make_slice(2, 50, 100)];
+        let result = SliceDesc::remove_fully_covered(&slices);
+        assert_eq!(result.len(), 2, "partial overlap: both kept");
+    }
+
+    #[test]
+    fn test_remove_fully_covered_full_coverage() {
+        // [10,60) fully inside [0,100) — slice 1 removed (newer slice 2 covers it)
+        let slices = vec![make_slice(1, 10, 50), make_slice(2, 0, 100)];
+        let result = SliceDesc::remove_fully_covered(&slices);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].slice_id, 2);
+    }
+
+    #[test]
+    fn test_remove_fully_covered_exact_same_range() {
+        // [0,100) + [0,100) — older one removed
+        let slices = vec![make_slice(1, 0, 100), make_slice(2, 0, 100)];
+        let result = SliceDesc::remove_fully_covered(&slices);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].slice_id, 2);
+    }
+
+    #[test]
+    fn test_remove_fully_covered_chain() {
+        // A⊂B⊂C → only C survives
+        let slices = vec![
+            make_slice(1, 10, 20),
+            make_slice(2, 5, 50),
+            make_slice(3, 0, 100),
+        ];
+        let result = SliceDesc::remove_fully_covered(&slices);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].slice_id, 3);
+    }
+
+    #[test]
+    fn test_remove_fully_covered_sorted_by_offset() {
+        let slices = vec![
+            make_slice(3, 200, 50),
+            make_slice(1, 0, 50),
+            make_slice(2, 100, 50),
+        ];
+        let result = SliceDesc::remove_fully_covered(&slices);
+        for i in 1..result.len() {
+            assert!(result[i].offset >= result[i - 1].offset, "not sorted");
+        }
     }
 }
