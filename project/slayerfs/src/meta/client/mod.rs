@@ -282,6 +282,11 @@ impl<T: MetaStore + 'static> MetaClient<T> {
     }
 
     /// Returns a clone of the underlying raw `MetaStore` handle.
+    #[allow(dead_code)]
+    pub fn store(&self) -> Arc<T> {
+        self.store.clone()
+    }
+
     /// Update the logical root inode. All subsequent metadata lookups treat
     /// `ROOT_INODE` as an alias for `inode`.
     #[allow(dead_code)]
@@ -1916,8 +1921,10 @@ impl<T: MetaStore + 'static> MetaLayer for MetaClient<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::meta::config::{CacheConfig, ClientOptions, Config, DatabaseConfig, DatabaseType};
-    use crate::meta::stores::database::DatabaseMetaStore;
+    use crate::meta::config::{
+        CacheConfig, ClientOptions, CompactConfig, Config, DatabaseConfig, DatabaseType,
+    };
+    use crate::meta::stores::database_store::DatabaseMetaStore;
     use crate::vfs::chunk_id_for;
     use std::time::Duration;
 
@@ -1937,6 +1944,7 @@ mod tests {
             },
             cache: CacheConfig::default(),
             client: ClientOptions::default(),
+            compact: CompactConfig::default(),
         };
 
         let store = Arc::new(DatabaseMetaStore::from_config(config).await.unwrap());
