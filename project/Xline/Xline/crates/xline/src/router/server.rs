@@ -142,7 +142,7 @@ impl Server {
         // tracing::info!("yes quic is serving");
         // handle incoming connections and requests
         while let Ok((new_conn, server, _pathway, _link)) = listeners.accept().await {
-            tracing::info!("get a conenction  {server:?} {_pathway:?} {_link:?}");
+            tracing::info!("get a connection  {server:?} {_pathway:?} {_link:?}");
             let h3_conn =
                 match h3::server::Connection::new(h3_shim::QuicConnection::new(Arc::new(new_conn)))
                     .await
