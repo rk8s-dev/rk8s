@@ -89,7 +89,9 @@ fn main() -> Result<()> {
         Commands::Push(args) => push::push(args),
         Commands::Repo(args) => repo::repo(args),
         Commands::Rmi(args) => images::remove_image(args),
-        Commands::Run(args) => container::run_container(&args.container_yaml, args.volumes),
+        Commands::Run(args) => {
+            container::run_container(&args.container_yaml, args.volumes, args.device)
+        }
         Commands::Save(args) => images::save_image(args),
         Commands::Sandbox(cmd) => sandbox::cli::execute(cmd),
         Commands::SandboxShim(args) => sandbox::vm::run_shim_command(args),
