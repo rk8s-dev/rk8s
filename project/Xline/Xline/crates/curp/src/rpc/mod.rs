@@ -69,7 +69,10 @@ pub use transport::TransportConfig;
 /// QUIC transport implementation
 pub(crate) mod quic_transport;
 
-pub use quic_transport::{DnsFallback, MethodId, QuicChannel, QuicGrpcServer};
+pub use quic_transport::{
+    DnsFallback, Frame, FrameReader, FrameWriter, MethodId, QuicChannel, QuicGrpcServer,
+    QuicServiceExt, read_request_header, status_error, status_ok,
+};
 
 #[doc(hidden)]
 pub use quic_transport::ALL_METHOD_IDS;

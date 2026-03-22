@@ -6,8 +6,8 @@
 //   the caller buffer. Overlapping slices obey "latest slice wins" ordering.
 // - Writer commit will call DataReader::invalidate(...) to mark cached slices stale.
 
-use crate::chuck::reader::DataFetcher;
-use crate::chuck::{BlockStore, ChunkLayout};
+use crate::chunk::reader::DataFetcher;
+use crate::chunk::{BlockStore, ChunkLayout};
 use crate::meta::MetaLayer;
 use crate::utils::{Intervals, NumCastExt, UsageGuard};
 use crate::vfs::Inode;
@@ -997,9 +997,9 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::chuck::store::InMemoryBlockStore;
-    use crate::chuck::writer::DataUploader;
-    use crate::chuck::{ChunkLayout, SliceDesc};
+    use crate::chunk::store::InMemoryBlockStore;
+    use crate::chunk::writer::DataUploader;
+    use crate::chunk::{ChunkLayout, SliceDesc};
     use crate::meta::MetaLayer;
     use crate::meta::SLICE_ID_KEY;
     use crate::meta::factory::create_meta_store_from_url;

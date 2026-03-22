@@ -22,10 +22,11 @@ use xlineapi::{
 
 use crate::{
     revision_check::RevisionCheck,
+    router::endpoint::EndPoint as RouterEndpoint,
     rpc::{
-        CompactionRequest, CompactionResponse, DeleteRangeRequest, DeleteRangeResponse, Kv,
-        PutRequest, PutResponse, RangeRequest, RangeResponse, RequestWrapper, Response, ResponseOp,
-        TxnRequest, TxnResponse,
+        CompactionRequest, CompactionResponse, DeleteRangeRequest, DeleteRangeResponse, PutRequest,
+        PutResponse, RangeRequest, RangeResponse, RequestWrapper, Response, ResponseOp, TxnRequest,
+        TxnResponse,
     },
     storage::{AuthStore, KvStore},
 };
@@ -43,7 +44,20 @@ pub(crate) struct KvServer {
     /// Compact events
     compact_events: Arc<DashMap<u64, Arc<Event>>>,
     /// Next `compact_id`
-    next_compact_id: AtomicU64,
+    next_compact_id: Arc<AtomicU64>,
+}
+
+impl Clone for KvServer {
+    fn clone(&self) -> Self {
+        Self {
+            kv_storage: Arc::clone(&self.kv_storage),
+            auth_storage: Arc::clone(&self.auth_storage),
+            compact_timeout: self.compact_timeout,
+            client: Arc::clone(&self.client),
+            compact_events: Arc::clone(&self.compact_events),
+            next_compact_id: Arc::clone(&self.next_compact_id),
+        }
+    }
 }
 
 impl KvServer {
@@ -62,7 +76,7 @@ impl KvServer {
             compact_timeout,
             client,
             compact_events,
-            next_compact_id: AtomicU64::new(0),
+            next_compact_id: Arc::new(AtomicU64::new(0)),
         }
     }
 
@@ -131,10 +145,7 @@ impl KvServer {
             }
         }
     }
-}
 
-#[tonic::async_trait]
-impl Kv for KvServer {
     /// Range gets the keys in the range from the key-value store.
     #[instrument(skip_all)]
     async fn range(
@@ -236,7 +247,7 @@ impl Kv for KvServer {
     /// key-value store should be periodically compacted or the event
     /// history will continue to grow indefinitely.
     #[instrument(skip_all)]
-    async fn compact(
+    pub(crate) async fn compact(
         &self,
         request: tonic::Request<CompactionRequest>,
     ) -> Result<tonic::Response<CompactionResponse>, Status> {
@@ -414,5 +425,56 @@ mod test {
         let expected_tonic_status =
             Status::from(compact_request.check_revision(13, 18).unwrap_err());
         assert_eq!(expected_tonic_status.code(), Code::OutOfRange);
+    }
+}
+
+pub(crate) struct Server {
+    kvserver: Arc<KvServer>,
+}
+impl Server {
+    #[allow(unused)]
+    pub(crate) fn new(kv_server: KvServer) -> Self {
+        Self {
+            kvserver: Arc::new(kv_server),
+        }
+    }
+    #[allow(unused)]
+    pub(crate) fn from_arc(kv_server: Arc<KvServer>) -> Self {
+        Self {
+            kvserver: kv_server,
+        }
+    }
+    pub(crate) fn endpoint(self) -> RouterEndpoint<Arc<KvServer>> {
+        RouterEndpoint::new(self.kvserver)
+            .add_unary_fn(
+                "/Range",
+                move |this: Arc<KvServer>, request: tonic::Request<RangeRequest>| async move {
+                    this.range(request).await
+                },
+            )
+            .add_unary_fn(
+                "/Put",
+                move |this: Arc<KvServer>, request: tonic::Request<PutRequest>| async move {
+                    this.put(request).await
+                },
+            )
+            .add_unary_fn(
+                "/DeleteRange",
+                move |this: Arc<KvServer>, request: tonic::Request<DeleteRangeRequest>| async move {
+                    this.delete_range(request).await
+                },
+            )
+            .add_unary_fn(
+                "/Txn",
+                move |this: Arc<KvServer>, request: tonic::Request<TxnRequest>| async move {
+                    this.txn(request).await
+                },
+            )
+            .add_unary_fn(
+                "/Compact",
+                move |this: Arc<KvServer>, request: tonic::Request<CompactionRequest>| async move {
+                    this.compact(request).await
+                },
+            )
     }
 }

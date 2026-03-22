@@ -1,4 +1,4 @@
-use crate::chuck::{ChunkLayout, ChunkSpan, ChunkTag};
+use crate::chunk::{ChunkLayout, ChunkSpan, ChunkTag};
 
 pub(crate) mod reader;
 pub(crate) mod writer;

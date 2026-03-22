@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 
-use crate::chuck::SliceDesc;
+use crate::chunk::SliceDesc;
 use crate::meta::client::session::SessionInfo;
 use crate::meta::file_lock::{FileLockInfo, FileLockQuery, FileLockRange, FileLockType};
 use crate::meta::store::{
@@ -17,8 +17,8 @@ use crate::vfs::handles::DirHandle;
 /// the raw [`MetaStore`] directly. Implementations may return
 /// `MetaError::NotImplemented` for operations that have not landed yet, but the
 /// signatures are provided up front to ease future parity work.
-#[allow(dead_code)]
 #[async_trait]
+#[allow(dead_code)]
 pub trait MetaLayer: Send + Sync {
     /// Optional human readable backend name.
     fn name(&self) -> &'static str {

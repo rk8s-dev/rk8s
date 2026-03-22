@@ -50,9 +50,9 @@ fn default_sqlite_url() -> String {
     "sqlite:///tmp/slayerfs/metadata.db".to_string()
 }
 
-#[allow(dead_code)]
 impl Config {
     /// Load configuration from YAML file
+    #[allow(dead_code)]
     pub fn from_file<P: AsRef<Path>>(path: P) -> Result<Self, ConfigError> {
         let content = std::fs::read_to_string(path.as_ref()).map_err(ConfigError::IoError)?;
 
@@ -63,6 +63,7 @@ impl Config {
     }
 
     /// Load configuration from path, fallback to default paths
+    #[allow(dead_code)]
     pub fn from_path(backend_path: &Path) -> Result<Self, ConfigError> {
         let config_file = backend_path.join("slayerfs.yml");
         if config_file.exists() {
@@ -73,6 +74,7 @@ impl Config {
     }
 
     /// Load configuration from default paths
+    #[allow(dead_code)]
     pub fn from_default_path() -> Result<Self, ConfigError> {
         let possible_paths = [
             "slayerfs.yml",

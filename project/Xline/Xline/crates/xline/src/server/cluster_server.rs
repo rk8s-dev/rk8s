@@ -13,14 +13,15 @@ use tonic::{Request, Response, Status};
 // use xlinerpc::status::Status;
 use utils::timestamp;
 use xlineapi::{
-    Cluster, Member, MemberAddRequest, MemberAddResponse, MemberListRequest, MemberListResponse,
+    Member, MemberAddRequest, MemberAddResponse, MemberListRequest, MemberListResponse,
     MemberPromoteRequest, MemberPromoteResponse, MemberRemoveRequest, MemberRemoveResponse,
     MemberUpdateRequest, MemberUpdateResponse, command::CurpClient,
 };
 
-use crate::header_gen::HeaderGenerator;
+use crate::{header_gen::HeaderGenerator, router::endpoint::EndPoint as RouterEndpoint};
 
 /// Cluster Server
+#[derive(Clone)]
 pub(crate) struct ClusterServer {
     /// Consensus client
     client: Arc<CurpClient>,
@@ -50,11 +51,8 @@ impl ClusterServer {
             })
             .collect())
     }
-}
 
-#[tonic::async_trait]
-impl Cluster for ClusterServer {
-    async fn member_add(
+    pub(crate) async fn member_add(
         &self,
         request: Request<MemberAddRequest>,
     ) -> Result<Response<MemberAddResponse>, Status> {
@@ -82,7 +80,7 @@ impl Cluster for ClusterServer {
         Ok(Response::new(resp))
     }
 
-    async fn member_remove(
+    pub(crate) async fn member_remove(
         &self,
         request: Request<MemberRemoveRequest>,
     ) -> Result<Response<MemberRemoveResponse>, Status> {
@@ -101,7 +99,7 @@ impl Cluster for ClusterServer {
         Ok(Response::new(resp))
     }
 
-    async fn member_update(
+    pub(crate) async fn member_update(
         &self,
         request: Request<MemberUpdateRequest>,
     ) -> Result<Response<MemberUpdateResponse>, Status> {
@@ -120,7 +118,7 @@ impl Cluster for ClusterServer {
         Ok(Response::new(resp))
     }
 
-    async fn member_list(
+    pub(crate) async fn member_list(
         &self,
         request: Request<MemberListRequest>,
     ) -> Result<Response<MemberListResponse>, Status> {
@@ -143,7 +141,7 @@ impl Cluster for ClusterServer {
         Ok(Response::new(resp))
     }
 
-    async fn member_promote(
+    pub(crate) async fn member_promote(
         &self,
         request: Request<MemberPromoteRequest>,
     ) -> Result<Response<MemberPromoteResponse>, Status> {
@@ -160,5 +158,54 @@ impl Cluster for ClusterServer {
             members,
         };
         Ok(Response::new(resp))
+    }
+}
+
+pub(crate) struct Server {
+    server: Arc<ClusterServer>,
+}
+impl Server {
+    #[allow(unused)]
+    pub(crate) fn new(server: ClusterServer) -> Self {
+        Self {
+            server: Arc::new(server),
+        }
+    }
+    #[allow(unused)]
+    pub(crate) fn from_arc(server: Arc<ClusterServer>) -> Self {
+        Self { server: server }
+    }
+    pub(crate) fn endpoint(self) -> RouterEndpoint<Arc<ClusterServer>> {
+        RouterEndpoint::new(self.server)
+            .add_unary_fn(
+                "/MemberAdd",
+                move |this: Arc<ClusterServer>, request: Request<MemberAddRequest>| async move {
+                    this.member_add(request).await
+                },
+            )
+            .add_unary_fn(
+                "/MemberRemove",
+                move |this: Arc<ClusterServer>, request: Request<MemberRemoveRequest>| async move {
+                    this.member_remove(request).await
+                },
+            )
+            .add_unary_fn(
+                "/MemberUpdate",
+                move |this: Arc<ClusterServer>, request: Request<MemberUpdateRequest>| async move {
+                    this.member_update(request).await
+                },
+            )
+            .add_unary_fn(
+                "/MemberList",
+                move |this: Arc<ClusterServer>, request: Request<MemberListRequest>| async move {
+                    this.member_list(request).await
+                },
+            )
+            .add_unary_fn(
+                "/MemberPromote",
+                move |this: Arc<ClusterServer>, request: Request<MemberPromoteRequest>| async move {
+                    this.member_promote(request).await
+                },
+            )
     }
 }

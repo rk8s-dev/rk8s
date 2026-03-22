@@ -18,10 +18,10 @@ use tracing::debug;
 use xlineapi::command::Command;
 
 use super::xline_server::CurpServer;
-use crate::storage::AuthStore;
+use crate::{router::endpoint::EndPoint as RouterEndpoint, storage::AuthStore};
 
 /// Build transport-agnostic `Metadata` from `tonic::metadata::MetadataMap`
-fn metadata_from_tonic(map: &tonic::metadata::MetadataMap) -> Metadata {
+pub(crate) fn metadata_from_tonic(map: &tonic::metadata::MetadataMap) -> Metadata {
     let pairs = map
         .iter()
         .filter_map(|kv| match kv {
@@ -36,7 +36,7 @@ fn metadata_from_tonic(map: &tonic::metadata::MetadataMap) -> Metadata {
 }
 
 /// Convert `CurpError` → `tonic::Status` via `xlinerpc::Status`
-fn curp_error_to_tonic_status(err: CurpError) -> Status {
+pub(crate) fn curp_error_to_tonic_status(err: CurpError) -> Status {
     let xlinerpc_status: xlinerpc::status::Status = err.into();
     let code = tonic::Code::from(i32::from(xlinerpc_status.code()));
     let details = xlinerpc_status.details();
@@ -293,5 +293,84 @@ impl Protocol for AuthWrapper {
                 .await
                 .map_err(curp_error_to_tonic_status)?,
         ))
+    }
+}
+
+pub(crate) struct Server {
+    server: Arc<AuthWrapper>,
+}
+impl Server {
+    #[allow(unused)]
+    pub(crate) fn new(server: AuthWrapper) -> Self {
+        Self {
+            server: Arc::new(server),
+        }
+    }
+    #[allow(unused)]
+    pub(crate) fn from_arc(server: Arc<AuthWrapper>) -> Self {
+        Self { server: server }
+    }
+    pub(crate) fn endpoint(self) -> RouterEndpoint<Arc<AuthWrapper>> {
+        RouterEndpoint::new(self.server)
+            .add_server_streaming_fn(
+                "/ProposeStream",
+                move |this: Arc<AuthWrapper>, request: tonic::Request<ProposeRequest>| async move {
+                    Protocol::propose_stream(&*this, request).await
+                },
+            )
+            .add_unary_fn(
+                "/Record",
+                move |this: Arc<AuthWrapper>, request: tonic::Request<RecordRequest>| async move {
+                    Protocol::record(&*this, request).await
+                },
+            )
+            .add_unary_fn(
+                "/ReadIndex",
+                move |this: Arc<AuthWrapper>, request: tonic::Request<ReadIndexRequest>| async move {
+                    Protocol::read_index(&*this, request).await
+                },
+            )
+            .add_unary_fn(
+                "/ProposeConfChange",
+                move |this: Arc<AuthWrapper>, request: tonic::Request<ProposeConfChangeRequest>| async move {
+                    Protocol::propose_conf_change(&*this, request).await
+                },
+            )
+            .add_unary_fn(
+                "/Publish",
+                move |this: Arc<AuthWrapper>, request: tonic::Request<PublishRequest>| async move {
+                    Protocol::publish(&*this, request).await
+                }
+            )
+            .add_unary_fn(
+                "/Shutdown",
+                move |this: Arc<AuthWrapper>, request: tonic::Request<ShutdownRequest>| async move {
+                    Protocol::shutdown(&*this, request).await
+                },
+            )
+            .add_unary_fn(
+                "/FetchCluster",
+                move |this: Arc<AuthWrapper>, request: tonic::Request<FetchClusterRequest>| async move {
+                    Protocol::fetch_cluster(&*this, request).await
+                },
+            )
+            .add_unary_fn(
+                "/FetchReadState",
+                move |this: Arc<AuthWrapper>, request: tonic::Request<FetchReadStateRequest>| async move {
+                    Protocol::fetch_read_state(&*this, request).await
+                },
+            )
+            .add_unary_fn(
+                "/MoveLeader",
+                move |this: Arc<AuthWrapper>, request: tonic::Request<MoveLeaderRequest>| async move {
+                    Protocol::move_leader(&*this, request).await
+                },
+            )
+            .add_client_streaming_fn(
+                "/LeaseKeepAlive",
+                move |this: Arc<AuthWrapper>, request: tonic::Request<tonic::Streaming<LeaseKeepAliveMsg>>| async move {
+                    Protocol::lease_keep_alive(&*this, request).await
+                },
+            )
     }
 }

@@ -1,8 +1,9 @@
 //! Metadata store abstract interface
 //!
 //! Defines unified interface for filesystem metadata operations
-use crate::chuck::SliceDesc;
+use crate::chunk::SliceDesc;
 use crate::meta::client::session::{Session, SessionInfo};
+use crate::meta::config::Config;
 use crate::meta::entities::content_meta::EntryType;
 use crate::meta::file_lock::{FileLockInfo, FileLockQuery, FileLockRange, FileLockType};
 use async_trait::async_trait;
@@ -32,7 +33,6 @@ impl From<EntryType> for FileType {
 
 /// File attributes
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 pub struct FileAttr {
     pub ino: i64,
     pub size: u64,
@@ -48,7 +48,6 @@ pub struct FileAttr {
 
 /// Bitmask describing which fields should be updated in a `set_attr` call.
 #[derive(Debug, Clone, Copy, Default)]
-#[allow(dead_code)]
 pub struct SetAttrRequest {
     pub mode: Option<u32>,
     pub uid: Option<u32>,
@@ -84,7 +83,6 @@ pub fn chown_request(uid: Option<u32>, gid: Option<u32>) -> SetAttrRequest {
 
 bitflags::bitflags! {
     /// Additional flags that control set-attribute semantics.
-    #[allow(dead_code)]
     #[derive(Debug)]
     pub struct SetAttrFlags: u32 {
         const CLEAR_SUID = 0b0001;
@@ -96,7 +94,6 @@ bitflags::bitflags! {
 
 bitflags::bitflags! {
     /// POSIX-style open flags translated for the metadata store.
-    #[allow(dead_code)]
     #[derive(Debug)]
     pub struct OpenFlags: u32 {
         const RDONLY = 0b0001;
@@ -138,7 +135,6 @@ pub struct WriteOutcome {
 
 /// Snapshot returned by `stat_fs` providing capacity/inode information.
 #[derive(Debug, Clone, Default)]
-#[allow(dead_code)]
 pub struct StatFsSnapshot {
     pub total_space: u64,
     pub available_space: u64,
@@ -265,7 +261,6 @@ pub trait Visitor<T>: Send {
 
 /// Metadata operation errors
 #[derive(Debug, thiserror::Error)]
-#[allow(dead_code)]
 pub enum MetaError {
     #[error("Entry not found: {0}")]
     NotFound(i64),
@@ -375,12 +370,21 @@ pub enum MetaError {
 /// The trait uses `async_trait` to allow async method implementations and
 /// `auto_impl` to conveniently implement the trait for shared references and
 /// `Arc<T>` wrappers.
-#[allow(dead_code)]
 #[allow(clippy::too_many_arguments)]
+#[allow(dead_code)]
 pub trait MetaStore: Send + Sync {
     /// Human readable backend name (for diagnostics and logging)
     fn name(&self) -> &'static str {
         "meta-store"
+    }
+
+    /// Build a concrete store instance from backend config.
+    #[auto_impl(keep_default_for(&, std::sync::Arc))]
+    async fn from_config(_config: Config) -> Result<Self, MetaError>
+    where
+        Self: Sized,
+    {
+        Err(MetaError::NotImplemented)
     }
 
     async fn stat(&self, ino: i64) -> Result<Option<FileAttr>, MetaError>;
