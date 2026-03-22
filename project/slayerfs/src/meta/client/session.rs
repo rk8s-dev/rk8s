@@ -93,6 +93,8 @@ impl<M: MetaStore + ?Sized + 'static> SessionManager<M> {
         }
     }
 }
+
+const SESSION_LOCK_TTL_SECS: u64 = 60;
 pub async fn clean_sessions_circle<M: MetaStore + ?Sized>(store: Arc<M>, token: CancellationToken) {
     let mut interval = tokio::time::interval(Duration::from_secs(10));
 
@@ -100,7 +102,7 @@ pub async fn clean_sessions_circle<M: MetaStore + ?Sized>(store: Arc<M>, token: 
         select! {
             _ = token.cancelled() => break,
             _ = interval.tick() => {
-                if store.get_global_lock(LockName::CleanupSessionsLock).await {
+                if store.get_global_lock(LockName::CleanupSessionsLock, SESSION_LOCK_TTL_SECS).await {
                     match store.cleanup_sessions().await {
                         Ok(_) => (),
                         Err(err) => error!("Failed to clean sessions: {}", err),
