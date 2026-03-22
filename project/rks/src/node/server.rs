@@ -1,6 +1,6 @@
 use crate::node::Shared;
 use crate::node::cert::build_quic_config;
-use crate::node::dispatch::{dispatch_user, dispatch_user_bistream, dispatch_worker};
+use crate::node::dispatch::{dispatch_user, dispatch_user_bistream, dispatch_worker, dispatch_worker_bi};
 use crate::node::register::NodeRegister;
 use crate::node::server::private::Sealed;
 use crate::node::watcher::PodsWatcher;
@@ -107,16 +107,20 @@ impl QUICServer {
                 match incoming.await {
                     Ok(connection) => {
                         let cfg = config_ref();
-                        let result = if !cfg.tls_config.enable
-                            || connection.peer_identity().is_some()
-                        {
-                            let conn = AuthConnection::<Verified>::new(connection, shared.clone());
-                            conn.serve().await
-                        } else {
-                            let conn =
-                                AuthConnection::<Unauthenticated>::new(connection, shared.clone());
-                            conn.serve().await
-                        };
+                        let result =
+                            if !cfg.tls_config.enable || connection.peer_identity().is_some() {
+                                let conn = Arc::new(AuthConnection::<Verified>::new(
+                                    connection,
+                                    shared.clone(),
+                                ));
+                                conn.clone().serve().await
+                            } else {
+                                let conn = Arc::new(AuthConnection::<Unauthenticated>::new(
+                                    connection,
+                                    shared.clone(),
+                                ));
+                                conn.clone().serve().await
+                            };
                         if let Err(e) = result {
                             let msg = e.to_string();
                             // "closed by peer: 0" means normal QUIC NO_ERROR close
@@ -148,7 +152,7 @@ impl Sealed for Verified {}
 
 #[async_trait]
 pub trait ConnectionState: Sealed {
-    async fn serve(conn: AuthConnection<Self>) -> anyhow::Result<()>
+    async fn serve(conn: Arc<AuthConnection<Self>>) -> anyhow::Result<()>
     where
         Self: Sized;
 }
@@ -173,7 +177,7 @@ impl<State: Sealed> AuthConnection<State> {
 }
 
 impl<State: ConnectionState> AuthConnection<State> {
-    pub async fn serve(self) -> anyhow::Result<()> {
+    pub async fn serve(self: Arc<Self>) -> anyhow::Result<()> {
         State::serve(self).await
     }
 }
@@ -199,19 +203,43 @@ impl AuthConnection<Verified> {
         }
     }
 
-    async fn dispatch_loop(&self, is_worker: bool) -> anyhow::Result<()> {
-        // Main loop: accept application messages for ongoing communication
-        loop {
-            let msg = self.conn.fetch_msg().await?;
-            info!("fetched message: {msg}");
+    async fn dispatch_loop(self: Arc<Self>, is_worker: bool) -> anyhow::Result<()> {
+        let self_cloned = self.clone();
+        let uni_stream_task = tokio::spawn(async move {
+            // Main loop: accept application messages for ongoing communication
+            loop {
+                let msg = self_cloned.conn.fetch_msg().await?;
+                info!("fetched message: {msg}");
 
-            if is_worker {
-                log_error!(dispatch_worker(msg, &self.conn, &self.shared).await);
-                continue;
+                if is_worker {
+                    log_error!(dispatch_worker(msg, &self_cloned.conn, &self_cloned.shared).await);
+                    continue;
+                }
+
+                log_error!(dispatch_user(msg, &self_cloned.conn, &self_cloned.shared).await)
             }
+            #[allow(unreachable_code)]
+            Ok::<(), anyhow::Error>(())
+        });
 
-            log_error!(dispatch_user(msg, &self.conn, &self.shared).await)
-        }
+        let self_cloned = self.clone();
+        let bi_stream_task = tokio::spawn(async move {
+            // Main loop: accept bi-directional stream application messages for ongoing communication
+            loop {
+                let mut stream = self_cloned.conn.accept_bi().await?;
+                let msg = stream.fetch_msg().await?;
+                info!("fetched bi stream message: {msg}");
+                if is_worker {
+                    log_error!(dispatch_worker_bi(msg, &mut stream, &self_cloned.shared).await);
+                }
+            }
+            #[allow(unreachable_code)]
+            Ok::<(), anyhow::Error>(())
+        });
+
+        uni_stream_task.await??;
+        bi_stream_task.await??;
+        Ok(())
     }
 
     fn spawn_user_bistream_loop(&self) {
@@ -240,7 +268,7 @@ impl AuthConnection<Verified> {
 
 #[async_trait]
 impl ConnectionState for Unauthenticated {
-    async fn serve(conn: AuthConnection<Self>) -> anyhow::Result<()> {
+    async fn serve(conn: Arc<AuthConnection<Self>>) -> anyhow::Result<()> {
         debug!("waiting for auth request from client");
 
         let msg = conn.conn.fetch_msg().await?;
@@ -279,7 +307,7 @@ impl ConnectionState for Unauthenticated {
 impl ConnectionState for Verified {
     /// Handle an individual connection (worker or user).
     /// Classifies client type and spawns watchers for workers.
-    async fn serve(conn: AuthConnection<Self>) -> anyhow::Result<()> {
+    async fn serve(conn: Arc<AuthConnection<Self>>) -> anyhow::Result<()> {
         let (is_worker, node_id) = conn.classify_connection().await?;
 
         let worker_session = if is_worker {
@@ -299,7 +327,7 @@ impl ConnectionState for Verified {
             watcher.spawn()?;
         }
 
-        let dispatch_result = conn.dispatch_loop(is_worker).await;
+        let dispatch_result = conn.clone().dispatch_loop(is_worker).await;
 
         if is_worker
             && let (Some(node_id), Some(worker_session)) =

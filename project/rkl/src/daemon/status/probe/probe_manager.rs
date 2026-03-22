@@ -17,11 +17,11 @@ use tracing::{debug, info, warn};
 use uuid::Uuid;
 
 use crate::{
-    commands::pod::{PodInfo, TLSConnectionArgs},
-    daemon::status::probe::prober::{
-        ExecProber, HttpGetProber, ProbeConfig, Prober, TcpSocketProber,
+    commands::pod::PodInfo,
+    daemon::{
+        client::try_get_daemon_client,
+        status::probe::prober::{ExecProber, HttpGetProber, ProbeConfig, Prober, TcpSocketProber},
     },
-    quic::client::{Cli, QUICClient},
 };
 
 /// Global singleton [`ProbeManager`], initialized once by the daemon.
@@ -543,18 +543,13 @@ impl Drop for ProbeWorker {
 }
 
 /// Re-registers probes for pods that already exist on the server (called on daemon restart).
-pub async fn restore_existing_probes(
-    server_addr: &str,
-    tls_cfg: Arc<TLSConnectionArgs>,
-    probe_manager: Arc<ProbeManager>,
-) -> anyhow::Result<()> {
-    debug!(
-        server_addr,
-        "[daemon] Restoring existing probes from server pod list"
-    );
-    let client = QUICClient::<Cli>::connect(server_addr.to_string(), &tls_cfg).await?;
-    client.send_msg(&RksMessage::ListPod).await?;
-    let pods = match client.fetch_msg().await? {
+pub async fn restore_existing_probes(probe_manager: Arc<ProbeManager>) -> anyhow::Result<()> {
+    debug!("[daemon] Restoring existing probes from rks pod list");
+    let client = try_get_daemon_client().await?;
+    let mut stream = client.open_bi().await?;
+    stream.send_msg(&RksMessage::ListPod).await?;
+    stream.sender().finish()?;
+    let pods = match stream.fetch_msg().await? {
         RksMessage::ListPodRes(pods) => pods,
         msg => anyhow::bail!("unexpected response {msg:?}"),
     };

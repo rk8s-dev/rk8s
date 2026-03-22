@@ -5,7 +5,7 @@ use crate::network::service_ip::{
 };
 use crate::node::Shared;
 use chrono::Utc;
-use common::quic::RksConnection;
+use common::quic::{RksConnection, RksStream};
 use common::*;
 use common::{AttachControlMessage, Node, NodeStatus, PodTask, RksMessage, ServiceSpec};
 use log::{error, info, warn};
@@ -109,6 +109,62 @@ pub async fn dispatch_worker(
             target: "rks::node::worker_dispatch",
             "unknown or unexpected message from worker"
         ),
+    }
+    Ok(())
+}
+
+/// Dispatch worker-originated bi-directional stream messages
+pub async fn dispatch_worker_bi(
+    msg: RksMessage,
+    stream: &mut RksStream,
+    shared: &Shared,
+) -> anyhow::Result<()> {
+    let xline_store = &shared.xline_store;
+    match msg {
+        RksMessage::GetPodByUid(pod_uid) => {
+            info!(
+                target: "rks::node::worker_dispatch_bi",
+                "retrieved Pod with UID {pod_uid} for bi-directional request"
+            );
+
+            if let Some(pod) = xline_store
+                .list_pods()
+                .await?
+                .into_iter()
+                .find(|p| p.metadata.uid == pod_uid)
+            {
+                stream
+                    .send_msg(&RksMessage::GetPodByUidRes(Box::new(pod)))
+                    .await?;
+            } else {
+                stream
+                    .send_msg(&RksMessage::Error(format!(
+                        "Pod with UID {} not found",
+                        pod_uid
+                    )))
+                    .await?;
+            }
+        }
+        RksMessage::ListPod => {
+            let pods = xline_store.list_pods().await?;
+            info!(
+                target: "rks::node::worker_dispatch_bi",
+                "retrieved Pod list with {} items for bi-directional request",
+                pods.len()
+            );
+            stream.send_msg(&RksMessage::ListPodRes(pods)).await?;
+        }
+        _ => {
+            warn!(
+                target: "rks::node::worker_dispatch_bi",
+                "unknown or unexpected message from worker"
+            );
+            stream
+                .send_msg(&RksMessage::Error(
+                    "unknown or unexpected message from worker".to_string(),
+                ))
+                .await?;
+        }
     }
     Ok(())
 }

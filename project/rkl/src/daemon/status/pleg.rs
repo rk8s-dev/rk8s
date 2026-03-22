@@ -28,10 +28,7 @@ use tokio::{select, sync::mpsc::UnboundedReceiver};
 use tracing::{debug, info, warn};
 use uuid::Uuid;
 
-use crate::{
-    commands::pod::TLSConnectionArgs,
-    daemon::status::pod::{Pod, get_pods},
-};
+use crate::daemon::status::pod::{Pod, list_pods};
 
 #[derive(Debug, Clone)]
 struct PodRecord {
@@ -53,8 +50,6 @@ struct PodRecord {
 /// 3. Drop or call [`PLEG::stop`] to cancel the background task.
 #[allow(clippy::upper_case_acronyms)]
 pub struct PLEG {
-    rks_addr: String,
-    tls_cfg: Arc<TLSConnectionArgs>,
     pod_records: Arc<DashMap<Uuid, PodRecord>>,
     relist_duration: Duration,
     relist_task_handle: Option<tokio::task::JoinHandle<()>>,
@@ -64,8 +59,6 @@ pub struct PLEG {
 
 #[derive(Debug, Clone)]
 struct State {
-    rks_addr: String,
-    tls_cfg: Arc<TLSConnectionArgs>,
     pod_records: Arc<DashMap<Uuid, PodRecord>>,
     relist_duration: Duration,
     event_tx: Option<tokio::sync::mpsc::UnboundedSender<PodLifecycleEvent>>,
@@ -118,14 +111,8 @@ impl PLEG {
     /// * `rks_addr` — Address of the rks API server (used to fetch pod lists).
     /// * `tls_cfg` — TLS configuration for QUIC connections.
     /// * `relist_duration` — Interval between consecutive relist cycles.
-    pub fn new(
-        rks_addr: String,
-        tls_cfg: Arc<TLSConnectionArgs>,
-        relist_duration: Duration,
-    ) -> Self {
+    pub fn new(relist_duration: Duration) -> Self {
         Self {
-            rks_addr,
-            tls_cfg,
             pod_records: Arc::new(DashMap::new()),
             relist_duration,
             relist_task_handle: None,
@@ -157,8 +144,6 @@ impl PLEG {
         self.event_tx = Some(event_tx.clone());
 
         let mut state = State {
-            rks_addr: self.rks_addr.clone(),
-            tls_cfg: self.tls_cfg.clone(),
             pod_records: self.pod_records.clone(),
             relist_duration: self.relist_duration,
             event_tx: self.event_tx.clone(),
@@ -234,7 +219,7 @@ async fn relist(state: &mut State) -> anyhow::Result<Vec<PodLifecycleEvent>> {
     debug!("[pleg] Relisting pods for lifecycle event detection");
 
     // get all pods from cri
-    let pods = get_pods(&state.rks_addr, &state.tls_cfg)
+    let pods = list_pods()
         .await?
         .into_iter()
         .map(Arc::new)

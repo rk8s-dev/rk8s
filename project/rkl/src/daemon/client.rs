@@ -2,6 +2,7 @@ use anyhow::Result;
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Seek, SeekFrom};
 use std::{env, fs, net::SocketAddr, path::Path, sync::Arc, time::Duration};
+use tokio::sync::OnceCell;
 
 use tokio::time;
 
@@ -27,6 +28,8 @@ use libcontainer::syscall::syscall::create_syscall;
 use libruntime::rootpath;
 use sysinfo::{Disks, System};
 use tracing::{error, info, warn};
+
+pub static DAEMON_CLIENT: OnceCell<Arc<QUICClient<ClientDaemon>>> = OnceCell::const_new();
 
 fn nft_rules_phase(rules: &str) -> &'static str {
     if rules.contains("\"map\":\"verdict\"")
@@ -177,6 +180,9 @@ pub async fn run_once(
 
     let client = QUICClient::<ClientDaemon>::connect(server_addr.to_string(), &tls_cfg).await?;
     info!("[worker] connected to RKS at {server_addr}");
+    DAEMON_CLIENT
+        .set(Arc::new(client.clone()))
+        .map_err(|_| anyhow::anyhow!("Failed to set DAEMON_CLIENT"))?;
 
     // register to rks by sending RegisterNode(Box<Node>)
     let register_msg = RksMessage::RegisterNode(Box::new(node.clone()));
@@ -871,6 +877,21 @@ pub fn network_condition() -> NodeCondition {
 
 async fn handle_dns_config(_dns_ip: String, _dns_port: u16) -> Result<()> {
     Ok(())
+}
+
+/// Try get daemon_client
+pub async fn try_get_daemon_client() -> Result<Arc<QUICClient<ClientDaemon>>> {
+    let mut try_count: i32 = 0;
+
+    while try_count < 10 && DAEMON_CLIENT.get().is_none() {
+        try_count += 1;
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+
+    DAEMON_CLIENT
+        .get()
+        .cloned()
+        .ok_or(anyhow::anyhow!("Failed to get daemon client"))
 }
 
 /// Find the log file for a pod/container by scanning /var/log/pods/

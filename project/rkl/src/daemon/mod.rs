@@ -6,7 +6,7 @@ pub mod status;
 pub mod sync_loop;
 pub mod tty;
 
-use std::{env, sync::Arc, time::Duration};
+use std::{sync::Arc, time::Duration};
 
 //mod status_access;
 use crate::{
@@ -31,8 +31,6 @@ pub fn main(tls_cfg: TLSConnectionArgs) -> Result<(), anyhow::Error> {
             //tokio::spawn(status_access::init());
 
             let tls_cfg = Arc::new(tls_cfg.clone());
-            let server_addr: String =
-                env::var("RKS_ADDRESS").unwrap_or_else(|_| "192.168.73.128:50051".to_string());
 
             let client_tls_cfg = (*tls_cfg).clone();
             tokio::spawn(async move {
@@ -41,9 +39,7 @@ pub fn main(tls_cfg: TLSConnectionArgs) -> Result<(), anyhow::Error> {
                 }
             });
 
-            let mut status_manager = StatusManager::try_new(server_addr.clone(), tls_cfg.clone())
-                .await
-                .expect("Failed to construct StatusManager");
+            let mut status_manager = StatusManager::new().await;
             status_manager.run();
             let status_manager = Arc::new(status_manager);
             STATUS_MANAGER
@@ -56,26 +52,14 @@ pub fn main(tls_cfg: TLSConnectionArgs) -> Result<(), anyhow::Error> {
                 .expect("[daemon] failed to set global PROBE_MANAGER");
 
             tokio::spawn(async move {
-                let mut pleg = PLEG::new(
-                    server_addr.clone(),
-                    tls_cfg.clone(),
-                    Duration::from_secs(10),
-                );
+                let mut pleg = PLEG::new(Duration::from_secs(10));
                 let pleg_event_rx = pleg.run();
 
-                let mut pod_worker = PodWorker::new(
-                    server_addr.clone(),
-                    tls_cfg.clone(),
-                    pleg_event_rx,
-                    probe_manager.clone(),
-                    status_manager.clone(),
-                );
+                let mut pod_worker =
+                    PodWorker::new(pleg_event_rx, probe_manager.clone(), status_manager.clone());
                 pod_worker.run();
 
-                if let Err(e) =
-                    restore_existing_probes(&server_addr, tls_cfg.clone(), probe_manager.clone())
-                        .await
-                {
+                if let Err(e) = restore_existing_probes(probe_manager.clone()).await {
                     warn!("[daemon] failed to restore probes: {e}");
                 }
 
