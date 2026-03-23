@@ -63,8 +63,8 @@ Loop DAG allows you to create task graphs with cyclic dependencies. This is part
 
 ```rust
 let mut lop = LoopSubgraph::new("loop".to_string(), &mut node_table);
-lop.add_node(processor);
-lop.add_node(consumer);
+lop.add_node(processor).unwrap();
+lop.add_node(consumer).unwrap();
 ```
 
 ### Customized Configuration Parser
@@ -112,16 +112,40 @@ Dagrs execution is async-only. Runtime lifecycle is managed by callers.
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut graph = build_graph_somehow();
-    graph.async_start().await?;
+    let report = graph.async_start().await?;
+    assert_eq!(report.status, dagrs::CompletionStatus::Succeeded);
     Ok(())
 }
 ```
 
-- Execution entry: `Graph::async_start().await`.
+- Graph construction APIs (`Graph::add_node`, `Graph::add_edge`, `LoopSubgraph::add_node`) return `Result`.
+- Execution entry: `Graph::async_start().await`, which returns an `ExecutionReport`.
+- Failures use the structured `DagrsError` + `ErrorCode` model.
+- Event subscribers should treat `GraphEvent::ExecutionTerminated` as the final signal.
 - `Graph::start_with_runtime()` has been removed.
 - Use async channel APIs (`recv_from().await`, `send_to(...).await`, `broadcast(...).await`, `close(...).await`).
 
 ## Changelog
+
+### v0.9.0
+
+#### 🚀 Runtime/API Changes
+
+- **Structured Error Model**: `DagrsError` and `ErrorCode` now unify graph build, runtime, checkpoint, and channel failures.
+- **Build APIs Return `Result`**: `Graph::add_node`, `Graph::add_edge`, and `LoopSubgraph::add_node` now return `Result`.
+- **Execution Reports**: `Graph::async_start()` and checkpoint resume APIs now return `ExecutionReport`.
+- **Unified Termination Event**: `GraphEvent::ExecutionTerminated` replaces `GraphFinished`, and `Progress` is now emitted during execution.
+- **Checkpoint State Model**: `NodeExecStatus` makes checkpointed node state explicit, and `Output::empty()` is persisted as success.
+- **Hook Contract Cleanup**: `ExecutionHook::on_error` has been removed; failures are reported through `DagrsError` and events.
+- **Reset Semantics**: `reset()` now preserves the caller environment by default. Use `reset_with(...)` for explicit environment reset.
+
+#### 💡 Migration
+
+- Replace `GraphError`, `RecvErr`, `SendErr`, `CheckpointError`, and string-based `Output::Err(...)` handling with `DagrsError`.
+- Handle or unwrap `Graph::add_node(...)`, `Graph::add_edge(...)`, and `LoopSubgraph::add_node(...)`.
+- Update `async_start()` / `resume_from_checkpoint()` call sites to consume the returned `ExecutionReport`.
+- Replace `GraphFinished` listeners with `ExecutionTerminated`.
+- Move command exit-code-specific error handling into `DagrsError.context` instead of `Output::ErrWithExitCode`.
 
 ### v0.8.0
 
@@ -175,9 +199,9 @@ The `dagrs` project relies on community contributions and aims to simplify getti
 
 ### Version Release Notes
 
-When releasing a new version, please note that both `dagrs` and `dagrs-derive` packages need to be updated synchronously. Since `dagrs` depends on `dagrs-derive`, when there are changes in `dagrs` that involve modifications to `dagrs-derive`, a new version of `dagrs-derive` must be released simultaneously. This ensures correct dependency relationships and prevents compilation errors.
+When releasing a new version, update `dagrs` and `dagrs-derive` as a compatible pair. They do not need identical version numbers, but breaking changes in one crate that require changes in the other should be released together. For this release line, the compatibility target is `dagrs 0.9.0` with `dagrs-derive 0.5.0`.
 
-For example, as mentioned in issue [#98](https://github.com/dagrs-dev/dagrs/issues/98), the problem occurred because `dagrs` version 0.4.3 depended on `dagrs-derive` version 0.4.2, but the latter did not include the necessary code changes, resulting in compilation errors. Therefore, when releasing a new version, please ensure that both packages' version numbers are updated in sync.
+For example, as mentioned in issue [#98](https://github.com/dagrs-dev/dagrs/issues/98), the problem occurred because `dagrs` version 0.4.3 depended on a `dagrs-derive` release that did not include the required macro changes. Release the compatibility matrix together so downstream users do not get a mismatched runtime/macro pair.
 
 ### What's the contribution
 
