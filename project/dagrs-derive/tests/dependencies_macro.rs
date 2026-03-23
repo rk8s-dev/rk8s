@@ -98,3 +98,25 @@ fn dependencies_macro_propagates_graph_build_errors() {
         .expect_err("duplicate node ids should fail");
     assert_eq!(err, dagrs::DagrsError("duplicate node id"));
 }
+
+#[test]
+fn dependencies_macro_handles_internal_identifier_collisions() -> dagrs::DagrsResult<()> {
+    let graph = TestNode {
+        id: dagrs::NodeId(11),
+    };
+    let edge = TestNode {
+        id: dagrs::NodeId(12),
+    };
+    let vec = TestNode {
+        id: dagrs::NodeId(13),
+    };
+
+    let built = dependencies!(graph -> edge vec, edge -> vec)?;
+
+    assert_eq!(
+        built.nodes,
+        vec![dagrs::NodeId(11), dagrs::NodeId(12), dagrs::NodeId(13)]
+    );
+    assert_eq!(built.edges.len(), 2);
+    Ok(())
+}
