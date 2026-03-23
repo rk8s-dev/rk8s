@@ -202,13 +202,6 @@ sudo project/target/debug/rkl pod list --cluster 127.0.0.1:50051
 sudo project/target/debug/rkl pod delete simple-container-task --cluster 127.0.0.1:50051
 ```
 
-**Compose Applications:**
-```bash
-sudo project/target/debug/rkl compose up
-sudo project/target/debug/rkl compose ps
-sudo project/target/debug/rkl compose down
-```
-
 **Daemon Mode:**
 ```bash
 sudo RKL_ADDRESS=127.0.0.1:50051 project/target/debug/rkl pod daemon # Monitors /etc/rk8s/manifests/ and acts as work node of rks

@@ -137,8 +137,8 @@ impl TypedAction for ReceiverAction {
     }
 }
 
-#[allow(deprecated)]
-fn main() {
+#[tokio::main]
+async fn main() {
     // Create a node table
     let mut node_table = NodeTable::new();
 
@@ -174,13 +174,8 @@ fn main() {
     // Add edges: both senders connect to the receiver
     graph.add_edge(sender1_id, vec![receiver_id]);
     graph.add_edge(sender2_id, vec![receiver_id]);
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .expect("failed to create tokio runtime");
-
     // Run the graph
-    match graph.start_with_runtime(&runtime) {
+    match graph.async_start().await {
         Ok(_) => (),
         Err(e) => {
             eprintln!("Graph execution failed: {:?}", e);

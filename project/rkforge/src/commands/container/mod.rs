@@ -1,6 +1,12 @@
+mod device;
 pub mod network;
 pub mod rootfs_mount;
-use self::rootfs_mount::RootfsMount;
+use self::{
+    device::{
+        DeviceRequest, append_oci_devices, build_process_capabilities, collect_requested_devices,
+    },
+    rootfs_mount::RootfsMount,
+};
 use crate::{
     commands::{
         Exec, ExecContainer,
@@ -22,7 +28,6 @@ use libcontainer::{
 };
 use liboci_cli::{Create, Delete, List, Start};
 use libruntime::cri::config::ContainerConfigBuilder;
-use libruntime::oci;
 use libruntime::rootpath;
 use libruntime::utils::{
     ImageType, determine_image, sync_handle_oci_image, sync_handle_oci_image_no_copy,
@@ -70,6 +75,9 @@ pub enum ContainerCommand {
 
         #[arg(long, short = 'v')]
         volumes: Option<Vec<String>>,
+
+        #[arg(long, value_name = "HOST_PATH[:CONTAINER_PATH[:PERMISSIONS]]")]
+        device: Vec<String>,
     },
     #[command(about = "Create a Container from a YAML file using rkl create container.yaml")]
     Create {
@@ -117,6 +125,7 @@ pub struct ContainerRunner {
     root_path: PathBuf,
     container_id: String,
     volumes: Option<Vec<String>>,
+    requested_devices: Vec<DeviceRequest>,
     ip: Option<IpAddr>,
 
     compose_assigned_ip: Option<IpAddr>,
@@ -161,6 +170,7 @@ impl ContainerRunner {
                 None => rootpath::determine(None, &*create_syscall())?,
             },
             volumes: None,
+            requested_devices: vec![],
             ip: None,
             compose_assigned_ip: None,
             rootfs_mount,
@@ -197,6 +207,7 @@ impl ContainerRunner {
             config: None,
             container_id,
             volumes,
+            requested_devices: vec![],
             ip: None,
             compose_assigned_ip: None,
             rootfs_mount,
@@ -228,6 +239,7 @@ impl ContainerRunner {
                 None => rootpath::determine(None, &*create_syscall())?,
             },
             volumes: None,
+            requested_devices: vec![],
             ip: None,
             compose_assigned_ip: None,
             rootfs_mount: None,
@@ -277,15 +289,27 @@ impl ContainerRunner {
         // create container_config
         self.build_config()?;
 
-        let _ = self.create_container()?;
-
         let id = self.container_id.clone();
         // See if the container exists
         match is_container_exist(id.as_str(), &self.root_path).is_ok() {
             // exist
             true => {
+                if self.load_container()?.can_start() && !self.has_requested_devices() {
+                    self.start_container(None)?;
+                    info!("Container: {id} runs successfully!");
+                    return Ok(());
+                }
+
+                if self.has_requested_devices() {
+                    warn!(
+                        "Container: {id} will be recreated so updated device mappings take effect"
+                    );
+                }
+
+                delete_container(&id)?;
+                let CreateContainerResponse { container_id } = self.create_container()?;
                 self.start_container(None)?;
-                info!("Container: {id} runs successfully!");
+                info!("Container: {container_id} runs successfully!");
                 Ok(())
             }
             // not exist
@@ -315,6 +339,8 @@ impl ContainerRunner {
 
     pub fn build_config(&mut self) -> Result<()> {
         let _ = self.handle_volumes()?;
+        self.apply_requested_devices();
+        self.warn_about_unprivileged_gpu_devices();
 
         let config = self
             .config_builder
@@ -363,12 +389,13 @@ impl ContainerRunner {
         {
             linux = linux.resources(r);
         }
-        let linux = linux.build()?;
+        let mut linux = linux.build()?;
+        append_oci_devices(&mut linux, &config.devices)?;
         spec.set_linux(Some(linux));
 
         // build the process path
         let mut process = ProcessBuilder::default().cwd(&config.working_dir).build()?;
-        let capabilities = oci::new_linux_capabilities_with_defaults();
+        let capabilities = build_process_capabilities(&self.spec);
         process.set_capabilities(Some(capabilities));
         process.set_terminal(Some(false));
         process.set_args(Some(config.args.clone()));
@@ -530,43 +557,14 @@ fn determine_mount_type(host_path: &str) -> String {
     }
 }
 
-pub fn run_container(path: &str, volumes: Option<Vec<String>>) -> Result<(), anyhow::Error> {
-    // read the container_spec bytes to container_spec struct
+pub fn run_container(
+    path: &str,
+    volumes: Option<Vec<String>>,
+    devices: Vec<String>,
+) -> Result<(), anyhow::Error> {
     let mut runner = ContainerRunner::from_file(path, volumes)?;
-
-    // create container_config
-    runner.build_config()?;
-
-    let id = runner.container_id.clone();
-    // See if the container exists
-    match is_container_exist(id.as_str(), &runner.root_path).is_ok() {
-        // exist
-        true => {
-            // determine if the container is running
-            if runner.load_container()?.can_start() {
-                runner.start_container(None)?;
-                info!("Container: {id} runs successfully!");
-                return Ok(());
-            }
-            warn!(
-                "Container: {id} can not start, status: {}! Creating a new one...",
-                runner.load_container()?.status()
-            );
-            delete_container(&id)?;
-            let CreateContainerResponse { container_id } = runner.create_container()?;
-            runner.start_container(None)?;
-            info!("Container: {container_id} runs successfully!");
-            Ok(())
-        }
-        // not exist
-        false => {
-            // create container
-            let CreateContainerResponse { container_id } = runner.create_container()?;
-            runner.start_container(None)?;
-            info!("Container: {container_id} runs successfully!");
-            Ok(())
-        }
-    }
+    runner.set_requested_devices(collect_requested_devices(&devices)?);
+    runner.run()
 }
 
 pub fn is_container_exist(id: &str, root_path: &PathBuf) -> Result<()> {
@@ -590,10 +588,11 @@ pub fn delete_container(id: &str) -> Result<()> {
     // Get bundle_path before delete (container state will be cleaned up after delete)
     let container = load_container(&root_path, id)?;
     let bundle_path = container.bundle().to_path_buf();
-    let pid = container
-        .pid()
-        .ok_or(anyhow!("invalid container {} can't find pid", id))?;
-    remove_container_network(pid, id)?;
+    if let Some(pid) = container.pid() {
+        remove_container_network(pid, id)?;
+    } else {
+        warn!("Container {id} has no recorded pid; skipping network teardown");
+    }
 
     let delete_args = Delete {
         container_id: id.to_string(),
@@ -810,7 +809,8 @@ pub fn container_execute(cmd: ContainerCommand) -> Result<()> {
         ContainerCommand::Run {
             container_yaml,
             volumes,
-        } => run_container(&container_yaml, volumes),
+            device,
+        } => run_container(&container_yaml, volumes, device),
         ContainerCommand::Start { container_name } => start_container(&container_name),
         ContainerCommand::State { container_name } => state_container(&container_name),
         ContainerCommand::Delete { container_name } => delete_container(&container_name),

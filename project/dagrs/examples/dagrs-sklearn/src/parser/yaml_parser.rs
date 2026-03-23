@@ -51,7 +51,7 @@ impl YamlParser {
                 .split(' ')
                 .collect::<Vec<_>>();
 
-            let cmd = cmd_args.get(0).unwrap_or(&"");
+            let cmd = cmd_args.first().unwrap_or(&"");
             let args = cmd_args[1..].iter().map(|s| s.to_string()).collect();
 
             Ok(YamlTask::new(
@@ -118,7 +118,7 @@ impl Parser for YamlParser {
 
             let succ_id = task.id();
             pres.iter().for_each(|p| {
-                if let Some(p) = edges.get_mut(&p) {
+                if let Some(p) = edges.get_mut(p) {
                     p.push(succ_id);
                 } else {
                     edges.insert(*p, vec![succ_id]);

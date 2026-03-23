@@ -4,11 +4,10 @@
 
 This project is built on top of [Youki](https://github.com/youki-dev/youki), a container runtime written in Rust. 
 
-By following the CRI(Container Runtime Interface) provided by kubernetes, it implements the basic functionality for three common container workloads:
+By following the CRI(Container Runtime Interface) provided by kubernetes, it implements the basic functionality for two common container workloads:
 
 1. **Single Container** - Manage and run standalone containers.
-2. **Pod** - Group multiple containers that are sharing the same namespace and lifestyle. Kubernetes-Pod-Like 
-3. **Compose** - Run multi-container applications use Docker-Compose-style definitions. 
+2. **Pod** - Group multiple containers that are sharing the same namespace and lifestyle. Kubernetes-Pod-Like.
 
 Specifically, we provides two kinds of running mode while RKL runs under the Pod workload:
 - Standalone
@@ -25,15 +24,24 @@ the usage details refers to [here](#pod).
 ├── Cargo.toml
 ├── src
 │   ├── commands              # Command definitions
-│   │   ├── compose           # Compose-related files
-│   │   ├── container         # Single container-related files
+│   │   ├── apply             # Apply-related files
+│   │   ├── run               # run-related files
+│   │   ├── exec              # exec-related files
+│   │   ├── get               # get-related files
+│   │   ├── delete            # delete-related files
 │   │   ├── pod               # Pod-related files
+│   │   ├── container         # Single container-related files
+│   │   ├── deployment        # Deployment-related files
+│   │   ├── replicaset        # Replicaset-related files
+│   │   ├── service           # Service-related files
+│   │   ├── log.rs            # About log command
 │   │   └── mod.rs            # Public base functions imported from Youki
-│   ├── cri                  # CRI (Container Runtime Interface) definitions from kubernetes
+│   ├── config.rs            # RKL overlay rootfs configuration.
 │   ├── daemon               # Pod daemon state implementation
 │   ├── lib.rs               # CLI argument definitions (public)
 │   ├── main.rs              # CLI main entry point
-│   ├── rootpath.rs          # Determines the container root path (from Youki)
+│   ├── network              # 
+│   ├── quic                 # About QUIC connection
 │   └── task.rs              # Pod task management
 ├── tests                    # Unit tests
 
@@ -78,10 +86,18 @@ A simple container runtime
 Usage: rkl <workload> <command> [OPTIONS]
 
 Commands:
-  pod        Operations related to pods
-  container  Manage standalone containers
-  compose    Manage multi-container apps using compose
-  help       Print this message or the help of the given subcommand(s)
+  apply       Apply a configuration to a resource whether it exists or not
+  run         Create and run a particular image in a pod
+  exec        Execute a command in a container
+  get         Display one or many resources
+  delete      Delete resources by file names, stdin, resources and names, or by resources and label selector.
+  pod         (Deprecated)Operations related to pods
+  container   (Deprecated)Manage standalone containers
+  replicaset  (Deprecated)Manage ReplicaSets
+  deployment  (Deprecated)Manage Deployments
+  service     (Deprecated)Manage Services
+  logs        Get logs from a pod's container
+  help        Print this message or the help of the given subcommand(s)
 
 Options:
   -h, --help  Print help
@@ -109,59 +125,38 @@ resources:
 ```
 > Note: Currently, only local files are supported as container images. So you need to extract your image into a local OCI bundle. For more details see [convert](../../docs/convert-docker-image-to-OCI-image-using-skopeo.md)
 
-**To see available commands for manage containers, run:**
-
-```bash
-$ rkl container
-Manage standalone containers
-
-Usage: rkl container <COMMAND>
-
-Commands:
-  run     Run a single container from a YAML file using rkl run container.yaml
-  create  Create a Container from a YAML file using rkl create container.yaml
-  start   Start a Container with a Container-name using rkl start container-name
-  delete  Delete a Container with a Container-name using rkl delete container-name
-  state   Get the state of a container using rkl state container-name
-  list    List the current running container
-  exec    Execute a process within an existing container Reference: https://github.com/opencontainers/runc/blob/main/man/runc-exec.8.md
-  help    Print this message or the help of the given subcommand(s)
-
-Options:
-  -h, --help  Print help
-```
 **Create and run a single container**
 
-```bash
-$ rkl container run single.yaml 
+```bash 
+$ rkl run single.yaml
 Container: single-container-test runs successfully!
 ```
 **Get container status** 
 
 ```bash
-$ rkl container state single-container-test
+$ rkl get container single-container-test
 ID                     PID    STATUS   BUNDLE       CREATED                    CREATOR
 single-container-test  19592  Running  .../busybox  2025-07-28T23:51:19+08:00  root
 ```
 **List all the container**
 
 ```bash
-$ rkl container list
+$ rkl get container
 ID                     PID    STATUS   BUNDLE       CREATED                    CREATOR
 single-container-test  19592  Running  .../busybox  2025-07-28T23:51:19+08:00  root
 ```
 **Execute into container**
 
 ```bash
-$ rkl container exec single-container-test  /bin/sh
+$ rkl exec single-container-test -- /bin/sh
 / # ls
 bin    dev    etc    lib    lib64  proc   sys    usr
 ```
 **Delete container**
 
 ```bash
-$ rkl container delete single-container-test
-$ rkl container list
+$ rkl delete container single-container-test
+$ rkl get container
 ID  PID  STATUS  BUNDLE  CREATED  CREATOR
 ```
 ## Pod
@@ -189,26 +184,7 @@ spec:
           cpu: "500m"
           memory: "512Mi"
 ```
- **Pod command details**
-```bash
-$ rkl pod
-Operations related to pods
 
-Usage: rkl pod <COMMAND>
-
-Commands:
-  run     Run a pod from a YAML file using rkl run pod.yaml
-  create  Create a pod from a YAML file using rkl create pod.yaml
-  start   Start a pod with a pod-name using rkl start pod-name
-  delete  Delete a pod with a pod-name using rkl delete pod-name
-  state   Get the state of a pod using rkl state pod-name
-  exec    Execute a process within an existing container Reference: https://github.com/opencontainers/runc/blob/main/man/runc-exec.8.md
-  daemon  Set rkl on daemon mod monitoring the pod.yaml in '/etc/rk8s/manifests' directory
-  help    Print this message or the help of the given subcommand(s)
-
-Options:
-  -h, --help  Print help
-```
 
 RKL provides two different ways to manage the pod lifecycle:
 - **CLI**
@@ -247,26 +223,22 @@ After checking `--cluster` parameter firstly, RKl will try to get `RKS_ADDRESS` 
 **pod create**
 
 ```bash
-$ rkl pod create pod.yaml --cluster 127.0.0.1:50051
+$ rkl apply -f pod.yaml --cluster 127.0.0.1:50051
 RKL connected to RKS at 127.0.0.1:50051
 ```
 
 **pod list**
 
 ```bash
-$ RKS_ADDRESS=127.0.0.1:50051 rkl pod list
-RKL connected to RKS at 127.0.0.1:50051
-NAME  READY  STATUS  RESTARTS  AGE
-test-pod1
-test-pod3
+$ rkl get pod --cluster 127.0.0.1:50051
+NAME                   READY  STATUS   RESTARTS  AGE
+simple-container-task  1/1    Running  0         11s
 ```
 
 **pod delete**
 
 ```bash
-$ rkl pod delete test-pod1 --cluster 127.0.0.1:50051
-RKL connected to RKS at 127.0.0.1:50051
-pod test-pod1 deleted
+$ rkl delete pod simple-container-task --cluster 127.0.0.1:50051
 
 ```
 
@@ -340,88 +312,33 @@ Containers:
 **Execute into one of the pod's container**
 ```bash
 # Execute a shell command inside a container within a pod 
-$ rkl pod exec <pod-name> <container-name> <option> <command>
+$ rkl exec <pod-name> -c <container-name> -- <command>
 # Example
-$ rkl pod exec simple-container-task simple-container-task-main-container1 -e PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin /bin/sh
+$ rkl exec simple-container-task -c simple-container-task-main-container1 -- /bin/sh
 /bin/sh: can't access tty; job control turned off
 / # ls
 bin    dev    etc    lib    lib64  proc   sys    usr
-/ # echo "Hello rk8s!"
-Hello rk8s!
-/ # 
-```
-## Compose
-
-To run multiple containers using a **Compose-style** configuration, define your application in a `compose.yaml` file.  The following is an example, based on the [Docker Compose specification](https://docs.docker.com/compose/compose-file/):
-
-```yaml
-services:
-  backend:
-    container_name: back
-    image: ./project/test/bundles/busybox
-    command: ["sleep", "300"]
-    ports:
-      - "8080:8080"
-    networks:
-      - libra-net
-    volumes:
-      - ./tmp/mount/dir:/app/data # if the target directory is not exists, rkl will create it manually
-      - ./data:/app/data2
-
-  frontend:
-    container_name: front
-    image: ./project/test/bundles/busybox
-    command: ["sleep", "300"]
-    ports:
-      - "80:80"
-
-networks:
-  libra-net:
-    driver: bridge  # Default to bridge mode
-
- configs:
-   backend-config:
-     file: ./config.yaml  # Local configuration file, e.g., nginx.conf, app.yaml
-
+/ # exit
+$ 
 ```
 
-**Run `rkl compose` to get CLI help information**
+## Kubectl-style CLI
 
-```bash
-$ rkl compose 
-Manage multi-container apps using compose
+Now(2026.3) rkl's cli is updated to kubectl-style. Existing users please refer to the following table to find the corresponding new commands for the old ones.
 
-Usage: rkl compose <COMMAND>
+| Function | Old Command | New Command |
+| -------- | ----------- | ----------- |
+| Create and run a single container | `rkl container run single.yaml` | `rkl run single.yaml` |
+| Create and run a pod | `rkl pod create pod.yaml --cluster 127.0.0.1:50051` | `rkl apply -f pod.yaml --cluster 127.0.0.1:50051` |
+| Create or Update Deployment | `rkl deployment apply d.yaml --cluster 127.0.0.1:50051` | `rkl apply -f d.yaml --cluster 127.0.0.1:50051` |
+| Execute into container | `rkl pod exec <pod-name> <container-name> <option> <command>` | `rkl exec <pod-name> -c <container-name> -- <command>` |
+| Get container status | `rkl container state <container-name>` | `rkl get container <container-name>` |
+| Get Deployment info | `rkl deployment get <deploy-name> --cluster 127.0.0.1:50051` | `rkl get deployment <deploy-name> --cluster 127.0.0.1:50051` |
+| List all Containers | `rkl container list` | `rkl get container` |
+| List all Pods | `rkl pod list --cluster 127.0.0.1:50051` | `rkl get pod --cluster 127.0.0.1:50051` |
+| List Deployment | `rkl deployment list --cluster 127.0.0.1:50051` | `rkl get deploy --cluster 127.0.0.1:50051` |
+| Delete Container | `rkl container delete <container-name>` | `rkl delete c <container-name>` |
+| Delete Pod | `rkl pod delete <pod-name> --cluster 127.0.0.1:50051` | `rkl delete po <container-name> --cluster 127.0.0.1:50051` |
+| Delete Deployment | `rkl deployment delete <deploy-name> --cluster 127.0.0.1:50051` | `rkl delete deploy --cluster 127.0.0.1:50051` |
 
-Commands:
-  up    Start a compose application from a compose yaml
-  down  stop and delete all the containers in the compose application
-  ps    List all the containers' state in compose application
-  help  Print this message or the help of the given subcommand(s)
-```
-To start a compose application, first you must have a compose.yml(or compose.yaml) file under your current directory. After confirming that, you can **run `rkl compose up`**  to start the entire application: 
-
-```bash
-$ ls
-compose.yaml 
-$ rkl compose up
-Creating networks: libra-net
-Container: back runs successfully!
-Container: frontend runs successfully!
-Project test-compose starts successfully
-```
-Once the application is up and running, run `rkl compose ps` to check the status of all containers.
-
-```bash
-$ rkl compose ps
-ID    PID    STATUS   BUNDLE       CREATED                    CREATOR
-back  22372  Running  .../busybox  2025-07-18T00:24:12+08:00  root
-front 23864  Running  .../busybox  2025-07-18T00:24:12+08:00  root
-```
-Use `rkl compose down` to stop the entire application.
-
-```bash
-$ rkl compose down
-$ rkl compose ps
-Error: The project test-compose does not exist
-```
+Commands in the kubectl style is made up of `operation + resource`. Main operations are: Apply/Run/Exec/Get/Delete. Run `rkl <operation> --help` for more info.

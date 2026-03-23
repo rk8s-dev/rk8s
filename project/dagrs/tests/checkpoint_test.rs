@@ -50,8 +50,8 @@ impl Action for SlowAction {
     }
 }
 
-#[test]
-fn test_checkpoint_store_configuration() {
+#[tokio::test]
+async fn test_checkpoint_store_configuration() {
     let mut graph = Graph::new();
     let store = MemoryCheckpointStore::new();
 
@@ -68,8 +68,8 @@ fn test_checkpoint_store_configuration() {
     // (direct field access is private, which is correct encapsulation)
 }
 
-#[test]
-fn test_manual_checkpoint_save_and_load() {
+#[tokio::test]
+async fn test_manual_checkpoint_save_and_load() {
     let mut graph = Graph::new();
     let mut table = NodeTable::new();
 
@@ -85,80 +85,71 @@ fn test_manual_checkpoint_save_and_load() {
 
     graph.set_checkpoint_store(Box::new(MemoryCheckpointStore::new()));
 
-    let rt = tokio::runtime::Runtime::new().unwrap();
-    rt.block_on(async {
-        // Run the graph first to initialize it
-        graph.async_start().await.unwrap();
+    // Run the graph first to initialize it
+    graph.async_start().await.unwrap();
 
-        // Reset and try to list checkpoints (should work if store is configured)
-        let checkpoints = graph.list_checkpoints().await.unwrap();
-        // Initially empty since we didn't enable auto-checkpoint
-        assert!(checkpoints.is_empty());
-    });
+    // Reset and try to list checkpoints (should work if store is configured)
+    let checkpoints = graph.list_checkpoints().await.unwrap();
+    // Initially empty since we didn't enable auto-checkpoint
+    assert!(checkpoints.is_empty());
 }
 
-#[test]
-fn test_checkpoint_list_and_delete() {
+#[tokio::test]
+async fn test_checkpoint_list_and_delete() {
     let store = MemoryCheckpointStore::new();
 
-    let rt = tokio::runtime::Runtime::new().unwrap();
-    rt.block_on(async {
-        // Create multiple checkpoints
-        let cp1 = Checkpoint::with_id("test_1", 1, 0);
-        let cp2 = Checkpoint::with_id("test_2", 2, 1);
-        let cp3 = Checkpoint::with_id("test_3", 3, 2);
+    // Create multiple checkpoints
+    let cp1 = Checkpoint::with_id("test_1", 1, 0);
+    let cp2 = Checkpoint::with_id("test_2", 2, 1);
+    let cp3 = Checkpoint::with_id("test_3", 3, 2);
 
-        store.save(&cp1).await.unwrap();
-        store.save(&cp2).await.unwrap();
-        store.save(&cp3).await.unwrap();
+    store.save(&cp1).await.unwrap();
+    store.save(&cp2).await.unwrap();
+    store.save(&cp3).await.unwrap();
 
-        // List checkpoints
-        let ids = store.list().await.unwrap();
-        assert_eq!(ids.len(), 3);
+    // List checkpoints
+    let ids = store.list().await.unwrap();
+    assert_eq!(ids.len(), 3);
 
-        // Delete one checkpoint
-        store.delete(&"test_2".to_string()).await.unwrap();
+    // Delete one checkpoint
+    store.delete(&"test_2".to_string()).await.unwrap();
 
-        let ids = store.list().await.unwrap();
-        assert_eq!(ids.len(), 2);
-        assert!(!ids.contains(&"test_2".to_string()));
+    let ids = store.list().await.unwrap();
+    assert_eq!(ids.len(), 2);
+    assert!(!ids.contains(&"test_2".to_string()));
 
-        // Clear all checkpoints
-        store.clear().await.unwrap();
-        let ids = store.list().await.unwrap();
-        assert_eq!(ids.len(), 0);
-    });
+    // Clear all checkpoints
+    store.clear().await.unwrap();
+    let ids = store.list().await.unwrap();
+    assert_eq!(ids.len(), 0);
 }
 
-#[test]
-fn test_get_latest_checkpoint() {
+#[tokio::test]
+async fn test_get_latest_checkpoint() {
     let store = MemoryCheckpointStore::new();
 
-    let rt = tokio::runtime::Runtime::new().unwrap();
-    rt.block_on(async {
-        // Create checkpoints with different timestamps
-        let mut cp1 = Checkpoint::with_id("old", 1, 0);
-        cp1.timestamp = 1000;
+    // Create checkpoints with different timestamps
+    let mut cp1 = Checkpoint::with_id("old", 1, 0);
+    cp1.timestamp = 1000;
 
-        let mut cp2 = Checkpoint::with_id("newer", 2, 1);
-        cp2.timestamp = 2000;
+    let mut cp2 = Checkpoint::with_id("newer", 2, 1);
+    cp2.timestamp = 2000;
 
-        let mut cp3 = Checkpoint::with_id("newest", 3, 2);
-        cp3.timestamp = 3000;
+    let mut cp3 = Checkpoint::with_id("newest", 3, 2);
+    cp3.timestamp = 3000;
 
-        store.save(&cp1).await.unwrap();
-        store.save(&cp3).await.unwrap();
-        store.save(&cp2).await.unwrap();
+    store.save(&cp1).await.unwrap();
+    store.save(&cp3).await.unwrap();
+    store.save(&cp2).await.unwrap();
 
-        // Get latest should return cp3
-        let latest = store.latest().await.unwrap().unwrap();
-        assert_eq!(latest.id, "newest");
-        assert_eq!(latest.pc, 3);
-    });
+    // Get latest should return cp3
+    let latest = store.latest().await.unwrap().unwrap();
+    assert_eq!(latest.id, "newest");
+    assert_eq!(latest.pc, 3);
 }
 
-#[test]
-fn test_checkpoint_with_node_states() {
+#[tokio::test]
+async fn test_checkpoint_with_node_states() {
     use dagrs::NodeState;
     let mut checkpoint = Checkpoint::new(5, 2);
 
@@ -173,8 +164,8 @@ fn test_checkpoint_with_node_states() {
     assert!(!checkpoint.node_states.get(&3).unwrap().completed);
 }
 
-#[test]
-fn test_checkpoint_metadata() {
+#[tokio::test]
+async fn test_checkpoint_metadata() {
     let mut checkpoint = Checkpoint::new(0, 0);
 
     checkpoint.add_metadata("graph_name", "test_graph");
@@ -192,8 +183,8 @@ fn test_checkpoint_metadata() {
     );
 }
 
-#[test]
-fn test_checkpoint_events() {
+#[tokio::test]
+async fn test_checkpoint_events() {
     let mut graph = Graph::new();
     let mut table = NodeTable::new();
 
@@ -231,31 +222,28 @@ fn test_checkpoint_events() {
     let events = Arc::new(Mutex::new(Vec::new()));
     let events_clone = events.clone();
 
-    let rt = tokio::runtime::Runtime::new().unwrap();
-    rt.block_on(async {
-        // Spawn event collector
-        let collector = tokio::spawn(async move {
-            let mut collected = Vec::new();
-            while let Ok(Ok(event)) =
-                tokio::time::timeout(Duration::from_millis(200), receiver.recv()).await
-            {
-                let is_finished = matches!(event, GraphEvent::GraphFinished);
-                collected.push(event);
-                if is_finished {
-                    break;
-                }
+    // Spawn event collector
+    let collector = tokio::spawn(async move {
+        let mut collected = Vec::new();
+        while let Ok(Ok(event)) =
+            tokio::time::timeout(Duration::from_millis(200), receiver.recv()).await
+        {
+            let is_finished = matches!(event, GraphEvent::GraphFinished);
+            collected.push(event);
+            if is_finished {
+                break;
             }
-            collected
-        });
-
-        // Run graph
-        graph.async_start().await.unwrap();
-
-        tokio::time::sleep(Duration::from_millis(50)).await;
-
-        let collected = collector.await.unwrap();
-        *events_clone.lock().unwrap() = collected;
+        }
+        collected
     });
+
+    // Run graph
+    graph.async_start().await.unwrap();
+
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    let collected = collector.await.unwrap();
+    *events_clone.lock().unwrap() = collected;
 
     let events_list = events.lock().unwrap();
 
@@ -275,8 +263,8 @@ fn test_checkpoint_events() {
     assert!(has_finished, "Should have GraphFinished event");
 }
 
-#[test]
-fn test_checkpoint_config_builder() {
+#[tokio::test]
+async fn test_checkpoint_config_builder() {
     // Test default config
     let default_config = CheckpointConfig::default();
     assert!(!default_config.enabled);
@@ -299,8 +287,8 @@ fn test_checkpoint_config_builder() {
     assert_eq!(custom_config.max_checkpoints, 10);
 }
 
-#[test]
-fn test_checkpoint_serialization() {
+#[tokio::test]
+async fn test_checkpoint_serialization() {
     use dagrs::NodeState;
     let mut checkpoint = Checkpoint::new(5, 3);
     checkpoint.active_nodes.insert(1);
@@ -322,8 +310,8 @@ fn test_checkpoint_serialization() {
     assert_eq!(restored.metadata.get("key"), Some(&"value".to_string()));
 }
 
-#[test]
-fn test_resume_execution_basic() {
+#[tokio::test]
+async fn test_resume_execution_basic() {
     // This test verifies basic resume functionality
     let mut graph = Graph::new();
     let mut table = NodeTable::new();
@@ -356,91 +344,82 @@ fn test_resume_execution_basic() {
     let store = MemoryCheckpointStore::new();
     graph.set_checkpoint_store(Box::new(store));
 
-    let rt = tokio::runtime::Runtime::new().unwrap();
-    rt.block_on(async {
-        // Run the graph normally
-        graph.async_start().await.unwrap();
-    });
+    // Run the graph normally
+    graph.async_start().await.unwrap();
 
     let exec_log = executed.lock().unwrap();
     assert!(exec_log.contains(&"A".to_string()), "Node A should execute");
     assert!(exec_log.contains(&"B".to_string()), "Node B should execute");
 }
-#[test]
-fn test_file_checkpoint_store_basic() {
+#[tokio::test]
+async fn test_file_checkpoint_store_basic() {
     use dagrs::FileCheckpointStore;
     use std::env::temp_dir;
 
-    let rt = tokio::runtime::Runtime::new().unwrap();
-    rt.block_on(async {
-        // Create a temporary directory for test
-        let test_dir = temp_dir().join("dagrs_checkpoint_test");
-        let store = FileCheckpointStore::new(&test_dir);
+    // Create a temporary directory for test
+    let test_dir = temp_dir().join("dagrs_checkpoint_test");
+    let store = FileCheckpointStore::new(&test_dir);
 
-        // Clean up any existing checkpoints
-        let _ = store.clear().await;
+    // Clean up any existing checkpoints
+    let _ = store.clear().await;
 
-        // Create and save checkpoint
-        let mut checkpoint = Checkpoint::with_id("test_file_cp", 5, 2);
-        checkpoint.add_metadata("test_key", "test_value");
-        checkpoint.active_nodes.insert(1);
+    // Create and save checkpoint
+    let mut checkpoint = Checkpoint::with_id("test_file_cp", 5, 2);
+    checkpoint.add_metadata("test_key", "test_value");
+    checkpoint.active_nodes.insert(1);
 
-        store.save(&checkpoint).await.unwrap();
+    store.save(&checkpoint).await.unwrap();
 
-        // Load checkpoint
-        let loaded = store.load(&"test_file_cp".to_string()).await.unwrap();
-        assert_eq!(loaded.pc, 5);
-        assert_eq!(loaded.loop_count, 2);
-        assert!(loaded.active_nodes.contains(&1));
+    // Load checkpoint
+    let loaded = store.load(&"test_file_cp".to_string()).await.unwrap();
+    assert_eq!(loaded.pc, 5);
+    assert_eq!(loaded.loop_count, 2);
+    assert!(loaded.active_nodes.contains(&1));
 
-        // List checkpoints
-        let ids = store.list().await.unwrap();
-        assert!(ids.contains(&"test_file_cp".to_string()));
+    // List checkpoints
+    let ids = store.list().await.unwrap();
+    assert!(ids.contains(&"test_file_cp".to_string()));
 
-        // Get latest
-        let latest = store.latest().await.unwrap();
-        assert!(latest.is_some());
+    // Get latest
+    let latest = store.latest().await.unwrap();
+    assert!(latest.is_some());
 
-        // Clean up
-        store.clear().await.unwrap();
-        let _ = std::fs::remove_dir_all(&test_dir);
-    });
+    // Clean up
+    store.clear().await.unwrap();
+    let _ = std::fs::remove_dir_all(&test_dir);
 }
 
-#[test]
-fn test_file_checkpoint_store_path_traversal_prevention() {
+#[tokio::test]
+async fn test_file_checkpoint_store_path_traversal_prevention() {
     use dagrs::FileCheckpointStore;
     use std::env::temp_dir;
 
-    let rt = tokio::runtime::Runtime::new().unwrap();
-    rt.block_on(async {
-        let test_dir = temp_dir().join("dagrs_checkpoint_security_test");
-        let store = FileCheckpointStore::new(&test_dir);
+    let test_dir = temp_dir().join("dagrs_checkpoint_security_test");
+    let store = FileCheckpointStore::new(&test_dir);
 
-        // Attempt path traversal attack with ..
-        let malicious_checkpoint = Checkpoint::with_id("../../../etc/passwd", 0, 0);
-        let result = store.save(&malicious_checkpoint).await;
-        assert!(
-            result.is_err(),
-            "Should reject path traversal attempts with .."
-        );
+    // Attempt path traversal attack with ..
+    let malicious_checkpoint = Checkpoint::with_id("../../../etc/passwd", 0, 0);
+    let result = store.save(&malicious_checkpoint).await;
+    assert!(
+        result.is_err(),
+        "Should reject path traversal attempts with .."
+    );
 
-        // Attempt with forward slash
-        let malicious_checkpoint2 = Checkpoint::with_id("foo/bar", 0, 0);
-        let result2 = store.save(&malicious_checkpoint2).await;
-        assert!(result2.is_err(), "Should reject checkpoint IDs with /");
+    // Attempt with forward slash
+    let malicious_checkpoint2 = Checkpoint::with_id("foo/bar", 0, 0);
+    let result2 = store.save(&malicious_checkpoint2).await;
+    assert!(result2.is_err(), "Should reject checkpoint IDs with /");
 
-        // Attempt to load with malicious ID
-        let result3 = store.load(&"../secret".to_string()).await;
-        assert!(result3.is_err(), "Should reject path traversal in load");
+    // Attempt to load with malicious ID
+    let result3 = store.load(&"../secret".to_string()).await;
+    assert!(result3.is_err(), "Should reject path traversal in load");
 
-        // Clean up
-        let _ = std::fs::remove_dir_all(&test_dir);
-    });
+    // Clean up
+    let _ = std::fs::remove_dir_all(&test_dir);
 }
 
-#[test]
-fn test_checkpoint_id_generation() {
+#[tokio::test]
+async fn test_checkpoint_id_generation() {
     // Test that auto-generated IDs are safe
     let cp1 = Checkpoint::new(0, 0);
     let cp2 = Checkpoint::new(10, 5);
@@ -457,8 +436,8 @@ fn test_checkpoint_id_generation() {
     // This is acceptable as the ID format includes both timestamp and pc
 }
 
-#[test]
-fn test_node_state_builder_api() {
+#[tokio::test]
+async fn test_node_state_builder_api() {
     use dagrs::NodeState;
 
     // Test completed with success
@@ -490,8 +469,8 @@ fn test_node_state_builder_api() {
     assert!(!state.success);
 }
 
-#[test]
-fn test_checkpoint_output_data_serialization() {
+#[tokio::test]
+async fn test_checkpoint_output_data_serialization() {
     use dagrs::NodeState;
 
     let mut checkpoint = Checkpoint::new(0, 0);

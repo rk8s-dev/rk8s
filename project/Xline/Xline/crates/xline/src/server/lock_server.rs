@@ -2,7 +2,10 @@ use std::sync::Arc;
 
 use async_stream::stream;
 use clippy_utilities::OverflowArithmetic;
+use http::uri::PathAndQuery;
 use tonic::Status;
+use tonic::client::Grpc;
+use tonic::codec::ProstCodec;
 use tonic::transport::{Channel, ClientTlsConfig, Endpoint};
 use tracing::debug;
 use utils::build_endpoint;
@@ -15,12 +18,13 @@ use xlineapi::{
 // use xlinerpc::status::Status;
 use crate::{
     id_gen::IdGenerator,
+    router::endpoint::EndPoint as RouterEndpoint,
     rpc::{
         Compare, CompareResult, CompareTarget, DeleteRangeRequest, DeleteRangeResponse,
-        LeaseGrantRequest, LeaseGrantResponse, Lock, LockRequest, LockResponse, PutRequest,
-        RangeRequest, RangeResponse, Request, RequestOp, RequestUnion, RequestWrapper, Response,
-        ResponseHeader, SortOrder, SortTarget, TargetUnion, TxnRequest, TxnResponse, UnlockRequest,
-        UnlockResponse, WatchClient, WatchCreateRequest, WatchRequest,
+        LeaseGrantRequest, LeaseGrantResponse, LockRequest, LockResponse, PutRequest, RangeRequest,
+        RangeResponse, Request, RequestOp, RequestUnion, RequestWrapper, Response, ResponseHeader,
+        SortOrder, SortTarget, TargetUnion, TxnRequest, TxnResponse, UnlockRequest, UnlockResponse,
+        WatchCreateRequest, WatchRequest,
     },
     storage::AuthStore,
 };
@@ -131,8 +135,9 @@ impl LockServer {
         auth_info: Option<&AuthInfo>,
     ) -> Result<(), Status> {
         let rev = my_rev.overflow_sub(1);
-        let mut watch_client =
-            WatchClient::new(Channel::balance_list(self.addrs.clone().into_iter()));
+        let channel = Channel::balance_list(self.addrs.clone().into_iter());
+        let mut grpc = Grpc::new(channel);
+        let path = PathAndQuery::from_static("/etcdserverpb.Watch/Watch");
         loop {
             let range_end = KeyRange::get_prefix(&pfx);
             #[allow(clippy::as_conversions)] // this cast is always safe
@@ -159,7 +164,14 @@ impl LockServer {
                     })),
                 };
             };
-            let mut response_stream = watch_client.watch(request_stream).await?.into_inner();
+            let mut response_stream: tonic::Streaming<crate::rpc::WatchResponse> = grpc
+                .streaming(
+                    tonic::Request::new(request_stream),
+                    path.clone(),
+                    ProstCodec::default(),
+                )
+                .await?
+                .into_inner();
             while let Some(watch_res) = response_stream.message().await? {
                 #[allow(clippy::as_conversions)] // this cast is always safe
                 if watch_res
@@ -199,10 +211,7 @@ impl LockServer {
         let res = Into::<LeaseGrantResponse>::into(cmd_res.into_inner());
         Ok(res.id)
     }
-}
 
-#[tonic::async_trait]
-impl Lock for LockServer {
     /// Lock acquires a distributed shared lock on a given named lock.
     /// On success, it will return a unique key that exists so long as the
     /// lock is held by the caller. This key can be used in conjunction with
@@ -291,5 +300,31 @@ impl Lock for LockServer {
         let auth_info = self.auth_store.try_get_auth_info_from_request(&request)?;
         let header = self.delete_key(&request.get_ref().key, auth_info).await?;
         Ok(tonic::Response::new(UnlockResponse { header }))
+    }
+}
+
+pub(crate) struct Server {
+    lock_server: Arc<LockServer>,
+}
+impl Server {
+    pub(crate) fn new(lock_server: LockServer) -> Self {
+        Self {
+            lock_server: Arc::new(lock_server),
+        }
+    }
+    pub(crate) fn endpoint(self) -> RouterEndpoint<Arc<LockServer>> {
+        RouterEndpoint::new(self.lock_server)
+            .add_unary_fn(
+                "/lock",
+                move |this: Arc<LockServer>, request: tonic::Request<LockRequest>| async move {
+                    this.lock(request).await
+                },
+            )
+            .add_unary_fn(
+                "/unlock",
+                move |this: Arc<LockServer>, request: tonic::Request<UnlockRequest>| async move {
+                    this.unlock(request).await
+                },
+            )
     }
 }

@@ -78,8 +78,8 @@ impl Condition for VerifyGT {
     }
 }
 
-#[allow(deprecated)]
-fn main() {
+#[tokio::main]
+async fn main() {
     // Initialization log.
     unsafe {
         env::set_var("RUST_LOG", "debug");
@@ -136,13 +136,8 @@ fn main() {
     let mut env = EnvVar::new(node_table);
     env.set("base", 2usize);
     graph.set_env(env);
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .expect("failed to create tokio runtime");
-
     // Start executing this dag.
-    match graph.start_with_runtime(&runtime) {
+    match graph.async_start().await {
         Ok(_) => {
             // Since node X's condition (VerifyGT(128)) is not met,
             // execution stops at node X and never reaches node G.
