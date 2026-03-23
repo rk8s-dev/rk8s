@@ -16,6 +16,7 @@ use nix::mount::{MntFlags, MsFlags};
 use rfuse3::raw::MountHandle;
 use tracing::{error, info, warn};
 
+use common::{SlayerFsMetaBackend, SlayerFsVolumeConfig};
 use libcsi::{CsiError, NodePublishVolumeRequest, NodeStageVolumeRequest, VolumeId, VolumeState};
 use slayerfs::{
     ChunkLayout, LocalFsBackend, ObjectBlockStore, ObjectClient, create_meta_store_from_url,
@@ -78,6 +79,19 @@ impl SlayerFsOperator {
         &self.node_id
     }
 
+    /// Parse SlayerFsVolumeConfig from volume_context, returning defaults if absent or invalid.
+    fn parse_volume_config(
+        volume_context: &std::collections::HashMap<String, String>,
+    ) -> SlayerFsVolumeConfig {
+        match volume_context.get("slayerfs_config") {
+            Some(json) => serde_json::from_str(json).unwrap_or_else(|e| {
+                warn!("failed to parse slayerfs_config, using defaults: {e}");
+                SlayerFsVolumeConfig::default()
+            }),
+            None => SlayerFsVolumeConfig::default(),
+        }
+    }
+
     // ----- Stage (FUSE mount) -----------------------------------------------
 
     /// Stage a volume: create a SlayerFS VFS and FUSE-mount it at
@@ -106,21 +120,71 @@ impl SlayerFsOperator {
             reason: format!("create staging dir: {e}"),
         })?;
 
-        // 3. Build SlayerFS VFS (LocalFsBackend + ObjectBlockStore + sqlite meta)
-        let backend = LocalFsBackend::new(vol_data_dir.join("xxx"));
+        // 3. Parse backend config from volume_context
+        let cfg = Self::parse_volume_config(&req.volume_context);
+
+        // 4. Build data backend
+        let data_dir = match &cfg.data.localfs {
+            Some(lfs) if !lfs.data_dir.is_empty() => std::path::PathBuf::from(&lfs.data_dir),
+            _ => vol_data_dir.join("data"),
+        };
+        std::fs::create_dir_all(&data_dir).map_err(|e| CsiError::MountFailed {
+            path: data_dir.display().to_string(),
+            reason: format!("create data backend dir: {e}"),
+        })?;
+        let backend = LocalFsBackend::new(&data_dir);
         let client = ObjectClient::new(backend);
-        let meta_db_path = vol_data_dir.join("meta.db");
-        let meta_url = format!("sqlite://{}?mode=rwc", meta_db_path.display());
+        let store = ObjectBlockStore::new(client);
+
+        // 5. Build metadata store URL
+        let meta_url = match cfg.meta.backend {
+            SlayerFsMetaBackend::Sqlx => {
+                if let Some(ref sqlx_cfg) = cfg.meta.sqlx {
+                    if !sqlx_cfg.url.is_empty() {
+                        sqlx_cfg.url.clone()
+                    } else {
+                        let meta_db_path = vol_data_dir.join("meta.db");
+                        format!("sqlite://{}?mode=rwc", meta_db_path.display())
+                    }
+                } else {
+                    let meta_db_path = vol_data_dir.join("meta.db");
+                    format!("sqlite://{}?mode=rwc", meta_db_path.display())
+                }
+            }
+            SlayerFsMetaBackend::Redis => {
+                cfg.meta
+                    .redis
+                    .as_ref()
+                    .map(|r| r.url.clone())
+                    .unwrap_or_else(|| {
+                        warn!(
+                            "redis meta backend selected but no url provided, falling back to sqlite"
+                        );
+                        let meta_db_path = vol_data_dir.join("meta.db");
+                        format!("sqlite://{}?mode=rwc", meta_db_path.display())
+                    })
+            }
+            SlayerFsMetaBackend::Etcd => {
+                warn!("etcd meta backend is not yet supported, falling back to sqlite");
+                let meta_db_path = vol_data_dir.join("meta.db");
+                format!("sqlite://{}?mode=rwc", meta_db_path.display())
+            }
+        };
         let meta_handle = create_meta_store_from_url(&meta_url)
             .await
             .map_err(|e| CsiError::BackendError(format!("create meta store: {e}")))?;
-        let store = ObjectBlockStore::new(client);
 
-        let vfs = slayerfs::VFS::new(self.layout, store, meta_handle.store().clone())
+        // 6. Build layout (use config values if provided, else fall back to operator defaults)
+        let layout = ChunkLayout {
+            chunk_size: cfg.layout.chunk_size.unwrap_or(self.layout.chunk_size),
+            block_size: cfg.layout.block_size.unwrap_or(self.layout.block_size),
+        };
+
+        let vfs = slayerfs::VFS::new(layout, store, meta_handle.store().clone())
             .await
             .map_err(|e| CsiError::BackendError(format!("create VFS: {e}")))?;
 
-        // 4. Privileged FUSE mount
+        // 7. Privileged FUSE mount
         let mount_opts = Self::default_mount_options();
         let handle = rfuse3::raw::Session::new(mount_opts)
             .mount(vfs, &req.staging_target_path)
@@ -130,7 +194,7 @@ impl SlayerFsOperator {
                 reason: format!("FUSE mount: {e}"),
             })?;
 
-        // 5. Store handle and persist state
+        // 8. Store handle and persist state
         self.mount_handles.insert(vol_id.clone(), handle);
 
         self.state_store
