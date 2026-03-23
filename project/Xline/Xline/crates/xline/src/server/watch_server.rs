@@ -15,9 +15,10 @@ use xlineapi::command::KeyRange;
 // use xlinerpc::status::Status;
 use crate::{
     header_gen::HeaderGenerator,
+    router::endpoint::EndPoint as RouterEndpoint,
     rpc::{
-        RequestUnion, ResponseHeader, Watch, WatchCancelRequest, WatchCreateRequest,
-        WatchProgressRequest, WatchRequest, WatchResponse,
+        RequestUnion, ResponseHeader, WatchCancelRequest, WatchCreateRequest, WatchProgressRequest,
+        WatchRequest, WatchResponse,
     },
     storage::kvwatcher::{KvWatcher, KvWatcherOps, WatchEvent, WatchId, WatchIdGenerator},
 };
@@ -143,6 +144,21 @@ impl WatchServer {
                 }
             }
         }
+    }
+
+    /// Watch watches for events happening or that have happened. Both input and output
+    /// are streams; the input stream is for creating and canceling watchers and the output
+    /// stream sends events. One watch RPC can watch on multiple key ranges, streaming events
+    /// for several watches at once. The entire event history can be watched starting from the
+    /// last compaction revision.
+    async fn watch(
+        &self,
+        request: tonic::Request<tonic::Streaming<WatchRequest>>,
+    ) -> Result<tonic::Response<ReceiverStream<Result<WatchResponse, Status>>>, Status> {
+        debug!("Receive Watch Connection {:?}", request);
+        Ok(tonic::Response::new(
+            self.watch_stream(request.into_inner()),
+        ))
     }
 }
 
@@ -402,24 +418,30 @@ where
     }
 }
 
-#[tonic::async_trait]
-impl Watch for WatchServer {
-    ///Server streaming response type for the Watch method.
-    type WatchStream = ReceiverStream<Result<WatchResponse, Status>>;
-
-    /// Watch watches for events happening or that have happened. Both input and output
-    /// are streams; the input stream is for creating and canceling watchers and the output
-    /// stream sends events. One watch RPC can watch on multiple key ranges, streaming events
-    /// for several watches at once. The entire event history can be watched starting from the
-    /// last compaction revision.
-    async fn watch(
-        &self,
-        request: tonic::Request<tonic::Streaming<WatchRequest>>,
-    ) -> Result<tonic::Response<Self::WatchStream>, Status> {
-        debug!("Receive Watch Connection {:?}", request);
-        Ok(tonic::Response::new(
-            self.watch_stream(request.into_inner()),
-        ))
+pub(crate) struct Server {
+    watch_server: Arc<WatchServer>,
+}
+impl Server {
+    #[allow(unused)]
+    pub(crate) fn new(server: WatchServer) -> Self {
+        Self {
+            watch_server: Arc::new(server),
+        }
+    }
+    #[allow(unused)]
+    pub(crate) fn from_arc(server: Arc<WatchServer>) -> Self {
+        Self {
+            watch_server: server,
+        }
+    }
+    pub(crate) fn endpoint(self) -> RouterEndpoint<Arc<WatchServer>> {
+        RouterEndpoint::new(self.watch_server).add_streaming_fn(
+            "/Watch",
+            move |this: Arc<WatchServer>,
+                  request: tonic::Request<tonic::Streaming<WatchRequest>>| async move {
+                this.watch(request).await
+            },
+        )
     }
 }
 

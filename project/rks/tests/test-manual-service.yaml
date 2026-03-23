@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: nginx-manual
+  namespace: default
+spec:
+  type: ClusterIP
+  cluster_ip: "10.96.0.2"  # 手动指定
+  selector:
+    matchLabels:
+      app: nginx
+  ports:
+    - name: http
+      protocol: TCP
+      port: 80
+      targetPort: 8080

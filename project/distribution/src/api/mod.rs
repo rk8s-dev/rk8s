@@ -5,19 +5,16 @@ use crate::api::middleware::{
     authorize_repository_access, populate_oci_claims, require_authentication,
 };
 use crate::api::v2::probe;
-use crate::domain::user::UserRepository;
-use crate::error::{AppError, OciError};
-use crate::service::auth::{auth, client_id, oauth_callback};
+use crate::error::AppError;
+use crate::service::auth::auth;
 use crate::service::repo::{change_visibility, list_visible_repos};
-use crate::utils::jwt::{Claims, decode};
-use crate::utils::password::check_password;
 use crate::utils::state::AppState;
 use axum::Json;
 use axum::Router;
 use axum::extract::{OptionalFromRequestParts, State};
 use axum::http::request::Parts;
 use axum::response::IntoResponse;
-use axum::routing::{get, post, put};
+use axum::routing::{get, put};
 use axum_extra::TypedHeader;
 use axum_extra::headers::Authorization;
 use axum_extra::headers::authorization::{Basic, Bearer};
@@ -45,10 +42,7 @@ pub async fn healthz(State(_): State<Arc<AppState>>) -> Result<impl IntoResponse
 }
 
 fn custom_v1_router(state: Arc<AppState>) -> Router<Arc<AppState>> {
-    Router::new()
-        .route("/auth/{provider}/callback", post(oauth_callback))
-        .route("/auth/{provider}/client_id", get(client_id))
-        .merge(v1_router_with_auth(state))
+    Router::new().merge(v1_router_with_auth(state))
 }
 
 fn v1_router_with_auth(state: Arc<AppState>) -> Router<Arc<AppState>> {
@@ -77,6 +71,7 @@ fn v1_router_with_auth(state: Arc<AppState>) -> Router<Arc<AppState>> {
 #[cfg(debug_assertions)]
 fn debug_router(state: Arc<AppState>) -> Router<Arc<AppState>> {
     use crate::service::auth::create_user;
+    use axum::routing::post;
 
     Router::new()
         .route("/users", post(create_user))
@@ -111,31 +106,5 @@ where
             return Ok(Some(Self::Basic(header)));
         };
         Ok(None)
-    }
-}
-
-async fn extract_claims(
-    auth: Option<AuthHeader>,
-    jwt_secret: impl AsRef<str>,
-    user_storage: &dyn UserRepository,
-    auth_url: impl AsRef<str>,
-) -> Result<Claims, AppError> {
-    match auth {
-        Some(auth) => match auth {
-            AuthHeader::Bearer(bearer) => decode(jwt_secret, bearer.token()),
-            AuthHeader::Basic(basic) => {
-                let user = user_storage.query_user_by_name(basic.username()).await?;
-                check_password(&user.salt, &user.password, basic.password())?;
-                Ok(Claims {
-                    sub: basic.username().to_string(),
-                    exp: 0,
-                })
-            }
-        },
-        None => Err(OciError::Unauthorized {
-            msg: "Missing `authorization` header or invalid `authorization` header".to_string(),
-            auth_url: Some(auth_url.as_ref().to_string()),
-        }
-        .into()),
     }
 }

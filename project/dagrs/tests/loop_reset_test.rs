@@ -21,8 +21,8 @@ impl Action for IncAction {
     }
 }
 
-#[test]
-fn test_loop_reset() {
+#[tokio::test]
+async fn test_loop_reset() {
     let mut graph = Graph::new();
     let mut table = NodeTable::new();
 
@@ -71,12 +71,8 @@ fn test_loop_reset() {
     // This design allows for cyclic execution flows on top of an acyclic static graph structure,
     // maintaining the benefits of topological ordering while supporting loop semantics.
 
-    let rt = tokio::runtime::Runtime::new().unwrap();
-
     println!("First Run");
-    rt.block_on(async {
-        graph.async_start().await.unwrap();
-    });
+    graph.async_start().await.unwrap();
 
     // A runs once initially + 3 times loop = 4 times?
     // Wait, let's check CountLoopCondition logic.
@@ -98,15 +94,11 @@ fn test_loop_reset() {
     );
 
     // Reset
-    rt.block_on(async {
-        graph.reset().await;
-    });
+    graph.reset().await;
     *counter.lock().unwrap() = 0;
 
     println!("Second Run");
-    rt.block_on(async {
-        graph.async_start().await.unwrap();
-    });
+    graph.async_start().await.unwrap();
 
     let second_run_count = *counter.lock().unwrap();
     println!("Second run count: {}", second_run_count);

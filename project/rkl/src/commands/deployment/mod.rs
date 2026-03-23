@@ -1,5 +1,6 @@
 use anyhow::{Result, anyhow};
 use clap::Subcommand;
+use log::warn;
 use std::env;
 
 use crate::commands::pod::TLSConnectionArgs;
@@ -134,23 +135,38 @@ pub fn deployment_execute(cmd: DeploymentCommand) -> Result<()> {
             deploy_yaml,
             cluster,
             tls_cfg,
-        } => deployment_apply(&deploy_yaml, cluster, tls_cfg),
+        } => {
+            warn!("This command has been deprecated. Use 'rkl apply -f deploy.yaml' instead.");
+            deployment_apply(&deploy_yaml, cluster, tls_cfg)
+        }
         DeploymentCommand::Create {
             deploy_yaml,
             cluster,
             tls_cfg,
-        } => deployment_create(&deploy_yaml, cluster, tls_cfg),
+        } => {
+            warn!("This command has been deprecated. Use 'rkl apply -f deploy.yaml' instead.");
+            deployment_create(&deploy_yaml, cluster, tls_cfg)
+        }
         DeploymentCommand::Delete {
             deploy_name,
             cluster,
             tls_cfg,
-        } => deployment_delete(&deploy_name, cluster, tls_cfg),
+        } => {
+            warn!("This command has been deprecated. Use 'rkl delete deploy DEPLOY_NAME' instead.");
+            deployment_delete(&deploy_name, cluster, tls_cfg)
+        }
         DeploymentCommand::Get {
             deploy_name,
             cluster,
             tls_cfg,
-        } => deployment_get(&deploy_name, cluster, tls_cfg),
-        DeploymentCommand::List { cluster, tls_cfg } => deployment_list(cluster, tls_cfg),
+        } => {
+            warn!("This command has been deprecated. Use 'rkl get deploy' instead.");
+            deployment_get(&deploy_name, cluster, tls_cfg)
+        }
+        DeploymentCommand::List { cluster, tls_cfg } => {
+            warn!("This command has been deprecated. Use 'rkl get deploys' instead.");
+            deployment_list(cluster, tls_cfg)
+        }
         DeploymentCommand::Rollback {
             deploy_name,
             to_revision,
@@ -165,7 +181,7 @@ pub fn deployment_execute(cmd: DeploymentCommand) -> Result<()> {
     }
 }
 
-fn deployment_apply(
+pub fn deployment_apply(
     deploy_yaml: &str,
     addr: Option<String>,
     tls_cfg: TLSConnectionArgs,
@@ -195,7 +211,7 @@ fn deployment_create(
     }
 }
 
-fn deployment_delete(
+pub fn deployment_delete(
     deploy_name: &str,
     addr: Option<String>,
     tls_cfg: TLSConnectionArgs,
@@ -210,7 +226,7 @@ fn deployment_delete(
     }
 }
 
-fn deployment_get(
+pub fn deployment_get(
     deploy_name: &str,
     addr: Option<String>,
     tls_cfg: TLSConnectionArgs,
@@ -225,7 +241,7 @@ fn deployment_get(
     }
 }
 
-fn deployment_list(addr: Option<String>, tls_cfg: TLSConnectionArgs) -> Result<()> {
+pub fn deployment_list(addr: Option<String>, tls_cfg: TLSConnectionArgs) -> Result<()> {
     let env_addr = env::var("RKS_ADDRESS").ok();
     let rt = tokio::runtime::Runtime::new()?;
     match addr.or(env_addr) {

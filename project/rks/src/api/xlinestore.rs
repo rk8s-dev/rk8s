@@ -381,6 +381,24 @@ impl XlineStore {
         Ok(())
     }
 
+    /// Insert service only when key does not exist (CAS create).
+    ///
+    /// Returns `true` if created, `false` if key already exists.
+    pub async fn insert_service_yaml_if_absent(
+        &self,
+        service_name: &str,
+        service_yaml: &str,
+    ) -> Result<bool> {
+        let key = format!("/registry/services/{service_name}");
+        let cmp = Compare::version(key.clone(), CompareOp::Equal, 0);
+        let put_op = TxnOp::put(key, service_yaml, None);
+        let txn = Txn::new().when([cmp]).and_then([put_op]);
+
+        let mut client = self.client.write().await;
+        let resp = client.txn(txn).await?;
+        Ok(resp.succeeded())
+    }
+
     /// Insert an endpoints YAML definition into xline.
     pub async fn insert_endpoint_yaml(
         &self,

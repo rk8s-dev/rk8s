@@ -312,6 +312,7 @@ impl TaskRunner {
             name: "sandbox".to_string(),
             // FIXME: SHOULD define a const variable image name
             image: "pause:3.9".to_string(),
+            // image: "/home/harry/Documents/rk8s/project/test/bundles/pause".to_string(),
             ports: vec![],
             args: vec![],
             resources: None,

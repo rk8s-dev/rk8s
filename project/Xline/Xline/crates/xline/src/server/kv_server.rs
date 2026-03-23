@@ -22,10 +22,11 @@ use xlineapi::{
 
 use crate::{
     revision_check::RevisionCheck,
+    router::endpoint::EndPoint as RouterEndpoint,
     rpc::{
-        CompactionRequest, CompactionResponse, DeleteRangeRequest, DeleteRangeResponse, Kv,
-        PutRequest, PutResponse, RangeRequest, RangeResponse, RequestWrapper, Response, ResponseOp,
-        TxnRequest, TxnResponse,
+        CompactionRequest, CompactionResponse, DeleteRangeRequest, DeleteRangeResponse, PutRequest,
+        PutResponse, RangeRequest, RangeResponse, RequestWrapper, Response, ResponseOp, TxnRequest,
+        TxnResponse,
     },
     storage::{AuthStore, KvStore},
 };
@@ -144,10 +145,7 @@ impl KvServer {
             }
         }
     }
-}
 
-#[tonic::async_trait]
-impl Kv for KvServer {
     /// Range gets the keys in the range from the key-value store.
     #[instrument(skip_all)]
     async fn range(
@@ -249,7 +247,7 @@ impl Kv for KvServer {
     /// key-value store should be periodically compacted or the event
     /// history will continue to grow indefinitely.
     #[instrument(skip_all)]
-    async fn compact(
+    pub(crate) async fn compact(
         &self,
         request: tonic::Request<CompactionRequest>,
     ) -> Result<tonic::Response<CompactionResponse>, Status> {
@@ -427,5 +425,56 @@ mod test {
         let expected_tonic_status =
             Status::from(compact_request.check_revision(13, 18).unwrap_err());
         assert_eq!(expected_tonic_status.code(), Code::OutOfRange);
+    }
+}
+
+pub(crate) struct Server {
+    kvserver: Arc<KvServer>,
+}
+impl Server {
+    #[allow(unused)]
+    pub(crate) fn new(kv_server: KvServer) -> Self {
+        Self {
+            kvserver: Arc::new(kv_server),
+        }
+    }
+    #[allow(unused)]
+    pub(crate) fn from_arc(kv_server: Arc<KvServer>) -> Self {
+        Self {
+            kvserver: kv_server,
+        }
+    }
+    pub(crate) fn endpoint(self) -> RouterEndpoint<Arc<KvServer>> {
+        RouterEndpoint::new(self.kvserver)
+            .add_unary_fn(
+                "/Range",
+                move |this: Arc<KvServer>, request: tonic::Request<RangeRequest>| async move {
+                    this.range(request).await
+                },
+            )
+            .add_unary_fn(
+                "/Put",
+                move |this: Arc<KvServer>, request: tonic::Request<PutRequest>| async move {
+                    this.put(request).await
+                },
+            )
+            .add_unary_fn(
+                "/DeleteRange",
+                move |this: Arc<KvServer>, request: tonic::Request<DeleteRangeRequest>| async move {
+                    this.delete_range(request).await
+                },
+            )
+            .add_unary_fn(
+                "/Txn",
+                move |this: Arc<KvServer>, request: tonic::Request<TxnRequest>| async move {
+                    this.txn(request).await
+                },
+            )
+            .add_unary_fn(
+                "/Compact",
+                move |this: Arc<KvServer>, request: tonic::Request<CompactionRequest>| async move {
+                    this.compact(request).await
+                },
+            )
     }
 }

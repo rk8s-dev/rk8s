@@ -23,7 +23,7 @@ tonic = { workspace = true }
 utils = { path = "../utils" }
 
 [build-dependencies]
-tonic-build = { workspace = true }
+prost-build = { workspace = true }
 
 [dev-dependencies]
 strum = "0.26"

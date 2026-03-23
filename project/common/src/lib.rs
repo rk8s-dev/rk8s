@@ -1566,7 +1566,13 @@ pub struct ServiceSpec {
     pub selector: Option<LabelSelector>,
     #[serde(default)]
     pub ports: Vec<ServicePort>,
-    #[serde(rename = "clusterIP", default)]
+    #[serde(
+        rename = "clusterIP",
+        alias = "cluster_ip",
+        alias = "clusterIp",
+        alias = "clusterip",
+        default
+    )]
     pub cluster_ip: Option<String>,
 }
 
