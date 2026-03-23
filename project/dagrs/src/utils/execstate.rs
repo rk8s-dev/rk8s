@@ -28,16 +28,21 @@ impl ExecState {
     /// After the task is successfully executed, set the execution result.
     pub(crate) fn set_output(&self, output: Output) {
         self.success.store(true, Ordering::Relaxed);
-        *self.output.lock().unwrap() = output;
+        if let Ok(mut guard) = self.output.lock() {
+            *guard = output;
+        }
     }
 
     /// [`Output`] for fetching internal storage.
     /// This function is generally not called directly, but first uses the semaphore for synchronization control.
     pub(crate) fn get_output(&self) -> Option<Content> {
-        self.output.lock().unwrap().get_out()
+        self.output.lock().ok().and_then(|guard| guard.get_out())
     }
     pub(crate) fn get_full_output(&self) -> Output {
-        self.output.lock().unwrap().clone()
+        self.output
+            .lock()
+            .map(|guard| guard.clone())
+            .unwrap_or_else(|_| Output::empty())
     }
 
     pub(crate) fn exe_success(&self) {
@@ -46,5 +51,9 @@ impl ExecState {
 
     pub(crate) fn exe_fail(&self) {
         self.success.store(false, Ordering::Relaxed)
+    }
+
+    pub(crate) fn is_success(&self) -> bool {
+        self.success.load(Ordering::Relaxed)
     }
 }

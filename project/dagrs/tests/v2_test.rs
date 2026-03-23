@@ -43,11 +43,11 @@ async fn test_loop_node() {
     );
     let id_loop = loop_node.id();
 
-    graph.add_node(node_a);
-    graph.add_node(loop_node);
+    graph.add_node(node_a).unwrap();
+    graph.add_node(loop_node).unwrap();
 
     // A -> Loop
-    graph.add_edge(id_a, vec![id_loop]);
+    graph.add_edge(id_a, vec![id_loop]).unwrap();
 
     match graph.async_start().await {
         Ok(_) => {}
@@ -108,12 +108,12 @@ async fn test_router_node() {
     );
     let id_router = router.id();
 
-    graph.add_node(router);
-    graph.add_node(node_b);
-    graph.add_node(node_c);
+    graph.add_node(router).unwrap();
+    graph.add_node(node_b).unwrap();
+    graph.add_node(node_c).unwrap();
 
     // Router -> B, Router -> C
-    graph.add_edge(id_router, vec![id_b, id_c]);
+    graph.add_edge(id_router, vec![id_b, id_c]).unwrap();
 
     match graph.async_start().await {
         Ok(_) => {}

@@ -169,7 +169,7 @@ impl NodeTable {
 impl EnvVar {
     /// Get a [`Node`]'s [`NodeId`] by providing its name.
     pub fn get_node_id(&self, node_name: &str) -> Option<&NodeId> {
-        let node_table: &NodeTable = self.get_ref(NODE_TABLE_STR).unwrap();
-        node_table.get(node_name)
+        self.get_ref::<NodeTable>(NODE_TABLE_STR)
+            .and_then(|node_table| node_table.get(node_name))
     }
 }

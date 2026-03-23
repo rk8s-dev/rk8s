@@ -144,13 +144,13 @@ async fn main() {
 
     // Create graph and add nodes
     let mut graph = Graph::new();
-    graph.add_node(in_node);
-    graph.add_node(inter_proc);
+    graph.add_node(in_node).unwrap();
+    graph.add_node(inter_proc).unwrap();
 
     // Set up dependencies to create the loop
-    graph.add_edge(in_id, vec![inter_id]);
-    graph.add_edge(inter_id, vec![proc_id]);
-    graph.add_edge(proc_id, vec![inter_id]);
+    graph.add_edge(in_id, vec![inter_id]).unwrap();
+    graph.add_edge(inter_id, vec![proc_id]).unwrap();
+    graph.add_edge(proc_id, vec![inter_id]).unwrap();
     // Execute graph
     match graph.async_start().await {
         Ok(_) => println!("Graph executed successfully"),

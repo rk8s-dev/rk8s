@@ -47,11 +47,11 @@ async fn test_loop_reset() {
     );
     let id_loop = loop_node.id();
 
-    graph.add_node(node_a);
-    graph.add_node(loop_node);
+    graph.add_node(node_a).unwrap();
+    graph.add_node(loop_node).unwrap();
 
     // A -> Loop
-    graph.add_edge(id_a, vec![id_loop]);
+    graph.add_edge(id_a, vec![id_loop]).unwrap();
 
     // # Dynamic Jump Mechanism
     //
@@ -94,7 +94,7 @@ async fn test_loop_reset() {
     );
 
     // Reset
-    graph.reset().await;
+    graph.reset().await.unwrap();
     *counter.lock().unwrap() = 0;
 
     println!("Second Run");

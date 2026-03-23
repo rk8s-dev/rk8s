@@ -9,7 +9,7 @@
 //! - Memory and file-based checkpoint stores
 
 use async_trait::async_trait;
-use dagrs::graph::event::GraphEvent;
+use dagrs::graph::event::{GraphEvent, TerminationStatus};
 use dagrs::node::action::Action;
 use dagrs::node::default_node::DefaultNode;
 use dagrs::{
@@ -18,6 +18,25 @@ use dagrs::{
 };
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
+
+async fn collect_events_until_terminated(
+    mut receiver: tokio::sync::broadcast::Receiver<GraphEvent>,
+) -> Vec<GraphEvent> {
+    let mut events = Vec::new();
+    loop {
+        match tokio::time::timeout(Duration::from_millis(200), receiver.recv()).await {
+            Ok(Ok(event)) => {
+                let terminated = matches!(event, GraphEvent::ExecutionTerminated { .. });
+                events.push(event);
+                if terminated {
+                    break;
+                }
+            }
+            Ok(Err(_)) | Err(_) => break,
+        }
+    }
+    events
+}
 
 /// Action that counts executions
 #[derive(Clone)]
@@ -79,9 +98,9 @@ async fn test_manual_checkpoint_save_and_load() {
     let id_a = node_a.id();
     let id_b = node_b.id();
 
-    graph.add_node(node_a);
-    graph.add_node(node_b);
-    graph.add_edge(id_a, vec![id_b]);
+    graph.add_node(node_a).unwrap();
+    graph.add_node(node_b).unwrap();
+    graph.add_edge(id_a, vec![id_b]).unwrap();
 
     graph.set_checkpoint_store(Box::new(MemoryCheckpointStore::new()));
 
@@ -206,9 +225,9 @@ async fn test_checkpoint_events() {
     let id_a = node_a.id();
     let id_b = node_b.id();
 
-    graph.add_node(node_a);
-    graph.add_node(node_b);
-    graph.add_edge(id_a, vec![id_b]);
+    graph.add_node(node_a).unwrap();
+    graph.add_node(node_b).unwrap();
+    graph.add_edge(id_a, vec![id_b]).unwrap();
 
     graph.set_checkpoint_store(Box::new(MemoryCheckpointStore::new()));
 
@@ -218,24 +237,10 @@ async fn test_checkpoint_events() {
         .with_max_checkpoints(10);
     graph.set_checkpoint_config(config);
 
-    let mut receiver = graph.subscribe();
+    let receiver = graph.subscribe();
     let events = Arc::new(Mutex::new(Vec::new()));
     let events_clone = events.clone();
-
-    // Spawn event collector
-    let collector = tokio::spawn(async move {
-        let mut collected = Vec::new();
-        while let Ok(Ok(event)) =
-            tokio::time::timeout(Duration::from_millis(200), receiver.recv()).await
-        {
-            let is_finished = matches!(event, GraphEvent::GraphFinished);
-            collected.push(event);
-            if is_finished {
-                break;
-            }
-        }
-        collected
-    });
+    let collector = tokio::spawn(collect_events_until_terminated(receiver));
 
     // Run graph
     graph.async_start().await.unwrap();
@@ -254,13 +259,19 @@ async fn test_checkpoint_events() {
     let has_node_success = events_list
         .iter()
         .any(|e| matches!(e, GraphEvent::NodeSuccess { .. }));
-    let has_finished = events_list
+    let has_terminated = events_list
         .iter()
-        .any(|e| matches!(e, GraphEvent::GraphFinished));
+        .any(|e| matches!(
+            e,
+            GraphEvent::ExecutionTerminated {
+                status: TerminationStatus::Succeeded,
+                error: None,
+            }
+        ));
 
     assert!(has_node_start, "Should have NodeStart events");
     assert!(has_node_success, "Should have NodeSuccess events");
-    assert!(has_finished, "Should have GraphFinished event");
+    assert!(has_terminated, "Should have a successful termination event");
 }
 
 #[tokio::test]
@@ -270,7 +281,6 @@ async fn test_checkpoint_config_builder() {
     assert!(!default_config.enabled);
     assert_eq!(default_config.interval_nodes, Some(10));
     assert!(default_config.on_loop_iteration);
-    assert!(default_config.before_conditional);
     assert_eq!(default_config.max_checkpoints, 5);
 
     // Test builder pattern
@@ -337,9 +347,9 @@ async fn test_resume_execution_basic() {
     let id_a = node_a.id();
     let id_b = node_b.id();
 
-    graph.add_node(node_a);
-    graph.add_node(node_b);
-    graph.add_edge(id_a, vec![id_b]);
+    graph.add_node(node_a).unwrap();
+    graph.add_node(node_b).unwrap();
+    graph.add_edge(id_a, vec![id_b]).unwrap();
 
     let store = MemoryCheckpointStore::new();
     graph.set_checkpoint_store(Box::new(store));

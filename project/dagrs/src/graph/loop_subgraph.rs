@@ -2,7 +2,10 @@ use async_trait::async_trait;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
-use crate::{EnvVar, InChannels, Node, NodeId, NodeName, NodeTable, OutChannels, Output};
+use crate::{
+    DagrsError, ErrorCode, EnvVar, InChannels, Node, NodeId, NodeName, NodeTable, OutChannels,
+    Output,
+};
 
 /// A special node type that represents a subgraph of nodes in a loop structure.
 ///
@@ -30,8 +33,10 @@ impl LoopSubgraph {
     }
 
     /// Add a node to the subgraph
-    pub fn add_node(&mut self, node: impl Node + 'static) {
+    pub fn add_node(&mut self, node: impl Node + 'static) -> NodeId {
+        let node_id = node.id();
         self.inner_nodes.push(Arc::new(Mutex::new(node)));
+        node_id
     }
 }
 
@@ -58,6 +63,9 @@ impl Node for LoopSubgraph {
     }
 
     async fn run(&mut self, _: Arc<EnvVar>) -> Output {
-        panic!("Loop subgraph is not executed directly, it will be executed by the parent graph.");
+        Output::error(DagrsError::new(
+            ErrorCode::DgRun0006NodeExecutionFailed,
+            "loop subgraph should not be executed directly",
+        ))
     }
 }

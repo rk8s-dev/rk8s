@@ -1,7 +1,7 @@
 use std::process::Command;
 
 use dagrs::async_trait::async_trait;
-use dagrs::{Action, Content, Output};
+use dagrs::{Action, Content, DagrsError, ErrorCode, Output};
 
 /// [`CommandAction`] is a specific implementation of [`Complex`], used to execute operating system commands.
 pub struct CommandAction {
@@ -54,14 +54,18 @@ impl Action for CommandAction {
         let out = match cmd.args(args).output() {
             Ok(o) => o,
             Err(e) => {
-                out_channels.broadcast(Content::new(e.raw_os_error())).await;
-                return Output::error_with_exit_code(
-                    e.raw_os_error(),
-                    Some(Content::new(e.to_string())),
-                );
+                let mut err = DagrsError::new(
+                    ErrorCode::DgRun0006NodeExecutionFailed,
+                    format!("failed to spawn command `{}`", self.command),
+                )
+                .with_detail("io_error", e.to_string());
+                if let Some(code) = e.raw_os_error() {
+                    err = err.with_detail("os_error_code", code.to_string());
+                }
+                return Output::error(err);
             }
         };
-        let code = out.status.code().unwrap_or(0);
+        let code = out.status.code();
         let stdout: Vec<String> = {
             let out = String::from_utf8(out.stdout).unwrap_or("".to_string());
             if cfg!(target_os = "windows") {
@@ -87,8 +91,19 @@ impl Action for CommandAction {
             out_channels
                 .broadcast(Content::new((stdout.clone(), stderr.clone())))
                 .await;
-            let output = Content::new((stdout, stderr));
-            Output::error_with_exit_code(Some(code), Some(output))
+            let mut err = DagrsError::new(
+                ErrorCode::DgRun0006NodeExecutionFailed,
+                format!("command `{}` exited with a non-zero status", self.command),
+            );
+            if let Some(code) = code {
+                err = err.with_detail("exit_code", code.to_string());
+            }
+            if !stderr.is_empty() {
+                err = err.with_detail("stderr", stderr.join("\n"));
+            } else if !stdout.is_empty() {
+                err = err.with_detail("stdout", stdout.join("\n"));
+            }
+            Output::error(err)
         }
     }
 }

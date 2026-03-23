@@ -7,19 +7,18 @@ use std::hash::Hash;
 use std::sync::atomic::Ordering;
 use std::{
     collections::{HashMap, HashSet},
-    panic::{self, AssertUnwindSafe},
+    panic::AssertUnwindSafe,
     sync::{Arc, atomic::AtomicBool},
     time::Duration,
 };
 
 use crate::{
+    DagrsError, DagrsResult, ErrorCode,
     Output,
     connection::{in_channel::InChannel, information_packet::Content, out_channel::OutChannel},
-    graph::event::GraphEvent,
+    graph::event::{GraphEvent, SkipReason, TerminationStatus},
     node::{Node, NodeId, NodeTable},
-    utils::checkpoint::{
-        Checkpoint, CheckpointConfig, CheckpointError, CheckpointStore, NodeState,
-    },
+    utils::checkpoint::{Checkpoint, CheckpointConfig, CheckpointStore, NodeState},
     utils::hook::{ExecutionHook, RetryDecision},
     utils::output::FlowControl,
     utils::{env::EnvVar, execstate::ExecState},
@@ -31,7 +30,34 @@ use tokio::sync::{RwLock, broadcast, mpsc};
 use tokio::task;
 
 use abstract_graph::AbstractGraph;
-use error::GraphError;
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CompletionStatus {
+    Succeeded,
+    Aborted,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ResetPolicy {
+    KeepEnv,
+    ResetEnv,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct RunOptions {
+    pub run_id: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ExecutionReport {
+    pub run_id: String,
+    pub status: CompletionStatus,
+    pub started_at_unix_secs: u64,
+    pub ended_at_unix_secs: u64,
+    pub node_total: usize,
+    pub node_succeeded: usize,
+    pub node_failed: usize,
+    pub node_skipped: usize,
+}
 
 /// [`Graph`] is dagrs's main body.
 ///
@@ -169,17 +195,22 @@ impl Graph {
     ///
     /// # Returns
     /// * `Ok(CheckpointId)` - The ID of the saved checkpoint
-    /// * `Err(CheckpointError)` - If saving fails
+    /// * `Err(DagrsError)` - If saving fails
     pub async fn save_checkpoint(
         &self,
         pc: usize,
         loop_count: usize,
         active_nodes: &HashSet<NodeId>,
-    ) -> Result<String, CheckpointError> {
+    ) -> DagrsResult<String> {
         let store = self
             .checkpoint_store
             .as_ref()
-            .ok_or(CheckpointError::StoreNotConfigured)?;
+            .ok_or_else(|| {
+                DagrsError::new(
+                    ErrorCode::DgChk0001StoreNotConfigured,
+                    "checkpoint store not configured",
+                )
+            })?;
 
         let mut checkpoint = Checkpoint::new(pc, loop_count);
         checkpoint.set_active_nodes(active_nodes);
@@ -187,8 +218,8 @@ impl Graph {
         // Capture node execution states with output data
         for (node_id, exec_state) in &self.execute_states {
             let output = exec_state.get_full_output();
-            let completed = !output.is_empty();
-            let success = !output.is_err();
+            let completed = exec_state.is_success() || output.is_err();
+            let success = exec_state.is_success() && !output.is_err();
 
             let mut node_state = if completed {
                 NodeState::completed(node_id.0, success)
@@ -209,7 +240,7 @@ impl Graph {
                     node_state = node_state.with_output_data(data);
                 }
             } else if let Some(err) = output.get_err() {
-                node_state = node_state.with_summary(format!("Error: {}", err));
+                node_state = node_state.with_summary(format!("Error: {err}"));
             }
 
             checkpoint.add_node_state(node_state);
@@ -322,15 +353,20 @@ impl Graph {
     ///
     /// # Returns
     /// * `Ok(Checkpoint)` - The loaded checkpoint
-    /// * `Err(CheckpointError)` - If loading fails
+    /// * `Err(DagrsError)` - If loading fails
     pub async fn load_checkpoint(
         &self,
         checkpoint_id: &str,
-    ) -> Result<Checkpoint, CheckpointError> {
+    ) -> DagrsResult<Checkpoint> {
         let store = self
             .checkpoint_store
             .as_ref()
-            .ok_or(CheckpointError::StoreNotConfigured)?;
+            .ok_or_else(|| {
+                DagrsError::new(
+                    ErrorCode::DgChk0001StoreNotConfigured,
+                    "checkpoint store not configured",
+                )
+            })?;
         store.load(&checkpoint_id.to_string()).await
     }
 
@@ -339,30 +375,45 @@ impl Graph {
     /// # Returns
     /// * `Ok(Some(Checkpoint))` - The latest checkpoint if one exists
     /// * `Ok(None)` - If no checkpoints exist
-    /// * `Err(CheckpointError)` - If loading fails
-    pub async fn get_latest_checkpoint(&self) -> Result<Option<Checkpoint>, CheckpointError> {
+    /// * `Err(DagrsError)` - If loading fails
+    pub async fn get_latest_checkpoint(&self) -> DagrsResult<Option<Checkpoint>> {
         let store = self
             .checkpoint_store
             .as_ref()
-            .ok_or(CheckpointError::StoreNotConfigured)?;
+            .ok_or_else(|| {
+                DagrsError::new(
+                    ErrorCode::DgChk0001StoreNotConfigured,
+                    "checkpoint store not configured",
+                )
+            })?;
         store.latest().await
     }
 
     /// List all available checkpoint IDs.
-    pub async fn list_checkpoints(&self) -> Result<Vec<String>, CheckpointError> {
+    pub async fn list_checkpoints(&self) -> DagrsResult<Vec<String>> {
         let store = self
             .checkpoint_store
             .as_ref()
-            .ok_or(CheckpointError::StoreNotConfigured)?;
+            .ok_or_else(|| {
+                DagrsError::new(
+                    ErrorCode::DgChk0001StoreNotConfigured,
+                    "checkpoint store not configured",
+                )
+            })?;
         store.list().await
     }
 
     /// Delete a checkpoint by ID.
-    pub async fn delete_checkpoint(&self, checkpoint_id: &str) -> Result<(), CheckpointError> {
+    pub async fn delete_checkpoint(&self, checkpoint_id: &str) -> DagrsResult<()> {
         let store = self
             .checkpoint_store
             .as_ref()
-            .ok_or(CheckpointError::StoreNotConfigured)?;
+            .ok_or_else(|| {
+                DagrsError::new(
+                    ErrorCode::DgChk0001StoreNotConfigured,
+                    "checkpoint store not configured",
+                )
+            })?;
         store.delete(&checkpoint_id.to_string()).await
     }
 
@@ -370,7 +421,7 @@ impl Graph {
     async fn cleanup_old_checkpoints(
         &self,
         store: &dyn CheckpointStore,
-    ) -> Result<(), CheckpointError> {
+    ) -> DagrsResult<()> {
         let ids = store.list().await?;
         if ids.len() <= self.checkpoint_config.max_checkpoints {
             return Ok(());
@@ -397,60 +448,46 @@ impl Graph {
         Ok(())
     }
 
-    /// Resume graph execution from a checkpoint.
-    ///
-    /// This method:
-    /// 1. Loads the checkpoint
-    /// 2. Restores execution state
-    /// 3. Continues execution from the saved point
-    ///
-    /// # Arguments
-    /// * `checkpoint_id` - The ID of the checkpoint to resume from
-    ///
-    /// # Returns
-    /// * `Ok(())` - If execution completes successfully
-    /// * `Err(GraphError)` - If execution fails
-    ///
-    /// # Example
-    /// ```ignore
-    /// // Resume from a specific checkpoint
-    /// graph.resume_from_checkpoint("ckpt_123").await?;
-    ///
-    /// // Or resume from the latest checkpoint
-    /// if let Some(checkpoint) = graph.get_latest_checkpoint().await? {
-    ///     graph.resume_from_checkpoint(&checkpoint.id).await?;
-    /// }
-    /// ```
-    pub async fn resume_from_checkpoint(&mut self, checkpoint_id: &str) -> Result<(), GraphError> {
-        let checkpoint = self
-            .load_checkpoint(checkpoint_id)
+    pub async fn resume_from_checkpoint(&mut self, checkpoint_id: &str) -> DagrsResult<ExecutionReport> {
+        self.resume_from_checkpoint_with(checkpoint_id, RunOptions::default())
             .await
-            .map_err(|e| GraphError::CheckpointError(e.to_string()))?;
+    }
+
+    pub async fn resume_from_checkpoint_with(
+        &mut self,
+        checkpoint_id: &str,
+        opts: RunOptions,
+    ) -> DagrsResult<ExecutionReport> {
+        let started_at_unix_secs = Self::current_unix_secs();
+        let run_id = Self::run_id(opts.run_id);
+
+        let checkpoint = match self.load_checkpoint(checkpoint_id).await {
+            Ok(checkpoint) => checkpoint,
+            Err(err) => {
+                self.emit_termination(TerminationStatus::Failed, Some(err.clone()));
+                return Err(err);
+            }
+        };
 
         info!(
             "Resuming from checkpoint: {} (pc={}, loop_count={})",
             checkpoint.id, checkpoint.pc, checkpoint.loop_count
         );
 
-        // Emit event
         let _ = self.event_sender.send(GraphEvent::CheckpointRestored {
             checkpoint_id: checkpoint.id.clone(),
             pc: checkpoint.pc,
         });
 
-        // Initialize if not already done
         if self.blocks.is_empty() {
             self.init();
-            let is_loop = self.check_loop_and_partition().await;
-            if is_loop {
-                return Err(GraphError::GraphLoopDetected);
+            if let Err(err) = self.check_loop_and_partition().await {
+                self.emit_termination(TerminationStatus::Failed, Some(err.clone()));
+                return Err(err);
             }
         }
 
-        // Restore active nodes
         let active_nodes = checkpoint.get_active_nodes();
-
-        // Restore execution states for completed nodes
         for (node_id_val, node_state) in &checkpoint.node_states {
             let node_id = NodeId(*node_id_val);
             if let Some(exec_state) = self.execute_states.get(&node_id)
@@ -464,26 +501,103 @@ impl Graph {
             }
         }
 
-        // Continue execution from checkpoint
-        self.run_from_checkpoint(checkpoint.pc, checkpoint.loop_count, active_nodes)
-            .await
+        self.run_internal(
+            run_id,
+            started_at_unix_secs,
+            checkpoint.pc,
+            checkpoint.loop_count,
+            active_nodes,
+            false,
+        )
+        .await
     }
 
-    /// Internal method to run from a specific checkpoint state.
-    async fn run_from_checkpoint(
+    fn current_unix_secs() -> u64 {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs()
+    }
+
+    fn run_id(run_id: Option<String>) -> String {
+        run_id.unwrap_or_else(|| format!("run_{}", Self::current_unix_secs()))
+    }
+
+    fn emit_termination(&self, status: TerminationStatus, error: Option<DagrsError>) {
+        let _ = self
+            .event_sender
+            .send(GraphEvent::ExecutionTerminated { status, error });
+        self.is_active.store(false, Ordering::Relaxed);
+    }
+
+    fn build_report(
+        &self,
+        run_id: String,
+        status: CompletionStatus,
+        started_at_unix_secs: u64,
+        node_skipped: usize,
+    ) -> ExecutionReport {
+        let node_failed = self
+            .execute_states
+            .values()
+            .filter(|state| state.get_full_output().is_err())
+            .count();
+        let node_succeeded = self
+            .execute_states
+            .values()
+            .filter(|state| state.is_success() && !state.get_full_output().is_err())
+            .count();
+
+        ExecutionReport {
+            run_id,
+            status,
+            started_at_unix_secs,
+            ended_at_unix_secs: Self::current_unix_secs(),
+            node_total: self.nodes.len(),
+            node_succeeded,
+            node_failed,
+            node_skipped,
+        }
+    }
+
+    fn aggregate_errors(errors: &[DagrsError]) -> DagrsError {
+        if let Some(err) = errors.first() {
+            if errors.len() == 1 {
+                return err.clone();
+            }
+        }
+        DagrsError::new(
+            ErrorCode::DgRun0006NodeExecutionFailed,
+            "multiple node failures occurred during graph execution",
+        )
+        .with_detail("error_count", errors.len().to_string())
+    }
+
+    async fn run_internal(
         &mut self,
+        run_id: String,
+        started_at_unix_secs: u64,
         start_pc: usize,
         start_loop_count: usize,
         initial_active_nodes: HashSet<NodeId>,
-    ) -> Result<(), GraphError> {
+        reset_nodes: bool,
+    ) -> DagrsResult<ExecutionReport> {
         let condition_flag = Arc::new(Mutex::new(true));
-        let errors = Arc::new(Mutex::new(Vec::new()));
+        let errors = Arc::new(Mutex::new(Vec::<DagrsError>::new()));
+        let mut skipped_total = 0usize;
+        let mut completed_total = 0usize;
+
+        if reset_nodes {
+            for node in self.nodes.values() {
+                let mut node = node.lock().await;
+                node.reset();
+            }
+        }
 
         let mut pc = start_pc;
         let mut loop_count = start_loop_count;
         let mut active_nodes = initial_active_nodes;
 
-        // Build parents map for pruning logic
         let mut parents_map: HashMap<NodeId, Vec<NodeId>> = HashMap::new();
         for (parent, children) in &self.abstract_graph.edges {
             for child in children {
@@ -491,21 +605,19 @@ impl Graph {
             }
         }
 
-        // Track nodes completed since last checkpoint
         let mut nodes_since_checkpoint = 0usize;
         let checkpoint_start_time = std::time::Instant::now();
+        let mut status = CompletionStatus::Succeeded;
 
-        // Start the nodes by blocks
         while pc < self.blocks.len() {
-            // Check if we should create a checkpoint
             if self.checkpoint_config.enabled && self.checkpoint_store.is_some() {
                 let should_checkpoint = self.should_create_checkpoint(
                     nodes_since_checkpoint,
                     checkpoint_start_time.elapsed().as_secs(),
                 );
                 if should_checkpoint {
-                    if let Err(e) = self.save_checkpoint(pc, loop_count, &active_nodes).await {
-                        error!("Failed to save automatic checkpoint: {}", e);
+                    if let Err(err) = self.save_checkpoint(pc, loop_count, &active_nodes).await {
+                        error!("Failed to save automatic checkpoint: {err}");
                     } else {
                         nodes_since_checkpoint = 0;
                     }
@@ -513,7 +625,6 @@ impl Graph {
             }
 
             let block = &self.blocks[pc];
-
             let mut active_block_nodes = Vec::new();
             let mut skipped_block_nodes = Vec::new();
 
@@ -525,14 +636,13 @@ impl Graph {
                 }
             }
 
-            // Handle skipped nodes
             for node_id in skipped_block_nodes {
-                let _ = self
-                    .event_sender
-                    .send(GraphEvent::NodeSkipped { id: node_id });
-                debug!("Skipped node [id: {}]", node_id.0);
-
-                // Hook: on_skip
+                skipped_total += 1;
+                completed_total += 1;
+                let _ = self.event_sender.send(GraphEvent::NodeSkipped {
+                    id: node_id,
+                    reason: SkipReason::PrunedByControlFlow,
+                });
                 if let Some(node) = self.nodes.get(&node_id) {
                     let node_guard = node.lock().await;
                     let hooks_guard = self.hooks.read().await;
@@ -542,158 +652,163 @@ impl Graph {
                 }
             }
 
+            let _ = self.event_sender.send(GraphEvent::Progress {
+                completed: completed_total,
+                total: self.nodes.len(),
+            });
+
             if active_block_nodes.is_empty() {
                 pc += 1;
                 continue;
             }
 
             let mut tasks = vec![];
-            for node_id in active_block_nodes.iter().cloned() {
-                let node = self
-                    .nodes
-                    .get(&node_id)
-                    .ok_or(GraphError::NodeIdError(node_id.0))?;
-                let execute_state = self
-                    .execute_states
-                    .get(&node_id)
-                    .ok_or(GraphError::NodeIdError(node_id.0))?
-                    .clone();
+            for node_id in active_block_nodes.iter().copied() {
+                let node = self.nodes.get(&node_id).ok_or_else(|| {
+                    DagrsError::new(ErrorCode::DgBld0001NodeNotFound, "node not found")
+                        .with_node_id(node_id.as_usize())
+                })?;
+                let execute_state = self.execute_states.get(&node_id).ok_or_else(|| {
+                    DagrsError::new(
+                        ErrorCode::DgRun0006NodeExecutionFailed,
+                        "execution state not initialised for node",
+                    )
+                    .with_node_id(node_id.as_usize())
+                })?
+                .clone();
                 let env = Arc::clone(&self.env);
                 let node = Arc::clone(node);
-                let condition_flag = condition_flag.clone();
-                let errors = errors.clone();
-                let hooks = self.hooks.clone();
+                let condition_flag = Arc::clone(&condition_flag);
+                let errors = Arc::clone(&errors);
+                let hooks = Arc::clone(&self.hooks);
                 let event_sender = self.event_sender.clone();
 
-                let task = task::spawn({
-                    let errors = Arc::clone(&errors);
-                    async move {
-                        let node_ref: Arc<Mutex<dyn Node>> = node.clone();
-                        let node_guard = node.lock().await;
-                        let node_name = node_guard.name().to_string();
-                        let node_id = node_guard.id();
-                        let id_val = node_id.0;
-                        let max_retries = node_guard.max_retries();
+                tasks.push(task::spawn(async move {
+                    use futures::FutureExt;
 
-                        // Hook: before_node_run
-                        {
-                            let hooks_guard = hooks.read().await;
-                            for hook in hooks_guard.iter() {
-                                hook.before_node_run(&*node_guard, &env).await;
-                            }
+                    let node_ref: Arc<Mutex<dyn Node>> = node.clone();
+                    let node_guard = node.lock().await;
+                    let node_name = node_guard.name().to_string();
+                    let node_id = node_guard.id();
+                    let max_retries = node_guard.max_retries();
+
+                    {
+                        let hooks_guard = hooks.read().await;
+                        for hook in hooks_guard.iter() {
+                            hook.before_node_run(&*node_guard, &env).await;
                         }
-                        // Event: NodeStart
-                        let _ = event_sender.send(GraphEvent::NodeStart {
-                            id: node_id,
-                            timestamp: std::time::SystemTime::now()
-                                .duration_since(std::time::UNIX_EPOCH)
-                                .unwrap_or_default()
-                                .as_secs(),
-                        });
+                    }
 
-                        // Execute with retry logic
-                        let mut attempt = 0u32;
+                    let _ = event_sender.send(GraphEvent::NodeStart {
+                        id: node_id,
+                        timestamp: Graph::current_unix_secs(),
+                    });
 
-                        // Drop guard before retry loop to allow re-acquisition
-                        drop(node_guard);
+                    drop(node_guard);
 
-                        let final_output = loop {
-                            // Re-acquire lock for each attempt
-                            let mut node_guard = node_ref.lock().await;
-                            let retry_delay = node_guard.retry_delay_ms(attempt + 1);
+                    let mut attempt = 0u32;
+                    let final_output = loop {
+                        let mut node_guard = node_ref.lock().await;
+                        let retry_delay = node_guard.retry_delay_ms(attempt + 1);
+                        let started_at = std::time::Instant::now();
+                        let result = AssertUnwindSafe(node_guard.run(env.clone()))
+                            .catch_unwind()
+                            .await;
+                        let duration_ms = started_at.elapsed().as_millis() as u64;
 
-                            let env_for_run = env.clone();
+                        match result {
+                            Ok(out) if out.is_err() => {
+                                let err = out.get_err().cloned().unwrap_or_else(|| {
+                                    DagrsError::new(
+                                        ErrorCode::DgRun0006NodeExecutionFailed,
+                                        "node execution failed without an error payload",
+                                    )
+                                    .with_node(node_id.as_usize(), node_name.clone())
+                                });
 
-                            // Run the node with panic protection
-                            let result = panic::catch_unwind(AssertUnwindSafe(|| async move {
-                                node_guard.run(env_for_run).await
-                            }));
+                                if attempt < max_retries {
+                                    attempt += 1;
+                                    let _ = event_sender.send(GraphEvent::NodeRetry {
+                                        id: node_id,
+                                        attempt,
+                                        max_retries,
+                                        error: err.clone(),
+                                    });
 
-                            match result {
-                                Ok(future) => {
-                                    let out = future.await;
-
-                                    if out.is_err() {
-                                        let error_msg = out.get_err().unwrap_or_default();
-
-                                        // Check if we should retry
-                                        if attempt < max_retries {
-                                            attempt += 1;
-
-                                            // Emit NodeRetry event
-                                            let _ = event_sender.send(GraphEvent::NodeRetry {
-                                                id: node_id,
-                                                attempt,
-                                                max_retries,
-                                                error: error_msg.clone(),
-                                            });
-
-                                            // Call on_retry hook and check decision
-                                            let err_obj = GraphError::ExecutionFailed {
-                                                node_name: node_name.clone(),
-                                                node_id: id_val,
-                                                error: error_msg.clone(),
-                                            };
-
-                                            let mut should_retry = true;
-                                            {
-                                                let node_guard = node_ref.lock().await;
-                                                let hooks_guard = hooks.read().await;
-                                                for hook in hooks_guard.iter() {
-                                                    let decision = hook
-                                                        .on_retry(
-                                                            &*node_guard,
-                                                            &err_obj,
-                                                            attempt,
-                                                            max_retries,
-                                                            &env,
-                                                        )
-                                                        .await;
-                                                    if decision == RetryDecision::Fail {
-                                                        should_retry = false;
-                                                        break;
-                                                    }
-                                                }
-                                            }
-
-                                            if should_retry {
-                                                warn!(
-                                                    "Retrying node [name: {}, id: {}] attempt {}/{} after {}ms - {}",
-                                                    node_name,
-                                                    id_val,
+                                    let mut should_retry = true;
+                                    {
+                                        let hooks_guard = hooks.read().await;
+                                        for hook in hooks_guard.iter() {
+                                            let decision = hook
+                                                .on_retry(
+                                                    &*node_guard,
+                                                    &err,
                                                     attempt,
                                                     max_retries,
-                                                    retry_delay,
-                                                    error_msg
-                                                );
-                                                tokio::time::sleep(Duration::from_millis(
-                                                    retry_delay,
-                                                ))
+                                                    &env,
+                                                )
                                                 .await;
-                                                continue;
+                                            if decision == RetryDecision::Fail {
+                                                should_retry = false;
+                                                break;
                                             }
                                         }
+                                    }
 
-                                        // No more retries, fail
-                                        break Ok(out);
-                                    } else {
-                                        // Success
-                                        break Ok(out);
+                                    if should_retry {
+                                        warn!(
+                                            "Retrying node [name: {}, id: {}] attempt {}/{} after {}ms - {}",
+                                            node_name,
+                                            node_id.0,
+                                            attempt,
+                                            max_retries,
+                                            retry_delay,
+                                            err
+                                        );
+                                        drop(node_guard);
+                                        tokio::time::sleep(Duration::from_millis(retry_delay)).await;
+                                        continue;
                                     }
                                 }
-                                Err(panic_err) => {
-                                    // Panic occurred - don't retry panics
-                                    break Err(panic_err);
-                                }
+
+                                break Ok((out, duration_ms));
                             }
-                        };
+                            Ok(out) => break Ok((out, duration_ms)),
+                            Err(_) => {
+                                break Err(
+                                    DagrsError::new(
+                                        ErrorCode::DgRun0001TaskPanicked,
+                                        "node execution panicked",
+                                    )
+                                    .with_node(node_id.as_usize(), node_name.clone()),
+                                )
+                            }
+                        }
+                    };
 
-                        // Process the final output
-                        match final_output {
-                            Ok(out) => {
-                                let node_guard = node_ref.lock().await;
-
-                                // Hook: after_node_run
+                    match final_output {
+                        Ok((out, duration_ms)) => {
+                            let node_guard = node_ref.lock().await;
+                            if out.is_err() {
+                                let err = out.get_err().cloned().unwrap_or_else(|| {
+                                    DagrsError::new(
+                                        ErrorCode::DgRun0006NodeExecutionFailed,
+                                        "node execution failed without an error payload",
+                                    )
+                                    .with_node(node_id.as_usize(), node_name.clone())
+                                });
+                                error!(
+                                    "Execution failed [name: {}, id: {}] - {} (after {} retries)",
+                                    node_name, node_id.0, err, attempt
+                                );
+                                let _ = event_sender.send(GraphEvent::NodeFailed {
+                                    id: node_id,
+                                    error: err.clone(),
+                                });
+                                execute_state.set_output(out.clone());
+                                execute_state.exe_fail();
+                                errors.lock().await.push(err);
+                            } else {
                                 {
                                     let hooks_guard = hooks.read().await;
                                     for hook in hooks_guard.iter() {
@@ -701,116 +816,69 @@ impl Graph {
                                     }
                                 }
 
-                                if out.is_err() {
-                                    let error_msg = out.get_err().unwrap_or_default();
-                                    error!(
-                                        "Execution failed [name: {}, id: {}] - {} (after {} retries)",
-                                        node_name, id_val, error_msg, attempt
-                                    );
-                                    let _ = event_sender.send(GraphEvent::NodeFailed {
-                                        id: node_id,
-                                        error: error_msg.clone(),
-                                    });
-
-                                    let err_obj = GraphError::ExecutionFailed {
-                                        node_name: node_name.clone(),
-                                        node_id: id_val,
-                                        error: error_msg.clone(),
-                                    };
-                                    {
-                                        let hooks_guard = hooks.read().await;
-                                        for hook in hooks_guard.iter() {
-                                            hook.on_error(&err_obj, &env).await;
-                                        }
-                                    }
-
-                                    execute_state.set_output(out.clone());
-                                    execute_state.exe_fail();
-                                    let mut errors_lock = errors.lock().await;
-                                    errors_lock.push(err_obj);
-                                } else {
-                                    if let Some(false) = out.conditional_result() {
-                                        let mut cf = condition_flag.lock().await;
-                                        *cf = false;
-                                        info!(
-                                            "Condition failed on [name: {}, id: {}]. The rest nodes will abort.",
-                                            node_name, id_val,
-                                        )
-                                    }
-                                    let _ =
-                                        event_sender.send(GraphEvent::NodeSuccess { id: node_id });
-
-                                    execute_state.set_output(out.clone());
-                                    execute_state.exe_success();
-                                    debug!(
-                                        "Execution succeed [name: {}, id: {}]{}",
-                                        node_name,
-                                        id_val,
-                                        if attempt > 0 {
-                                            format!(" (after {} retries)", attempt)
-                                        } else {
-                                            String::new()
-                                        }
-                                    );
+                                if let Some(false) = out.conditional_result() {
+                                    let mut cf = condition_flag.lock().await;
+                                    *cf = false;
                                 }
 
-                                (node_id, out)
-                            }
-                            Err(_) => {
-                                // Panic occurred
-                                let mut node_guard = node_ref.lock().await;
-                                node_guard.input_channels().close_all().await;
-                                node_guard.output_channels().close_all().await;
-
-                                error!("Execution panic [name: {}, id: {}]", node_name, id_val);
-                                let _ = event_sender.send(GraphEvent::NodeFailed {
+                                let _ = event_sender.send(GraphEvent::NodeSuccess {
                                     id: node_id,
-                                    error: "Panic".to_string(),
+                                    duration_ms,
                                 });
-
-                                execute_state.set_output(Output::Err("Panic".to_string()));
-                                execute_state.exe_fail();
-
-                                let err_obj = GraphError::PanicOccurred {
-                                    node_name: node_name.clone(),
-                                    node_id: id_val,
-                                };
-                                {
-                                    let hooks_guard = hooks.read().await;
-                                    for hook in hooks_guard.iter() {
-                                        hook.on_error(&err_obj, &env).await;
-                                    }
-                                }
-
-                                let mut errors_lock = errors.lock().await;
-                                errors_lock.push(err_obj);
-                                (node_id, Output::Err("Panic".to_string()))
+                                execute_state.set_output(out.clone());
+                                execute_state.exe_success();
                             }
+                            Ok::<_, DagrsError>((node_id, out))
+                        }
+                        Err(err) => {
+                            let mut node_guard = node_ref.lock().await;
+                            node_guard.input_channels().close_all().await;
+                            node_guard.output_channels().close_all().await;
+                            let _ = event_sender.send(GraphEvent::NodeFailed {
+                                id: node_id,
+                                error: err.clone(),
+                            });
+                            execute_state.set_output(Output::error(err.clone()));
+                            execute_state.exe_fail();
+                            errors.lock().await.push(err.clone());
+                            Ok::<_, DagrsError>((node_id, Output::error(err)))
                         }
                     }
-                });
-                tasks.push(task);
+                }));
             }
 
-            let results: Vec<Result<(NodeId, Output), tokio::task::JoinError>> =
-                futures::future::join_all(tasks).await;
+            let mut results = Vec::new();
+            for result in futures::future::join_all(tasks).await {
+                match result {
+                    Ok(Ok(output)) => results.push(output),
+                    Ok(Err(err)) => errors.lock().await.push(err),
+                    Err(join_err) => {
+                        errors.lock().await.push(
+                            DagrsError::new(
+                                ErrorCode::DgRun0002TaskJoinFailed,
+                                format!("node task join failed: {join_err}"),
+                            ),
+                        );
+                    }
+                }
+            }
 
-            // Update nodes completed count
+            completed_total += active_block_nodes.len();
             nodes_since_checkpoint += active_block_nodes.len();
+            let _ = self.event_sender.send(GraphEvent::Progress {
+                completed: completed_total,
+                total: self.nodes.len(),
+            });
 
-            // Check for errors immediately
             let errors_guard = errors.lock().await;
             if !errors_guard.is_empty() {
-                // Save checkpoint before failing
                 if self.checkpoint_config.enabled && self.checkpoint_store.is_some() {
                     let _ = self.save_checkpoint(pc, loop_count, &active_nodes).await;
                 }
-
-                if errors_guard.len() == 1 {
-                    return Err(errors_guard[0].clone());
-                } else {
-                    return Err(GraphError::MultipleErrors(errors_guard.clone()));
-                }
+                let err = Self::aggregate_errors(&errors_guard);
+                drop(errors_guard);
+                self.emit_termination(TerminationStatus::Failed, Some(err.clone()));
+                return Err(err);
             }
             drop(errors_guard);
 
@@ -820,8 +888,7 @@ impl Graph {
 
             let mut next_pc = pc + 1;
             let mut should_abort = false;
-
-            for (node_id, output) in results.into_iter().flatten() {
+            for (node_id, output) in results {
                 if self.handle_flow_control(
                     output,
                     node_id,
@@ -837,24 +904,27 @@ impl Graph {
             }
 
             if should_abort {
+                status = CompletionStatus::Aborted;
                 break;
             }
 
-            // Check for loop (backward jump)
             if next_pc < pc {
                 loop_count += 1;
                 if loop_count >= self.max_loop_count {
-                    return Err(GraphError::LoopLimitExceeded(self.max_loop_count));
+                    let err = DagrsError::new(
+                        ErrorCode::DgRun0003LoopLimitExceeded,
+                        "maximum loop limit exceeded",
+                    )
+                    .with_detail("limit", self.max_loop_count.to_string());
+                    self.emit_termination(TerminationStatus::Failed, Some(err.clone()));
+                    return Err(err);
                 }
 
-                // Save checkpoint on loop iteration if configured
                 if self.checkpoint_config.enabled
                     && self.checkpoint_config.on_loop_iteration
                     && self.checkpoint_store.is_some()
                 {
-                    let _ = self
-                        .save_checkpoint(next_pc, loop_count, &active_nodes)
-                        .await;
+                    let _ = self.save_checkpoint(next_pc, loop_count, &active_nodes).await;
                 }
 
                 let _ = self.event_sender.send(GraphEvent::LoopIteration {
@@ -868,12 +938,20 @@ impl Graph {
             pc = next_pc;
         }
 
-        let _ = self.event_sender.send(GraphEvent::GraphFinished);
+        let termination_status = match status {
+            CompletionStatus::Succeeded => TerminationStatus::Succeeded,
+            CompletionStatus::Aborted => TerminationStatus::Aborted,
+        };
+        let termination_error = matches!(status, CompletionStatus::Aborted)
+            .then(DagrsError::aborted);
+        self.emit_termination(termination_status, termination_error);
 
-        self.is_active
-            .store(false, std::sync::atomic::Ordering::Relaxed);
-
-        Ok(())
+        Ok(self.build_report(
+            run_id,
+            status,
+            started_at_unix_secs,
+            skipped_total,
+        ))
     }
 
     /// Check if a checkpoint should be created based on configuration.
@@ -893,9 +971,15 @@ impl Graph {
 
     /// Reset the graph state but keep the nodes.
     /// This method is async because it needs to acquire locks on nodes.
-    pub async fn reset(&mut self) {
+    pub async fn reset(&mut self) -> DagrsResult<()> {
+        self.reset_with(ResetPolicy::KeepEnv).await
+    }
+
+    pub async fn reset_with(&mut self, policy: ResetPolicy) -> DagrsResult<()> {
         self.execute_states = HashMap::new();
-        self.env = Arc::new(EnvVar::new(NodeTable::default()));
+        if matches!(policy, ResetPolicy::ResetEnv) {
+            self.env = Arc::new(EnvVar::new(NodeTable::default()));
+        }
         self.is_active = Arc::new(AtomicBool::new(true));
         self.blocks.clear();
         self.node_block_map.clear();
@@ -962,6 +1046,7 @@ impl Graph {
                 }
             }
         }
+        Ok(())
     }
 
     /// Register a new execution hook
@@ -978,38 +1063,73 @@ impl Graph {
     fn try_lock_node_for_build<'a>(
         node: &'a Arc<Mutex<dyn Node>>,
         context: &str,
-    ) -> tokio::sync::MutexGuard<'a, dyn Node> {
-        node.try_lock().unwrap_or_else(|_| {
-            panic!(
-                "Failed to acquire node lock while building graph ({context}). \
-                 Build the graph from a single context without concurrent mutations."
+    ) -> DagrsResult<tokio::sync::MutexGuard<'a, dyn Node>> {
+        node.try_lock().map_err(|_| {
+            DagrsError::new(
+                ErrorCode::DgBld0005ConcurrentBuildMutation,
+                format!(
+                    "failed to acquire node lock while building graph ({context}); build the graph from a single context"
+                ),
             )
         })
     }
 
     /// Adds a new node to the `Graph`
-    pub fn add_node(&mut self, node: impl Node + 'static) {
+    pub fn add_node(&mut self, node: impl Node + 'static) -> DagrsResult<NodeId> {
         if let Some(loop_structure) = node.loop_structure() {
             // Expand loop subgraph, and update concrete node id -> abstract node id mapping in abstract_graph
             let abstract_node_id = node.id();
+
+            if self.nodes.contains_key(&abstract_node_id) {
+                return Err(
+                    DagrsError::new(
+                        ErrorCode::DgBld0003DuplicateNodeId,
+                        "duplicate node id detected while adding loop subgraph",
+                    )
+                    .with_node_id(abstract_node_id.as_usize()),
+                );
+            }
 
             log::debug!("Add node {:?} to abstract graph", abstract_node_id);
             self.abstract_graph.add_folded_node(
                 abstract_node_id,
                 loop_structure
                     .iter()
-                    .map(|n| Self::try_lock_node_for_build(n, "loop_structure node id").id())
-                    .collect(),
+                    .map(|n| {
+                        Self::try_lock_node_for_build(n, "loop_structure node id")
+                            .map(|guard| guard.id())
+                    })
+                    .collect::<DagrsResult<Vec<_>>>()?,
             );
 
             for node in loop_structure {
                 let concrete_id =
-                    Self::try_lock_node_for_build(&node, "loop_structure concrete id").id();
+                    Self::try_lock_node_for_build(&node, "loop_structure concrete id")?.id();
+                if self.nodes.contains_key(&concrete_id) {
+                    return Err(
+                        DagrsError::new(
+                            ErrorCode::DgBld0003DuplicateNodeId,
+                            "duplicate node id detected while expanding loop subgraph",
+                        )
+                        .with_node_id(concrete_id.as_usize()),
+                    );
+                }
                 log::debug!("Add node {:?} to concrete graph", concrete_id);
                 self.nodes.insert(concrete_id, node.clone());
+                self.in_degree.entry(concrete_id).or_insert(0);
             }
+            Ok(abstract_node_id)
         } else {
             let id = node.id();
+            if self.nodes.contains_key(&id) {
+                return Err(
+                    DagrsError::new(
+                        ErrorCode::DgBld0003DuplicateNodeId,
+                        "duplicate node id detected",
+                    )
+                    .with_node_id(id.as_usize()),
+                );
+            }
             let node = Arc::new(Mutex::new(node));
             self.node_count += 1;
             self.nodes.insert(id, node);
@@ -1017,21 +1137,39 @@ impl Graph {
             self.abstract_graph.add_node(id);
 
             log::debug!("Add node {:?} to concrete & abstract graph", id);
+            Ok(id)
         }
     }
     /// Adds an edge between two nodes in the `Graph`.
     /// If the outgoing port of the sending node is empty and the number of receiving nodes is > 1, use the broadcast channel
     /// An MPSC channel is used if the outgoing port of the sending node is empty and the number of receiving nodes is equal to 1
     /// If the outgoing port of the sending node is not empty, adding any number of receiving nodes will change all relevant channels to broadcast
-    pub fn add_edge(&mut self, from_id: NodeId, all_to_ids: Vec<NodeId>) {
+    pub fn add_edge(&mut self, from_id: NodeId, all_to_ids: Vec<NodeId>) -> DagrsResult<()> {
         let to_ids = Self::remove_duplicates(all_to_ids);
         let mut rx_map: HashMap<NodeId, mpsc::Receiver<Content>> = HashMap::new();
+        if !self.nodes.contains_key(&from_id) {
+            return Err(
+                DagrsError::new(ErrorCode::DgBld0001NodeNotFound, "source node not found")
+                    .with_node_id(from_id.as_usize()),
+            );
+        }
+        for to_id in &to_ids {
+            if !self.nodes.contains_key(to_id) {
+                return Err(
+                    DagrsError::new(ErrorCode::DgBld0001NodeNotFound, "target node not found")
+                        .with_node_id(to_id.as_usize()),
+                );
+            }
+        }
 
         // Update channels
         {
-            let from_node_lock = self.nodes.get_mut(&from_id).unwrap();
+            let from_node_lock = self.nodes.get_mut(&from_id).ok_or_else(|| {
+                DagrsError::new(ErrorCode::DgBld0001NodeNotFound, "source node not found")
+                    .with_node_id(from_id.as_usize())
+            })?;
             let mut from_node =
-                Self::try_lock_node_for_build(from_node_lock, "add_edge from node output channels");
+                Self::try_lock_node_for_build(from_node_lock, "add_edge from node output channels")?;
             let from_channel = from_node.output_channels();
 
             for to_id in &to_ids {
@@ -1045,20 +1183,21 @@ impl Graph {
                         .or_insert(0);
 
                     // Update abstract graph
-                    self.abstract_graph.add_edge(from_id, *to_id);
+                    self.abstract_graph.add_edge(from_id, *to_id)?;
                 }
             }
         }
         for to_id in &to_ids {
             if let Some(to_node_lock) = self.nodes.get_mut(to_id) {
                 let mut to_node =
-                    Self::try_lock_node_for_build(to_node_lock, "add_edge to node input channels");
+                    Self::try_lock_node_for_build(to_node_lock, "add_edge to node input channels")?;
                 let to_channel = to_node.input_channels();
                 if let Some(rx) = rx_map.remove(to_id) {
                     to_channel.insert(from_id, Arc::new(Mutex::new(InChannel::Mpsc(rx))));
                 }
             }
         }
+        Ok(())
     }
 
     /// Initializes the network, setting up the nodes.
@@ -1091,412 +1230,38 @@ impl Graph {
     ///     Ok(())
     /// }
     /// ```
-    pub async fn async_start(&mut self) -> Result<(), GraphError> {
+    pub async fn async_start(&mut self) -> DagrsResult<ExecutionReport> {
+        self.async_start_with(RunOptions::default()).await
+    }
+
+    pub async fn async_start_with(&mut self, opts: RunOptions) -> DagrsResult<ExecutionReport> {
+        let started_at_unix_secs = Self::current_unix_secs();
+        let run_id = Self::run_id(opts.run_id);
+
         self.init();
-        let is_loop = self.check_loop_and_partition().await;
-        if is_loop {
-            return Err(GraphError::GraphLoopDetected);
+        if let Err(err) = self.check_loop_and_partition().await {
+            self.emit_termination(TerminationStatus::Failed, Some(err.clone()));
+            return Err(err);
         }
 
         if !self.is_active.load(Ordering::Relaxed) {
-            return Err(GraphError::GraphNotActive);
-        }
-        self.run().await
-    }
-
-    /// Executes the graph's nodes in a concurrent manner, respecting the block structure.
-    ///
-    /// - Executes nodes in blocks, where blocks are separated by conditional nodes
-    /// - Runs nodes within each block concurrently using Tokio tasks
-    /// - Handles node execution failures and panics
-    /// - Supports conditional execution - if a conditional node returns false, remaining blocks are aborted
-    /// - Tracks execution state and errors for each node
-    ///
-    /// # Returns
-    /// - `Ok(())` if all nodes execute successfully
-    /// - `Err(GraphError)` if any node fails or panics during execution
-    ///   - Returns single error if only one failure occurs
-    ///   - Returns `MultipleErrors` if multiple nodes fail
-    async fn run(&mut self) -> Result<(), GraphError> {
-        let condition_flag = Arc::new(Mutex::new(true));
-        let errors = Arc::new(Mutex::new(Vec::new()));
-
-        // Reset all nodes
-        for node in self.nodes.values() {
-            let mut node = node.lock().await;
-            node.reset();
+            let err = DagrsError::new(
+                ErrorCode::DgRun0004GraphNotActive,
+                "graph is not active; call reset() before executing again",
+            );
+            self.emit_termination(TerminationStatus::Failed, Some(err.clone()));
+            return Err(err);
         }
 
-        let mut pc = 0;
-        let mut loop_count = 0;
-        let mut active_nodes: HashSet<NodeId> = self.nodes.keys().cloned().collect();
-
-        // Build parents map for pruning logic
-        let mut parents_map: HashMap<NodeId, Vec<NodeId>> = HashMap::new();
-        for (parent, children) in &self.abstract_graph.edges {
-            for child in children {
-                parents_map.entry(*child).or_default().push(*parent);
-            }
-        }
-
-        // Start the nodes by blocks
-        while pc < self.blocks.len() {
-            let block = &self.blocks[pc];
-
-            let mut active_block_nodes = Vec::new();
-            let mut skipped_block_nodes = Vec::new();
-
-            for id in block {
-                if active_nodes.contains(id) {
-                    active_block_nodes.push(*id);
-                } else {
-                    skipped_block_nodes.push(*id);
-                }
-            }
-
-            // Handle skipped nodes
-            // Note: We do NOT close output channels here to support loop execution.
-            // Channels will be closed when the entire graph finishes.
-            for node_id in skipped_block_nodes {
-                let _ = self
-                    .event_sender
-                    .send(GraphEvent::NodeSkipped { id: node_id });
-                debug!("Skipped node [id: {}]", node_id.0);
-
-                // Hook: on_skip
-                if let Some(node) = self.nodes.get(&node_id) {
-                    let node_guard = node.lock().await;
-                    let hooks_guard = self.hooks.read().await;
-                    for hook in hooks_guard.iter() {
-                        hook.on_skip(&*node_guard, &self.env).await;
-                    }
-                }
-            }
-
-            if active_block_nodes.is_empty() {
-                pc += 1;
-                continue;
-            }
-
-            let mut tasks = vec![];
-            for node_id in active_block_nodes {
-                let node = self
-                    .nodes
-                    .get(&node_id)
-                    .ok_or(GraphError::NodeIdError(node_id.0))?;
-                let execute_state = self
-                    .execute_states
-                    .get(&node_id)
-                    .ok_or(GraphError::NodeIdError(node_id.0))?
-                    .clone();
-                let env = Arc::clone(&self.env);
-                let node = Arc::clone(node);
-                let condition_flag = condition_flag.clone();
-                let errors = errors.clone();
-                let hooks = self.hooks.clone();
-                let event_sender = self.event_sender.clone();
-
-                let task = task::spawn({
-                    let errors = Arc::clone(&errors);
-                    async move {
-                        let node_ref: Arc<Mutex<dyn Node>> = node.clone();
-                        let node_guard = node.lock().await;
-                        let node_name = node_guard.name().to_string();
-                        let node_id = node_guard.id();
-                        let id_val = node_id.0;
-                        let max_retries = node_guard.max_retries();
-
-                        // Hook: before_node_run
-                        {
-                            let hooks_guard = hooks.read().await;
-                            for hook in hooks_guard.iter() {
-                                hook.before_node_run(&*node_guard, &env).await;
-                            }
-                        }
-                        // Event: NodeStart
-                        let _ = event_sender.send(GraphEvent::NodeStart {
-                            id: node_id,
-                            timestamp: std::time::SystemTime::now()
-                                .duration_since(std::time::UNIX_EPOCH)
-                                .unwrap_or_default()
-                                .as_secs(),
-                        });
-
-                        // Drop guard before retry loop
-                        drop(node_guard);
-
-                        // Execute with retry logic
-                        let mut attempt = 0u32;
-
-                        let final_output = loop {
-                            // Re-acquire lock for each attempt
-                            let mut node_guard = node_ref.lock().await;
-                            let retry_delay = node_guard.retry_delay_ms(attempt + 1);
-
-                            let env_for_run = env.clone();
-                            let result = panic::catch_unwind(AssertUnwindSafe(|| {
-                                // We need to wrap node_guard in a way that can be moved
-                                // Since we can't move the guard into the closure, execute directly
-                                async move { node_guard.run(env_for_run).await }
-                            }));
-
-                            match result {
-                                Ok(future) => {
-                                    let out = future.await;
-
-                                    if out.is_err() {
-                                        let error_msg = out.get_err().unwrap_or_default();
-
-                                        // Check if we should retry
-                                        if attempt < max_retries {
-                                            attempt += 1;
-
-                                            // Emit NodeRetry event
-                                            let _ = event_sender.send(GraphEvent::NodeRetry {
-                                                id: node_id,
-                                                attempt,
-                                                max_retries,
-                                                error: error_msg.clone(),
-                                            });
-
-                                            // Call on_retry hook and check decision
-                                            let err_obj = GraphError::ExecutionFailed {
-                                                node_name: node_name.clone(),
-                                                node_id: id_val,
-                                                error: error_msg.clone(),
-                                            };
-
-                                            let mut should_retry = true;
-                                            {
-                                                let node_guard = node_ref.lock().await;
-                                                let hooks_guard = hooks.read().await;
-                                                for hook in hooks_guard.iter() {
-                                                    let decision = hook
-                                                        .on_retry(
-                                                            &*node_guard,
-                                                            &err_obj,
-                                                            attempt,
-                                                            max_retries,
-                                                            &env,
-                                                        )
-                                                        .await;
-                                                    if decision == RetryDecision::Fail {
-                                                        should_retry = false;
-                                                        break;
-                                                    }
-                                                }
-                                            }
-
-                                            if should_retry {
-                                                warn!(
-                                                    "Retrying node [name: {}, id: {}] attempt {}/{} after {}ms - {}",
-                                                    node_name,
-                                                    id_val,
-                                                    attempt,
-                                                    max_retries,
-                                                    retry_delay,
-                                                    error_msg
-                                                );
-                                                tokio::time::sleep(Duration::from_millis(
-                                                    retry_delay,
-                                                ))
-                                                .await;
-                                                continue;
-                                            }
-                                        }
-
-                                        // No more retries, fail
-                                        break Ok(out);
-                                    } else {
-                                        // Success
-                                        break Ok(out);
-                                    }
-                                }
-                                Err(panic_err) => {
-                                    // Panic occurred - don't retry panics
-                                    break Err(panic_err);
-                                }
-                            }
-                        };
-
-                        match final_output {
-                            Ok(out) => {
-                                let node = node_ref.lock().await;
-
-                                // Hook: after_node_run
-                                {
-                                    let hooks_guard = hooks.read().await;
-                                    for hook in hooks_guard.iter() {
-                                        hook.after_node_run(&*node, &out, &env).await;
-                                    }
-                                }
-
-                                if out.is_err() {
-                                    let error_msg = out.get_err().unwrap_or_default();
-                                    error!(
-                                        "Execution failed [name: {}, id: {}] - {} (after {} retries)",
-                                        node_name, id_val, error_msg, attempt
-                                    );
-                                    let _ = event_sender.send(GraphEvent::NodeFailed {
-                                        id: node_id,
-                                        error: error_msg.clone(),
-                                    });
-
-                                    // Hook: on_error
-                                    let err_obj = GraphError::ExecutionFailed {
-                                        node_name: node_name.clone(),
-                                        node_id: id_val,
-                                        error: error_msg.clone(),
-                                    };
-                                    {
-                                        let hooks_guard = hooks.read().await;
-                                        for hook in hooks_guard.iter() {
-                                            hook.on_error(&err_obj, &env).await;
-                                        }
-                                    }
-
-                                    execute_state.set_output(out.clone());
-                                    execute_state.exe_fail();
-                                    let mut errors_lock = errors.lock().await;
-                                    errors_lock.push(err_obj);
-                                } else {
-                                    if let Some(false) = out.conditional_result() {
-                                        let mut cf = condition_flag.lock().await;
-                                        *cf = false;
-                                        info!(
-                                            "Condition failed on [name: {}, id: {}]. The rest nodes will abort.",
-                                            node_name, id_val,
-                                        )
-                                    }
-                                    let _ =
-                                        event_sender.send(GraphEvent::NodeSuccess { id: node_id });
-
-                                    execute_state.set_output(out.clone());
-                                    execute_state.exe_success();
-                                    debug!(
-                                        "Execution succeed [name: {}, id: {}]{}",
-                                        node_name,
-                                        id_val,
-                                        if attempt > 0 {
-                                            format!(" (after {} retries)", attempt)
-                                        } else {
-                                            String::new()
-                                        }
-                                    );
-                                }
-
-                                (node_id, out)
-                            }
-                            Err(_) => {
-                                let mut node_guard: tokio::sync::MutexGuard<dyn Node> =
-                                    node_ref.lock().await;
-                                node_guard.input_channels().close_all().await;
-                                node_guard.output_channels().close_all().await;
-
-                                error!("Execution panic [name: {}, id: {}]", node_name, id_val,);
-                                let _ = event_sender.send(GraphEvent::NodeFailed {
-                                    id: node_id,
-                                    error: "Panic".to_string(),
-                                });
-
-                                execute_state.set_output(Output::Err("Panic".to_string()));
-                                execute_state.exe_fail();
-
-                                let err_obj = GraphError::PanicOccurred {
-                                    node_name: node_name.clone(),
-                                    node_id: id_val,
-                                };
-                                // Hook: on_error
-                                {
-                                    let hooks_guard = hooks.read().await;
-                                    for hook in hooks_guard.iter() {
-                                        hook.on_error(&err_obj, &env).await;
-                                    }
-                                }
-
-                                let mut errors_lock = errors.lock().await;
-                                errors_lock.push(err_obj);
-                                (node_id, Output::Err("Panic".to_string()))
-                            }
-                        }
-                    }
-                });
-                tasks.push(task);
-            }
-
-            let results: Vec<Result<(NodeId, Output), tokio::task::JoinError>> =
-                futures::future::join_all(tasks).await;
-
-            // Check for errors immediately
-            let errors_guard = errors.lock().await;
-            if !errors_guard.is_empty() {
-                if errors_guard.len() == 1 {
-                    return Err(errors_guard[0].clone());
-                } else {
-                    return Err(GraphError::MultipleErrors(errors_guard.clone()));
-                }
-            }
-            drop(errors_guard);
-
-            if !(*condition_flag.lock().await) {
-                break;
-            }
-
-            let mut next_pc = pc + 1;
-            let mut should_abort = false;
-
-            for (node_id, output) in results.into_iter().flatten() {
-                if self.handle_flow_control(
-                    output,
-                    node_id,
-                    &mut active_nodes,
-                    &self.node_block_map,
-                    &parents_map,
-                    &mut next_pc,
-                    self.blocks.len(),
-                )? {
-                    should_abort = true;
-                    break;
-                }
-            }
-
-            if should_abort {
-                break;
-            }
-
-            // Check for loop (backward jump)
-            // Only increment loop counter on actual backward jumps (next_pc < pc)
-            // not on staying at the same block (next_pc == pc)
-            if next_pc < pc {
-                loop_count += 1;
-                if loop_count >= self.max_loop_count {
-                    return Err(GraphError::LoopLimitExceeded(self.max_loop_count));
-                }
-
-                // Event: LoopIteration
-                let _ = self.event_sender.send(GraphEvent::LoopIteration {
-                    iteration: loop_count,
-                    block_index: next_pc,
-                });
-
-                // Reset active_nodes on loop iteration to allow dynamic routing.
-                // This ensures that nodes pruned by a router in a previous iteration
-                // can be selected in subsequent iterations (e.g., alternating between branches).
-                active_nodes = self.nodes.keys().cloned().collect();
-            }
-
-            pc = next_pc;
-        }
-
-        // Send GraphFinished event BEFORE setting is_active to false
-        // to avoid race conditions where subscribers see the flag change
-        // before receiving the event.
-        let _ = self.event_sender.send(GraphEvent::GraphFinished);
-
-        self.is_active
-            .store(false, std::sync::atomic::Ordering::Relaxed);
-
-        Ok(())
+        self.run_internal(
+            run_id,
+            started_at_unix_secs,
+            0,
+            0,
+            self.nodes.keys().cloned().collect(),
+            true,
+        )
+        .await
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1509,7 +1274,7 @@ impl Graph {
         parents_map: &HashMap<NodeId, Vec<NodeId>>,
         next_pc: &mut usize,
         blocks_len: usize,
-    ) -> Result<bool, GraphError> {
+    ) -> DagrsResult<bool> {
         if let Some(flow) = output.get_flow() {
             match flow {
                 FlowControl::Loop(instr) => {
@@ -1520,15 +1285,15 @@ impl Graph {
                                 "Graph configuration error: jump_to_block_index {} is out of bounds (blocks count: {})",
                                 idx, blocks_len
                             );
-                            return Err(GraphError::ExecutionFailed {
-                                node_name: format!("Node-{}", node_id.0),
-                                node_id: node_id.0,
-                                error: format!(
-                                    "Graph configuration error: jump_to_block_index {} is out of bounds. \
-                                     Valid range is 0..{}",
-                                    idx, blocks_len
-                                ),
-                            });
+                            return Err(
+                                DagrsError::new(
+                                    ErrorCode::DgRun0006NodeExecutionFailed,
+                                    format!(
+                                        "jump_to_block_index {idx} is out of bounds; valid range is 0..{blocks_len}"
+                                    ),
+                                )
+                                .with_node_id(node_id.as_usize()),
+                            );
                         }
                         *next_pc = idx;
                     } else if let Some(nid) = instr.jump_to_node {
@@ -1540,15 +1305,15 @@ impl Graph {
                                     "Internal error: node_block_map contains invalid block index {} for node {} (blocks count: {})",
                                     idx, nid, blocks_len
                                 );
-                                return Err(GraphError::ExecutionFailed {
-                                    node_name: format!("Node-{}", node_id.0),
-                                    node_id: node_id.0,
-                                    error: format!(
-                                        "Internal error: node_block_map contains invalid block index {} for node {}. \
-                                         This indicates a bug in the graph partitioning logic.",
-                                        idx, nid
-                                    ),
-                                });
+                                return Err(
+                                    DagrsError::new(
+                                        ErrorCode::DgRun0006NodeExecutionFailed,
+                                        format!(
+                                            "node_block_map resolved invalid block index {idx} for node {nid}"
+                                        ),
+                                    )
+                                    .with_node_id(node_id.as_usize()),
+                                );
                             }
                             *next_pc = idx;
                         } else {
@@ -1557,15 +1322,13 @@ impl Graph {
                                    This is likely due to an incorrect node ID in the LoopInstruction.",
                                 nid
                             );
-                            return Err(GraphError::ExecutionFailed {
-                                node_name: format!("Node-{}", node_id.0),
-                                node_id: node_id.0,
-                                error: format!(
-                                    "Graph configuration error: invalid jump target node {} not found. \
-                                     Ensure the node ID exists in the graph.",
-                                    nid
-                                ),
-                            });
+                            return Err(
+                                DagrsError::new(
+                                    ErrorCode::DgRun0006NodeExecutionFailed,
+                                    format!("invalid jump target node {nid} not found"),
+                                )
+                                .with_node_id(node_id.as_usize()),
+                            );
                         }
                     }
                 }
@@ -1636,11 +1399,16 @@ impl Graph {
     /// - Groups nodes into blocks, creating a new block whenever a conditional node / loop is encountered
     ///
     /// Returns true if the graph contains a cycle, false otherwise.
-    pub async fn check_loop_and_partition(&mut self) -> bool {
+    pub async fn check_loop_and_partition(&mut self) -> DagrsResult<()> {
         // Check for cycles and get topological sort
         let sorted_nodes = match self.abstract_graph.get_topological_sort() {
             Some(nodes) => nodes,
-            None => return true,
+            None => {
+                return Err(DagrsError::new(
+                    ErrorCode::DgBld0004GraphLoopDetected,
+                    "graph contains a loop",
+                ))
+            }
         };
 
         // Split into blocks based on conditional nodes
@@ -1665,7 +1433,12 @@ impl Graph {
                 current_block.insert(node_id);
 
                 // Create new block if conditional node / loop encountered
-                let node = self.nodes.get(&node_id).unwrap();
+                let Some(node) = self.nodes.get(&node_id) else {
+                    return Err(
+                        DagrsError::new(ErrorCode::DgBld0001NodeNotFound, "node not found")
+                            .with_node_id(node_id.as_usize()),
+                    );
+                };
                 // Use an async lock here to avoid blocking the runtime
                 let node_guard = node.lock().await;
                 if node_guard.is_condition() {
@@ -1689,7 +1462,7 @@ impl Graph {
 
         debug!("Split the graph into blocks: {:?}", self.blocks);
 
-        false
+        Ok(())
     }
 
     /// Get the output of all tasks.
@@ -1785,10 +1558,10 @@ mod tests {
         );
         let node1_id = node1.id();
 
-        graph.add_node(node);
-        graph.add_node(node1);
+        graph.add_node(node).unwrap();
+        graph.add_node(node1).unwrap();
 
-        graph.add_edge(node_id, vec![node1_id]);
+        graph.add_edge(node_id, vec![node1_id]).unwrap();
 
         match graph.async_start().await {
             Ok(_) => {
@@ -1846,22 +1619,17 @@ mod tests {
         let node_b_id = node_b.id();
 
         // Add nodes to graph
-        graph.add_node(node_a);
-        graph.add_node(node_b);
+        graph.add_node(node_a).unwrap();
+        graph.add_node(node_b).unwrap();
 
         // Add edge from A to B
-        graph.add_edge(node_a_id, vec![node_b_id]);
+        graph.add_edge(node_a_id, vec![node_b_id]).unwrap();
 
         // Execute graph
-        match graph.async_start().await {
-            Ok(_) => {
-                // Node A should have failed
-                assert!(graph.execute_states[&node_a_id].get_output().is_none());
-            }
-            Err(e) => {
-                assert!(matches!(e, GraphError::ExecutionFailed { .. }));
-            }
-        }
+        let report = graph.async_start().await.unwrap();
+        assert_eq!(report.status, CompletionStatus::Succeeded);
+        assert!(graph.execute_states[&node_a_id].is_success());
+        assert!(graph.execute_states[&node_b_id].get_output().is_none());
     }
 
     #[tokio::test]
@@ -1875,9 +1643,9 @@ mod tests {
         let node_a_id = node_a.id();
         let node_b_id = node_b.id();
 
-        graph.add_node(node_a);
-        graph.add_node(node_b);
-        graph.add_edge(node_a_id, vec![node_b_id]);
+        graph.add_node(node_a).unwrap();
+        graph.add_node(node_b).unwrap();
+        graph.add_edge(node_a_id, vec![node_b_id]).unwrap();
 
         let result = graph.async_start().await;
         assert!(result.is_ok());
