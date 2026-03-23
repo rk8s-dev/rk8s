@@ -21,6 +21,7 @@ pub struct AppState {
     pub user_storage: Arc<dyn UserRepository>,
     pub repo_storage: Arc<dyn RepoRepository>,
     pub config: Arc<Config>,
+    pub http_client: reqwest::Client,
 }
 
 impl AppState {
@@ -45,6 +46,7 @@ impl AppState {
             sessions: Arc::new(RwLock::new(HashMap::new())),
             storage: storage_backend,
             config: Arc::new(config),
+            http_client: reqwest::Client::new(),
             user_storage: Arc::new(PgUserRepository::new(pool.clone())),
             repo_storage: Arc::new(PgRepoRepository::new(pool)),
         })

@@ -35,8 +35,8 @@ impl Router for StaticRouter {
     }
 }
 
-#[test]
-fn test_branch_pruning() {
+#[tokio::test]
+async fn test_branch_pruning() {
     let mut graph = Graph::new();
     let mut table = NodeTable::new();
     let executed = Arc::new(Mutex::new(Vec::new()));
@@ -96,10 +96,7 @@ fn test_branch_pruning() {
     graph.add_edge(id_a, vec![id_b]); // A -> B
     graph.add_edge(id_c, vec![id_d]); // C -> D
 
-    let rt = tokio::runtime::Runtime::new().unwrap();
-    rt.block_on(async {
-        graph.async_start().await.unwrap();
-    });
+    graph.async_start().await.unwrap();
 
     let exec_log = executed.lock().unwrap();
     println!("Executed nodes: {:?}", *exec_log);
@@ -136,8 +133,8 @@ fn test_branch_pruning() {
 ///
 /// This tests that the pruning logic correctly handles the case where a node
 /// has multiple parents and at least one parent remains active.
-#[test]
-fn test_branch_pruning_diamond_with_active_alternate_parent() {
+#[tokio::test]
+async fn test_branch_pruning_diamond_with_active_alternate_parent() {
     let mut graph = Graph::new();
     let mut table = NodeTable::new();
     let executed = Arc::new(Mutex::new(Vec::new()));
@@ -207,10 +204,7 @@ fn test_branch_pruning_diamond_with_active_alternate_parent() {
     graph.add_edge(id_b, vec![id_d]);
     graph.add_edge(id_e, vec![id_d]); // E is an independent node that also connects to D
 
-    let rt = tokio::runtime::Runtime::new().unwrap();
-    rt.block_on(async {
-        graph.async_start().await.unwrap();
-    });
+    graph.async_start().await.unwrap();
 
     let exec_log = executed.lock().unwrap();
     println!("Executed nodes (diamond test): {:?}", *exec_log);
@@ -261,8 +255,8 @@ fn test_branch_pruning_diamond_with_active_alternate_parent() {
 ///
 /// This tests that the pruning state is reset on loop iteration to allow
 /// dynamic routing to select different branches in subsequent iterations.
-#[test]
-fn test_router_in_loop_alternating_branches() {
+#[tokio::test]
+async fn test_router_in_loop_alternating_branches() {
     use dagrs::node::loop_node::{LoopCondition, LoopNode};
 
     let mut graph = Graph::new();
@@ -373,10 +367,7 @@ fn test_router_in_loop_alternating_branches() {
     graph.add_edge(id_a, vec![id_loop]);
     graph.add_edge(id_b, vec![id_loop]);
 
-    let rt = tokio::runtime::Runtime::new().unwrap();
-    rt.block_on(async {
-        graph.async_start().await.unwrap();
-    });
+    graph.async_start().await.unwrap();
 
     let exec_log = executed.lock().unwrap();
     println!(

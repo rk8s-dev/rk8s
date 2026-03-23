@@ -14,15 +14,7 @@ use super::information_packet::Content;
 pub struct OutChannels(pub(crate) HashMap<NodeId, Arc<Mutex<OutChannel>>>);
 
 impl OutChannels {
-    /// Perform a blocking send on the outcoming channel from `NodeId`.
-    pub fn blocking_send_to(&self, id: &NodeId, content: Content) -> Result<(), SendErr> {
-        match self.get(id) {
-            Some(channel) => channel.blocking_lock().blocking_send(content),
-            None => Err(SendErr::NoSuchChannel),
-        }
-    }
-
-    /// Perform a asynchronous send on the outcoming channel from `NodeId`.
+    /// Perform an asynchronous send on the outgoing channel for `NodeId`.
     pub async fn send_to(&self, id: &NodeId, content: Content) -> Result<(), SendErr> {
         match self.get(id) {
             Some(channel) => channel.lock().await.send(content).await,
@@ -40,22 +32,14 @@ impl OutChannels {
         join_all(futures).await
     }
 
-    /// Blocking broadcasts the `content` to all the [`OutChannel`]s.
-    pub fn blocking_broadcast(&self, content: Content) -> Vec<Result<(), SendErr>> {
-        self.0
-            .values()
-            .map(|c| c.blocking_lock().blocking_send(content.clone()))
-            .collect()
-    }
-
     /// Close the channel by the given `NodeId`, and remove the channel in this map.
-    pub fn close(&mut self, id: &NodeId) {
+    pub async fn close(&mut self, id: &NodeId) {
         if self.get(id).is_some() {
             self.0.remove(id);
         }
     }
 
-    pub(crate) fn close_all(&mut self) {
+    pub(crate) async fn close_all(&mut self) {
         self.0.clear();
     }
 
@@ -85,21 +69,7 @@ pub enum OutChannel {
 }
 
 impl OutChannel {
-    /// Perform a blocking send on this channel.
-    fn blocking_send(&self, value: Content) -> Result<(), SendErr> {
-        match self {
-            OutChannel::Mpsc(sender) => match sender.blocking_send(value) {
-                Ok(_) => Ok(()),
-                Err(e) => Err(SendErr::ClosedChannel(e.0)),
-            },
-            OutChannel::Bcst(sender) => match sender.send(value) {
-                Ok(_) => Ok(()),
-                Err(e) => Err(SendErr::ClosedChannel(e.0)),
-            },
-        }
-    }
-
-    /// Perform a asynchronous send on this channel.
+    /// Perform an asynchronous send on this channel.
     async fn send(&self, value: Content) -> Result<(), SendErr> {
         match self {
             OutChannel::Mpsc(sender) => match sender.send(value).await {
@@ -138,15 +108,7 @@ pub struct TypedOutChannels<T: Send + Sync + 'static>(
 );
 
 impl<T: Send + Sync + 'static> TypedOutChannels<T> {
-    /// Perform a blocking send on the outcoming channel from `NodeId`.
-    pub fn blocking_send_to(&self, id: &NodeId, content: T) -> Result<(), SendErr> {
-        match self.get(id) {
-            Some(channel) => channel.blocking_lock().blocking_send(Content::new(content)),
-            None => Err(SendErr::NoSuchChannel),
-        }
-    }
-
-    /// Perform a asynchronous send on the outcoming channel from `NodeId`.
+    /// Perform an asynchronous send on the outcoming channel from `NodeId`.
     pub async fn send_to(&self, id: &NodeId, content: T) -> Result<(), SendErr> {
         match self.get(id) {
             Some(channel) => channel.lock().await.send(Content::new(content)).await,
@@ -165,17 +127,8 @@ impl<T: Send + Sync + 'static> TypedOutChannels<T> {
         join_all(futures).await
     }
 
-    /// Blocking broadcasts the `content` to all the [`TypedOutChannels`].
-    pub fn blocking_broadcast(&self, content: T) -> Vec<Result<(), SendErr>> {
-        let content = Content::new(content);
-        self.0
-            .values()
-            .map(|c| c.blocking_lock().blocking_send(content.clone()))
-            .collect()
-    }
-
     /// Close the channel by the given `NodeId`, and remove the channel in this map.
-    pub fn close(&mut self, id: &NodeId) {
+    pub async fn close(&mut self, id: &NodeId) {
         if self.get(id).is_some() {
             self.0.remove(id);
         }

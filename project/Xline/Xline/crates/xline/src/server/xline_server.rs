@@ -435,6 +435,20 @@ impl XlineServer {
         Ok(())
     }
 
+    /// Compatibility entrypoint for test utils that previously passed bound listeners.
+    ///
+    /// The current QUIC server binds from configured URLs, so the listeners are dropped
+    /// here to release ports before delegating to `start_with_quic`.
+    #[inline]
+    pub async fn start_from_listener(
+        &self,
+        xline_listener: tokio::net::TcpListener,
+        curp_listener: tokio::net::TcpListener,
+    ) -> Result<()> {
+        drop((xline_listener, curp_listener));
+        self.start_with_quic().await
+    }
+
     /// Init `KvServer`, `LockServer`, `LeaseServer`, `WatchServer` and
     /// `CurpServer` for the Xline Server.
     #[allow(

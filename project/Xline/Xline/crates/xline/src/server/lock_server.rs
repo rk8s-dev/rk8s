@@ -2,7 +2,10 @@ use std::sync::Arc;
 
 use async_stream::stream;
 use clippy_utilities::OverflowArithmetic;
-use xlinerpc::{Request, Response, Status};
+use http::uri::PathAndQuery;
+use tonic::Status;
+use tonic::client::Grpc;
+use tonic::codec::ProstCodec;
 use tonic::transport::{Channel, ClientTlsConfig, Endpoint};
 use tracing::debug;
 use utils::build_endpoint;
@@ -20,7 +23,7 @@ use crate::{
         LeaseGrantRequest, LeaseGrantResponse, LockRequest, LockResponse, PutRequest, RangeRequest,
         RangeResponse, Request, RequestOp, RequestUnion, RequestWrapper, Response, ResponseHeader,
         SortOrder, SortTarget, TargetUnion, TxnRequest, TxnResponse, UnlockRequest, UnlockResponse,
-        WatchClient, WatchCreateRequest, WatchRequest,
+        WatchCreateRequest, WatchRequest,
     },
     storage::AuthStore,
 };
@@ -131,8 +134,9 @@ impl LockServer {
         auth_info: Option<&AuthInfo>,
     ) -> Result<(), Status> {
         let rev = my_rev.overflow_sub(1);
-        let mut watch_client =
-            WatchClient::new(Channel::balance_list(self.addrs.clone().into_iter()));
+        let channel = Channel::balance_list(self.addrs.clone().into_iter());
+        let mut grpc = Grpc::new(channel);
+        let path = PathAndQuery::from_static("/etcdserverpb.Watch/Watch");
         loop {
             let range_end = KeyRange::get_prefix(&pfx);
             #[allow(clippy::as_conversions)] // this cast is always safe
@@ -159,7 +163,14 @@ impl LockServer {
                     })),
                 };
             };
-            let mut response_stream = watch_client.watch(request_stream).await?.into_inner();
+            let mut response_stream: tonic::Streaming<crate::rpc::WatchResponse> = grpc
+                .streaming(
+                    tonic::Request::new(request_stream),
+                    path.clone(),
+                    ProstCodec::default(),
+                )
+                .await?
+                .into_inner();
             while let Some(watch_res) = response_stream.message().await? {
                 #[allow(clippy::as_conversions)] // this cast is always safe
                 if watch_res

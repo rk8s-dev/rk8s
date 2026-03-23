@@ -36,6 +36,18 @@ pub(crate) struct Args {
     )]
     pub(crate) url: String,
 
+    /// Web App Internal Verify API URL
+    #[arg(
+        long,
+        env = "OCI_REGISTRY_AUTH_API_URL",
+        default_value = "http://127.0.0.1:7001/api/internal/verify"
+    )]
+    pub(crate) auth_api_url: String,
+
+    /// Shared internal token used for Distribution -> Web App verify calls.
+    #[arg(long, env = "INTERNAL_VERIFY_TOKEN")]
+    pub(crate) internal_verify_token: Option<String>,
+
     /// Database host
     #[arg(long, env = "POSTGRES_HOST", default_value = "localhost")]
     pub(crate) db_host: String,

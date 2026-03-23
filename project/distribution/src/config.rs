@@ -27,9 +27,8 @@ pub struct Config {
 
     pub jwt_secret: String,
     pub jwt_lifetime_secs: i64,
-
-    pub github_client_id: String,
-    pub github_client_secret: String,
+    pub auth_api_url: String,
+    pub internal_verify_token: String,
 
     pub s3_config: Option<S3Config>,
 }
@@ -138,8 +137,19 @@ pub async fn validate_config(args: &Args) -> Config {
     .unwrap();
     let jwt_lifetime_secs =
         must_set("JWT_LIFETIME_SECONDS", &mut validation_errors, Some(3600)).unwrap();
-    let github_client_id = must_set("GITHUB_CLIENT_ID", &mut validation_errors, None);
-    let github_client_secret = must_set("GITHUB_CLIENT_SECRET", &mut validation_errors, None);
+
+    let internal_verify_token = match args
+        .internal_verify_token
+        .as_ref()
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+    {
+        Some(token) => token.to_string(),
+        None => {
+            validation_errors.push("INTERNAL_VERIFY_TOKEN must be set".into());
+            String::new()
+        }
+    };
 
     let db_url = match std::env::var("DATABASE_URL") {
         Ok(url) => url,
@@ -172,8 +182,8 @@ pub async fn validate_config(args: &Args) -> Config {
         db_url,
         jwt_secret,
         jwt_lifetime_secs,
-        github_client_id: github_client_id.unwrap(),
-        github_client_secret: github_client_secret.unwrap(),
+        auth_api_url: args.auth_api_url.clone(),
+        internal_verify_token,
         s3_config,
     }
 }

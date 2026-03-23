@@ -15,12 +15,14 @@ mod quic;
 mod task;
 
 use commands::{
-    container::ContainerCommand, deployment::DeploymentCommand, logs::LogCommand, pod::PodCommand,
-    replicaset::ReplicaSetCommand, service::ServiceCommand,
+    apply::ApplyCommand, container::ContainerCommand, delete::DeleteCommand,
+    deployment::DeploymentCommand, exec::ExecCommand, get::GetCommand, logs::LogCommand,
+    pod::PodCommand, replicaset::ReplicaSetCommand, run::RunCommand, service::ServiceCommand,
 };
 use commands::{
-    container::container_execute, deployment::deployment_execute, logs::logs_execute,
-    pod::pod_execute, replicaset::replicaset_execute, service::service_execute,
+    apply::apply_execute, container::container_execute, delete::delete_execute,
+    deployment::deployment_execute, exec::exec_execute, get::get_execute, logs::logs_execute,
+    pod::pod_execute, replicaset::replicaset_execute, run::run_execute, service::service_execute,
 };
 use tracing::error;
 
@@ -45,6 +47,11 @@ struct Cli {
 impl Cli {
     fn run(self) -> Result<(), anyhow::Error> {
         match self.workload {
+            Workload::Apply(cmd) => apply_execute(cmd),
+            Workload::Run(cmd) => run_execute(cmd),
+            Workload::Exec(cmd) => exec_execute(cmd),
+            Workload::Get(cmd) => get_execute(cmd),
+            Workload::Delete(cmd) => delete_execute(cmd),
             Workload::Pod(cmd) => pod_execute(cmd),
             Workload::Container(cmd) => container_execute(cmd),
             Workload::Replicaset(cmd) => replicaset_execute(cmd),
@@ -58,19 +65,44 @@ impl Cli {
 
 #[derive(Subcommand)]
 enum Workload {
-    #[command(subcommand, about = "Operations related to pods", alias = "p")]
+    #[command(about = "Apply a configuration to a resource whether it exists or not")]
+    Apply(ApplyCommand),
+
+    #[command(about = "Create and run a particular image in a pod")]
+    Run(RunCommand),
+
+    #[command(about = "Execute a command in a container")]
+    Exec(ExecCommand),
+
+    #[command(about = "Display one or many resources")]
+    Get(GetCommand),
+
+    #[command(
+        about = "Delete resources by file names, stdin, resources and names, or by resources and label selector."
+    )]
+    Delete(DeleteCommand),
+
+    #[command(
+        subcommand,
+        about = "(Deprecated)Operations related to pods",
+        alias = "p"
+    )]
     Pod(PodCommand),
 
-    #[command(subcommand, about = "Manage standalone containers", alias = "c")]
+    #[command(
+        subcommand,
+        about = "(Deprecated)Manage standalone containers",
+        alias = "c"
+    )]
     Container(ContainerCommand),
 
-    #[command(subcommand, about = "Manage ReplicaSets", alias = "rs")]
+    #[command(subcommand, about = "(Deprecated)Manage ReplicaSets", alias = "rs")]
     Replicaset(ReplicaSetCommand),
 
-    #[command(subcommand, about = "Manage Deployments", alias = "deploy")]
+    #[command(subcommand, about = "(Deprecated)Manage Deployments", alias = "deploy")]
     Deployment(DeploymentCommand),
 
-    #[command(subcommand, about = "Manage Services", alias = "svc")]
+    #[command(subcommand, about = "(Deprecated)Manage Services", alias = "svc")]
     Service(ServiceCommand),
 
     #[command(about = "Get logs from a pod's container")]
