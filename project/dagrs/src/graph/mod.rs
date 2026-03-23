@@ -128,6 +128,8 @@ impl Default for Graph {
 }
 
 impl Graph {
+    const LOOP_NODE_ITERATIONS_METADATA_KEY: &'static str = "loop_node_iterations";
+
     /// Constructs a new `Graph`
     pub fn new() -> Self {
         let (tx, _) = broadcast::channel(100);
@@ -204,6 +206,17 @@ impl Graph {
         loop_count: usize,
         active_nodes: &HashSet<NodeId>,
     ) -> DagrsResult<String> {
+        self.save_checkpoint_with_loop_node_iterations(pc, loop_count, active_nodes, None)
+            .await
+    }
+
+    async fn save_checkpoint_with_loop_node_iterations(
+        &self,
+        pc: usize,
+        loop_count: usize,
+        active_nodes: &HashSet<NodeId>,
+        loop_node_iterations: Option<&HashMap<NodeId, usize>>,
+    ) -> DagrsResult<String> {
         let store = self.checkpoint_store.as_ref().ok_or_else(|| {
             DagrsError::new(
                 ErrorCode::DgChk0001StoreNotConfigured,
@@ -221,11 +234,6 @@ impl Graph {
             let serialized_output = output_content.as_ref().and_then(Self::try_serialize_output);
             let mut node_state = if output.is_err() {
                 NodeState::failed(node_id.0)
-            } else if exec_state.is_success()
-                && output_content.is_some()
-                && serialized_output.is_none()
-            {
-                NodeState::pending(node_id.0)
             } else if exec_state.is_success() {
                 NodeState::succeeded(node_id.0)
             } else if !active_nodes.contains(node_id) {
@@ -262,6 +270,11 @@ impl Graph {
         // Add metadata
         checkpoint.add_metadata("node_count", self.node_count.to_string());
         checkpoint.add_metadata("blocks_count", self.blocks.len().to_string());
+        if let Some(loop_node_iterations) = loop_node_iterations
+            && let Some(serialized) = Self::serialize_loop_node_iterations(loop_node_iterations)
+        {
+            checkpoint.add_metadata(Self::LOOP_NODE_ITERATIONS_METADATA_KEY, serialized);
+        }
 
         store.save(&checkpoint).await?;
 
@@ -287,6 +300,32 @@ impl Graph {
             checkpoint.id, pc, loop_count
         );
         Ok(checkpoint.id)
+    }
+
+    fn serialize_loop_node_iterations(
+        loop_node_iterations: &HashMap<NodeId, usize>,
+    ) -> Option<String> {
+        if loop_node_iterations.is_empty() {
+            return None;
+        }
+        let payload: HashMap<usize, usize> = loop_node_iterations
+            .iter()
+            .map(|(node_id, count)| (node_id.as_usize(), *count))
+            .collect();
+        serde_json::to_string(&payload).ok()
+    }
+
+    fn deserialize_loop_node_iterations(checkpoint: &Checkpoint) -> Option<HashMap<NodeId, usize>> {
+        let payload = checkpoint
+            .metadata
+            .get(Self::LOOP_NODE_ITERATIONS_METADATA_KEY)?;
+        let parsed: HashMap<usize, usize> = serde_json::from_str(payload).ok()?;
+        Some(
+            parsed
+                .into_iter()
+                .map(|(node_id, count)| (NodeId(node_id), count))
+                .collect(),
+        )
     }
 
     /// Try to get a human-readable summary of the output content
@@ -786,11 +825,20 @@ impl Graph {
     ) -> DagrsResult<()> {
         let mut restored_outputs = Vec::new();
         let mut skipped_senders = Vec::new();
+        let loop_node_iterations = Self::deserialize_loop_node_iterations(checkpoint);
 
-        for node in self.nodes.values() {
+        for (node_id, node) in &self.nodes {
             let mut node_guard = node.lock().await;
+            let restore_count = if let Some(loop_node_iterations) = &loop_node_iterations {
+                loop_node_iterations
+                    .get(node_id)
+                    .copied()
+                    .unwrap_or_default()
+            } else {
+                checkpoint.loop_count
+            };
             node_guard
-                .restore_from_checkpoint(checkpoint.loop_count)
+                .restore_from_checkpoint(restore_count)
                 .map_err(|err| err.with_checkpoint(checkpoint.id.clone()))?;
         }
 
@@ -988,6 +1036,7 @@ impl Graph {
             started_at_unix_secs,
             start_pc,
             checkpoint.loop_count,
+            Self::deserialize_loop_node_iterations(&checkpoint).unwrap_or_default(),
             active_nodes,
             false,
             completed_total,
@@ -1064,6 +1113,7 @@ impl Graph {
         started_at_unix_secs: u64,
         start_pc: usize,
         start_loop_count: usize,
+        initial_loop_node_iterations: HashMap<NodeId, usize>,
         initial_active_nodes: HashSet<NodeId>,
         reset_nodes: bool,
         initial_completed_total: usize,
@@ -1083,6 +1133,7 @@ impl Graph {
 
         let mut pc = start_pc;
         let mut loop_count = start_loop_count;
+        let mut loop_node_iterations = initial_loop_node_iterations;
         let mut active_nodes = initial_active_nodes;
 
         let mut parents_map: HashMap<NodeId, Vec<NodeId>> = HashMap::new();
@@ -1103,7 +1154,15 @@ impl Graph {
                     checkpoint_start_time.elapsed().as_secs(),
                 );
                 if should_checkpoint {
-                    if let Err(err) = self.save_checkpoint(pc, loop_count, &active_nodes).await {
+                    if let Err(err) = self
+                        .save_checkpoint_with_loop_node_iterations(
+                            pc,
+                            loop_count,
+                            &active_nodes,
+                            Some(&loop_node_iterations),
+                        )
+                        .await
+                    {
                         error!("Failed to save automatic checkpoint: {err}");
                     } else {
                         nodes_since_checkpoint = 0;
@@ -1371,7 +1430,14 @@ impl Graph {
             let errors_guard = errors.lock().await;
             if !errors_guard.is_empty() {
                 if self.checkpoint_config.enabled && self.checkpoint_store.is_some() {
-                    let _ = self.save_checkpoint(pc, loop_count, &active_nodes).await;
+                    let _ = self
+                        .save_checkpoint_with_loop_node_iterations(
+                            pc,
+                            loop_count,
+                            &active_nodes,
+                            Some(&loop_node_iterations),
+                        )
+                        .await;
                 }
                 let err = Self::aggregate_errors(&errors_guard);
                 drop(errors_guard);
@@ -1393,6 +1459,7 @@ impl Graph {
 
             let mut next_pc = pc + 1;
             let mut should_abort = false;
+            let mut backward_loop_source = None;
             for (node_id, output, _) in results {
                 if self.handle_flow_control(
                     output,
@@ -1402,6 +1469,8 @@ impl Graph {
                     &parents_map,
                     &mut next_pc,
                     self.blocks.len(),
+                    pc,
+                    &mut backward_loop_source,
                 )? {
                     should_abort = true;
                     break;
@@ -1415,6 +1484,9 @@ impl Graph {
 
             if next_pc < pc {
                 loop_count += 1;
+                if let Some(node_id) = backward_loop_source {
+                    *loop_node_iterations.entry(node_id).or_insert(0) += 1;
+                }
                 if loop_count >= self.max_loop_count {
                     let err = DagrsError::new(
                         ErrorCode::DgRun0003LoopLimitExceeded,
@@ -1430,7 +1502,12 @@ impl Graph {
                     && self.checkpoint_store.is_some()
                 {
                     let _ = self
-                        .save_checkpoint(next_pc, loop_count, &active_nodes)
+                        .save_checkpoint_with_loop_node_iterations(
+                            next_pc,
+                            loop_count,
+                            &active_nodes,
+                            Some(&loop_node_iterations),
+                        )
                         .await;
                 }
 
@@ -1770,6 +1847,7 @@ impl Graph {
             started_at_unix_secs,
             0,
             0,
+            HashMap::new(),
             self.nodes.keys().cloned().collect(),
             true,
             0,
@@ -1788,6 +1866,8 @@ impl Graph {
         parents_map: &HashMap<NodeId, Vec<NodeId>>,
         next_pc: &mut usize,
         blocks_len: usize,
+        current_pc: usize,
+        backward_loop_source: &mut Option<NodeId>,
     ) -> DagrsResult<bool> {
         if let Some(flow) = output.get_flow() {
             match flow {
@@ -1810,6 +1890,9 @@ impl Graph {
                             );
                         }
                         *next_pc = idx;
+                        if idx < current_pc {
+                            *backward_loop_source = Some(node_id);
+                        }
                     } else if let Some(nid) = instr.jump_to_node {
                         if let Some(&idx) = node_block_map.get(&NodeId(nid)) {
                             // Validate that the resolved block index is within valid range
@@ -1830,6 +1913,9 @@ impl Graph {
                                 );
                             }
                             *next_pc = idx;
+                            if idx < current_pc {
+                                *backward_loop_source = Some(node_id);
+                            }
                         } else {
                             error!(
                                 "Graph configuration error: invalid jump target node {} not found in block map. \
@@ -2032,7 +2118,10 @@ mod tests {
         NodeTable, OutChannels, Output, StoredOutputKind, action::Action,
     };
     use async_trait::async_trait;
-    use std::{sync::Arc, time::Duration};
+    use std::{
+        sync::{Arc, Mutex as StdMutex},
+        time::Duration,
+    };
 
     /// An implementation of [`Action`] that returns [`Output::Out`] containing a String "Hello world" from default_node.rs.
     #[derive(Default)]
@@ -2066,6 +2155,58 @@ mod tests {
         name: NodeName,
         in_channels: InChannels,
         out_channels: OutChannels,
+    }
+
+    struct RestoreProbeNode {
+        id: NodeId,
+        name: NodeName,
+        in_channels: InChannels,
+        out_channels: OutChannels,
+        restored_count: Arc<StdMutex<Option<usize>>>,
+    }
+
+    impl RestoreProbeNode {
+        fn new(
+            id: NodeId,
+            name: impl Into<NodeName>,
+            restored_count: Arc<StdMutex<Option<usize>>>,
+        ) -> Self {
+            Self {
+                id,
+                name: name.into(),
+                in_channels: InChannels::default(),
+                out_channels: OutChannels::default(),
+                restored_count,
+            }
+        }
+    }
+
+    #[async_trait]
+    impl Node for RestoreProbeNode {
+        fn id(&self) -> NodeId {
+            self.id
+        }
+
+        fn name(&self) -> NodeName {
+            self.name.clone()
+        }
+
+        fn input_channels(&mut self) -> &mut InChannels {
+            &mut self.in_channels
+        }
+
+        fn output_channels(&mut self) -> &mut OutChannels {
+            &mut self.out_channels
+        }
+
+        async fn run(&mut self, _: Arc<EnvVar>) -> Output {
+            Output::empty()
+        }
+
+        fn restore_from_checkpoint(&mut self, loop_count: usize) -> DagrsResult<()> {
+            *self.restored_count.lock().unwrap() = Some(loop_count);
+            Ok(())
+        }
     }
 
     impl FixedIdNode {
@@ -2342,7 +2483,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_save_checkpoint_marks_unserializable_success_as_pending() {
+    async fn test_save_checkpoint_keeps_unserializable_success_as_succeeded() {
         let mut graph = Graph::new();
         let mut node_table = NodeTable::new();
         let node = DefaultNode::with_action(
@@ -2364,8 +2505,52 @@ mod tests {
             .get(&node_id.as_usize())
             .expect("checkpoint should capture the node state");
 
-        assert_eq!(node_state.status, NodeExecStatus::Pending);
+        assert_eq!(node_state.status, NodeExecStatus::Succeeded);
         assert!(node_state.output_data.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_restore_checkpoint_uses_per_loop_node_iterations() {
+        let mut graph = Graph::new();
+        let mut node_table = NodeTable::new();
+        let first_id = node_table.alloc_id_for("loop-a");
+        let second_id = node_table.alloc_id_for("loop-b");
+
+        let first_restored = Arc::new(StdMutex::new(None));
+        let second_restored = Arc::new(StdMutex::new(None));
+
+        graph
+            .add_node(RestoreProbeNode::new(
+                first_id,
+                "loop-a",
+                first_restored.clone(),
+            ))
+            .unwrap();
+        graph
+            .add_node(RestoreProbeNode::new(
+                second_id,
+                "loop-b",
+                second_restored.clone(),
+            ))
+            .unwrap();
+        graph.init();
+
+        let mut checkpoint = Checkpoint::with_id("per_loop_restore", 0, 9);
+        checkpoint.add_node_state(NodeState::pending(first_id.as_usize()));
+        checkpoint.add_node_state(NodeState::pending(second_id.as_usize()));
+        checkpoint.add_metadata(
+            Graph::LOOP_NODE_ITERATIONS_METADATA_KEY,
+            serde_json::to_string(&HashMap::from([(first_id.as_usize(), 3usize)])).unwrap(),
+        );
+
+        let active_nodes = Graph::rebuild_active_nodes_from_checkpoint(&checkpoint);
+        graph
+            .restore_checkpoint_state(&checkpoint, &active_nodes)
+            .await
+            .unwrap();
+
+        assert_eq!(*first_restored.lock().unwrap(), Some(3));
+        assert_eq!(*second_restored.lock().unwrap(), Some(0));
     }
 
     #[tokio::test]

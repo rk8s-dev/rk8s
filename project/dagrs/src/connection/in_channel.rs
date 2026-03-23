@@ -61,7 +61,7 @@ impl InChannels {
             .0
             .iter_mut()
             .filter(|(id, _)| !disabled.contains(id))
-            .map(|(_, c)| async { c.lock().await.recv(NodeId(0)).await });
+            .map(|(id, c)| async move { c.lock().await.recv(*id).await });
         join_all(futures).await.into_iter().map(f).collect()
     }
 
@@ -211,8 +211,8 @@ impl<T: Send + Sync + 'static> TypedInChannels<T> {
             .0
             .iter_mut()
             .filter(|(id, _)| !disabled.contains(id))
-            .map(|(_, c)| async {
-                let content: Content = c.lock().await.recv(NodeId(0)).await?;
+            .map(|(id, c)| async move {
+                let content: Content = c.lock().await.recv(*id).await?;
                 Ok(content.into_inner())
             });
         join_all(futures).await.into_iter().map(f).collect()

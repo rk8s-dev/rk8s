@@ -11,7 +11,6 @@ fn run_cargo_check(case_dir: &Path) -> std::process::Output {
         .arg("--quiet")
         .arg("--manifest-path")
         .arg(case_dir.join("Cargo.toml"))
-        .env("CARGO_NET_OFFLINE", "true")
         .env("CARGO_TARGET_DIR", case_dir.join("target"))
         .output()
         .expect("failed to execute cargo check for UI fixture")

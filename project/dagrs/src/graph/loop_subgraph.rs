@@ -1,4 +1,5 @@
 use async_trait::async_trait;
+use std::collections::HashSet;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
@@ -19,6 +20,7 @@ pub struct LoopSubgraph {
     out_channels: OutChannels,
     // Inner nodes, contains the nodes that need to be executed in a loop
     inner_nodes: Vec<Arc<Mutex<dyn Node>>>,
+    inner_node_ids: HashSet<NodeId>,
 }
 
 impl LoopSubgraph {
@@ -29,6 +31,7 @@ impl LoopSubgraph {
             in_channels: InChannels::default(),
             out_channels: OutChannels::default(),
             inner_nodes: Vec::new(),
+            inner_node_ids: HashSet::new(),
         }
     }
 
@@ -43,21 +46,15 @@ impl LoopSubgraph {
     /// Add a node to the subgraph
     pub fn add_node(&mut self, node: impl Node + 'static) -> DagrsResult<NodeId> {
         let node_id = node.id();
-        for existing in &self.inner_nodes {
-            let existing = existing.try_lock().map_err(|_| {
-                DagrsError::new(
-                    ErrorCode::DgBld0005ConcurrentBuildMutation,
-                    "failed to acquire loop subgraph node lock while building graph",
-                )
-            })?;
-            if existing.id() == node_id {
-                return Err(DagrsError::new(
-                    ErrorCode::DgBld0003DuplicateNodeId,
-                    "duplicate node id detected while building loop subgraph",
-                )
-                .with_node_id(node_id.as_usize()));
-            }
+        if self.inner_node_ids.contains(&node_id) {
+            return Err(DagrsError::new(
+                ErrorCode::DgBld0003DuplicateNodeId,
+                "duplicate node id detected while building loop subgraph",
+            )
+            .with_node_id(node_id.as_usize()));
         }
+
+        self.inner_node_ids.insert(node_id);
         self.inner_nodes.push(Arc::new(Mutex::new(node)));
         Ok(node_id)
     }
