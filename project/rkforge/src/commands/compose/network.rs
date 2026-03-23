@@ -17,6 +17,7 @@ use std::net::Ipv4Addr;
 use std::path::Path;
 use std::path::PathBuf;
 
+use crate::commands::compose::spec::NetworkDriver;
 use crate::commands::compose::spec::NetworkDriver::Bridge;
 use crate::commands::compose::spec::NetworkDriver::Host;
 use crate::commands::compose::spec::NetworkDriver::Overlay;
@@ -56,6 +57,25 @@ fn next_container_ip_in_subnet(
         return None;
     }
     Some(Ipv4Addr::from(next.to_be_bytes()))
+}
+
+fn validate_network_driver(network_name: &str, driver: &NetworkDriver) -> Result<()> {
+    match driver {
+        Bridge => Ok(()),
+        Overlay | Host => Err(anyhow!(
+            "unsupported network driver '{}' for network '{}': only 'bridge' is supported",
+            driver_name(driver),
+            network_name
+        )),
+    }
+}
+
+fn driver_name(driver: &NetworkDriver) -> &'static str {
+    match driver {
+        Bridge => "bridge",
+        Overlay => "overlay",
+        Host => "host",
+    }
 }
 
 #[derive(Debug)]
@@ -197,21 +217,21 @@ impl NetworkManager {
                 },
             );
         }
+        for (network_name, network_spec) in &mut self.map {
+            if let Some(driver) = network_spec.driver.as_ref() {
+                validate_network_driver(network_name, driver)?;
+            } else {
+                // Compose defaults an omitted network driver to bridge.
+                network_spec.driver = Some(Bridge);
+            }
+        }
         Ok(())
     }
 
     fn allocate_interface(&mut self) -> Result<()> {
-        for (i, (k, v)) in self.map.iter().enumerate() {
-            if let Some(driver) = &v.driver {
-                match driver {
-                    // add the bridge default is rCompose0
-                    Bridge => self
-                        .network_interface
-                        .insert(k.to_string(), format!("rCompose{}", i + 1).to_string()),
-                    Overlay => todo!(),
-                    Host => todo!(),
-                };
-            }
+        for (i, (k, _v)) in self.map.iter().enumerate() {
+            self.network_interface
+                .insert(k.to_string(), format!("rCompose{}", i + 1));
         }
         Ok(())
     }
@@ -219,16 +239,12 @@ impl NetworkManager {
     fn allocate_subnets(&mut self) -> Result<()> {
         let pools = default_subnet_pools();
         let mut used: Vec<Ipv4Network> = Vec::new();
-        for (network_name, spec) in &self.map.clone() {
-            if matches!(spec.driver, Some(Bridge)) {
-                let (subnet, gateway) = get_free_ipv4_subnet(&used, &pools)
-                    .ok_or_else(|| anyhow!("could not find free subnet from subnet pools"))?;
-                used.push(subnet);
-                self.network_subnets
-                    .insert(network_name.clone(), NetworkSubnet { subnet, gateway });
-            } else {
-                todo!()
-            }
+        for network_name in self.map.clone().keys() {
+            let (subnet, gateway) = get_free_ipv4_subnet(&used, &pools)
+                .ok_or_else(|| anyhow!("could not find free subnet from subnet pools"))?;
+            used.push(subnet);
+            self.network_subnets
+                .insert(network_name.clone(), NetworkSubnet { subnet, gateway });
         }
         Ok(())
     }
@@ -565,4 +581,95 @@ fn default_aardvark_bin() -> Result<OsString> {
     }
 
     Err(anyhow!("aardvark-dns not found"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn parse_spec(yaml: &str) -> ComposeSpec {
+        serde_yaml::from_str(yaml).expect("compose yaml should parse")
+    }
+
+    #[test]
+    fn handle_rejects_overlay_driver() {
+        let spec = parse_spec(
+            r#"
+name: demo
+services:
+  app:
+    container_name: app
+    image: busybox
+    networks:
+      - app-net
+networks:
+  app-net:
+    driver: overlay
+"#,
+        );
+
+        let mut manager = NetworkManager::new("demo".to_string());
+        let err = manager
+            .handle(&spec)
+            .expect_err("overlay should be rejected");
+
+        let msg = err.to_string();
+        assert!(msg.contains("unsupported network driver 'overlay'"));
+        assert!(msg.contains("app-net"));
+    }
+
+    #[test]
+    fn handle_rejects_host_driver() {
+        let spec = parse_spec(
+            r#"
+name: demo
+services:
+  app:
+    container_name: app
+    image: busybox
+    networks:
+      - app-net
+networks:
+  app-net:
+    driver: host
+"#,
+        );
+
+        let mut manager = NetworkManager::new("demo".to_string());
+        let err = manager.handle(&spec).expect_err("host should be rejected");
+
+        let msg = err.to_string();
+        assert!(msg.contains("unsupported network driver 'host'"));
+        assert!(msg.contains("app-net"));
+    }
+
+    #[test]
+    fn handle_defaults_missing_driver_to_bridge() {
+        let spec = parse_spec(
+            r#"
+name: demo
+services:
+  app:
+    container_name: app
+    image: busybox
+    networks:
+      - app-net
+networks:
+  app-net:
+    external: false
+"#,
+        );
+
+        let mut manager = NetworkManager::new("demo".to_string());
+        manager
+            .handle(&spec)
+            .expect("missing driver should default to bridge");
+
+        let driver = manager
+            .map
+            .get("app-net")
+            .and_then(|n| n.driver.as_ref())
+            .expect("driver should be normalized to bridge");
+        assert!(matches!(driver, Bridge));
+    }
 }
