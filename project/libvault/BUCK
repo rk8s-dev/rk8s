@@ -127,7 +127,7 @@ buildscript_run(
     package_name = "libvault",
     buildscript_rule = ":build-script-build",
     env_srcs = [
-        "//third-party/rust/crates/openssl-sys/0.9.111:build-script-main-run[metadata]",
+        "//third-party/rust/crates/openssl-sys/0.9.111:openssl-sys-build-script-main-run[metadata]",
         ":manifest[env_dict]",
     ],
     features = [
