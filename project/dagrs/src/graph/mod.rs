@@ -496,20 +496,52 @@ impl Graph {
     }
 
     fn rebuild_active_nodes_from_checkpoint(checkpoint: &Checkpoint) -> HashSet<NodeId> {
-        let mut active_nodes = checkpoint.get_active_nodes();
+        let mut active_nodes: HashSet<_> = checkpoint
+            .get_active_nodes()
+            .into_iter()
+            .filter(|node_id| {
+                !matches!(
+                    checkpoint
+                        .node_states
+                        .get(&node_id.0)
+                        .map(|state| state.status),
+                    Some(NodeExecStatus::Skipped)
+                )
+            })
+            .collect();
         for (node_id_val, node_state) in &checkpoint.node_states {
             let node_id = NodeId(*node_id_val);
             match node_state.status {
-                NodeExecStatus::Succeeded => {
+                NodeExecStatus::Pending
+                | NodeExecStatus::Running
+                | NodeExecStatus::Succeeded
+                | NodeExecStatus::Failed => {
                     active_nodes.insert(node_id);
                 }
                 NodeExecStatus::Skipped => {
                     active_nodes.remove(&node_id);
                 }
-                NodeExecStatus::Pending | NodeExecStatus::Running | NodeExecStatus::Failed => {}
             }
         }
         active_nodes
+    }
+
+    fn node_should_receive_replayed_input(
+        checkpoint: &Checkpoint,
+        active_nodes: &HashSet<NodeId>,
+        node_id: NodeId,
+    ) -> bool {
+        if !active_nodes.contains(&node_id) {
+            return false;
+        }
+
+        !matches!(
+            checkpoint
+                .node_states
+                .get(&node_id.0)
+                .map(|state| state.status),
+            Some(NodeExecStatus::Succeeded | NodeExecStatus::Skipped)
+        )
     }
 
     fn checkpoint_progress_totals(checkpoint: &Checkpoint) -> (usize, usize) {
@@ -557,6 +589,48 @@ impl Graph {
                 receiver_guard.input_channels().disable_sender(sender);
             }
         }
+        Ok(())
+    }
+
+    fn validate_checkpoint(&self, checkpoint: &Checkpoint) -> DagrsResult<()> {
+        if checkpoint.pc >= self.blocks.len() {
+            return Err(DagrsError::new(
+                ErrorCode::DgChk0003InvalidCheckpoint,
+                format!(
+                    "checkpoint program counter {} is out of bounds for graph with {} blocks",
+                    checkpoint.pc,
+                    self.blocks.len()
+                ),
+            )
+            .with_checkpoint(checkpoint.id.clone())
+            .with_detail("pc", checkpoint.pc.to_string())
+            .with_detail("blocks_len", self.blocks.len().to_string()));
+        }
+
+        for node_id in &checkpoint.active_nodes {
+            let node_id = NodeId(*node_id);
+            if !self.nodes.contains_key(&node_id) {
+                return Err(DagrsError::new(
+                    ErrorCode::DgChk0003InvalidCheckpoint,
+                    "checkpoint active node does not exist in the graph",
+                )
+                .with_checkpoint(checkpoint.id.clone())
+                .with_node_id(node_id.as_usize()));
+            }
+        }
+
+        for node_id in checkpoint.node_states.keys() {
+            let node_id = NodeId(*node_id);
+            if !self.nodes.contains_key(&node_id) {
+                return Err(DagrsError::new(
+                    ErrorCode::DgChk0003InvalidCheckpoint,
+                    "checkpoint node state does not exist in the graph",
+                )
+                .with_checkpoint(checkpoint.id.clone())
+                .with_node_id(node_id.as_usize()));
+            }
+        }
+
         Ok(())
     }
 
@@ -630,8 +704,14 @@ impl Graph {
             if let Some(receiver_ids) = self.abstract_graph.edges.get(&skipped_sender) {
                 let active_receivers: Vec<_> = receiver_ids
                     .iter()
-                    .filter(|receiver_id| active_nodes.contains(receiver_id))
                     .copied()
+                    .filter(|receiver_id| {
+                        Self::node_should_receive_replayed_input(
+                            checkpoint,
+                            active_nodes,
+                            *receiver_id,
+                        )
+                    })
                     .collect();
                 self.set_sender_enabled_for_receivers(
                     skipped_sender,
@@ -656,9 +736,15 @@ impl Graph {
                 let mut node_guard = node.lock().await;
                 node_guard.output_channels().get_receiver_ids()
             };
+            let replay_receivers: Vec<_> = receiver_ids
+                .into_iter()
+                .filter(|receiver_id| {
+                    Self::node_should_receive_replayed_input(checkpoint, active_nodes, *receiver_id)
+                })
+                .collect();
             self.set_sender_enabled_for_receivers(
                 node_id,
-                &receiver_ids,
+                &replay_receivers,
                 true,
                 Some(checkpoint.id.as_str()),
             )
@@ -666,13 +752,11 @@ impl Graph {
 
             let mut node_guard = node.lock().await;
             let output_channels = node_guard.output_channels();
-            for receiver_id in receiver_ids {
-                if active_nodes.contains(&receiver_id) {
-                    output_channels
-                        .send_to(&receiver_id, content.clone())
-                        .await
-                        .map_err(|err| err.with_checkpoint(checkpoint.id.clone()))?;
-                }
+            for receiver_id in replay_receivers {
+                output_channels
+                    .send_to(&receiver_id, content.clone())
+                    .await
+                    .map_err(|err| err.with_checkpoint(checkpoint.id.clone()))?;
             }
         }
 
@@ -715,6 +799,10 @@ impl Graph {
 
         self.init();
         if let Err(err) = self.check_loop_and_partition().await {
+            self.emit_termination(TerminationStatus::Failed, Some(err.clone()));
+            return Err(err);
+        }
+        if let Err(err) = self.validate_checkpoint(&checkpoint) {
             self.emit_termination(TerminationStatus::Failed, Some(err.clone()));
             return Err(err);
         }
@@ -1762,10 +1850,11 @@ mod tests {
     use crate::node::conditional_node::{Condition, ConditionalNode};
     use crate::node::default_node::DefaultNode;
     use crate::{
-        Content, EnvVar, InChannels, Node, NodeName, NodeTable, OutChannels, Output, action::Action,
+        Checkpoint, Content, EnvVar, InChannels, Node, NodeName, NodeState, NodeTable, OutChannels,
+        Output, StoredOutputKind, action::Action,
     };
     use async_trait::async_trait;
-    use std::sync::Arc;
+    use std::{sync::Arc, time::Duration};
 
     /// An implementation of [`Action`] that returns [`Output::Out`] containing a String "Hello world" from default_node.rs.
     #[derive(Default)]
@@ -1901,5 +1990,124 @@ mod tests {
 
         let result = graph.async_start().await;
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_rebuild_active_nodes_from_checkpoint_without_snapshot() {
+        let mut checkpoint = Checkpoint::with_id("rebuild_active_nodes", 0, 0);
+        checkpoint.add_node_state(NodeState::pending(1));
+        checkpoint.add_node_state(NodeState::failed(2));
+        checkpoint.add_node_state(NodeState::succeeded(3));
+        checkpoint.add_node_state(NodeState::skipped(4));
+
+        let mut active_nodes: Vec<_> = Graph::rebuild_active_nodes_from_checkpoint(&checkpoint)
+            .into_iter()
+            .map(|id| id.as_usize())
+            .collect();
+        active_nodes.sort_unstable();
+
+        assert_eq!(active_nodes, vec![1, 2, 3]);
+    }
+
+    #[tokio::test]
+    async fn test_validate_checkpoint_rejects_out_of_bounds_pc() {
+        let mut graph = Graph::new();
+        let mut node_table = NodeTable::new();
+        let node = DefaultNode::new(NodeName::from("Node A"), &mut node_table);
+        let node_id = node.id();
+
+        graph.add_node(node).unwrap();
+        graph.init();
+        graph.check_loop_and_partition().await.unwrap();
+
+        let mut checkpoint = Checkpoint::with_id("invalid_pc", graph.blocks.len(), 0);
+        checkpoint.active_nodes.insert(node_id.as_usize());
+        checkpoint.add_node_state(NodeState::pending(node_id.as_usize()));
+
+        let err = graph
+            .validate_checkpoint(&checkpoint)
+            .expect_err("checkpoint pc should be rejected when it is out of bounds");
+        assert_eq!(err.code, ErrorCode::DgChk0003InvalidCheckpoint);
+    }
+
+    #[tokio::test]
+    async fn test_restore_checkpoint_does_not_replay_inputs_to_completed_receivers() {
+        struct AlwaysTrueCondition;
+
+        #[async_trait]
+        impl Condition for AlwaysTrueCondition {
+            async fn run(&self, _: &mut InChannels, _: &OutChannels, _: Arc<EnvVar>) -> bool {
+                true
+            }
+        }
+
+        let mut graph = Graph::new();
+        let mut node_table = NodeTable::new();
+
+        let node_a = DefaultNode::with_action(
+            NodeName::from("Node A"),
+            HelloAction::new(),
+            &mut node_table,
+        );
+        let node_a_id = node_a.id();
+        let node_b = DefaultNode::new(NodeName::from("Node B"), &mut node_table);
+        let node_b_id = node_b.id();
+        let gate = ConditionalNode::with_condition(
+            NodeName::from("Gate"),
+            AlwaysTrueCondition,
+            &mut node_table,
+        );
+        let gate_id = gate.id();
+        let node_c = DefaultNode::new(NodeName::from("Node C"), &mut node_table);
+        let node_c_id = node_c.id();
+
+        graph.add_node(node_a).unwrap();
+        graph.add_node(node_b).unwrap();
+        graph.add_node(gate).unwrap();
+        graph.add_node(node_c).unwrap();
+        graph.add_edge(node_a_id, vec![node_b_id]).unwrap();
+        graph.add_edge(node_b_id, vec![gate_id]).unwrap();
+        graph.add_edge(gate_id, vec![node_c_id]).unwrap();
+
+        graph.init();
+        graph.check_loop_and_partition().await.unwrap();
+        assert_eq!(graph.blocks.len(), 2);
+
+        let mut checkpoint = Checkpoint::with_id("completed_receivers", 1, 0);
+        checkpoint.active_nodes.extend([
+            node_a_id.as_usize(),
+            node_b_id.as_usize(),
+            gate_id.as_usize(),
+            node_c_id.as_usize(),
+        ]);
+        checkpoint.add_node_state(
+            NodeState::succeeded(node_a_id.as_usize())
+                .with_output_kind(StoredOutputKind::String)
+                .with_output_data(serde_json::to_vec(&"Hello world".to_string()).unwrap()),
+        );
+        checkpoint.add_node_state(NodeState::succeeded(node_b_id.as_usize()));
+        checkpoint.add_node_state(NodeState::succeeded(gate_id.as_usize()));
+        checkpoint.add_node_state(NodeState::pending(node_c_id.as_usize()));
+
+        let active_nodes = Graph::rebuild_active_nodes_from_checkpoint(&checkpoint);
+        graph
+            .restore_checkpoint_state(&checkpoint, &active_nodes)
+            .await
+            .unwrap();
+
+        let node_b = graph.nodes.get(&node_b_id).unwrap().clone();
+        let replay_result = {
+            let mut node_b_guard = node_b.lock().await;
+            tokio::time::timeout(
+                Duration::from_millis(50),
+                node_b_guard.input_channels().recv_from(&node_a_id),
+            )
+            .await
+        };
+
+        assert!(
+            replay_result.is_err(),
+            "completed downstream nodes should not receive replayed inputs from checkpoints",
+        );
     }
 }
