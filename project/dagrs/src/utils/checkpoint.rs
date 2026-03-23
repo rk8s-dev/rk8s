@@ -37,6 +37,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
@@ -46,6 +47,8 @@ use crate::{DagrsError, DagrsResult, ErrorCode, node::NodeId};
 
 /// Checkpoint identifier
 pub type CheckpointId = String;
+
+static CHECKPOINT_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 /// Represents the execution state of a single node
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -184,7 +187,7 @@ impl NodeState {
 pub struct Checkpoint {
     /// Unique identifier for this checkpoint
     pub id: CheckpointId,
-    /// Timestamp when checkpoint was created (Unix epoch seconds)
+    /// Timestamp when checkpoint was created (Unix epoch nanoseconds)
     pub timestamp: u64,
     /// Current program counter (block index)
     pub pc: usize,
@@ -201,14 +204,19 @@ pub struct Checkpoint {
 }
 
 impl Checkpoint {
-    /// Create a new checkpoint with generated ID
-    pub fn new(pc: usize, loop_count: usize) -> Self {
-        let timestamp = SystemTime::now()
+    fn current_timestamp_nanos() -> u64 {
+        SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
-            .as_secs();
+            .as_nanos() as u64
+    }
 
-        let id = format!("ckpt_{}_{}", timestamp, pc);
+    /// Create a new checkpoint with generated ID
+    pub fn new(pc: usize, loop_count: usize) -> Self {
+        let timestamp = Self::current_timestamp_nanos();
+        let sequence = CHECKPOINT_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+
+        let id = format!("ckpt_{}_{}_{}", timestamp, pc, sequence);
 
         Self {
             id,
@@ -224,10 +232,7 @@ impl Checkpoint {
 
     /// Create checkpoint with a specific ID
     pub fn with_id(id: impl Into<String>, pc: usize, loop_count: usize) -> Self {
-        let timestamp = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs();
+        let timestamp = Self::current_timestamp_nanos();
 
         Self {
             id: id.into(),
@@ -629,9 +634,12 @@ mod tests {
     #[test]
     fn test_checkpoint_creation() {
         let checkpoint = Checkpoint::new(10, 3);
+        let another = Checkpoint::new(10, 3);
         assert_eq!(checkpoint.pc, 10);
         assert_eq!(checkpoint.loop_count, 3);
         assert!(checkpoint.id.starts_with("ckpt_"));
+        assert_ne!(checkpoint.id, another.id);
+        assert!(another.timestamp >= checkpoint.timestamp);
     }
 
     #[test]

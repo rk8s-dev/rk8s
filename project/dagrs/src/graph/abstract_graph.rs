@@ -62,11 +62,7 @@ impl AbstractGraph {
                 .with_node_id(from.as_usize())
         })?;
         if !edges.insert(to) {
-            return Err(
-                DagrsError::new(ErrorCode::DgBld0002DuplicateEdge, "duplicate edge")
-                    .with_node_id(from.as_usize())
-                    .with_detail("to", to.as_usize().to_string()),
-            );
+            return Ok(());
         }
 
         let in_degree = self.in_degree.get_mut(&to).ok_or_else(|| {

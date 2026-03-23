@@ -503,6 +503,77 @@ async fn test_resume_restores_effective_active_upstreams() {
 }
 
 #[tokio::test]
+async fn test_resume_from_failed_checkpoint_keeps_successful_upstreams_frozen() {
+    let mut graph = Graph::new();
+    let mut table = NodeTable::new();
+    let producer_runs = Arc::new(Mutex::new(1usize));
+    let seen = Arc::new(Mutex::new(Vec::new()));
+
+    let producer = DefaultNode::with_action(
+        "Producer".to_string(),
+        ProduceCheckpointedValue {
+            runs: producer_runs.clone(),
+        },
+        &mut table,
+    );
+    let id_producer = producer.id();
+    let gate = ConditionalNode::with_condition("Gate".to_string(), AlwaysTrueCondition, &mut table);
+    let id_gate = gate.id();
+    let consumer = DefaultNode::with_action(
+        "Consumer".to_string(),
+        CaptureCheckpointedValue {
+            source_id: id_producer,
+            seen: seen.clone(),
+        },
+        &mut table,
+    );
+    let id_consumer = consumer.id();
+
+    graph.add_node(producer).unwrap();
+    graph.add_node(gate).unwrap();
+    graph.add_node(consumer).unwrap();
+    graph
+        .add_edge(id_producer, vec![id_gate, id_consumer])
+        .unwrap();
+    graph.add_edge(id_gate, vec![id_consumer]).unwrap();
+
+    let store = MemoryCheckpointStore::new();
+    let mut checkpoint = Checkpoint::with_id("failed_resume", 1, 0);
+    checkpoint.active_nodes.extend([
+        id_producer.as_usize(),
+        id_gate.as_usize(),
+        id_consumer.as_usize(),
+    ]);
+    checkpoint.add_node_state(
+        NodeState::succeeded(id_producer.as_usize())
+            .with_output_kind(StoredOutputKind::String)
+            .with_output_data(serde_json::to_vec(&"checkpointed".to_string()).unwrap())
+            .with_summary("String(checkpointed)"),
+    );
+    checkpoint.add_node_state(NodeState::succeeded(id_gate.as_usize()));
+    checkpoint.add_node_state(
+        NodeState::failed(id_consumer.as_usize())
+            .with_summary("Error: consumer failed before checkpoint"),
+    );
+    store.save(&checkpoint).await.unwrap();
+    graph.set_checkpoint_store(Box::new(store));
+
+    let report = graph.resume_from_checkpoint("failed_resume").await.unwrap();
+
+    assert_eq!(
+        *producer_runs.lock().unwrap(),
+        1,
+        "successful upstream nodes should not rerun when resuming a failed downstream block",
+    );
+    assert_eq!(
+        seen.lock().unwrap().as_slice(),
+        ["checkpointed".to_string()],
+    );
+    assert_eq!(report.node_succeeded, 3);
+    assert_eq!(report.node_failed, 0);
+}
+
+#[tokio::test]
 async fn test_loop_checkpoint_idempotency() {
     let mut graph = Graph::new();
     let mut table = NodeTable::new();
@@ -620,18 +691,34 @@ async fn test_file_checkpoint_store_path_traversal_prevention() {
 async fn test_checkpoint_id_generation() {
     // Test that auto-generated IDs are safe
     let cp1 = Checkpoint::new(0, 0);
-    let cp2 = Checkpoint::new(10, 5);
+    let cp2 = Checkpoint::new(0, 1);
+    let cp3 = Checkpoint::new(10, 5);
 
     // IDs should start with "ckpt_" and not contain path separators
     assert!(cp1.id.starts_with("ckpt_"));
     assert!(cp2.id.starts_with("ckpt_"));
+    assert!(cp3.id.starts_with("ckpt_"));
     assert!(!cp1.id.contains('/'));
     assert!(!cp1.id.contains('\\'));
     assert!(!cp1.id.contains(".."));
 
-    // IDs should be unique
-    // Note: In very fast execution, timestamps might be the same, but pc differs
-    // This is acceptable as the ID format includes both timestamp and pc
+    assert_ne!(cp1.id, cp2.id);
+    assert_ne!(cp2.id, cp3.id);
+
+    let store = MemoryCheckpointStore::new();
+    store.save(&cp1).await.unwrap();
+    store.save(&cp2).await.unwrap();
+    store.save(&cp3).await.unwrap();
+
+    let ids = store.list().await.unwrap();
+    assert_eq!(
+        ids.len(),
+        3,
+        "generated checkpoint IDs must not overwrite each other"
+    );
+
+    let latest = store.latest().await.unwrap().unwrap();
+    assert_eq!(latest.id, cp3.id);
 }
 
 #[tokio::test]

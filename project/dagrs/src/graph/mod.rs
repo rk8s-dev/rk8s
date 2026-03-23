@@ -1516,6 +1516,10 @@ impl Graph {
 
             for to_id in &to_ids {
                 if !from_channel.0.contains_key(to_id) {
+                    // Update the abstract graph first so an abstract-edge error
+                    // cannot leave the concrete channel map partially mutated.
+                    self.abstract_graph.add_edge(from_id, *to_id)?;
+
                     let (tx, rx) = mpsc::channel::<Content>(32);
                     from_channel.insert(*to_id, Arc::new(Mutex::new(OutChannel::Mpsc(tx.clone()))));
                     rx_map.insert(*to_id, rx);
@@ -1523,9 +1527,6 @@ impl Graph {
                         .entry(*to_id)
                         .and_modify(|e| *e += 1)
                         .or_insert(0);
-
-                    // Update abstract graph
-                    self.abstract_graph.add_edge(from_id, *to_id)?;
                 }
             }
         }
@@ -1854,6 +1855,7 @@ impl Graph {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::graph::loop_subgraph::LoopSubgraph;
     use crate::node::conditional_node::{Condition, ConditionalNode};
     use crate::node::default_node::DefaultNode;
     use crate::{
@@ -1997,6 +1999,53 @@ mod tests {
 
         let result = graph.async_start().await;
         assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_add_edge_supports_multiple_loop_subgraph_targets() {
+        let mut graph = Graph::new();
+        let mut node_table = NodeTable::new();
+
+        let source = DefaultNode::new(NodeName::from("Source"), &mut node_table);
+        let source_id = source.id();
+        let inner_a = DefaultNode::new(NodeName::from("Inner A"), &mut node_table);
+        let inner_a_id = inner_a.id();
+        let inner_b = DefaultNode::new(NodeName::from("Inner B"), &mut node_table);
+        let inner_b_id = inner_b.id();
+
+        let mut loop_subgraph = LoopSubgraph::new(NodeName::from("Loop"), &mut node_table);
+        loop_subgraph.add_node(inner_a).unwrap();
+        loop_subgraph.add_node(inner_b).unwrap();
+
+        graph.add_node(source).unwrap();
+        graph.add_node(loop_subgraph).unwrap();
+        graph
+            .add_edge(source_id, vec![inner_a_id, inner_b_id])
+            .expect("fan-out into folded loop subgraph targets should succeed");
+
+        let source_node = graph.nodes.get(&source_id).unwrap().clone();
+        let mut receiver_ids = {
+            let mut source_guard = source_node.lock().await;
+            source_guard.output_channels().get_receiver_ids()
+        };
+        receiver_ids.sort_unstable();
+        assert_eq!(receiver_ids, vec![inner_a_id, inner_b_id]);
+
+        for inner_id in [inner_a_id, inner_b_id] {
+            let inner_node = graph.nodes.get(&inner_id).unwrap().clone();
+            let sender_ids = {
+                let mut inner_guard = inner_node.lock().await;
+                inner_guard.input_channels().get_sender_ids()
+            };
+            assert_eq!(sender_ids, vec![source_id]);
+        }
+
+        let abstract_edges = graph.abstract_graph.edges.get(&source_id).unwrap();
+        assert_eq!(
+            abstract_edges.len(),
+            1,
+            "the abstract graph should fold both concrete targets into one loop-subgraph edge",
+        );
     }
 
     #[test]
