@@ -41,14 +41,14 @@ pub struct SessionInfo {
     pub created_at: DateTimeUtc,
 }
 
-pub struct SessionManager<M: MetaStore> {
+pub struct SessionManager<M: MetaStore + ?Sized> {
     shutdown_token: CancellationToken,
     store: Arc<M>,
     pub session_id: RwLock<Option<Uuid>>,
     pub session: RwLock<Option<Session>>,
 }
 
-impl<M: MetaStore + 'static> SessionManager<M> {
+impl<M: MetaStore + ?Sized + 'static> SessionManager<M> {
     pub fn new(store: Arc<M>) -> Self {
         SessionManager {
             shutdown_token: CancellationToken::new(),
@@ -93,7 +93,7 @@ impl<M: MetaStore + 'static> SessionManager<M> {
         }
     }
 }
-pub async fn clean_sessions_circle<M: MetaStore>(store: Arc<M>, token: CancellationToken) {
+pub async fn clean_sessions_circle<M: MetaStore + ?Sized>(store: Arc<M>, token: CancellationToken) {
     let mut interval = tokio::time::interval(Duration::from_secs(10));
 
     loop {
