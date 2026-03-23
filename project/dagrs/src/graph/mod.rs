@@ -220,6 +220,8 @@ impl Graph {
                 NodeState::failed(node_id.0)
             } else if exec_state.is_success() {
                 NodeState::succeeded(node_id.0)
+            } else if !active_nodes.contains(node_id) {
+                NodeState::skipped(node_id.0)
             } else {
                 NodeState::pending(node_id.0)
             };
@@ -493,12 +495,85 @@ impl Graph {
         Ok(())
     }
 
+    fn rebuild_active_nodes_from_checkpoint(checkpoint: &Checkpoint) -> HashSet<NodeId> {
+        let mut active_nodes = checkpoint.get_active_nodes();
+        for (node_id_val, node_state) in &checkpoint.node_states {
+            let node_id = NodeId(*node_id_val);
+            match node_state.status {
+                NodeExecStatus::Succeeded => {
+                    active_nodes.insert(node_id);
+                }
+                NodeExecStatus::Skipped => {
+                    active_nodes.remove(&node_id);
+                }
+                NodeExecStatus::Pending | NodeExecStatus::Running | NodeExecStatus::Failed => {}
+            }
+        }
+        active_nodes
+    }
+
+    fn checkpoint_progress_totals(checkpoint: &Checkpoint) -> (usize, usize) {
+        let skipped_total = checkpoint
+            .node_states
+            .values()
+            .filter(|node_state| matches!(node_state.status, NodeExecStatus::Skipped))
+            .count();
+        let completed_total = checkpoint
+            .node_states
+            .values()
+            .filter(|node_state| {
+                matches!(
+                    node_state.status,
+                    NodeExecStatus::Succeeded | NodeExecStatus::Failed | NodeExecStatus::Skipped
+                )
+            })
+            .count();
+        (completed_total, skipped_total)
+    }
+
+    async fn set_sender_enabled_for_receivers(
+        &self,
+        sender: NodeId,
+        receiver_ids: &[NodeId],
+        enabled: bool,
+        checkpoint_id: Option<&str>,
+    ) -> DagrsResult<()> {
+        for receiver_id in receiver_ids {
+            let receiver = self.nodes.get(receiver_id).ok_or_else(|| {
+                let mut err = DagrsError::new(
+                    ErrorCode::DgChk0003InvalidCheckpoint,
+                    "receiver referenced during checkpoint restore does not exist",
+                )
+                .with_node_id(receiver_id.as_usize());
+                if let Some(checkpoint_id) = checkpoint_id {
+                    err = err.with_checkpoint(checkpoint_id.to_string());
+                }
+                err
+            })?;
+            let mut receiver_guard = receiver.lock().await;
+            if enabled {
+                receiver_guard.input_channels().enable_sender(sender);
+            } else {
+                receiver_guard.input_channels().disable_sender(sender);
+            }
+        }
+        Ok(())
+    }
+
     async fn restore_checkpoint_state(
         &mut self,
         checkpoint: &Checkpoint,
         active_nodes: &HashSet<NodeId>,
     ) -> DagrsResult<()> {
         let mut restored_outputs = Vec::new();
+        let mut skipped_senders = Vec::new();
+
+        for node in self.nodes.values() {
+            let mut node_guard = node.lock().await;
+            node_guard
+                .restore_from_checkpoint(checkpoint.loop_count)
+                .map_err(|err| err.with_checkpoint(checkpoint.id.clone()))?;
+        }
 
         for (node_id_val, node_state) in &checkpoint.node_states {
             let node_id = NodeId(*node_id_val);
@@ -544,7 +619,27 @@ impl Graph {
                     ));
                     exec_state.exe_fail();
                 }
-                NodeExecStatus::Pending | NodeExecStatus::Running | NodeExecStatus::Skipped => {}
+                NodeExecStatus::Skipped => {
+                    skipped_senders.push(node_id);
+                }
+                NodeExecStatus::Pending | NodeExecStatus::Running => {}
+            }
+        }
+
+        for skipped_sender in skipped_senders {
+            if let Some(receiver_ids) = self.abstract_graph.edges.get(&skipped_sender) {
+                let active_receivers: Vec<_> = receiver_ids
+                    .iter()
+                    .filter(|receiver_id| active_nodes.contains(receiver_id))
+                    .copied()
+                    .collect();
+                self.set_sender_enabled_for_receivers(
+                    skipped_sender,
+                    &active_receivers,
+                    false,
+                    Some(checkpoint.id.as_str()),
+                )
+                .await?;
             }
         }
 
@@ -557,10 +652,20 @@ impl Graph {
                 .with_node_id(node_id.as_usize())
                 .with_checkpoint(checkpoint.id.clone())
             })?;
+            let receiver_ids = {
+                let mut node_guard = node.lock().await;
+                node_guard.output_channels().get_receiver_ids()
+            };
+            self.set_sender_enabled_for_receivers(
+                node_id,
+                &receiver_ids,
+                true,
+                Some(checkpoint.id.as_str()),
+            )
+            .await?;
+
             let mut node_guard = node.lock().await;
             let output_channels = node_guard.output_channels();
-            let receiver_ids = output_channels.get_receiver_ids();
-
             for receiver_id in receiver_ids {
                 if active_nodes.contains(&receiver_id) {
                     output_channels
@@ -614,7 +719,8 @@ impl Graph {
             return Err(err);
         }
 
-        let active_nodes = checkpoint.get_active_nodes();
+        let active_nodes = Self::rebuild_active_nodes_from_checkpoint(&checkpoint);
+        let (completed_total, skipped_total) = Self::checkpoint_progress_totals(&checkpoint);
         if let Err(err) = self
             .restore_checkpoint_state(&checkpoint, &active_nodes)
             .await
@@ -635,6 +741,8 @@ impl Graph {
             checkpoint.loop_count,
             active_nodes,
             false,
+            completed_total,
+            skipped_total,
         )
         .await
     }
@@ -700,6 +808,7 @@ impl Graph {
         .with_detail("error_count", errors.len().to_string())
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn run_internal(
         &mut self,
         run_id: String,
@@ -708,11 +817,13 @@ impl Graph {
         start_loop_count: usize,
         initial_active_nodes: HashSet<NodeId>,
         reset_nodes: bool,
+        initial_completed_total: usize,
+        initial_skipped_total: usize,
     ) -> DagrsResult<ExecutionReport> {
         let condition_flag = Arc::new(Mutex::new(true));
         let errors = Arc::new(Mutex::new(Vec::<DagrsError>::new()));
-        let mut skipped_total = 0usize;
-        let mut completed_total = 0usize;
+        let mut skipped_total = initial_skipped_total;
+        let mut completed_total = initial_completed_total;
 
         if reset_nodes {
             for node in self.nodes.values() {
@@ -960,7 +1071,8 @@ impl Graph {
                                 execute_state.set_output(out.clone());
                                 execute_state.exe_success();
                             }
-                            Ok::<_, DagrsError>((node_id, out))
+                            let receiver_ids = node_guard.output_channels().get_receiver_ids();
+                            Ok::<_, DagrsError>((node_id, out, receiver_ids))
                         }
                         Err(err) => {
                             let mut node_guard = node_ref.lock().await;
@@ -973,7 +1085,7 @@ impl Graph {
                             execute_state.set_output(Output::error(err.clone()));
                             execute_state.exe_fail();
                             errors.lock().await.push(err.clone());
-                            Ok::<_, DagrsError>((node_id, Output::error(err)))
+                            Ok::<_, DagrsError>((node_id, Output::error(err), Vec::new()))
                         }
                     }
                 }));
@@ -1012,13 +1124,20 @@ impl Graph {
             }
             drop(errors_guard);
 
+            for (node_id, output, receiver_ids) in &results {
+                if !output.is_err() {
+                    self.set_sender_enabled_for_receivers(*node_id, receiver_ids, true, None)
+                        .await?;
+                }
+            }
+
             if !(*condition_flag.lock().await) {
                 break;
             }
 
             let mut next_pc = pc + 1;
             let mut should_abort = false;
-            for (node_id, output) in results {
+            for (node_id, output, _) in results {
                 if self.handle_flow_control(
                     output,
                     node_id,
@@ -1116,6 +1235,7 @@ impl Graph {
         for node in self.nodes.values() {
             let mut node = node.lock().await;
             node.input_channels().0.clear();
+            node.input_channels().clear_disabled();
             node.output_channels().0.clear();
             node.reset();
         }
@@ -1387,6 +1507,8 @@ impl Graph {
             0,
             self.nodes.keys().cloned().collect(),
             true,
+            0,
+            0,
         )
         .await
     }

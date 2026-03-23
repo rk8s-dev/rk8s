@@ -11,7 +11,9 @@
 use async_trait::async_trait;
 use dagrs::graph::event::{GraphEvent, TerminationStatus};
 use dagrs::node::action::Action;
+use dagrs::node::conditional_node::{Condition, ConditionalNode};
 use dagrs::node::default_node::DefaultNode;
+use dagrs::node::loop_node::CountLoopCondition;
 use dagrs::{
     Checkpoint, CheckpointConfig, CheckpointStore, EnvVar, Graph, InChannels,
     MemoryCheckpointStore, Node, NodeExecStatus, NodeState, NodeTable, OutChannels, Output,
@@ -77,6 +79,38 @@ impl Action for CaptureCheckpointedValue {
         let value = content.get::<String>().unwrap().clone();
         self.seen.lock().unwrap().push(value);
         Output::empty()
+    }
+}
+
+#[derive(Clone)]
+struct ObserveActiveSendersAction {
+    expected_sender: dagrs::NodeId,
+    observed_senders: Arc<Mutex<Vec<Vec<usize>>>>,
+}
+
+#[async_trait]
+impl Action for ObserveActiveSendersAction {
+    async fn run(&self, input: &mut InChannels, _: &mut OutChannels, _: Arc<EnvVar>) -> Output {
+        let mut sender_ids: Vec<_> = input
+            .get_sender_ids()
+            .into_iter()
+            .map(|id| id.as_usize())
+            .collect();
+        sender_ids.sort_unstable();
+        self.observed_senders.lock().unwrap().push(sender_ids);
+
+        let content = input.recv_from(&self.expected_sender).await.unwrap();
+        let value = content.get::<String>().unwrap().clone();
+        Output::new(value)
+    }
+}
+
+struct AlwaysTrueCondition;
+
+#[async_trait]
+impl Condition for AlwaysTrueCondition {
+    async fn run(&self, _: &mut InChannels, _: &OutChannels, _: Arc<EnvVar>) -> bool {
+        true
     }
 }
 
@@ -355,6 +389,8 @@ async fn test_resume_execution_basic() {
         &mut table,
     );
     let id_a = node_a.id();
+    let gate = ConditionalNode::with_condition("Gate".to_string(), AlwaysTrueCondition, &mut table);
+    let id_gate = gate.id();
     let node_b = DefaultNode::with_action(
         "B".to_string(),
         CaptureCheckpointedValue {
@@ -366,11 +402,16 @@ async fn test_resume_execution_basic() {
     let id_b = node_b.id();
 
     graph.add_node(node_a).unwrap();
+    graph.add_node(gate).unwrap();
     graph.add_node(node_b).unwrap();
+    graph.add_edge(id_a, vec![id_gate]).unwrap();
+    graph.add_edge(id_gate, vec![id_b]).unwrap();
     graph.add_edge(id_a, vec![id_b]).unwrap();
 
     let store = MemoryCheckpointStore::new();
-    let mut checkpoint = Checkpoint::with_id("resume_basic", 0, 0);
+    let mut checkpoint = Checkpoint::with_id("resume_basic", 1, 0);
+    checkpoint.active_nodes.insert(id_a.as_usize());
+    checkpoint.active_nodes.insert(id_gate.as_usize());
     checkpoint.active_nodes.insert(id_b.as_usize());
     checkpoint.add_node_state(
         NodeState::succeeded(id_a.as_usize())
@@ -378,6 +419,7 @@ async fn test_resume_execution_basic() {
             .with_output_data(serde_json::to_vec(&"checkpointed").unwrap())
             .with_summary("String(checkpointed)"),
     );
+    checkpoint.add_node_state(NodeState::succeeded(id_gate.as_usize()));
     checkpoint.add_node_state(NodeState::pending(id_b.as_usize()));
     store.save(&checkpoint).await.unwrap();
     graph.set_checkpoint_store(Box::new(store));
@@ -395,6 +437,115 @@ async fn test_resume_execution_basic() {
         seen.lock().unwrap().as_slice(),
         ["checkpointed"],
         "B should receive the checkpointed output",
+    );
+    assert_eq!(report.node_succeeded, 3);
+}
+
+#[tokio::test]
+async fn test_resume_restores_effective_active_upstreams() {
+    let mut graph = Graph::new();
+    let mut table = NodeTable::new();
+    let observed_senders = Arc::new(Mutex::new(Vec::new()));
+
+    let node_a = DefaultNode::new("A".to_string(), &mut table);
+    let id_a = node_a.id();
+    let node_b = DefaultNode::new("B".to_string(), &mut table);
+    let id_b = node_b.id();
+    let gate = ConditionalNode::with_condition("Gate".to_string(), AlwaysTrueCondition, &mut table);
+    let id_gate = gate.id();
+    let node_d = DefaultNode::with_action(
+        "D".to_string(),
+        ObserveActiveSendersAction {
+            expected_sender: id_a,
+            observed_senders: observed_senders.clone(),
+        },
+        &mut table,
+    );
+    let id_d = node_d.id();
+
+    graph.add_node(node_a).unwrap();
+    graph.add_node(node_b).unwrap();
+    graph.add_node(gate).unwrap();
+    graph.add_node(node_d).unwrap();
+    graph.add_edge(id_a, vec![id_gate]).unwrap();
+    graph.add_edge(id_b, vec![id_gate]).unwrap();
+    graph.add_edge(id_gate, vec![id_d]).unwrap();
+    graph.add_edge(id_a, vec![id_d]).unwrap();
+    graph.add_edge(id_b, vec![id_d]).unwrap();
+
+    let store = MemoryCheckpointStore::new();
+    let mut checkpoint = Checkpoint::with_id("resume_skip_merge", 1, 0);
+    checkpoint.active_nodes.insert(id_a.as_usize());
+    checkpoint.active_nodes.insert(id_gate.as_usize());
+    checkpoint.active_nodes.insert(id_d.as_usize());
+    checkpoint.add_node_state(
+        NodeState::succeeded(id_a.as_usize())
+            .with_output_kind(StoredOutputKind::String)
+            .with_output_data(serde_json::to_vec(&"from-a").unwrap())
+            .with_summary("String(from-a)"),
+    );
+    checkpoint.add_node_state(NodeState::skipped(id_b.as_usize()));
+    checkpoint.add_node_state(NodeState::succeeded(id_gate.as_usize()));
+    checkpoint.add_node_state(NodeState::pending(id_d.as_usize()));
+    store.save(&checkpoint).await.unwrap();
+    graph.set_checkpoint_store(Box::new(store));
+
+    let report = graph
+        .resume_from_checkpoint("resume_skip_merge")
+        .await
+        .unwrap();
+    assert_eq!(
+        observed_senders.lock().unwrap().as_slice(),
+        [vec![id_a.as_usize(), id_gate.as_usize()]],
+        "only the active upstream sender should remain visible after resume",
+    );
+    assert_eq!(report.node_skipped, 1);
+}
+
+#[tokio::test]
+async fn test_loop_checkpoint_idempotency() {
+    let mut graph = Graph::new();
+    let mut table = NodeTable::new();
+    let counter = Arc::new(Mutex::new(1usize));
+
+    let node_a = DefaultNode::with_action(
+        "A".to_string(),
+        CounterAction {
+            count: counter.clone(),
+        },
+        &mut table,
+    );
+    let id_a = node_a.id();
+    let loop_node = dagrs::LoopNode::new(
+        "Loop".to_string(),
+        id_a,
+        CountLoopCondition::new(2),
+        &mut table,
+    );
+    let id_loop = loop_node.id();
+
+    graph.add_node(node_a).unwrap();
+    graph.add_node(loop_node).unwrap();
+    graph.add_edge(id_a, vec![id_loop]).unwrap();
+
+    let store = MemoryCheckpointStore::new();
+    let mut checkpoint = Checkpoint::with_id("loop_idempotent", 0, 1);
+    checkpoint.active_nodes.insert(id_a.as_usize());
+    checkpoint.active_nodes.insert(id_loop.as_usize());
+    checkpoint.add_node_state(NodeState::succeeded(id_a.as_usize()));
+    checkpoint.add_node_state(NodeState::succeeded(id_loop.as_usize()));
+    store.save(&checkpoint).await.unwrap();
+    graph.set_checkpoint_store(Box::new(store));
+
+    let report = graph
+        .resume_from_checkpoint("loop_idempotent")
+        .await
+        .unwrap();
+
+    assert_eq!(
+        *counter.lock().unwrap(),
+        3,
+        "resuming from loop checkpoint should only execute the remaining iterations",
     );
     assert_eq!(report.node_succeeded, 2);
 }

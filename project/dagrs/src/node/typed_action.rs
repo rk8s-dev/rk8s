@@ -36,7 +36,11 @@ pub trait TypedAction: Send + Sync {
     ///
     /// Returns a typed input channel with the type specified by the associated type `I`
     fn make_typed_in_channels(&self, in_channels: &InChannels) -> TypedInChannels<Self::I> {
-        TypedInChannels(in_channels.0.clone(), Default::default())
+        TypedInChannels(
+            in_channels.0.clone(),
+            in_channels.1.clone(),
+            Default::default(),
+        )
     }
 
     /// Converts raw output channels to typed output channels

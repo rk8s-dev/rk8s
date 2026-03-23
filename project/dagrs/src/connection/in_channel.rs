@@ -1,4 +1,8 @@
-use std::{collections::HashMap, marker::PhantomData, sync::Arc};
+use std::{
+    collections::{HashMap, HashSet},
+    marker::PhantomData,
+    sync::Arc,
+};
 
 use futures::future::{join_all, select_ok};
 use tokio::sync::{Mutex, broadcast, mpsc};
@@ -9,10 +13,16 @@ use crate::graph::error::{DagrsError, DagrsResult, ErrorCode};
 use super::information_packet::Content;
 
 #[derive(Default)]
-pub struct InChannels(pub(crate) HashMap<NodeId, Arc<Mutex<InChannel>>>);
+pub struct InChannels(
+    pub(crate) HashMap<NodeId, Arc<Mutex<InChannel>>>,
+    pub(crate) HashSet<NodeId>,
+);
 
 impl InChannels {
     pub async fn recv_from(&mut self, id: &NodeId) -> DagrsResult<Content> {
+        if self.is_disabled(id) {
+            return Err(disabled_channel(*id));
+        }
         match self.get(id) {
             Some(channel) => channel.lock().await.recv(*id).await,
             None => Err(no_such_channel(*id)),
@@ -46,9 +56,11 @@ impl InChannels {
     where
         F: FnMut(DagrsResult<Content>) -> T,
     {
+        let disabled = self.1.clone();
         let futures = self
             .0
             .iter_mut()
+            .filter(|(id, _)| !disabled.contains(id))
             .map(|(_, c)| async { c.lock().await.recv(NodeId(0)).await });
         join_all(futures).await.into_iter().map(f).collect()
     }
@@ -57,11 +69,13 @@ impl InChannels {
         if let Some(c) = self.get(id) {
             c.lock().await.close();
             self.0.remove(id);
+            self.1.remove(id);
         }
     }
 
     pub(crate) fn insert(&mut self, node_id: NodeId, channel: Arc<Mutex<InChannel>>) {
         self.0.insert(node_id, channel);
+        self.1.remove(&node_id);
     }
 
     pub(crate) async fn close_all(&mut self) {
@@ -69,6 +83,21 @@ impl InChannels {
         for channel in channels {
             channel.lock().await.close();
         }
+        self.1.clear();
+    }
+
+    pub(crate) fn disable_sender(&mut self, node_id: NodeId) {
+        if self.0.contains_key(&node_id) {
+            self.1.insert(node_id);
+        }
+    }
+
+    pub(crate) fn enable_sender(&mut self, node_id: NodeId) {
+        self.1.remove(&node_id);
+    }
+
+    pub(crate) fn clear_disabled(&mut self) {
+        self.1.clear();
     }
 
     pub fn get_sender_ids(&self) -> Vec<NodeId> {
@@ -80,7 +109,15 @@ impl InChannels {
     }
 
     fn keys(&self) -> Vec<NodeId> {
-        self.0.keys().copied().collect()
+        self.0
+            .keys()
+            .filter(|id| !self.is_disabled(id))
+            .copied()
+            .collect()
+    }
+
+    fn is_disabled(&self, id: &NodeId) -> bool {
+        self.1.contains(id)
     }
 }
 
@@ -124,11 +161,15 @@ impl InChannel {
 #[derive(Default)]
 pub struct TypedInChannels<T: Send + Sync + 'static>(
     pub(crate) HashMap<NodeId, Arc<Mutex<InChannel>>>,
+    pub(crate) HashSet<NodeId>,
     pub(crate) PhantomData<T>,
 );
 
 impl<T: Send + Sync + 'static> TypedInChannels<T> {
     pub async fn recv_from(&mut self, id: &NodeId) -> DagrsResult<Option<Arc<T>>> {
+        if self.is_disabled(id) {
+            return Err(disabled_channel(*id));
+        }
         match self.get(id) {
             Some(channel) => {
                 let content: Content = channel.lock().await.recv(*id).await?;
@@ -165,10 +206,15 @@ impl<T: Send + Sync + 'static> TypedInChannels<T> {
     where
         F: FnMut(DagrsResult<Option<Arc<T>>>) -> U,
     {
-        let futures = self.0.iter_mut().map(|(_, c)| async {
-            let content: Content = c.lock().await.recv(NodeId(0)).await?;
-            Ok(content.into_inner())
-        });
+        let disabled = self.1.clone();
+        let futures = self
+            .0
+            .iter_mut()
+            .filter(|(id, _)| !disabled.contains(id))
+            .map(|(_, c)| async {
+                let content: Content = c.lock().await.recv(NodeId(0)).await?;
+                Ok(content.into_inner())
+            });
         join_all(futures).await.into_iter().map(f).collect()
     }
 
@@ -176,6 +222,7 @@ impl<T: Send + Sync + 'static> TypedInChannels<T> {
         if let Some(c) = self.get(id) {
             c.lock().await.close();
             self.0.remove(id);
+            self.1.remove(id);
         }
     }
 
@@ -184,11 +231,28 @@ impl<T: Send + Sync + 'static> TypedInChannels<T> {
     }
 
     fn keys(&self) -> Vec<NodeId> {
-        self.0.keys().copied().collect()
+        self.0
+            .keys()
+            .filter(|id| !self.is_disabled(id))
+            .copied()
+            .collect()
+    }
+
+    fn is_disabled(&self, id: &NodeId) -> bool {
+        self.1.contains(id)
     }
 }
 
 fn no_such_channel(id: NodeId) -> DagrsError {
     DagrsError::new(ErrorCode::DgChn0001NoSuchChannel, "channel not found")
         .with_channel(id.as_usize())
+}
+
+fn disabled_channel(id: NodeId) -> DagrsError {
+    DagrsError::new(
+        ErrorCode::DgChn0002Closed,
+        "channel is disabled by restored control flow state",
+    )
+    .with_channel(id.as_usize())
+    .with_detail("state", "disabled")
 }
