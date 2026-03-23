@@ -50,6 +50,20 @@ pub type CheckpointId = String;
 
 static CHECKPOINT_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
+fn checkpoint_sequence_hint(id: &str) -> u64 {
+    id.rsplit('_')
+        .next()
+        .and_then(|segment| segment.parse().ok())
+        .unwrap_or(0)
+}
+
+pub(crate) fn checkpoint_cmp(left: &Checkpoint, right: &Checkpoint) -> std::cmp::Ordering {
+    left.timestamp
+        .cmp(&right.timestamp)
+        .then_with(|| checkpoint_sequence_hint(&left.id).cmp(&checkpoint_sequence_hint(&right.id)))
+        .then_with(|| left.id.cmp(&right.id))
+}
+
 /// Represents the execution state of a single node
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub enum NodeExecStatus {
@@ -349,7 +363,10 @@ impl CheckpointStore for MemoryCheckpointStore {
             .checkpoints
             .read()
             .map_err(|e| checkpoint_io_error(e.to_string()))?;
-        Ok(store.values().max_by_key(|c| c.timestamp).cloned())
+        Ok(store
+            .values()
+            .max_by(|left, right| checkpoint_cmp(left, right))
+            .cloned())
     }
 
     async fn clear(&self) -> DagrsResult<()> {
@@ -499,7 +516,7 @@ impl CheckpointStore for FileCheckpointStore {
             if let Ok(checkpoint) = self.load(&id).await
                 && latest
                     .as_ref()
-                    .is_none_or(|l| checkpoint.timestamp > l.timestamp)
+                    .is_none_or(|current| checkpoint_cmp(&checkpoint, current).is_gt())
             {
                 latest = Some(checkpoint);
             }

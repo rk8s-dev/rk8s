@@ -19,6 +19,7 @@ use crate::{
     node::{Node, NodeId, NodeTable},
     utils::checkpoint::{
         Checkpoint, CheckpointConfig, CheckpointStore, NodeExecStatus, NodeState, StoredOutputKind,
+        checkpoint_cmp,
     },
     utils::hook::{ExecutionHook, RetryDecision},
     utils::output::FlowControl,
@@ -494,7 +495,7 @@ impl Graph {
                 checkpoints.push(cp);
             }
         }
-        checkpoints.sort_by_key(|c| c.timestamp);
+        checkpoints.sort_by(checkpoint_cmp);
 
         // Delete oldest checkpoints
         let to_delete = checkpoints
@@ -539,6 +540,60 @@ impl Graph {
         active_nodes
     }
 
+    fn checkpoint_receiver_still_needs_input(
+        &self,
+        checkpoint: &Checkpoint,
+        receiver_id: NodeId,
+    ) -> bool {
+        if let Some(concrete_receivers) = self.abstract_graph.unfold_node(receiver_id) {
+            concrete_receivers.iter().any(|receiver_id| {
+                !matches!(
+                    checkpoint
+                        .node_states
+                        .get(&receiver_id.0)
+                        .map(|state| state.status),
+                    Some(NodeExecStatus::Succeeded | NodeExecStatus::Skipped)
+                )
+            })
+        } else {
+            !matches!(
+                checkpoint
+                    .node_states
+                    .get(&receiver_id.0)
+                    .map(|state| state.status),
+                Some(NodeExecStatus::Succeeded | NodeExecStatus::Skipped)
+            )
+        }
+    }
+
+    fn succeeded_node_requires_rerun(
+        &self,
+        checkpoint: &Checkpoint,
+        node_id: NodeId,
+        node_state: &NodeState,
+    ) -> bool {
+        if !matches!(node_state.status, NodeExecStatus::Succeeded)
+            || node_state.output_data.is_some()
+            || node_state.output_summary.is_none()
+        {
+            return false;
+        }
+
+        let edge_source = self
+            .abstract_graph
+            .get_abstract_node_id(&node_id)
+            .copied()
+            .unwrap_or(node_id);
+        self.abstract_graph
+            .edges
+            .get(&edge_source)
+            .is_some_and(|receiver_ids| {
+                receiver_ids.iter().copied().any(|receiver_id| {
+                    self.checkpoint_receiver_still_needs_input(checkpoint, receiver_id)
+                })
+            })
+    }
+
     fn resume_block_from_checkpoint(&self, checkpoint: &Checkpoint) -> DagrsResult<usize> {
         let mut start_pc = checkpoint.pc;
 
@@ -546,10 +601,10 @@ impl Graph {
             .node_states
             .iter()
             .filter_map(|(node_id, state)| {
-                matches!(
+                (matches!(
                     state.status,
                     NodeExecStatus::Pending | NodeExecStatus::Running | NodeExecStatus::Failed
-                )
+                ) || self.succeeded_node_requires_rerun(checkpoint, NodeId(*node_id), state))
                 .then_some(NodeId(*node_id))
             })
         {
@@ -588,11 +643,13 @@ impl Graph {
             });
 
         for (node_id_val, node_state) in &checkpoint.node_states {
-            if !matches!(node_state.status, NodeExecStatus::Succeeded) {
+            let node_id = NodeId(*node_id_val);
+            if !matches!(node_state.status, NodeExecStatus::Succeeded)
+                || self.succeeded_node_requires_rerun(checkpoint, node_id, node_state)
+            {
                 continue;
             }
 
-            let node_id = NodeId(*node_id_val);
             let block_index = self.node_block_map.get(&node_id).ok_or_else(|| {
                 DagrsError::new(
                     ErrorCode::DgChk0003InvalidCheckpoint,
@@ -629,7 +686,7 @@ impl Graph {
         )
     }
 
-    fn checkpoint_progress_totals(checkpoint: &Checkpoint) -> (usize, usize) {
+    fn checkpoint_progress_totals(&self, checkpoint: &Checkpoint) -> (usize, usize) {
         let skipped_total = checkpoint
             .node_states
             .values()
@@ -637,12 +694,15 @@ impl Graph {
             .count();
         let completed_total = checkpoint
             .node_states
-            .values()
-            .filter(|node_state| {
-                matches!(
-                    node_state.status,
-                    NodeExecStatus::Succeeded | NodeExecStatus::Skipped
-                )
+            .iter()
+            .filter(|(node_id, node_state)| {
+                matches!(node_state.status, NodeExecStatus::Skipped)
+                    || (matches!(node_state.status, NodeExecStatus::Succeeded)
+                        && !self.succeeded_node_requires_rerun(
+                            checkpoint,
+                            NodeId(**node_id),
+                            node_state,
+                        ))
             })
             .count();
         (completed_total, skipped_total)
@@ -747,6 +807,9 @@ impl Graph {
 
             match node_state.status {
                 NodeExecStatus::Succeeded => {
+                    if self.succeeded_node_requires_rerun(checkpoint, node_id, node_state) {
+                        continue;
+                    }
                     if let Some(data) = &node_state.output_data {
                         let kind = node_state.output_kind.ok_or_else(|| {
                             DagrsError::new(
@@ -906,7 +969,7 @@ impl Graph {
             self.emit_termination(TerminationStatus::Failed, Some(err.clone()));
             return Err(err);
         }
-        let (completed_total, skipped_total) = Self::checkpoint_progress_totals(&checkpoint);
+        let (completed_total, skipped_total) = self.checkpoint_progress_totals(&checkpoint);
         if let Err(err) = self
             .restore_checkpoint_state(&checkpoint, &active_nodes)
             .await

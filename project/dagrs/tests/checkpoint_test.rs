@@ -565,6 +565,75 @@ async fn test_resume_reruns_nodes_with_unserializable_outputs() {
 }
 
 #[tokio::test]
+async fn test_resume_reruns_legacy_succeeded_node_without_checkpointed_output() {
+    let mut graph = Graph::new();
+    let mut table = NodeTable::new();
+    let producer_runs = Arc::new(Mutex::new(0usize));
+    let seen = Arc::new(Mutex::new(Vec::new()));
+
+    let producer = DefaultNode::with_action(
+        "Producer".to_string(),
+        ProduceNonSerializableValue {
+            runs: producer_runs.clone(),
+        },
+        &mut table,
+    );
+    let id_producer = producer.id();
+    let gate = ConditionalNode::with_condition("Gate".to_string(), AlwaysTrueCondition, &mut table);
+    let id_gate = gate.id();
+    let consumer = DefaultNode::with_action(
+        "Consumer".to_string(),
+        FailOnceAfterReceivingNonSerializable {
+            source_id: id_producer,
+            seen: seen.clone(),
+            fail_first: Arc::new(AtomicBool::new(false)),
+        },
+        &mut table,
+    );
+    let id_consumer = consumer.id();
+
+    graph.add_node(producer).unwrap();
+    graph.add_node(gate).unwrap();
+    graph.add_node(consumer).unwrap();
+    graph.add_edge(id_producer, vec![id_gate]).unwrap();
+    graph.add_edge(id_gate, vec![id_consumer]).unwrap();
+    graph.add_edge(id_producer, vec![id_consumer]).unwrap();
+
+    let store = MemoryCheckpointStore::new();
+    let mut checkpoint = Checkpoint::with_id("legacy_unserializable_success", 1, 0);
+    checkpoint.active_nodes.extend([
+        id_producer.as_usize(),
+        id_gate.as_usize(),
+        id_consumer.as_usize(),
+    ]);
+    checkpoint.add_node_state(
+        NodeState::succeeded(id_producer.as_usize())
+            .with_summary("legacy checkpoint without replayable output"),
+    );
+    checkpoint.add_node_state(NodeState::succeeded(id_gate.as_usize()));
+    checkpoint.add_node_state(NodeState::pending(id_consumer.as_usize()));
+    store.save(&checkpoint).await.unwrap();
+    graph.set_checkpoint_store(Box::new(store));
+
+    let report = tokio::time::timeout(
+        Duration::from_secs(1),
+        graph.resume_from_checkpoint("legacy_unserializable_success"),
+    )
+    .await
+    .expect("resume should not hang")
+    .expect("legacy checkpoint should be recoverable");
+
+    assert_eq!(
+        *producer_runs.lock().unwrap(),
+        1,
+        "producer should rerun when a legacy checkpoint cannot replay its output",
+    );
+    assert_eq!(seen.lock().unwrap().as_slice(), ["custom".to_string()]);
+    assert_eq!(report.node_succeeded, 3);
+    assert_eq!(report.node_failed, 0);
+}
+
+#[tokio::test]
 async fn test_resume_restores_effective_active_upstreams() {
     let mut graph = Graph::new();
     let mut table = NodeTable::new();
