@@ -3,6 +3,8 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
 };
 
+use log::warn;
+
 use super::output::Output;
 use crate::connection::information_packet::Content;
 
@@ -33,6 +35,7 @@ impl ExecState {
                 *guard = output;
             }
             Err(poisoned) => {
+                warn!("ExecState output mutex poisoned in set_output, recovering inner value");
                 *poisoned.into_inner() = output;
             }
         }
@@ -43,13 +46,19 @@ impl ExecState {
     pub(crate) fn get_output(&self) -> Option<Content> {
         match self.output.lock() {
             Ok(guard) => guard.get_out(),
-            Err(poisoned) => poisoned.into_inner().get_out(),
+            Err(poisoned) => {
+                warn!("ExecState output mutex poisoned in get_output, recovering inner value");
+                poisoned.into_inner().get_out()
+            }
         }
     }
     pub(crate) fn get_full_output(&self) -> Output {
         match self.output.lock() {
             Ok(guard) => guard.clone(),
-            Err(poisoned) => poisoned.into_inner().clone(),
+            Err(poisoned) => {
+                warn!("ExecState output mutex poisoned in get_full_output, recovering inner value");
+                poisoned.into_inner().clone()
+            }
         }
     }
 

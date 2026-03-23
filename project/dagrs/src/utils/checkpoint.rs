@@ -50,6 +50,10 @@ pub type CheckpointId = String;
 
 static CHECKPOINT_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
+// NOTE: This sequence is process-global (shared by all Graph instances in the same process).
+// It is used as a monotonic tiebreaker in checkpoint IDs and ordering, so sequence values may
+// interleave across concurrently running graphs.
+
 fn checkpoint_sequence_hint(id: &str) -> u64 {
     id.rsplit('_')
         .next()

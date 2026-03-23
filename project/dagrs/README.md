@@ -149,6 +149,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 - Replace `GraphFinished` listeners with `ExecutionTerminated`.
 - Move command exit-code-specific error handling into `DagrsError.context` instead of `Output::ErrWithExitCode`.
 
+Example migration for command-style actions:
+
+```rust
+// Before (removed)
+// Output::ErrWithExitCode("command failed".to_string(), code)
+
+// After
+let mut err = DagrsError::new(
+    ErrorCode::DgRun0006NodeExecutionFailed,
+    format!("command `{}` exited with a non-zero status", command),
+);
+if let Some(code) = code {
+    err = err.with_detail("exit_code", code.to_string());
+}
+Output::error(err)
+```
+
 ### v0.8.0
 
 #### 🚀 Runtime/API Changes

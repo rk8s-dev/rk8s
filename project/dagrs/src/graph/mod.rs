@@ -49,6 +49,16 @@ pub struct RunOptions {
     pub run_id: Option<String>,
 }
 
+#[derive(Clone, Debug)]
+struct RunContext {
+    run_id: String,
+    started_at_unix_secs: u64,
+    start_pc: usize,
+    start_loop_count: usize,
+    initial_completed_total: usize,
+    initial_skipped_total: usize,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ExecutionReport {
     pub run_id: String,
@@ -1031,16 +1041,20 @@ impl Graph {
             pc: checkpoint.pc,
         });
 
-        self.run_internal(
+        let ctx = RunContext {
             run_id,
             started_at_unix_secs,
             start_pc,
-            checkpoint.loop_count,
+            start_loop_count: checkpoint.loop_count,
+            initial_completed_total: completed_total,
+            initial_skipped_total: skipped_total,
+        };
+
+        self.run_internal(
+            ctx,
             Self::deserialize_loop_node_iterations(&checkpoint).unwrap_or_default(),
             active_nodes,
             false,
-            completed_total,
-            skipped_total,
         )
         .await
     }
@@ -1106,19 +1120,22 @@ impl Graph {
         .with_detail("error_count", errors.len().to_string())
     }
 
-    #[allow(clippy::too_many_arguments)]
     async fn run_internal(
         &mut self,
-        run_id: String,
-        started_at_unix_secs: u64,
-        start_pc: usize,
-        start_loop_count: usize,
+        ctx: RunContext,
         initial_loop_node_iterations: HashMap<NodeId, usize>,
         initial_active_nodes: HashSet<NodeId>,
         reset_nodes: bool,
-        initial_completed_total: usize,
-        initial_skipped_total: usize,
     ) -> DagrsResult<ExecutionReport> {
+        let RunContext {
+            run_id,
+            started_at_unix_secs,
+            start_pc,
+            start_loop_count,
+            initial_completed_total,
+            initial_skipped_total,
+        } = ctx;
+
         let condition_flag = Arc::new(Mutex::new(true));
         let errors = Arc::new(Mutex::new(Vec::<DagrsError>::new()));
         let mut skipped_total = initial_skipped_total;
@@ -1842,16 +1859,20 @@ impl Graph {
             return Err(err);
         }
 
-        self.run_internal(
+        let ctx = RunContext {
             run_id,
             started_at_unix_secs,
-            0,
-            0,
+            start_pc: 0,
+            start_loop_count: 0,
+            initial_completed_total: 0,
+            initial_skipped_total: 0,
+        };
+
+        self.run_internal(
+            ctx,
             HashMap::new(),
             self.nodes.keys().cloned().collect(),
             true,
-            0,
-            0,
         )
         .await
     }
