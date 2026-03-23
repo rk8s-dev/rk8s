@@ -35,7 +35,8 @@ pub(crate) fn auto_node(args: TokenStream, input: TokenStream) -> TokenStream {
         Err(err) => return err.into_compile_error().into(),
     };
 
-    let field_out_channels = match parse_named_field(quote! { output_channels: dagrs::OutChannels }) {
+    let field_out_channels = match parse_named_field(quote! { output_channels: dagrs::OutChannels })
+    {
         Ok(field) => field,
         Err(err) => return err.into_compile_error().into(),
     };
@@ -99,7 +100,8 @@ fn parse_named_field(tokens: proc_macro2::TokenStream) -> syn::Result<Field> {
 }
 
 fn ensure_reserved_fields_are_available(item_struct: &ItemStruct) -> Option<syn::Error> {
-    const RESERVED_FIELDS: [&str; 5] = ["id", "name", "input_channels", "output_channels", "action"];
+    const RESERVED_FIELDS: [&str; 5] =
+        ["id", "name", "input_channels", "output_channels", "action"];
 
     match &item_struct.fields {
         syn::Fields::Named(fields) => {

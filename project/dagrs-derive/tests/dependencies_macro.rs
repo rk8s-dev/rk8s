@@ -1,5 +1,5 @@
-use dagrs_derive::dependencies;
 use crate::dagrs::Node;
+use dagrs_derive::dependencies;
 
 mod dagrs {
     #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -68,16 +68,20 @@ fn dependencies_macro_supports_question_mark() -> dagrs::DagrsResult<()> {
     };
 
     let graph = dependencies!(a -> b c, b -> c)?;
-    assert_eq!(graph.nodes, vec![dagrs::NodeId(1), dagrs::NodeId(2), dagrs::NodeId(3)]);
+    assert_eq!(
+        graph.nodes,
+        vec![dagrs::NodeId(1), dagrs::NodeId(2), dagrs::NodeId(3)]
+    );
     assert_eq!(graph.edges.len(), 2);
     assert!(graph.edges.iter().any(|(from, to)| {
         *from == dagrs::NodeId(1)
             && to.contains(&dagrs::NodeId(2))
             && to.contains(&dagrs::NodeId(3))
     }));
-    assert!(graph.edges.iter().any(|(from, to)| {
-        *from == dagrs::NodeId(2) && to == &vec![dagrs::NodeId(3)]
-    }));
+    assert!(graph
+        .edges
+        .iter()
+        .any(|(from, to)| { *from == dagrs::NodeId(2) && to == &vec![dagrs::NodeId(3)] }));
     Ok(())
 }
 

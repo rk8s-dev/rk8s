@@ -24,13 +24,13 @@ mod relay;
 /// ```ignore
 /// use dagrs::auto_node;
 /// #[auto_node]
-/// struct MyNode<T, 'a> {/*Put your customized fields here.*/}
+/// struct MyNode<'a, T> {/*Put your customized fields here.*/}
 /// ```
 /// - Mark `auto_node` on a unit struct.
 /// ```ignore
 /// use dagrs::auto_node;
 /// #[auto_node]
-/// struct MyNode()
+/// struct MyNode;
 /// ```
 #[cfg(feature = "derive")]
 #[proc_macro_attribute]
@@ -40,7 +40,7 @@ pub fn auto_node(args: TokenStream, input: TokenStream) -> TokenStream {
 }
 
 /// The [`dependencies!`] macro allows users to specify all task dependencies in an easy-to-understand
-/// way. It will return the generated graph structure based on a set of defined dependencies
+/// way. It returns `Result<dagrs::Graph, dagrs::DagrsError>` so build errors are not silently ignored.
 #[cfg(feature = "derive")]
 #[proc_macro]
 pub fn dependencies(input: TokenStream) -> TokenStream {
