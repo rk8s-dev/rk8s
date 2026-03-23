@@ -1,0 +1,9 @@
+[package]
+name = "auto-node-fail-tuple"
+version = "0.0.0"
+edition = "2021"
+
+[workspace]
+
+[dependencies]
+dagrs-derive = { path = "../../../../", features = ["derive"] }
