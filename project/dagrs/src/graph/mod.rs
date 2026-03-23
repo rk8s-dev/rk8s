@@ -496,6 +496,11 @@ impl Graph {
     }
 
     fn rebuild_active_nodes_from_checkpoint(checkpoint: &Checkpoint) -> HashSet<NodeId> {
+        let contains_failed_nodes = checkpoint
+            .node_states
+            .values()
+            .any(|state| matches!(state.status, NodeExecStatus::Failed));
+
         let mut active_nodes: HashSet<_> = checkpoint
             .get_active_nodes()
             .into_iter()
@@ -512,10 +517,13 @@ impl Graph {
         for (node_id_val, node_state) in &checkpoint.node_states {
             let node_id = NodeId(*node_id_val);
             match node_state.status {
-                NodeExecStatus::Pending
-                | NodeExecStatus::Running
-                | NodeExecStatus::Succeeded
-                | NodeExecStatus::Failed => {
+                NodeExecStatus::Pending | NodeExecStatus::Running | NodeExecStatus::Failed => {
+                    active_nodes.insert(node_id);
+                }
+                NodeExecStatus::Succeeded if contains_failed_nodes => {
+                    active_nodes.remove(&node_id);
+                }
+                NodeExecStatus::Succeeded => {
                     active_nodes.insert(node_id);
                 }
                 NodeExecStatus::Skipped => {
@@ -978,12 +986,11 @@ impl Graph {
                 }
             }
 
-            let _ = self.event_sender.send(GraphEvent::Progress {
-                completed: completed_total,
-                total: self.nodes.len(),
-            });
-
             if active_block_nodes.is_empty() {
+                let _ = self.event_sender.send(GraphEvent::Progress {
+                    completed: completed_total,
+                    total: self.nodes.len(),
+                });
                 pc += 1;
                 continue;
             }
@@ -2006,7 +2013,7 @@ mod tests {
             .collect();
         active_nodes.sort_unstable();
 
-        assert_eq!(active_nodes, vec![1, 2, 3]);
+        assert_eq!(active_nodes, vec![1, 2]);
     }
 
     #[tokio::test]

@@ -80,10 +80,13 @@ async fn test_event_node_start_and_success() {
     assert!(events.iter().any(|event| {
         matches!(event, GraphEvent::NodeSuccess { id, duration_ms } if *id == node_id && *duration_ms <= 1_000)
     }));
-    assert!(
-        events
-            .iter()
-            .any(|event| matches!(event, GraphEvent::Progress { total, .. } if *total == 1))
+    let progress_events = events
+        .iter()
+        .filter(|event| matches!(event, GraphEvent::Progress { total, .. } if *total == 1))
+        .count();
+    assert_eq!(
+        progress_events, 1,
+        "single-block execution should emit exactly one progress event"
     );
     assert!(matches!(
         events.last(),

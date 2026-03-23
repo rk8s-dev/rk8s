@@ -4,19 +4,18 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 filegroup(
-    name = "dagrs-derive-vendor",
+    name = "vendor",
     srcs = glob(["**/**"]),
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "dagrs-derive-manifest",
-    vendor = ":dagrs-derive-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "dagrs_derive",
-    srcs = [":dagrs-derive-vendor"],
+    srcs = [":vendor"],
     crate = "dagrs_derive",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
@@ -24,7 +23,7 @@ rust_library(
         "default",
         "derive",
     ],
-    rustc_flags = ["@$(location :dagrs-derive-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     proc_macro = True,
     visibility = ["PUBLIC"],
     deps = [

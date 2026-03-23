@@ -4,23 +4,22 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 filegroup(
-    name = "libruntime-vendor",
+    name = "vendor",
     srcs = glob(["**/**"]),
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "libruntime-manifest",
-    vendor = ":libruntime-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "libruntime",
-    srcs = [":libruntime-vendor"],
+    srcs = [":vendor"],
     crate = "libruntime",
     crate_root = "vendor/src/lib.rs",
     edition = "2024",
-    rustc_flags = ["@$(location :libruntime-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
         "//project/common:common",
