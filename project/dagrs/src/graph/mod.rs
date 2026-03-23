@@ -216,8 +216,15 @@ impl Graph {
         // Capture node execution states with output data
         for (node_id, exec_state) in &self.execute_states {
             let output = exec_state.get_full_output();
+            let output_content = output.get_out();
+            let serialized_output = output_content.as_ref().and_then(Self::try_serialize_output);
             let mut node_state = if output.is_err() {
                 NodeState::failed(node_id.0)
+            } else if exec_state.is_success()
+                && output_content.is_some()
+                && serialized_output.is_none()
+            {
+                NodeState::pending(node_id.0)
             } else if exec_state.is_success() {
                 NodeState::succeeded(node_id.0)
             } else if !active_nodes.contains(node_id) {
@@ -227,7 +234,7 @@ impl Graph {
             };
 
             // Try to capture output summary for debugging
-            if let Some(content) = output.get_out() {
+            if let Some(content) = output_content {
                 // Try to get a debug representation of common types
                 let summary = Self::get_output_summary(&content);
                 if let Some(s) = summary {
@@ -235,8 +242,14 @@ impl Graph {
                 }
 
                 // Try to serialize if the content is a serializable primitive
-                if let Some((kind, data)) = Self::try_serialize_output(&content) {
+                if let Some((kind, data)) = serialized_output {
                     node_state = node_state.with_output_kind(kind).with_output_data(data);
+                } else if exec_state.is_success() {
+                    let summary = node_state.output_summary.clone().unwrap_or_else(|| {
+                        "output is not checkpoint-serializable; node will rerun on resume"
+                            .to_string()
+                    });
+                    node_state = node_state.with_summary(summary);
                 }
             } else if let Some(err) = output.get_err() {
                 node_state = node_state.with_summary(format!("Error: {err}"));
@@ -496,11 +509,6 @@ impl Graph {
     }
 
     fn rebuild_active_nodes_from_checkpoint(checkpoint: &Checkpoint) -> HashSet<NodeId> {
-        let contains_failed_nodes = checkpoint
-            .node_states
-            .values()
-            .any(|state| matches!(state.status, NodeExecStatus::Failed));
-
         let mut active_nodes: HashSet<_> = checkpoint
             .get_active_nodes()
             .into_iter()
@@ -520,9 +528,6 @@ impl Graph {
                 NodeExecStatus::Pending | NodeExecStatus::Running | NodeExecStatus::Failed => {
                     active_nodes.insert(node_id);
                 }
-                NodeExecStatus::Succeeded if contains_failed_nodes => {
-                    active_nodes.remove(&node_id);
-                }
                 NodeExecStatus::Succeeded => {
                     active_nodes.insert(node_id);
                 }
@@ -532,6 +537,78 @@ impl Graph {
             }
         }
         active_nodes
+    }
+
+    fn resume_block_from_checkpoint(&self, checkpoint: &Checkpoint) -> DagrsResult<usize> {
+        let mut start_pc = checkpoint.pc;
+
+        for node_id in checkpoint
+            .node_states
+            .iter()
+            .filter_map(|(node_id, state)| {
+                matches!(
+                    state.status,
+                    NodeExecStatus::Pending | NodeExecStatus::Running | NodeExecStatus::Failed
+                )
+                .then_some(NodeId(*node_id))
+            })
+        {
+            let block_index = self.node_block_map.get(&node_id).ok_or_else(|| {
+                DagrsError::new(
+                    ErrorCode::DgChk0003InvalidCheckpoint,
+                    "checkpoint node is missing from the current block map",
+                )
+                .with_checkpoint(checkpoint.id.clone())
+                .with_node_id(node_id.as_usize())
+            })?;
+            start_pc = start_pc.min(*block_index);
+        }
+
+        Ok(start_pc)
+    }
+
+    fn prune_succeeded_nodes_from_resume_span(
+        &self,
+        checkpoint: &Checkpoint,
+        active_nodes: &mut HashSet<NodeId>,
+        start_pc: usize,
+    ) -> DagrsResult<()> {
+        let start_block_has_rerun_nodes =
+            checkpoint.node_states.iter().any(|(node_id_val, state)| {
+                if !matches!(
+                    state.status,
+                    NodeExecStatus::Pending | NodeExecStatus::Running | NodeExecStatus::Failed
+                ) {
+                    return false;
+                }
+
+                self.node_block_map
+                    .get(&NodeId(*node_id_val))
+                    .is_some_and(|block_index| *block_index == start_pc)
+            });
+
+        for (node_id_val, node_state) in &checkpoint.node_states {
+            if !matches!(node_state.status, NodeExecStatus::Succeeded) {
+                continue;
+            }
+
+            let node_id = NodeId(*node_id_val);
+            let block_index = self.node_block_map.get(&node_id).ok_or_else(|| {
+                DagrsError::new(
+                    ErrorCode::DgChk0003InvalidCheckpoint,
+                    "checkpoint node is missing from the current block map",
+                )
+                .with_checkpoint(checkpoint.id.clone())
+                .with_node_id(node_id.as_usize())
+            })?;
+
+            if *block_index > start_pc || (*block_index == start_pc && start_block_has_rerun_nodes)
+            {
+                active_nodes.remove(&node_id);
+            }
+        }
+
+        Ok(())
     }
 
     fn node_should_receive_replayed_input(
@@ -564,7 +641,7 @@ impl Graph {
             .filter(|node_state| {
                 matches!(
                     node_state.status,
-                    NodeExecStatus::Succeeded | NodeExecStatus::Failed | NodeExecStatus::Skipped
+                    NodeExecStatus::Succeeded | NodeExecStatus::Skipped
                 )
             })
             .count();
@@ -815,7 +892,20 @@ impl Graph {
             return Err(err);
         }
 
-        let active_nodes = Self::rebuild_active_nodes_from_checkpoint(&checkpoint);
+        let start_pc = match self.resume_block_from_checkpoint(&checkpoint) {
+            Ok(start_pc) => start_pc,
+            Err(err) => {
+                self.emit_termination(TerminationStatus::Failed, Some(err.clone()));
+                return Err(err);
+            }
+        };
+        let mut active_nodes = Self::rebuild_active_nodes_from_checkpoint(&checkpoint);
+        if let Err(err) =
+            self.prune_succeeded_nodes_from_resume_span(&checkpoint, &mut active_nodes, start_pc)
+        {
+            self.emit_termination(TerminationStatus::Failed, Some(err.clone()));
+            return Err(err);
+        }
         let (completed_total, skipped_total) = Self::checkpoint_progress_totals(&checkpoint);
         if let Err(err) = self
             .restore_checkpoint_state(&checkpoint, &active_nodes)
@@ -833,7 +923,7 @@ impl Graph {
         self.run_internal(
             run_id,
             started_at_unix_secs,
-            checkpoint.pc,
+            start_pc,
             checkpoint.loop_count,
             active_nodes,
             false,
@@ -971,6 +1061,14 @@ impl Graph {
             }
 
             for node_id in skipped_block_nodes {
+                let already_restored_terminal = self
+                    .execute_states
+                    .get(&node_id)
+                    .is_some_and(|state| state.is_success() || state.get_full_output().is_err());
+                if already_restored_terminal {
+                    continue;
+                }
+
                 skipped_total += 1;
                 completed_total += 1;
                 let _ = self.event_sender.send(GraphEvent::NodeSkipped {
@@ -1430,28 +1528,36 @@ impl Graph {
                 .with_node_id(abstract_node_id.as_usize()));
             }
 
-            log::debug!("Add node {:?} to abstract graph", abstract_node_id);
-            self.abstract_graph.add_folded_node(
-                abstract_node_id,
-                loop_structure
-                    .iter()
-                    .map(|n| {
-                        Self::try_lock_node_for_build(n, "loop_structure node id")
-                            .map(|guard| guard.id())
-                    })
-                    .collect::<DagrsResult<Vec<_>>>()?,
-            );
-
-            for node in loop_structure {
-                let concrete_id =
-                    Self::try_lock_node_for_build(&node, "loop_structure concrete id")?.id();
-                if self.nodes.contains_key(&concrete_id) {
+            let concrete_ids = loop_structure
+                .iter()
+                .map(|n| {
+                    Self::try_lock_node_for_build(n, "loop_structure node id")
+                        .map(|guard| guard.id())
+                })
+                .collect::<DagrsResult<Vec<_>>>()?;
+            let mut seen_concrete_ids = HashSet::new();
+            for concrete_id in &concrete_ids {
+                if !seen_concrete_ids.insert(*concrete_id) {
+                    return Err(DagrsError::new(
+                        ErrorCode::DgBld0003DuplicateNodeId,
+                        "duplicate node id detected inside loop subgraph",
+                    )
+                    .with_node_id(concrete_id.as_usize()));
+                }
+                if self.nodes.contains_key(concrete_id) {
                     return Err(DagrsError::new(
                         ErrorCode::DgBld0003DuplicateNodeId,
                         "duplicate node id detected while expanding loop subgraph",
                     )
                     .with_node_id(concrete_id.as_usize()));
                 }
+            }
+
+            log::debug!("Add node {:?} to abstract graph", abstract_node_id);
+            self.abstract_graph
+                .add_folded_node(abstract_node_id, concrete_ids.clone());
+
+            for (node, concrete_id) in loop_structure.into_iter().zip(concrete_ids) {
                 log::debug!("Add node {:?} to concrete graph", concrete_id);
                 self.nodes.insert(concrete_id, node.clone());
                 self.in_degree.entry(concrete_id).or_insert(0);
@@ -1859,8 +1965,8 @@ mod tests {
     use crate::node::conditional_node::{Condition, ConditionalNode};
     use crate::node::default_node::DefaultNode;
     use crate::{
-        Checkpoint, Content, EnvVar, InChannels, Node, NodeName, NodeState, NodeTable, OutChannels,
-        Output, StoredOutputKind, action::Action,
+        Checkpoint, Content, EnvVar, InChannels, MemoryCheckpointStore, Node, NodeName, NodeState,
+        NodeTable, OutChannels, Output, StoredOutputKind, action::Action,
     };
     use async_trait::async_trait;
     use std::{sync::Arc, time::Duration};
@@ -1878,6 +1984,58 @@ mod tests {
     impl HelloAction {
         pub fn new() -> Self {
             Self
+        }
+    }
+
+    struct NonSerializableOutput;
+
+    struct NonSerializableAction;
+
+    #[async_trait]
+    impl Action for NonSerializableAction {
+        async fn run(&self, _: &mut InChannels, _: &mut OutChannels, _: Arc<EnvVar>) -> Output {
+            Output::new(NonSerializableOutput)
+        }
+    }
+
+    struct FixedIdNode {
+        id: NodeId,
+        name: NodeName,
+        in_channels: InChannels,
+        out_channels: OutChannels,
+    }
+
+    impl FixedIdNode {
+        fn new(id: NodeId, name: impl Into<NodeName>) -> Self {
+            Self {
+                id,
+                name: name.into(),
+                in_channels: InChannels::default(),
+                out_channels: OutChannels::default(),
+            }
+        }
+    }
+
+    #[async_trait]
+    impl Node for FixedIdNode {
+        fn id(&self) -> NodeId {
+            self.id
+        }
+
+        fn name(&self) -> NodeName {
+            self.name.clone()
+        }
+
+        fn input_channels(&mut self) -> &mut InChannels {
+            &mut self.in_channels
+        }
+
+        fn output_channels(&mut self) -> &mut OutChannels {
+            &mut self.out_channels
+        }
+
+        async fn run(&mut self, _: Arc<EnvVar>) -> Output {
+            Output::empty()
         }
     }
 
@@ -2049,6 +2207,40 @@ mod tests {
     }
 
     #[test]
+    fn test_add_loop_subgraph_is_atomic_on_duplicate_member_id() {
+        let mut graph = Graph::new();
+        let mut node_table = NodeTable::new();
+        let existing_id = NodeId(41);
+
+        graph
+            .add_node(FixedIdNode::new(existing_id, "existing"))
+            .unwrap();
+        let mut loop_subgraph = LoopSubgraph::new(NodeName::from("Loop"), &mut node_table);
+        let loop_id = loop_subgraph.id();
+        loop_subgraph
+            .add_node(FixedIdNode::new(existing_id, "duplicate"))
+            .unwrap();
+        loop_subgraph
+            .add_node(FixedIdNode::new(NodeId(42), "inner"))
+            .unwrap();
+
+        let err = graph
+            .add_node(loop_subgraph)
+            .expect_err("duplicate loop member ids should fail before mutating graph state");
+
+        assert_eq!(err.code, ErrorCode::DgBld0003DuplicateNodeId);
+        assert_eq!(graph.nodes.len(), 1);
+        assert_eq!(graph.abstract_graph.size(), 1);
+        assert!(graph.abstract_graph.unfold_node(loop_id).is_none());
+        assert!(
+            graph
+                .abstract_graph
+                .get_abstract_node_id(&NodeId(42))
+                .is_none()
+        );
+    }
+
+    #[test]
     fn test_rebuild_active_nodes_from_checkpoint_without_snapshot() {
         let mut checkpoint = Checkpoint::with_id("rebuild_active_nodes", 0, 0);
         checkpoint.add_node_state(NodeState::pending(1));
@@ -2062,7 +2254,7 @@ mod tests {
             .collect();
         active_nodes.sort_unstable();
 
-        assert_eq!(active_nodes, vec![1, 2]);
+        assert_eq!(active_nodes, vec![1, 2, 3]);
     }
 
     #[tokio::test]
@@ -2084,6 +2276,33 @@ mod tests {
             .validate_checkpoint(&checkpoint)
             .expect_err("checkpoint pc should be rejected when it is out of bounds");
         assert_eq!(err.code, ErrorCode::DgChk0003InvalidCheckpoint);
+    }
+
+    #[tokio::test]
+    async fn test_save_checkpoint_marks_unserializable_success_as_pending() {
+        let mut graph = Graph::new();
+        let mut node_table = NodeTable::new();
+        let node = DefaultNode::with_action(
+            NodeName::from("NonSerializable"),
+            NonSerializableAction,
+            &mut node_table,
+        );
+        let node_id = node.id();
+
+        graph.add_node(node).unwrap();
+        graph.set_checkpoint_store(Box::new(MemoryCheckpointStore::new()));
+        graph.async_start().await.unwrap();
+
+        let active_nodes = graph.nodes.keys().copied().collect();
+        let checkpoint_id = graph.save_checkpoint(0, 0, &active_nodes).await.unwrap();
+        let checkpoint = graph.load_checkpoint(&checkpoint_id).await.unwrap();
+        let node_state = checkpoint
+            .node_states
+            .get(&node_id.as_usize())
+            .expect("checkpoint should capture the node state");
+
+        assert_eq!(node_state.status, NodeExecStatus::Pending);
+        assert!(node_state.output_data.is_none());
     }
 
     #[tokio::test]

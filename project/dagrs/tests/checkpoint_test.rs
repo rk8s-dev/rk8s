@@ -19,7 +19,10 @@ use dagrs::{
     MemoryCheckpointStore, Node, NodeExecStatus, NodeState, NodeTable, OutChannels, Output,
     StoredOutputKind,
 };
-use std::sync::{Arc, Mutex};
+use std::sync::{
+    Arc, Mutex,
+    atomic::{AtomicBool, Ordering},
+};
 use std::time::Duration;
 
 async fn collect_events_until_terminated(
@@ -111,6 +114,50 @@ struct AlwaysTrueCondition;
 impl Condition for AlwaysTrueCondition {
     async fn run(&self, _: &mut InChannels, _: &OutChannels, _: Arc<EnvVar>) -> bool {
         true
+    }
+}
+
+struct NonSerializablePayload(&'static str);
+
+#[derive(Clone)]
+struct ProduceNonSerializableValue {
+    runs: Arc<Mutex<usize>>,
+}
+
+#[async_trait]
+impl Action for ProduceNonSerializableValue {
+    async fn run(&self, _: &mut InChannels, out: &mut OutChannels, _: Arc<EnvVar>) -> Output {
+        *self.runs.lock().unwrap() += 1;
+        let _ = out
+            .broadcast(dagrs::Content::new(NonSerializablePayload("custom")))
+            .await;
+        Output::new(NonSerializablePayload("custom"))
+    }
+}
+
+#[derive(Clone)]
+struct FailOnceAfterReceivingNonSerializable {
+    source_id: dagrs::NodeId,
+    seen: Arc<Mutex<Vec<String>>>,
+    fail_first: Arc<AtomicBool>,
+}
+
+#[async_trait]
+impl Action for FailOnceAfterReceivingNonSerializable {
+    async fn run(&self, input: &mut InChannels, _: &mut OutChannels, _: Arc<EnvVar>) -> Output {
+        let content = input.recv_from(&self.source_id).await.unwrap();
+        let value = content
+            .get::<NonSerializablePayload>()
+            .unwrap()
+            .0
+            .to_string();
+        self.seen.lock().unwrap().push(value);
+
+        if self.fail_first.swap(false, Ordering::SeqCst) {
+            Output::execution_failed("intentional failure after checkpoint")
+        } else {
+            Output::empty()
+        }
     }
 }
 
@@ -439,6 +486,82 @@ async fn test_resume_execution_basic() {
         "B should receive the checkpointed output",
     );
     assert_eq!(report.node_succeeded, 3);
+}
+
+#[tokio::test]
+async fn test_resume_reruns_nodes_with_unserializable_outputs() {
+    let mut graph = Graph::new();
+    let mut table = NodeTable::new();
+    let producer_runs = Arc::new(Mutex::new(0usize));
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let fail_first = Arc::new(AtomicBool::new(true));
+
+    let producer = DefaultNode::with_action(
+        "Producer".to_string(),
+        ProduceNonSerializableValue {
+            runs: producer_runs.clone(),
+        },
+        &mut table,
+    );
+    let id_producer = producer.id();
+    let gate = ConditionalNode::with_condition("Gate".to_string(), AlwaysTrueCondition, &mut table);
+    let id_gate = gate.id();
+    let consumer = DefaultNode::with_action(
+        "Consumer".to_string(),
+        FailOnceAfterReceivingNonSerializable {
+            source_id: id_producer,
+            seen: seen.clone(),
+            fail_first: fail_first.clone(),
+        },
+        &mut table,
+    );
+    let id_consumer = consumer.id();
+
+    graph.add_node(producer).unwrap();
+    graph.add_node(gate).unwrap();
+    graph.add_node(consumer).unwrap();
+    graph.add_edge(id_producer, vec![id_gate]).unwrap();
+    graph.add_edge(id_gate, vec![id_consumer]).unwrap();
+    graph.add_edge(id_producer, vec![id_consumer]).unwrap();
+
+    graph.set_checkpoint_store(Box::new(MemoryCheckpointStore::new()));
+    graph.set_checkpoint_config(
+        CheckpointConfig::enabled()
+            .with_node_interval(1)
+            .with_max_checkpoints(10),
+    );
+
+    let err = graph
+        .async_start()
+        .await
+        .expect_err("first run should fail");
+    assert_eq!(err.code, dagrs::ErrorCode::DgRun0006NodeExecutionFailed);
+
+    let checkpoint = graph
+        .get_latest_checkpoint()
+        .await
+        .unwrap()
+        .expect("checkpoint should exist before the failing block");
+
+    let report = tokio::time::timeout(
+        Duration::from_secs(1),
+        graph.resume_from_checkpoint(&checkpoint.id),
+    )
+    .await
+    .expect("resume should not hang")
+    .expect("resume should succeed");
+
+    assert_eq!(
+        *producer_runs.lock().unwrap(),
+        2,
+        "producer should rerun because its output could not be checkpointed",
+    );
+    assert_eq!(
+        seen.lock().unwrap().as_slice(),
+        ["custom".to_string(), "custom".to_string()],
+    );
+    assert_eq!(report.node_succeeded, 3);
+    assert_eq!(report.node_failed, 0);
 }
 
 #[tokio::test]
