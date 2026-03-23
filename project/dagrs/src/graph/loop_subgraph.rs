@@ -3,7 +3,7 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 
 use crate::{
-    DagrsError, DagrsResult, ErrorCode, EnvVar, InChannels, Node, NodeId, NodeName, NodeTable,
+    DagrsError, DagrsResult, EnvVar, ErrorCode, InChannels, Node, NodeId, NodeName, NodeTable,
     OutChannels, Output,
 };
 
@@ -43,13 +43,11 @@ impl LoopSubgraph {
                 )
             })?;
             if existing.id() == node_id {
-                return Err(
-                    DagrsError::new(
-                        ErrorCode::DgBld0003DuplicateNodeId,
-                        "duplicate node id detected while building loop subgraph",
-                    )
-                    .with_node_id(node_id.as_usize()),
-                );
+                return Err(DagrsError::new(
+                    ErrorCode::DgBld0003DuplicateNodeId,
+                    "duplicate node id detected while building loop subgraph",
+                )
+                .with_node_id(node_id.as_usize()));
             }
         }
         self.inner_nodes.push(Arc::new(Mutex::new(node)));

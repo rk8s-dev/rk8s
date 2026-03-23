@@ -13,8 +13,7 @@ use std::{
 };
 
 use crate::{
-    DagrsError, DagrsResult, ErrorCode,
-    Output,
+    DagrsError, DagrsResult, ErrorCode, Output,
     connection::{in_channel::InChannel, information_packet::Content, out_channel::OutChannel},
     graph::event::{GraphEvent, SkipReason, TerminationStatus},
     node::{Node, NodeId, NodeTable},
@@ -202,15 +201,12 @@ impl Graph {
         loop_count: usize,
         active_nodes: &HashSet<NodeId>,
     ) -> DagrsResult<String> {
-        let store = self
-            .checkpoint_store
-            .as_ref()
-            .ok_or_else(|| {
-                DagrsError::new(
-                    ErrorCode::DgChk0001StoreNotConfigured,
-                    "checkpoint store not configured",
-                )
-            })?;
+        let store = self.checkpoint_store.as_ref().ok_or_else(|| {
+            DagrsError::new(
+                ErrorCode::DgChk0001StoreNotConfigured,
+                "checkpoint store not configured",
+            )
+        })?;
 
         let mut checkpoint = Checkpoint::new(pc, loop_count);
         checkpoint.set_active_nodes(active_nodes);
@@ -353,19 +349,13 @@ impl Graph {
     /// # Returns
     /// * `Ok(Checkpoint)` - The loaded checkpoint
     /// * `Err(DagrsError)` - If loading fails
-    pub async fn load_checkpoint(
-        &self,
-        checkpoint_id: &str,
-    ) -> DagrsResult<Checkpoint> {
-        let store = self
-            .checkpoint_store
-            .as_ref()
-            .ok_or_else(|| {
-                DagrsError::new(
-                    ErrorCode::DgChk0001StoreNotConfigured,
-                    "checkpoint store not configured",
-                )
-            })?;
+    pub async fn load_checkpoint(&self, checkpoint_id: &str) -> DagrsResult<Checkpoint> {
+        let store = self.checkpoint_store.as_ref().ok_or_else(|| {
+            DagrsError::new(
+                ErrorCode::DgChk0001StoreNotConfigured,
+                "checkpoint store not configured",
+            )
+        })?;
         store.load(&checkpoint_id.to_string()).await
     }
 
@@ -376,51 +366,39 @@ impl Graph {
     /// * `Ok(None)` - If no checkpoints exist
     /// * `Err(DagrsError)` - If loading fails
     pub async fn get_latest_checkpoint(&self) -> DagrsResult<Option<Checkpoint>> {
-        let store = self
-            .checkpoint_store
-            .as_ref()
-            .ok_or_else(|| {
-                DagrsError::new(
-                    ErrorCode::DgChk0001StoreNotConfigured,
-                    "checkpoint store not configured",
-                )
-            })?;
+        let store = self.checkpoint_store.as_ref().ok_or_else(|| {
+            DagrsError::new(
+                ErrorCode::DgChk0001StoreNotConfigured,
+                "checkpoint store not configured",
+            )
+        })?;
         store.latest().await
     }
 
     /// List all available checkpoint IDs.
     pub async fn list_checkpoints(&self) -> DagrsResult<Vec<String>> {
-        let store = self
-            .checkpoint_store
-            .as_ref()
-            .ok_or_else(|| {
-                DagrsError::new(
-                    ErrorCode::DgChk0001StoreNotConfigured,
-                    "checkpoint store not configured",
-                )
-            })?;
+        let store = self.checkpoint_store.as_ref().ok_or_else(|| {
+            DagrsError::new(
+                ErrorCode::DgChk0001StoreNotConfigured,
+                "checkpoint store not configured",
+            )
+        })?;
         store.list().await
     }
 
     /// Delete a checkpoint by ID.
     pub async fn delete_checkpoint(&self, checkpoint_id: &str) -> DagrsResult<()> {
-        let store = self
-            .checkpoint_store
-            .as_ref()
-            .ok_or_else(|| {
-                DagrsError::new(
-                    ErrorCode::DgChk0001StoreNotConfigured,
-                    "checkpoint store not configured",
-                )
-            })?;
+        let store = self.checkpoint_store.as_ref().ok_or_else(|| {
+            DagrsError::new(
+                ErrorCode::DgChk0001StoreNotConfigured,
+                "checkpoint store not configured",
+            )
+        })?;
         store.delete(&checkpoint_id.to_string()).await
     }
 
     /// Clean up old checkpoints to maintain the max_checkpoints limit.
-    async fn cleanup_old_checkpoints(
-        &self,
-        store: &dyn CheckpointStore,
-    ) -> DagrsResult<()> {
+    async fn cleanup_old_checkpoints(&self, store: &dyn CheckpointStore) -> DagrsResult<()> {
         let ids = store.list().await?;
         if ids.len() <= self.checkpoint_config.max_checkpoints {
             return Ok(());
@@ -447,7 +425,10 @@ impl Graph {
         Ok(())
     }
 
-    pub async fn resume_from_checkpoint(&mut self, checkpoint_id: &str) -> DagrsResult<ExecutionReport> {
+    pub async fn resume_from_checkpoint(
+        &mut self,
+        checkpoint_id: &str,
+    ) -> DagrsResult<ExecutionReport> {
         self.resume_from_checkpoint_with(checkpoint_id, RunOptions::default())
             .await
     }
@@ -493,9 +474,8 @@ impl Graph {
                 match node_state.status {
                     NodeExecStatus::Succeeded => exec_state.exe_success(),
                     NodeExecStatus::Failed => exec_state.exe_fail(),
-                    NodeExecStatus::Pending
-                    | NodeExecStatus::Running
-                    | NodeExecStatus::Skipped => {}
+                    NodeExecStatus::Pending | NodeExecStatus::Running | NodeExecStatus::Skipped => {
+                    }
                 }
             }
         }
@@ -560,10 +540,10 @@ impl Graph {
     }
 
     fn aggregate_errors(errors: &[DagrsError]) -> DagrsError {
-        if let Some(err) = errors.first() {
-            if errors.len() == 1 {
-                return err.clone();
-            }
+        if let Some(err) = errors.first()
+            && errors.len() == 1
+        {
+            return err.clone();
         }
         DagrsError::new(
             ErrorCode::DgRun0006NodeExecutionFailed,
@@ -662,19 +642,22 @@ impl Graph {
             }
 
             let mut tasks = vec![];
-            for node_id in active_block_nodes.iter().copied() {
-                let node = self.nodes.get(&node_id).ok_or_else(|| {
+            for node_id in &active_block_nodes {
+                let node = self.nodes.get(node_id).ok_or_else(|| {
                     DagrsError::new(ErrorCode::DgBld0001NodeNotFound, "node not found")
                         .with_node_id(node_id.as_usize())
                 })?;
-                let execute_state = self.execute_states.get(&node_id).ok_or_else(|| {
-                    DagrsError::new(
-                        ErrorCode::DgRun0006NodeExecutionFailed,
-                        "execution state not initialised for node",
-                    )
-                    .with_node_id(node_id.as_usize())
-                })?
-                .clone();
+                let execute_state = self
+                    .execute_states
+                    .get(node_id)
+                    .ok_or_else(|| {
+                        DagrsError::new(
+                            ErrorCode::DgRun0006NodeExecutionFailed,
+                            "execution state not initialised for node",
+                        )
+                        .with_node_id(node_id.as_usize())
+                    })?
+                    .clone();
                 let env = Arc::clone(&self.env);
                 let node = Arc::clone(node);
                 let condition_flag = Arc::clone(&condition_flag);
@@ -787,7 +770,7 @@ impl Graph {
 
                     match final_output {
                         Ok((out, duration_ms)) => {
-                            let node_guard = node_ref.lock().await;
+                            let mut node_guard = node_ref.lock().await;
                             if out.is_err() {
                                 let err = out.get_err().cloned().unwrap_or_else(|| {
                                     DagrsError::new(
@@ -804,6 +787,8 @@ impl Graph {
                                     id: node_id,
                                     error: err.clone(),
                                 });
+                                node_guard.input_channels().close_all().await;
+                                node_guard.output_channels().close_all().await;
                                 execute_state.set_output(out.clone());
                                 execute_state.exe_fail();
                                 errors.lock().await.push(err);
@@ -852,12 +837,10 @@ impl Graph {
                     Ok(Ok(output)) => results.push(output),
                     Ok(Err(err)) => errors.lock().await.push(err),
                     Err(join_err) => {
-                        errors.lock().await.push(
-                            DagrsError::new(
-                                ErrorCode::DgRun0002TaskJoinFailed,
-                                format!("node task join failed: {join_err}"),
-                            ),
-                        );
+                        errors.lock().await.push(DagrsError::new(
+                            ErrorCode::DgRun0002TaskJoinFailed,
+                            format!("node task join failed: {join_err}"),
+                        ));
                     }
                 }
             }
@@ -923,7 +906,9 @@ impl Graph {
                     && self.checkpoint_config.on_loop_iteration
                     && self.checkpoint_store.is_some()
                 {
-                    let _ = self.save_checkpoint(next_pc, loop_count, &active_nodes).await;
+                    let _ = self
+                        .save_checkpoint(next_pc, loop_count, &active_nodes)
+                        .await;
                 }
 
                 let _ = self.event_sender.send(GraphEvent::LoopIteration {
@@ -941,16 +926,11 @@ impl Graph {
             CompletionStatus::Succeeded => TerminationStatus::Succeeded,
             CompletionStatus::Aborted => TerminationStatus::Aborted,
         };
-        let termination_error = matches!(status, CompletionStatus::Aborted)
-            .then(DagrsError::aborted);
+        let termination_error =
+            matches!(status, CompletionStatus::Aborted).then(DagrsError::aborted);
         self.emit_termination(termination_status, termination_error);
 
-        Ok(self.build_report(
-            run_id,
-            status,
-            started_at_unix_secs,
-            skipped_total,
-        ))
+        Ok(self.build_report(run_id, status, started_at_unix_secs, skipped_total))
     }
 
     /// Check if a checkpoint should be created based on configuration.
@@ -1080,13 +1060,11 @@ impl Graph {
             let abstract_node_id = node.id();
 
             if self.nodes.contains_key(&abstract_node_id) {
-                return Err(
-                    DagrsError::new(
-                        ErrorCode::DgBld0003DuplicateNodeId,
-                        "duplicate node id detected while adding loop subgraph",
-                    )
-                    .with_node_id(abstract_node_id.as_usize()),
-                );
+                return Err(DagrsError::new(
+                    ErrorCode::DgBld0003DuplicateNodeId,
+                    "duplicate node id detected while adding loop subgraph",
+                )
+                .with_node_id(abstract_node_id.as_usize()));
             }
 
             log::debug!("Add node {:?} to abstract graph", abstract_node_id);
@@ -1105,13 +1083,11 @@ impl Graph {
                 let concrete_id =
                     Self::try_lock_node_for_build(&node, "loop_structure concrete id")?.id();
                 if self.nodes.contains_key(&concrete_id) {
-                    return Err(
-                        DagrsError::new(
-                            ErrorCode::DgBld0003DuplicateNodeId,
-                            "duplicate node id detected while expanding loop subgraph",
-                        )
-                        .with_node_id(concrete_id.as_usize()),
-                    );
+                    return Err(DagrsError::new(
+                        ErrorCode::DgBld0003DuplicateNodeId,
+                        "duplicate node id detected while expanding loop subgraph",
+                    )
+                    .with_node_id(concrete_id.as_usize()));
                 }
                 log::debug!("Add node {:?} to concrete graph", concrete_id);
                 self.nodes.insert(concrete_id, node.clone());
@@ -1121,13 +1097,11 @@ impl Graph {
         } else {
             let id = node.id();
             if self.nodes.contains_key(&id) {
-                return Err(
-                    DagrsError::new(
-                        ErrorCode::DgBld0003DuplicateNodeId,
-                        "duplicate node id detected",
-                    )
-                    .with_node_id(id.as_usize()),
-                );
+                return Err(DagrsError::new(
+                    ErrorCode::DgBld0003DuplicateNodeId,
+                    "duplicate node id detected",
+                )
+                .with_node_id(id.as_usize()));
             }
             let node = Arc::new(Mutex::new(node));
             self.node_count += 1;
@@ -1154,10 +1128,11 @@ impl Graph {
         }
         for to_id in &to_ids {
             if !self.nodes.contains_key(to_id) {
-                return Err(
-                    DagrsError::new(ErrorCode::DgBld0001NodeNotFound, "target node not found")
-                        .with_node_id(to_id.as_usize()),
-                );
+                return Err(DagrsError::new(
+                    ErrorCode::DgBld0001NodeNotFound,
+                    "target node not found",
+                )
+                .with_node_id(to_id.as_usize()));
             }
         }
 
@@ -1167,8 +1142,10 @@ impl Graph {
                 DagrsError::new(ErrorCode::DgBld0001NodeNotFound, "source node not found")
                     .with_node_id(from_id.as_usize())
             })?;
-            let mut from_node =
-                Self::try_lock_node_for_build(from_node_lock, "add_edge from node output channels")?;
+            let mut from_node = Self::try_lock_node_for_build(
+                from_node_lock,
+                "add_edge from node output channels",
+            )?;
             let from_channel = from_node.output_channels();
 
             for to_id in &to_ids {
@@ -1321,13 +1298,11 @@ impl Graph {
                                    This is likely due to an incorrect node ID in the LoopInstruction.",
                                 nid
                             );
-                            return Err(
-                                DagrsError::new(
-                                    ErrorCode::DgRun0006NodeExecutionFailed,
-                                    format!("invalid jump target node {nid} not found"),
-                                )
-                                .with_node_id(node_id.as_usize()),
-                            );
+                            return Err(DagrsError::new(
+                                ErrorCode::DgRun0006NodeExecutionFailed,
+                                format!("invalid jump target node {nid} not found"),
+                            )
+                            .with_node_id(node_id.as_usize()));
                         }
                     }
                 }
@@ -1406,7 +1381,7 @@ impl Graph {
                 return Err(DagrsError::new(
                     ErrorCode::DgBld0004GraphLoopDetected,
                     "graph contains a loop",
-                ))
+                ));
             }
         };
 
@@ -1433,10 +1408,11 @@ impl Graph {
 
                 // Create new block if conditional node / loop encountered
                 let Some(node) = self.nodes.get(&node_id) else {
-                    return Err(
-                        DagrsError::new(ErrorCode::DgBld0001NodeNotFound, "node not found")
-                            .with_node_id(node_id.as_usize()),
-                    );
+                    return Err(DagrsError::new(
+                        ErrorCode::DgBld0001NodeNotFound,
+                        "node not found",
+                    )
+                    .with_node_id(node_id.as_usize()));
                 };
                 // Use an async lock here to avoid blocking the runtime
                 let node_guard = node.lock().await;

@@ -6,7 +6,9 @@ use dagrs::node::action::Action;
 use dagrs::node::default_node::DefaultNode;
 use dagrs::node::loop_node::{CountLoopCondition, LoopNode};
 use dagrs::node::router_node::{Router, RouterNode};
-use dagrs::{DagrsError, EnvVar, ErrorCode, Graph, InChannels, Node, NodeTable, OutChannels, Output};
+use dagrs::{
+    DagrsError, EnvVar, ErrorCode, Graph, InChannels, Node, NodeTable, OutChannels, Output,
+};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::broadcast;
@@ -44,16 +46,13 @@ async fn collect_events_until_terminated(
     mut receiver: broadcast::Receiver<GraphEvent>,
 ) -> Vec<GraphEvent> {
     let mut events = Vec::new();
-    loop {
-        match tokio::time::timeout(Duration::from_millis(250), receiver.recv()).await {
-            Ok(Ok(event)) => {
-                let terminated = matches!(event, GraphEvent::ExecutionTerminated { .. });
-                events.push(event);
-                if terminated {
-                    break;
-                }
-            }
-            Ok(Err(_)) | Err(_) => break,
+    while let Ok(Ok(event)) =
+        tokio::time::timeout(Duration::from_millis(250), receiver.recv()).await
+    {
+        let terminated = matches!(event, GraphEvent::ExecutionTerminated { .. });
+        events.push(event);
+        if terminated {
+            break;
         }
     }
     events

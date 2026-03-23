@@ -4,9 +4,7 @@ pub mod node;
 pub mod utils;
 
 pub use connection::{
-    in_channel::InChannels,
-    information_packet::Content,
-    out_channel::OutChannels,
+    in_channel::InChannels, information_packet::Content, out_channel::OutChannels,
 };
 pub use graph::error::{DagrsError, DagrsResult, ErrorCode, ErrorContext};
 pub use node::*;

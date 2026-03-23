@@ -20,7 +20,7 @@ impl MyNode {
 }
 
 #[tokio::main]
-async fn main() {
+async fn main() -> Result<(), dagrs::DagrsError> {
     let mut node_table = NodeTable::default();
 
     let node_name = "auto_node";
@@ -32,6 +32,7 @@ async fn main() {
     let mut g = dependencies!(
         s -> a b,
         b -> a
-    );
-    g.async_start().await.unwrap();
+    )?;
+    g.async_start().await?;
+    Ok(())
 }

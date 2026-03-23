@@ -90,16 +90,13 @@ async fn collect_events_until_terminated(
     mut receiver: broadcast::Receiver<GraphEvent>,
 ) -> Vec<GraphEvent> {
     let mut events = Vec::new();
-    loop {
-        match tokio::time::timeout(Duration::from_millis(500), receiver.recv()).await {
-            Ok(Ok(event)) => {
-                let terminated = matches!(event, GraphEvent::ExecutionTerminated { .. });
-                events.push(event);
-                if terminated {
-                    break;
-                }
-            }
-            Ok(Err(_)) | Err(_) => break,
+    while let Ok(Ok(event)) =
+        tokio::time::timeout(Duration::from_millis(500), receiver.recv()).await
+    {
+        let terminated = matches!(event, GraphEvent::ExecutionTerminated { .. });
+        events.push(event);
+        if terminated {
+            break;
         }
     }
     events
@@ -317,7 +314,13 @@ async fn test_automatic_retry_success() {
         }))
         .await;
 
-    let node = RetryableNode::new("RetryNode".to_string(), 2, 3, fail_count.clone(), &mut table);
+    let node = RetryableNode::new(
+        "RetryNode".to_string(),
+        2,
+        3,
+        fail_count.clone(),
+        &mut table,
+    );
     graph.add_node(node).unwrap();
 
     let collector = tokio::spawn(collect_events_until_terminated(receiver));
@@ -360,7 +363,13 @@ async fn test_retry_hook_can_stop_retries() {
         }))
         .await;
 
-    let node = RetryableNode::new("AlwaysFail".to_string(), 100, 3, fail_count.clone(), &mut table);
+    let node = RetryableNode::new(
+        "AlwaysFail".to_string(),
+        100,
+        3,
+        fail_count.clone(),
+        &mut table,
+    );
     graph.add_node(node).unwrap();
 
     let collector = tokio::spawn(collect_events_until_terminated(receiver));

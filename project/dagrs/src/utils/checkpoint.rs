@@ -41,10 +41,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
-use crate::{
-    DagrsError, DagrsResult, ErrorCode,
-    node::NodeId,
-};
+use crate::{DagrsError, DagrsResult, ErrorCode, node::NodeId};
 
 /// Checkpoint identifier
 pub type CheckpointId = String;
@@ -276,34 +273,55 @@ impl MemoryCheckpointStore {
 #[async_trait]
 impl CheckpointStore for MemoryCheckpointStore {
     async fn save(&self, checkpoint: &Checkpoint) -> DagrsResult<()> {
-        let mut store = self.checkpoints.write().map_err(|e| checkpoint_io_error(e.to_string()))?;
+        let mut store = self
+            .checkpoints
+            .write()
+            .map_err(|e| checkpoint_io_error(e.to_string()))?;
         store.insert(checkpoint.id.clone(), checkpoint.clone());
         Ok(())
     }
 
     async fn load(&self, id: &CheckpointId) -> DagrsResult<Checkpoint> {
-        let store = self.checkpoints.read().map_err(|e| checkpoint_io_error(e.to_string()))?;
-        store.get(id).cloned().ok_or_else(|| checkpoint_not_found(id))
+        let store = self
+            .checkpoints
+            .read()
+            .map_err(|e| checkpoint_io_error(e.to_string()))?;
+        store
+            .get(id)
+            .cloned()
+            .ok_or_else(|| checkpoint_not_found(id))
     }
 
     async fn delete(&self, id: &CheckpointId) -> DagrsResult<()> {
-        let mut store = self.checkpoints.write().map_err(|e| checkpoint_io_error(e.to_string()))?;
+        let mut store = self
+            .checkpoints
+            .write()
+            .map_err(|e| checkpoint_io_error(e.to_string()))?;
         store.remove(id);
         Ok(())
     }
 
     async fn list(&self) -> DagrsResult<Vec<CheckpointId>> {
-        let store = self.checkpoints.read().map_err(|e| checkpoint_io_error(e.to_string()))?;
+        let store = self
+            .checkpoints
+            .read()
+            .map_err(|e| checkpoint_io_error(e.to_string()))?;
         Ok(store.keys().cloned().collect())
     }
 
     async fn latest(&self) -> DagrsResult<Option<Checkpoint>> {
-        let store = self.checkpoints.read().map_err(|e| checkpoint_io_error(e.to_string()))?;
+        let store = self
+            .checkpoints
+            .read()
+            .map_err(|e| checkpoint_io_error(e.to_string()))?;
         Ok(store.values().max_by_key(|c| c.timestamp).cloned())
     }
 
     async fn clear(&self) -> DagrsResult<()> {
-        let mut store = self.checkpoints.write().map_err(|e| checkpoint_io_error(e.to_string()))?;
+        let mut store = self
+            .checkpoints
+            .write()
+            .map_err(|e| checkpoint_io_error(e.to_string()))?;
         store.clear();
         Ok(())
     }
@@ -418,14 +436,16 @@ impl CheckpointStore for FileCheckpointStore {
     async fn list(&self) -> DagrsResult<Vec<CheckpointId>> {
         self.ensure_dir().await?;
 
-        let mut entries = tokio::fs::read_dir(&self.base_path)
-            .await
-            .map_err(|e| checkpoint_io_error(format!("Failed to read checkpoint directory: {e}")))?;
+        let mut entries = tokio::fs::read_dir(&self.base_path).await.map_err(|e| {
+            checkpoint_io_error(format!("Failed to read checkpoint directory: {e}"))
+        })?;
 
         let mut ids = Vec::new();
-        while let Some(entry) = entries.next_entry().await.map_err(|e| {
-            checkpoint_io_error(format!("Failed to read directory entry: {e}"))
-        })? {
+        while let Some(entry) = entries
+            .next_entry()
+            .await
+            .map_err(|e| checkpoint_io_error(format!("Failed to read directory entry: {e}")))?
+        {
             if let Some(name) = entry.file_name().to_str()
                 && name.ends_with(".json")
             {

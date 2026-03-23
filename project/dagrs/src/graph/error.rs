@@ -101,7 +101,7 @@ impl fmt::Display for ErrorContext {
 pub struct DagrsError {
     pub code: ErrorCode,
     pub message: Cow<'static, str>,
-    pub context: ErrorContext,
+    pub context: Box<ErrorContext>,
 }
 
 pub type DagrsResult<T> = Result<T, DagrsError>;
@@ -111,7 +111,7 @@ impl DagrsError {
         Self {
             code,
             message: message.into(),
-            context: ErrorContext::default(),
+            context: Box::default(),
         }
     }
 

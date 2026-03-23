@@ -15,28 +15,49 @@ pub enum TerminationStatus {
 /// Events emitted during graph execution.
 #[derive(Clone, Debug)]
 pub enum GraphEvent {
-    NodeStart { id: NodeId, timestamp: u64 },
-    NodeSuccess { id: NodeId, duration_ms: u64 },
-    NodeFailed { id: NodeId, error: DagrsError },
-    NodeSkipped { id: NodeId, reason: SkipReason },
+    NodeStart {
+        id: NodeId,
+        timestamp: u64,
+    },
+    NodeSuccess {
+        id: NodeId,
+        duration_ms: u64,
+    },
+    NodeFailed {
+        id: NodeId,
+        error: DagrsError,
+    },
+    NodeSkipped {
+        id: NodeId,
+        reason: SkipReason,
+    },
     NodeRetry {
         id: NodeId,
         attempt: u32,
         max_retries: u32,
         error: DagrsError,
     },
-    LoopIteration { iteration: usize, block_index: usize },
+    LoopIteration {
+        iteration: usize,
+        block_index: usize,
+    },
     BranchSelected {
         node_id: NodeId,
         selected_branches: Vec<usize>,
     },
-    Progress { completed: usize, total: usize },
+    Progress {
+        completed: usize,
+        total: usize,
+    },
     CheckpointSaved {
         checkpoint_id: String,
         pc: usize,
         completed_nodes: usize,
     },
-    CheckpointRestored { checkpoint_id: String, pc: usize },
+    CheckpointRestored {
+        checkpoint_id: String,
+        pc: usize,
+    },
     ExecutionTerminated {
         status: TerminationStatus,
         error: Option<DagrsError>,

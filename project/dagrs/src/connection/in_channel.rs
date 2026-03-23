@@ -3,8 +3,8 @@ use std::{collections::HashMap, marker::PhantomData, sync::Arc};
 use futures::future::{join_all, select_ok};
 use tokio::sync::{Mutex, broadcast, mpsc};
 
-use crate::graph::error::{DagrsError, DagrsResult, ErrorCode};
 use crate::NodeId;
+use crate::graph::error::{DagrsError, DagrsResult, ErrorCode};
 
 use super::information_packet::Content;
 
@@ -98,18 +98,17 @@ impl InChannel {
             }),
             InChannel::Bcst(receiver) => match receiver.recv().await {
                 Ok(v) => Ok(v),
-                Err(broadcast::error::RecvError::Closed) => Err(
-                    DagrsError::new(ErrorCode::DgChn0002Closed, "channel is closed")
-                        .with_channel(channel_id.as_usize()),
-                ),
-                Err(broadcast::error::RecvError::Lagged(x)) => Err(
-                    DagrsError::new(
-                        ErrorCode::DgChn0003Lagged,
-                        "channel receiver lagged behind broadcast sender",
-                    )
-                    .with_channel(channel_id.as_usize())
-                    .with_detail("lagged", x.to_string()),
-                ),
+                Err(broadcast::error::RecvError::Closed) => Err(DagrsError::new(
+                    ErrorCode::DgChn0002Closed,
+                    "channel is closed",
+                )
+                .with_channel(channel_id.as_usize())),
+                Err(broadcast::error::RecvError::Lagged(x)) => Err(DagrsError::new(
+                    ErrorCode::DgChn0003Lagged,
+                    "channel receiver lagged behind broadcast sender",
+                )
+                .with_channel(channel_id.as_usize())
+                .with_detail("lagged", x.to_string())),
             },
         }
     }

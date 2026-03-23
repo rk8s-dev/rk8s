@@ -1,7 +1,7 @@
+use crate::DagrsError;
 use crate::node::Node;
 use crate::utils::env::EnvVar;
 use crate::utils::output::Output;
-use crate::DagrsError;
 use async_trait::async_trait;
 use std::sync::Arc;
 

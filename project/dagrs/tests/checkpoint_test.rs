@@ -23,16 +23,13 @@ async fn collect_events_until_terminated(
     mut receiver: tokio::sync::broadcast::Receiver<GraphEvent>,
 ) -> Vec<GraphEvent> {
     let mut events = Vec::new();
-    loop {
-        match tokio::time::timeout(Duration::from_millis(200), receiver.recv()).await {
-            Ok(Ok(event)) => {
-                let terminated = matches!(event, GraphEvent::ExecutionTerminated { .. });
-                events.push(event);
-                if terminated {
-                    break;
-                }
-            }
-            Ok(Err(_)) | Err(_) => break,
+    while let Ok(Ok(event)) =
+        tokio::time::timeout(Duration::from_millis(200), receiver.recv()).await
+    {
+        let terminated = matches!(event, GraphEvent::ExecutionTerminated { .. });
+        events.push(event);
+        if terminated {
+            break;
         }
     }
     events
@@ -268,15 +265,15 @@ async fn test_checkpoint_events() {
     let has_node_success = events_list
         .iter()
         .any(|e| matches!(e, GraphEvent::NodeSuccess { .. }));
-    let has_terminated = events_list
-        .iter()
-        .any(|e| matches!(
+    let has_terminated = events_list.iter().any(|e| {
+        matches!(
             e,
             GraphEvent::ExecutionTerminated {
                 status: TerminationStatus::Succeeded,
                 error: None,
             }
-        ));
+        )
+    });
 
     assert!(has_node_start, "Should have NodeStart events");
     assert!(has_node_success, "Should have NodeSuccess events");
