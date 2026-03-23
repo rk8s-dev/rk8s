@@ -43,7 +43,7 @@ Dagrs leverages cutting-edge technologies to ensure functionality and performanc
 
 ## Macro Contract
 
-`dagrs-derive 0.5.0` targets the `dagrs 0.9.0` API surface.
+`dagrs-derive 0.5.0` targets the `dagrs 0.8.1` API surface.
 
 - `dependencies!` returns `Result<dagrs::Graph, dagrs::DagrsError>` and propagates graph build errors instead of ignoring them.
 - `auto_node` no longer injects `unsafe impl Send/Sync`; user-defined fields must satisfy `dagrs::Node` trait bounds naturally.

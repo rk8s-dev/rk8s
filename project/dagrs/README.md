@@ -128,7 +128,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 ## Changelog
 
-### v0.9.0
+### v0.8.1
 
 #### 🚀 Runtime/API Changes
 
@@ -201,7 +201,7 @@ The `dagrs` project relies on community contributions and aims to simplify getti
 
 ### Version Release Notes
 
-When releasing a new version, update `dagrs` and `dagrs-derive` as a compatible pair. They do not need identical version numbers, but breaking changes in one crate that require changes in the other should be released together. For this release line, the compatibility target is `dagrs 0.9.0` with `dagrs-derive 0.5.0`.
+When releasing a new version, update `dagrs` and `dagrs-derive` as a compatible pair. They do not need identical version numbers, but breaking changes in one crate that require changes in the other should be released together. For this release line, the compatibility target is `dagrs 0.8.1` with `dagrs-derive 0.5.0`.
 
 For example, as mentioned in issue [#98](https://github.com/dagrs-dev/dagrs/issues/98), the problem occurred because `dagrs` version 0.4.3 depended on a `dagrs-derive` release that did not include the required macro changes. Release the compatibility matrix together so downstream users do not get a mismatched runtime/macro pair.
 
