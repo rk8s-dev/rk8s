@@ -32,6 +32,14 @@ impl LoopSubgraph {
         }
     }
 
+    /// Fallible constructor kept for API symmetry with the main graph build path.
+    ///
+    /// Construction is currently infallible, so this simply returns `Ok(Self::new(...))`.
+    /// Callers that prefer a uniform `Result`-based build style can use this variant.
+    pub fn try_new(name: NodeName, node_table: &mut NodeTable) -> DagrsResult<Self> {
+        Ok(Self::new(name, node_table))
+    }
+
     /// Add a node to the subgraph
     pub fn add_node(&mut self, node: impl Node + 'static) -> DagrsResult<NodeId> {
         let node_id = node.id();

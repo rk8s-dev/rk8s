@@ -45,6 +45,10 @@ pub enum GraphEvent {
         node_id: NodeId,
         selected_branches: Vec<usize>,
     },
+    /// Progress is emitted when the executor finishes a whole block, not after every node.
+    ///
+    /// This keeps progress monotonic across branch pruning and checkpoint resume, but means
+    /// consumers that want per-node UI updates should combine it with node-level events.
     Progress {
         completed: usize,
         total: usize,

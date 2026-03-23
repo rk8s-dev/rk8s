@@ -122,6 +122,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 - Execution entry: `Graph::async_start().await`, which returns an `ExecutionReport`.
 - Failures use the structured `DagrsError` + `ErrorCode` model.
 - Event subscribers should treat `GraphEvent::ExecutionTerminated` as the final signal.
+- `GraphEvent::Progress` is emitted once per completed execution block, not once per completed node.
 - `Graph::start_with_runtime()` has been removed.
 - Use async channel APIs (`recv_from().await`, `send_to(...).await`, `broadcast(...).await`, `close(...).await`).
 
@@ -134,10 +135,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 - **Structured Error Model**: `DagrsError` and `ErrorCode` now unify graph build, runtime, checkpoint, and channel failures.
 - **Build APIs Return `Result`**: `Graph::add_node`, `Graph::add_edge`, and `LoopSubgraph::add_node` now return `Result`.
 - **Execution Reports**: `Graph::async_start()` and checkpoint resume APIs now return `ExecutionReport`.
-- **Unified Termination Event**: `GraphEvent::ExecutionTerminated` replaces `GraphFinished`, and `Progress` is now emitted during execution.
-- **Checkpoint State Model**: `NodeExecStatus` makes checkpointed node state explicit, `Output::empty()` is persisted as success, and serialized outputs are replayed to pending downstream nodes on resume.
+- **Unified Termination Event**: `GraphEvent::ExecutionTerminated` replaces `GraphFinished`, and `Progress` is now emitted during execution at block granularity.
+- **Checkpoint State Model**: `NodeExecStatus` makes checkpointed node state explicit, `Output::empty()` is persisted as success, serialized outputs are replayed to pending downstream nodes on resume, and restored skipped parents are hidden from downstream input selection until they execute again.
 - **Hook Contract Cleanup**: `ExecutionHook::on_error` has been removed; failures are reported through `DagrsError` and events.
 - **Reset Semantics**: `reset()` now preserves the caller environment by default. Use `reset_with(...)` for explicit environment reset.
+- **Loop Checkpoint Restore**: built-in `CountLoopCondition` restores its iteration state from checkpoints; custom loop conditions should override `restore_from_checkpoint(...)` if they carry their own resume-sensitive counters.
 
 #### 💡 Migration
 

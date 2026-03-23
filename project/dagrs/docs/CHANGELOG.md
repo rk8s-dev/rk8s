@@ -21,9 +21,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Runtime panic and join failures are surfaced through structured runtime error codes.
 - **Event / Hook / Checkpoint Contract**:
   - `GraphEvent::ExecutionTerminated` replaces `GraphFinished` as the final execution signal.
-  - `Progress` events are emitted during execution.
+  - `Progress` events are emitted during execution at block granularity.
   - `ExecutionHook::on_error` has been removed; failures are reported via `DagrsError`, `NodeFailed`, and `ExecutionTerminated`.
-  - Checkpoint node state now uses `NodeExecStatus`, `Output::empty()` is persisted as successful completion, and serializable outputs are replayed into downstream channels on resume.
+  - Checkpoint node state now uses `NodeExecStatus`, `Output::empty()` is persisted as successful completion, serializable outputs are replayed into downstream channels on resume, and restored skipped parents are hidden from downstream input selection until they execute again.
 - **Examples & Tests**:
   - Updated examples, `dagrs-sklearn`, tests, and docs to the new build/runtime/error APIs.
 
