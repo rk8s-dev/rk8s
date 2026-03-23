@@ -229,7 +229,7 @@ impl LeaseServer {
             .task_manager
             .get_shutdown_listener(TaskName::LeaseKeepAlive)
             .ok_or(Status::cancelled("The cluster is shutting down"))?;
-        
+    
         // Create QUIC channel
         let channel = Channel::new(
             // TODO: Use actual QUIC client
@@ -239,26 +239,64 @@ impl LeaseServer {
             std::time::Duration::from_secs(5),
         );
 
-        // Collect requests into a vector
-        let mut requests = Vec::new();
-        loop {
-            tokio::select! {
-                _ = shutdown_listener.wait() => {
-                    debug!("Lease keep alive shutdown");
-                    break;
+        // Create a channel to send requests to the background task
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+    
+        // Spawn a background task to handle the client streaming request
+        let response_stream = channel.client_streaming(
+            MethodId::XlineLeaseKeepAlive,
+            futures::stream::unfold(rx, |mut rx| async move {
+                match rx.recv().await {
+                    Some(req) => Some((Ok(req), rx)),
+                    None => None,
                 }
-                res = request_stream.next() => {
-                    if let Some(Ok(keep_alive_req)) = res {
-                        requests.push(keep_alive_req);
-                    } else {
+            })
+        ).await?;
+
+        // Create a stream that forwards requests and receives responses
+        let stream = try_stream! {
+            let mut response_stream = response_stream;
+        
+            loop {
+                tokio::select! {
+                    _ = shutdown_listener.wait() => {
+                        debug!("Lease keep alive shutdown");
                         break;
+                    }
+                    res = request_stream.next() => {
+                        match res {
+                            Some(Ok(keep_alive_req)) => {
+                                // Send the request to the background task
+                                if tx.send(keep_alive_req).is_err() {
+                                    break;
+                                }
+                            }
+                            Some(Err(e)) => {
+                                yield Err(e);
+                                break;
+                            }
+                            None => {
+                                break;
+                            }
+                        }
+                    }
+                    res = response_stream.next() => {
+                        match res {
+                            Some(Ok(response)) => {
+                                yield response;
+                            }
+                            Some(Err(e)) => {
+                                yield Err(e);
+                                break;
+                            }
+                            None => {
+                                break;
+                            }
+                        }
                     }
                 }
             }
-        }
-
-        // Use QUIC client to send client streaming request
-        let stream = channel.client_streaming(MethodId::XlineLeaseKeepAlive, futures::stream::iter(requests)).await?;
+        };
 
         Ok(Box::pin(stream))
     }
