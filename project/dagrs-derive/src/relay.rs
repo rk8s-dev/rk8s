@@ -92,7 +92,7 @@ pub(crate) fn add_relay(relaies: Relaies) -> proc_macro2::TokenStream {
         }
     }
     token.extend(quote::quote!(for (key, value) in &edge {
-        let vec = value.iter().cloned().collect();
+        let vec = value.iter().cloned().collect::<Vec<NodeId>>();
         graph.add_edge(key.clone(), vec)?;
     }));
 
