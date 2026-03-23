@@ -221,17 +221,18 @@ impl PodsWatcher {
         let mut pod = pod.clone();
 
         // Collect SlayerFs volume info upfront to avoid borrow conflicts
-        let slayerfs_volumes: Vec<(String, u64)> = pod
+        let slayerfs_volumes: Vec<(String, u64, Option<common::SlayerFsVolumeConfig>)> = pod
             .spec
             .volumes
             .iter()
             .filter_map(|vol| {
                 if let VolumeSourceType::SlayerFs {
                     capacity_bytes,
+                    config,
                     ..
                 } = &vol.source
                 {
-                    Some((vol.name.clone(), capacity_bytes.unwrap_or(0)))
+                    Some((vol.name.clone(), capacity_bytes.unwrap_or(0), config.clone()))
                 } else {
                     None
                 }
@@ -240,10 +241,17 @@ impl PodsWatcher {
 
         // Provision SlayerFs volumes before sending CreatePod
         let orchestrator = &self.shared.volume_orchestrator;
-        for (vol_name, capacity_bytes) in &slayerfs_volumes {
+        for (vol_name, capacity_bytes, vol_config) in &slayerfs_volumes {
+            let mut parameters = std::collections::HashMap::new();
+            if let Some(cfg) = vol_config {
+                if let Ok(json) = serde_json::to_string(cfg) {
+                    parameters.insert("slayerfs_config".to_owned(), json);
+                }
+            }
             let req = CreateVolumeRequest {
                 name: format!("{}-{}", pod.metadata.name, vol_name),
                 capacity_bytes: *capacity_bytes,
+                parameters,
                 ..Default::default()
             };
             let target_path = format!(

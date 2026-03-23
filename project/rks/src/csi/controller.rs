@@ -18,6 +18,9 @@ pub fn generate_volume_id() -> VolumeId {
 pub fn build_volume(volume_id: VolumeId, req: &CreateVolumeRequest) -> Volume {
     let mut volume_context = HashMap::new();
     volume_context.insert("name".to_owned(), req.name.clone());
+    if let Some(cfg_json) = req.parameters.get("slayerfs_config") {
+        volume_context.insert("slayerfs_config".to_owned(), cfg_json.clone());
+    }
 
     Volume {
         volume_id,
