@@ -228,7 +228,7 @@ impl PodsWatcher {
             .filter_map(|vol| {
                 if let VolumeSourceType::SlayerFs {
                     capacity_bytes,
-                    read_only: _,
+                    ..
                 } = &vol.source
                 {
                     Some((vol.name.clone(), capacity_bytes.unwrap_or(0)))
