@@ -139,8 +139,8 @@ async fn main() {
     });
 
     let mut inter_proc = LoopSubgraph::new("inter_proc".to_string(), &mut node_table);
-    inter_proc.add_node(inter);
-    inter_proc.add_node(proc);
+    inter_proc.add_node(inter).unwrap();
+    inter_proc.add_node(proc).unwrap();
 
     // Create graph and add nodes
     let mut graph = Graph::new();

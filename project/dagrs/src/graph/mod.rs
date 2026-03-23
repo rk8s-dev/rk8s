@@ -18,7 +18,7 @@ use crate::{
     connection::{in_channel::InChannel, information_packet::Content, out_channel::OutChannel},
     graph::event::{GraphEvent, SkipReason, TerminationStatus},
     node::{Node, NodeId, NodeTable},
-    utils::checkpoint::{Checkpoint, CheckpointConfig, CheckpointStore, NodeState},
+    utils::checkpoint::{Checkpoint, CheckpointConfig, CheckpointStore, NodeExecStatus, NodeState},
     utils::hook::{ExecutionHook, RetryDecision},
     utils::output::FlowControl,
     utils::{env::EnvVar, execstate::ExecState},
@@ -218,11 +218,10 @@ impl Graph {
         // Capture node execution states with output data
         for (node_id, exec_state) in &self.execute_states {
             let output = exec_state.get_full_output();
-            let completed = exec_state.is_success() || output.is_err();
-            let success = exec_state.is_success() && !output.is_err();
-
-            let mut node_state = if completed {
-                NodeState::completed(node_id.0, success)
+            let mut node_state = if output.is_err() {
+                NodeState::failed(node_id.0)
+            } else if exec_state.is_success() {
+                NodeState::succeeded(node_id.0)
             } else {
                 NodeState::pending(node_id.0)
             };
@@ -490,13 +489,13 @@ impl Graph {
         let active_nodes = checkpoint.get_active_nodes();
         for (node_id_val, node_state) in &checkpoint.node_states {
             let node_id = NodeId(*node_id_val);
-            if let Some(exec_state) = self.execute_states.get(&node_id)
-                && node_state.completed
-            {
-                if node_state.success {
-                    exec_state.exe_success();
-                } else {
-                    exec_state.exe_fail();
+            if let Some(exec_state) = self.execute_states.get(&node_id) {
+                match node_state.status {
+                    NodeExecStatus::Succeeded => exec_state.exe_success(),
+                    NodeExecStatus::Failed => exec_state.exe_fail(),
+                    NodeExecStatus::Pending
+                    | NodeExecStatus::Running
+                    | NodeExecStatus::Skipped => {}
                 }
             }
         }

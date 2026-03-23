@@ -3,8 +3,8 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 
 use crate::{
-    DagrsError, ErrorCode, EnvVar, InChannels, Node, NodeId, NodeName, NodeTable, OutChannels,
-    Output,
+    DagrsError, DagrsResult, ErrorCode, EnvVar, InChannels, Node, NodeId, NodeName, NodeTable,
+    OutChannels, Output,
 };
 
 /// A special node type that represents a subgraph of nodes in a loop structure.
@@ -33,10 +33,27 @@ impl LoopSubgraph {
     }
 
     /// Add a node to the subgraph
-    pub fn add_node(&mut self, node: impl Node + 'static) -> NodeId {
+    pub fn add_node(&mut self, node: impl Node + 'static) -> DagrsResult<NodeId> {
         let node_id = node.id();
+        for existing in &self.inner_nodes {
+            let existing = existing.try_lock().map_err(|_| {
+                DagrsError::new(
+                    ErrorCode::DgBld0005ConcurrentBuildMutation,
+                    "failed to acquire loop subgraph node lock while building graph",
+                )
+            })?;
+            if existing.id() == node_id {
+                return Err(
+                    DagrsError::new(
+                        ErrorCode::DgBld0003DuplicateNodeId,
+                        "duplicate node id detected while building loop subgraph",
+                    )
+                    .with_node_id(node_id.as_usize()),
+                );
+            }
+        }
         self.inner_nodes.push(Arc::new(Mutex::new(node)));
-        node_id
+        Ok(node_id)
     }
 }
 
@@ -67,5 +84,71 @@ impl Node for LoopSubgraph {
             ErrorCode::DgRun0006NodeExecutionFailed,
             "loop subgraph should not be executed directly",
         ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::LoopSubgraph;
+    use crate::node::{NodeId, NodeName};
+    use crate::{EnvVar, InChannels, Node, NodeTable, OutChannels, Output};
+    use async_trait::async_trait;
+    use std::sync::Arc;
+
+    struct FixedIdNode {
+        id: NodeId,
+        name: NodeName,
+        in_channels: InChannels,
+        out_channels: OutChannels,
+    }
+
+    impl FixedIdNode {
+        fn new(id: NodeId, name: impl Into<NodeName>) -> Self {
+            Self {
+                id,
+                name: name.into(),
+                in_channels: InChannels::default(),
+                out_channels: OutChannels::default(),
+            }
+        }
+    }
+
+    #[async_trait]
+    impl Node for FixedIdNode {
+        fn id(&self) -> NodeId {
+            self.id
+        }
+
+        fn name(&self) -> NodeName {
+            self.name.clone()
+        }
+
+        fn input_channels(&mut self) -> &mut InChannels {
+            &mut self.in_channels
+        }
+
+        fn output_channels(&mut self) -> &mut OutChannels {
+            &mut self.out_channels
+        }
+
+        async fn run(&mut self, _: Arc<EnvVar>) -> Output {
+            Output::empty()
+        }
+    }
+
+    #[test]
+    fn add_node_rejects_duplicate_ids() {
+        let mut table = NodeTable::new();
+        let mut loop_subgraph = LoopSubgraph::new("loop".to_string(), &mut table);
+        let duplicate_id = NodeId(42);
+
+        loop_subgraph
+            .add_node(FixedIdNode::new(duplicate_id, "first"))
+            .unwrap();
+        let err = loop_subgraph
+            .add_node(FixedIdNode::new(duplicate_id, "second"))
+            .expect_err("duplicate loop node id should fail");
+
+        assert_eq!(err.code, crate::ErrorCode::DgBld0003DuplicateNodeId);
     }
 }

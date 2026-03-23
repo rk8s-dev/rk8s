@@ -14,7 +14,7 @@ use dagrs::node::action::Action;
 use dagrs::node::default_node::DefaultNode;
 use dagrs::{
     Checkpoint, CheckpointConfig, CheckpointStore, EnvVar, Graph, InChannels,
-    MemoryCheckpointStore, Node, NodeTable, OutChannels, Output,
+    MemoryCheckpointStore, Node, NodeExecStatus, NodeTable, OutChannels, Output,
 };
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -178,9 +178,18 @@ async fn test_checkpoint_with_node_states() {
     checkpoint.add_node_state(NodeState::pending(3));
 
     assert_eq!(checkpoint.node_states.len(), 3);
-    assert!(checkpoint.node_states.get(&1).unwrap().success);
-    assert!(!checkpoint.node_states.get(&2).unwrap().success);
-    assert!(!checkpoint.node_states.get(&3).unwrap().completed);
+    assert_eq!(
+        checkpoint.node_states.get(&1).unwrap().status,
+        NodeExecStatus::Succeeded
+    );
+    assert_eq!(
+        checkpoint.node_states.get(&2).unwrap().status,
+        NodeExecStatus::Failed
+    );
+    assert_eq!(
+        checkpoint.node_states.get(&3).unwrap().status,
+        NodeExecStatus::Pending
+    );
 }
 
 #[tokio::test]
@@ -456,8 +465,7 @@ async fn test_node_state_builder_api() {
         .with_output_data(b"\"hello\"".to_vec());
 
     assert_eq!(state.node_id, 1);
-    assert!(state.completed);
-    assert!(state.success);
+    assert_eq!(state.status, NodeExecStatus::Succeeded);
     assert_eq!(state.output_summary, Some("String(hello)".to_string()));
     assert_eq!(state.output_data, Some(b"\"hello\"".to_vec()));
 
@@ -465,8 +473,7 @@ async fn test_node_state_builder_api() {
     let state = NodeState::completed(2, false).with_summary("Error: connection timeout");
 
     assert_eq!(state.node_id, 2);
-    assert!(state.completed);
-    assert!(!state.success);
+    assert_eq!(state.status, NodeExecStatus::Failed);
     assert_eq!(
         state.output_summary,
         Some("Error: connection timeout".to_string())
@@ -475,8 +482,13 @@ async fn test_node_state_builder_api() {
     // Test pending
     let state = NodeState::pending(3);
     assert_eq!(state.node_id, 3);
-    assert!(!state.completed);
-    assert!(!state.success);
+    assert_eq!(state.status, NodeExecStatus::Pending);
+
+    let state = NodeState::running(4);
+    assert_eq!(state.status, NodeExecStatus::Running);
+
+    let state = NodeState::skipped(5);
+    assert_eq!(state.status, NodeExecStatus::Skipped);
 }
 
 #[tokio::test]

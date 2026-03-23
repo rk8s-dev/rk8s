@@ -50,14 +50,22 @@ use crate::{
 pub type CheckpointId = String;
 
 /// Represents the execution state of a single node
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub enum NodeExecStatus {
+    Pending,
+    Running,
+    Succeeded,
+    Failed,
+    Skipped,
+}
+
+/// Represents the execution state of a single node
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NodeState {
     /// Node ID
     pub node_id: usize,
-    /// Whether the node has completed execution
-    pub completed: bool,
-    /// Whether execution was successful
-    pub success: bool,
+    /// Current execution status
+    pub status: NodeExecStatus,
     /// Serialized output data (if serializable)
     ///
     /// This field stores JSON-serialized output data for nodes that produce
@@ -72,25 +80,62 @@ pub struct NodeState {
 }
 
 impl NodeState {
-    /// Create a new NodeState with completed status
-    pub fn completed(node_id: usize, success: bool) -> Self {
+    /// Create a new NodeState with a successful terminal status.
+    pub fn succeeded(node_id: usize) -> Self {
         Self {
             node_id,
-            completed: true,
-            success,
+            status: NodeExecStatus::Succeeded,
             output_data: None,
             output_summary: None,
         }
     }
 
-    /// Create a new NodeState for a pending node
+    /// Create a new NodeState with a failed terminal status.
+    pub fn failed(node_id: usize) -> Self {
+        Self {
+            node_id,
+            status: NodeExecStatus::Failed,
+            output_data: None,
+            output_summary: None,
+        }
+    }
+
+    /// Create a new NodeState for a pending node.
     pub fn pending(node_id: usize) -> Self {
         Self {
             node_id,
-            completed: false,
-            success: false,
+            status: NodeExecStatus::Pending,
             output_data: None,
             output_summary: None,
+        }
+    }
+
+    /// Create a new NodeState for a running node.
+    pub fn running(node_id: usize) -> Self {
+        Self {
+            node_id,
+            status: NodeExecStatus::Running,
+            output_data: None,
+            output_summary: None,
+        }
+    }
+
+    /// Create a new NodeState for a skipped node.
+    pub fn skipped(node_id: usize) -> Self {
+        Self {
+            node_id,
+            status: NodeExecStatus::Skipped,
+            output_data: None,
+            output_summary: None,
+        }
+    }
+
+    /// Compatibility helper for callers that only know whether completion succeeded.
+    pub fn completed(node_id: usize, success: bool) -> Self {
+        if success {
+            Self::succeeded(node_id)
+        } else {
+            Self::failed(node_id)
         }
     }
 
@@ -550,5 +595,7 @@ mod tests {
         assert_eq!(config.interval_nodes, Some(5));
         assert_eq!(config.interval_seconds, Some(60));
         assert_eq!(config.max_checkpoints, 10);
+        assert_eq!(NodeState::running(1).status, NodeExecStatus::Running);
+        assert_eq!(NodeState::skipped(2).status, NodeExecStatus::Skipped);
     }
 }
