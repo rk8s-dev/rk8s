@@ -14,7 +14,8 @@ use dagrs::node::action::Action;
 use dagrs::node::default_node::DefaultNode;
 use dagrs::{
     Checkpoint, CheckpointConfig, CheckpointStore, EnvVar, Graph, InChannels,
-    MemoryCheckpointStore, Node, NodeExecStatus, NodeTable, OutChannels, Output,
+    MemoryCheckpointStore, Node, NodeExecStatus, NodeState, NodeTable, OutChannels, Output,
+    StoredOutputKind,
 };
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -50,18 +51,31 @@ impl Action for CounterAction {
     }
 }
 
-/// Action that sleeps for a short duration (simulating long-running task)
 #[derive(Clone)]
-struct SlowAction {
-    name: String,
-    executed: Arc<Mutex<Vec<String>>>,
+struct ProduceCheckpointedValue {
+    runs: Arc<Mutex<usize>>,
 }
 
 #[async_trait]
-impl Action for SlowAction {
+impl Action for ProduceCheckpointedValue {
     async fn run(&self, _: &mut InChannels, _: &mut OutChannels, _: Arc<EnvVar>) -> Output {
-        tokio::time::sleep(Duration::from_millis(10)).await;
-        self.executed.lock().unwrap().push(self.name.clone());
+        *self.runs.lock().unwrap() += 1;
+        Output::new("checkpointed".to_string())
+    }
+}
+
+#[derive(Clone)]
+struct CaptureCheckpointedValue {
+    source_id: dagrs::NodeId,
+    seen: Arc<Mutex<Vec<String>>>,
+}
+
+#[async_trait]
+impl Action for CaptureCheckpointedValue {
+    async fn run(&self, input: &mut InChannels, _: &mut OutChannels, _: Arc<EnvVar>) -> Output {
+        let content = input.recv_from(&self.source_id).await.unwrap();
+        let value = content.get::<String>().unwrap().clone();
+        self.seen.lock().unwrap().push(value);
         Output::empty()
     }
 }
@@ -328,29 +342,27 @@ async fn test_checkpoint_serialization() {
 
 #[tokio::test]
 async fn test_resume_execution_basic() {
-    // This test verifies basic resume functionality
     let mut graph = Graph::new();
     let mut table = NodeTable::new();
-    let executed = Arc::new(Mutex::new(Vec::new()));
+    let producer_runs = Arc::new(Mutex::new(0));
+    let seen = Arc::new(Mutex::new(Vec::new()));
 
-    // Create nodes
     let node_a = DefaultNode::with_action(
         "A".to_string(),
-        SlowAction {
-            name: "A".to_string(),
-            executed: executed.clone(),
-        },
-        &mut table,
-    );
-    let node_b = DefaultNode::with_action(
-        "B".to_string(),
-        SlowAction {
-            name: "B".to_string(),
-            executed: executed.clone(),
+        ProduceCheckpointedValue {
+            runs: producer_runs.clone(),
         },
         &mut table,
     );
     let id_a = node_a.id();
+    let node_b = DefaultNode::with_action(
+        "B".to_string(),
+        CaptureCheckpointedValue {
+            source_id: id_a,
+            seen: seen.clone(),
+        },
+        &mut table,
+    );
     let id_b = node_b.id();
 
     graph.add_node(node_a).unwrap();
@@ -358,14 +370,33 @@ async fn test_resume_execution_basic() {
     graph.add_edge(id_a, vec![id_b]).unwrap();
 
     let store = MemoryCheckpointStore::new();
+    let mut checkpoint = Checkpoint::with_id("resume_basic", 0, 0);
+    checkpoint.active_nodes.insert(id_b.as_usize());
+    checkpoint.add_node_state(
+        NodeState::succeeded(id_a.as_usize())
+            .with_output_kind(StoredOutputKind::String)
+            .with_output_data(serde_json::to_vec(&"checkpointed").unwrap())
+            .with_summary("String(checkpointed)"),
+    );
+    checkpoint.add_node_state(NodeState::pending(id_b.as_usize()));
+    store.save(&checkpoint).await.unwrap();
     graph.set_checkpoint_store(Box::new(store));
 
-    // Run the graph normally
-    graph.async_start().await.unwrap();
+    let report = tokio::time::timeout(
+        Duration::from_secs(1),
+        graph.resume_from_checkpoint("resume_basic"),
+    )
+    .await
+    .expect("resume should not hang")
+    .expect("resume should succeed");
 
-    let exec_log = executed.lock().unwrap();
-    assert!(exec_log.contains(&"A".to_string()), "Node A should execute");
-    assert!(exec_log.contains(&"B".to_string()), "Node B should execute");
+    assert_eq!(*producer_runs.lock().unwrap(), 0, "A should not rerun");
+    assert_eq!(
+        seen.lock().unwrap().as_slice(),
+        ["checkpointed"],
+        "B should receive the checkpointed output",
+    );
+    assert_eq!(report.node_succeeded, 2);
 }
 #[tokio::test]
 async fn test_file_checkpoint_store_basic() {
@@ -459,10 +490,12 @@ async fn test_node_state_builder_api() {
     // Test completed with success
     let state = NodeState::completed(1, true)
         .with_summary("String(hello)")
+        .with_output_kind(StoredOutputKind::String)
         .with_output_data(b"\"hello\"".to_vec());
 
     assert_eq!(state.node_id, 1);
     assert_eq!(state.status, NodeExecStatus::Succeeded);
+    assert_eq!(state.output_kind, Some(StoredOutputKind::String));
     assert_eq!(state.output_summary, Some("String(hello)".to_string()));
     assert_eq!(state.output_data, Some(b"\"hello\"".to_vec()));
 
@@ -497,6 +530,7 @@ async fn test_checkpoint_output_data_serialization() {
     // Add node with serialized output
     let output_json = serde_json::to_vec(&"test_output").unwrap();
     let state = NodeState::completed(1, true)
+        .with_output_kind(StoredOutputKind::String)
         .with_output_data(output_json.clone())
         .with_summary("String(test_output)");
     checkpoint.add_node_state(state);
@@ -507,6 +541,7 @@ async fn test_checkpoint_output_data_serialization() {
 
     // Verify output data was preserved
     let restored_state = restored.node_states.get(&1).unwrap();
+    assert_eq!(restored_state.output_kind, Some(StoredOutputKind::String));
     assert_eq!(restored_state.output_data, Some(output_json));
     assert_eq!(
         restored_state.output_summary,

@@ -17,7 +17,9 @@ use crate::{
     connection::{in_channel::InChannel, information_packet::Content, out_channel::OutChannel},
     graph::event::{GraphEvent, SkipReason, TerminationStatus},
     node::{Node, NodeId, NodeTable},
-    utils::checkpoint::{Checkpoint, CheckpointConfig, CheckpointStore, NodeExecStatus, NodeState},
+    utils::checkpoint::{
+        Checkpoint, CheckpointConfig, CheckpointStore, NodeExecStatus, NodeState, StoredOutputKind,
+    },
     utils::hook::{ExecutionHook, RetryDecision},
     utils::output::FlowControl,
     utils::{env::EnvVar, execstate::ExecState},
@@ -231,8 +233,8 @@ impl Graph {
                 }
 
                 // Try to serialize if the content is a serializable primitive
-                if let Some(data) = Self::try_serialize_output(&content) {
-                    node_state = node_state.with_output_data(data);
+                if let Some((kind, data)) = Self::try_serialize_output(&content) {
+                    node_state = node_state.with_output_kind(kind).with_output_data(data);
                 }
             } else if let Some(err) = output.get_err() {
                 node_state = node_state.with_summary(format!("Error: {err}"));
@@ -306,39 +308,105 @@ impl Graph {
     }
 
     /// Try to serialize output content to JSON bytes
-    fn try_serialize_output(content: &Content) -> Option<Vec<u8>> {
+    fn try_serialize_output(content: &Content) -> Option<(StoredOutputKind, Vec<u8>)> {
         // Try common serializable types
         if let Some(v) = content.get::<String>() {
-            return serde_json::to_vec(v).ok();
+            return serde_json::to_vec(v)
+                .ok()
+                .map(|data| (StoredOutputKind::String, data));
         }
         if let Some(v) = content.get::<i32>() {
-            return serde_json::to_vec(v).ok();
+            return serde_json::to_vec(v)
+                .ok()
+                .map(|data| (StoredOutputKind::I32, data));
         }
         if let Some(v) = content.get::<i64>() {
-            return serde_json::to_vec(v).ok();
+            return serde_json::to_vec(v)
+                .ok()
+                .map(|data| (StoredOutputKind::I64, data));
         }
         if let Some(v) = content.get::<u32>() {
-            return serde_json::to_vec(v).ok();
+            return serde_json::to_vec(v)
+                .ok()
+                .map(|data| (StoredOutputKind::U32, data));
         }
         if let Some(v) = content.get::<u64>() {
-            return serde_json::to_vec(v).ok();
+            return serde_json::to_vec(v)
+                .ok()
+                .map(|data| (StoredOutputKind::U64, data));
         }
         if let Some(v) = content.get::<f64>() {
-            return serde_json::to_vec(v).ok();
+            return serde_json::to_vec(v)
+                .ok()
+                .map(|data| (StoredOutputKind::F64, data));
         }
         if let Some(v) = content.get::<bool>() {
-            return serde_json::to_vec(v).ok();
+            return serde_json::to_vec(v)
+                .ok()
+                .map(|data| (StoredOutputKind::Bool, data));
         }
         if let Some(v) = content.get::<Vec<String>>() {
-            return serde_json::to_vec(v).ok();
+            return serde_json::to_vec(v)
+                .ok()
+                .map(|data| (StoredOutputKind::VecString, data));
         }
         if let Some(v) = content.get::<Vec<i32>>() {
-            return serde_json::to_vec(v).ok();
+            return serde_json::to_vec(v)
+                .ok()
+                .map(|data| (StoredOutputKind::VecI32, data));
         }
         if let Some(v) = content.get::<Vec<i64>>() {
-            return serde_json::to_vec(v).ok();
+            return serde_json::to_vec(v)
+                .ok()
+                .map(|data| (StoredOutputKind::VecI64, data));
         }
         None
+    }
+
+    fn restore_output_content(kind: StoredOutputKind, data: &[u8]) -> DagrsResult<Content> {
+        let invalid_checkpoint =
+            |message: String| DagrsError::new(ErrorCode::DgChk0003InvalidCheckpoint, message);
+
+        match kind {
+            StoredOutputKind::String => serde_json::from_slice::<String>(data)
+                .map(Content::new)
+                .map_err(|err| {
+                    invalid_checkpoint(format!("failed to restore String output: {err}"))
+                }),
+            StoredOutputKind::I32 => serde_json::from_slice::<i32>(data)
+                .map(Content::new)
+                .map_err(|err| invalid_checkpoint(format!("failed to restore i32 output: {err}"))),
+            StoredOutputKind::I64 => serde_json::from_slice::<i64>(data)
+                .map(Content::new)
+                .map_err(|err| invalid_checkpoint(format!("failed to restore i64 output: {err}"))),
+            StoredOutputKind::U32 => serde_json::from_slice::<u32>(data)
+                .map(Content::new)
+                .map_err(|err| invalid_checkpoint(format!("failed to restore u32 output: {err}"))),
+            StoredOutputKind::U64 => serde_json::from_slice::<u64>(data)
+                .map(Content::new)
+                .map_err(|err| invalid_checkpoint(format!("failed to restore u64 output: {err}"))),
+            StoredOutputKind::F64 => serde_json::from_slice::<f64>(data)
+                .map(Content::new)
+                .map_err(|err| invalid_checkpoint(format!("failed to restore f64 output: {err}"))),
+            StoredOutputKind::Bool => serde_json::from_slice::<bool>(data)
+                .map(Content::new)
+                .map_err(|err| invalid_checkpoint(format!("failed to restore bool output: {err}"))),
+            StoredOutputKind::VecString => serde_json::from_slice::<Vec<String>>(data)
+                .map(Content::new)
+                .map_err(|err| {
+                    invalid_checkpoint(format!("failed to restore Vec<String> output: {err}"))
+                }),
+            StoredOutputKind::VecI32 => serde_json::from_slice::<Vec<i32>>(data)
+                .map(Content::new)
+                .map_err(|err| {
+                    invalid_checkpoint(format!("failed to restore Vec<i32> output: {err}"))
+                }),
+            StoredOutputKind::VecI64 => serde_json::from_slice::<Vec<i64>>(data)
+                .map(Content::new)
+                .map_err(|err| {
+                    invalid_checkpoint(format!("failed to restore Vec<i64> output: {err}"))
+                }),
+        }
     }
 
     /// Load a checkpoint by ID.
@@ -425,6 +493,87 @@ impl Graph {
         Ok(())
     }
 
+    async fn restore_checkpoint_state(
+        &mut self,
+        checkpoint: &Checkpoint,
+        active_nodes: &HashSet<NodeId>,
+    ) -> DagrsResult<()> {
+        let mut restored_outputs = Vec::new();
+
+        for (node_id_val, node_state) in &checkpoint.node_states {
+            let node_id = NodeId(*node_id_val);
+            let exec_state = self.execute_states.get(&node_id).ok_or_else(|| {
+                DagrsError::new(
+                    ErrorCode::DgChk0003InvalidCheckpoint,
+                    "checkpoint references a node that is not initialised",
+                )
+                .with_node_id(node_id.as_usize())
+                .with_checkpoint(checkpoint.id.clone())
+            })?;
+
+            match node_state.status {
+                NodeExecStatus::Succeeded => {
+                    if let Some(data) = &node_state.output_data {
+                        let kind = node_state.output_kind.ok_or_else(|| {
+                            DagrsError::new(
+                                ErrorCode::DgChk0003InvalidCheckpoint,
+                                "checkpoint output is missing its type tag",
+                            )
+                            .with_node_id(node_id.as_usize())
+                            .with_checkpoint(checkpoint.id.clone())
+                        })?;
+                        let content = Self::restore_output_content(kind, data).map_err(|err| {
+                            err.with_node_id(node_id.as_usize())
+                                .with_checkpoint(checkpoint.id.clone())
+                        })?;
+                        exec_state.set_output(Output::Out(Some(content.clone())));
+                        exec_state.exe_success();
+                        restored_outputs.push((node_id, content));
+                    } else {
+                        exec_state.exe_success();
+                    }
+                }
+                NodeExecStatus::Failed => {
+                    let message = node_state
+                        .output_summary
+                        .clone()
+                        .unwrap_or_else(|| "node failed before checkpoint was saved".to_string());
+                    exec_state.set_output(Output::error(
+                        DagrsError::new(ErrorCode::DgRun0006NodeExecutionFailed, message)
+                            .with_node_id(node_id.as_usize()),
+                    ));
+                    exec_state.exe_fail();
+                }
+                NodeExecStatus::Pending | NodeExecStatus::Running | NodeExecStatus::Skipped => {}
+            }
+        }
+
+        for (node_id, content) in restored_outputs {
+            let node = self.nodes.get(&node_id).ok_or_else(|| {
+                DagrsError::new(
+                    ErrorCode::DgChk0003InvalidCheckpoint,
+                    "checkpoint references a node that does not exist in the graph",
+                )
+                .with_node_id(node_id.as_usize())
+                .with_checkpoint(checkpoint.id.clone())
+            })?;
+            let mut node_guard = node.lock().await;
+            let output_channels = node_guard.output_channels();
+            let receiver_ids = output_channels.get_receiver_ids();
+
+            for receiver_id in receiver_ids {
+                if active_nodes.contains(&receiver_id) {
+                    output_channels
+                        .send_to(&receiver_id, content.clone())
+                        .await
+                        .map_err(|err| err.with_checkpoint(checkpoint.id.clone()))?;
+                }
+            }
+        }
+
+        Ok(())
+    }
+
     pub async fn resume_from_checkpoint(
         &mut self,
         checkpoint_id: &str,
@@ -454,31 +603,30 @@ impl Graph {
             checkpoint.id, checkpoint.pc, checkpoint.loop_count
         );
 
+        if let Err(err) = self.reset_with(ResetPolicy::KeepEnv).await {
+            self.emit_termination(TerminationStatus::Failed, Some(err.clone()));
+            return Err(err);
+        }
+
+        self.init();
+        if let Err(err) = self.check_loop_and_partition().await {
+            self.emit_termination(TerminationStatus::Failed, Some(err.clone()));
+            return Err(err);
+        }
+
+        let active_nodes = checkpoint.get_active_nodes();
+        if let Err(err) = self
+            .restore_checkpoint_state(&checkpoint, &active_nodes)
+            .await
+        {
+            self.emit_termination(TerminationStatus::Failed, Some(err.clone()));
+            return Err(err);
+        }
+
         let _ = self.event_sender.send(GraphEvent::CheckpointRestored {
             checkpoint_id: checkpoint.id.clone(),
             pc: checkpoint.pc,
         });
-
-        if self.blocks.is_empty() {
-            self.init();
-            if let Err(err) = self.check_loop_and_partition().await {
-                self.emit_termination(TerminationStatus::Failed, Some(err.clone()));
-                return Err(err);
-            }
-        }
-
-        let active_nodes = checkpoint.get_active_nodes();
-        for (node_id_val, node_state) in &checkpoint.node_states {
-            let node_id = NodeId(*node_id_val);
-            if let Some(exec_state) = self.execute_states.get(&node_id) {
-                match node_state.status {
-                    NodeExecStatus::Succeeded => exec_state.exe_success(),
-                    NodeExecStatus::Failed => exec_state.exe_fail(),
-                    NodeExecStatus::Pending | NodeExecStatus::Running | NodeExecStatus::Skipped => {
-                    }
-                }
-            }
-        }
 
         self.run_internal(
             run_id,
@@ -1117,7 +1265,10 @@ impl Graph {
     /// If the outgoing port of the sending node is empty and the number of receiving nodes is > 1, use the broadcast channel
     /// An MPSC channel is used if the outgoing port of the sending node is empty and the number of receiving nodes is equal to 1
     /// If the outgoing port of the sending node is not empty, adding any number of receiving nodes will change all relevant channels to broadcast
-    pub fn add_edge(&mut self, from_id: NodeId, all_to_ids: Vec<NodeId>) -> DagrsResult<()> {
+    pub fn add_edge<I>(&mut self, from_id: NodeId, all_to_ids: I) -> DagrsResult<()>
+    where
+        I: IntoIterator<Item = NodeId>,
+    {
         let to_ids = Self::remove_duplicates(all_to_ids);
         let mut rx_map: HashMap<NodeId, mpsc::Receiver<Content>> = HashMap::new();
         if !self.nodes.contains_key(&from_id) {
@@ -1470,12 +1621,16 @@ impl Graph {
     }
 
     ///Remove duplicate elements
-    fn remove_duplicates<T>(vec: Vec<T>) -> Vec<T>
+    fn remove_duplicates<T, I>(items: I) -> Vec<T>
     where
+        I: IntoIterator<Item = T>,
         T: Eq + Hash + Clone,
     {
         let mut seen = HashSet::new();
-        vec.into_iter().filter(|x| seen.insert(x.clone())).collect()
+        items
+            .into_iter()
+            .filter(|item| seen.insert(item.clone()))
+            .collect()
     }
 }
 

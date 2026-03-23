@@ -135,7 +135,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 - **Build APIs Return `Result`**: `Graph::add_node`, `Graph::add_edge`, and `LoopSubgraph::add_node` now return `Result`.
 - **Execution Reports**: `Graph::async_start()` and checkpoint resume APIs now return `ExecutionReport`.
 - **Unified Termination Event**: `GraphEvent::ExecutionTerminated` replaces `GraphFinished`, and `Progress` is now emitted during execution.
-- **Checkpoint State Model**: `NodeExecStatus` makes checkpointed node state explicit, and `Output::empty()` is persisted as success.
+- **Checkpoint State Model**: `NodeExecStatus` makes checkpointed node state explicit, `Output::empty()` is persisted as success, and serialized outputs are replayed to pending downstream nodes on resume.
 - **Hook Contract Cleanup**: `ExecutionHook::on_error` has been removed; failures are reported through `DagrsError` and events.
 - **Reset Semantics**: `reset()` now preserves the caller environment by default. Use `reset_with(...)` for explicit environment reset.
 

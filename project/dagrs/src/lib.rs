@@ -14,7 +14,7 @@ pub use graph::*;
 pub use tokio;
 pub use utils::checkpoint::{
     Checkpoint, CheckpointConfig, CheckpointId, CheckpointStore, FileCheckpointStore,
-    MemoryCheckpointStore, NodeExecStatus, NodeState,
+    MemoryCheckpointStore, NodeExecStatus, NodeState, StoredOutputKind,
 };
 pub use utils::{env::EnvVar, output::Output};
 

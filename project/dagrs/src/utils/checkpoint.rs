@@ -17,7 +17,7 @@
 //! # Example
 //!
 //! ```ignore
-//! use dagrs::{Graph, checkpoint::{FileCheckpointStore, CheckpointConfig}};
+//! use dagrs::{CheckpointConfig, FileCheckpointStore, Graph};
 //!
 //! let mut graph = Graph::new();
 //! // ... add nodes ...
@@ -25,7 +25,8 @@
 //! // Configure checkpointing
 //! let store = FileCheckpointStore::new("/tmp/checkpoints");
 //! graph.set_checkpoint_store(Box::new(store));
-//! graph.set_checkpoint_interval(5); // Checkpoint every 5 nodes
+//! let config = CheckpointConfig::enabled().with_node_interval(5);
+//! graph.set_checkpoint_config(config);
 //!
 //! // Run with automatic checkpointing
 //! graph.async_start().await?;
@@ -56,6 +57,21 @@ pub enum NodeExecStatus {
     Skipped,
 }
 
+/// Identifies the concrete type encoded in [`NodeState::output_data`].
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub enum StoredOutputKind {
+    String,
+    I32,
+    I64,
+    U32,
+    U64,
+    F64,
+    Bool,
+    VecString,
+    VecI32,
+    VecI64,
+}
+
 /// Represents the execution state of a single node
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NodeState {
@@ -71,6 +87,9 @@ pub struct NodeState {
     /// Note: Only outputs that implement `serde::Serialize` can be stored here.
     /// For non-serializable outputs, this field will be `None`.
     pub output_data: Option<Vec<u8>>,
+    /// Type tag for `output_data`, used to restore checkpointed outputs safely.
+    #[serde(default)]
+    pub output_kind: Option<StoredOutputKind>,
     /// Human-readable output summary (for debugging)
     #[serde(default)]
     pub output_summary: Option<String>,
@@ -83,6 +102,7 @@ impl NodeState {
             node_id,
             status: NodeExecStatus::Succeeded,
             output_data: None,
+            output_kind: None,
             output_summary: None,
         }
     }
@@ -93,6 +113,7 @@ impl NodeState {
             node_id,
             status: NodeExecStatus::Failed,
             output_data: None,
+            output_kind: None,
             output_summary: None,
         }
     }
@@ -103,6 +124,7 @@ impl NodeState {
             node_id,
             status: NodeExecStatus::Pending,
             output_data: None,
+            output_kind: None,
             output_summary: None,
         }
     }
@@ -113,6 +135,7 @@ impl NodeState {
             node_id,
             status: NodeExecStatus::Running,
             output_data: None,
+            output_kind: None,
             output_summary: None,
         }
     }
@@ -123,6 +146,7 @@ impl NodeState {
             node_id,
             status: NodeExecStatus::Skipped,
             output_data: None,
+            output_kind: None,
             output_summary: None,
         }
     }
@@ -139,6 +163,12 @@ impl NodeState {
     /// Set serialized output data
     pub fn with_output_data(mut self, data: Vec<u8>) -> Self {
         self.output_data = Some(data);
+        self
+    }
+
+    /// Set the serialized output type tag
+    pub fn with_output_kind(mut self, kind: StoredOutputKind) -> Self {
+        self.output_kind = Some(kind);
         self
     }
 
