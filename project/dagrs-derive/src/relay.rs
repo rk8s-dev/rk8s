@@ -78,14 +78,14 @@ pub(crate) fn add_relay(relaies: Relaies) -> proc_macro2::TokenStream {
         let task = relay.task.clone();
         if !cache.contains(&task) {
             token.extend(quote::quote!(
-                graph.add_node(#task);
+                graph.add_node(#task)?;
             ));
             cache.insert(task);
         }
         for successor in relay.successors.iter() {
             if !cache.contains(successor) {
                 token.extend(quote::quote!(
-                    graph.add_node(#successor);
+                    graph.add_node(#successor)?;
                 ));
                 cache.insert(successor.clone());
             }
@@ -93,13 +93,13 @@ pub(crate) fn add_relay(relaies: Relaies) -> proc_macro2::TokenStream {
     }
     token.extend(quote::quote!(for (key, value) in &edge {
         let vec = value.iter().cloned().collect();
-        graph.add_edge(key.clone(), vec);
+        graph.add_edge(key.clone(), vec)?;
     }));
 
     quote::quote!(
         {
             #token;
-            graph
+            Ok::<dagrs::Graph, dagrs::DagrsError>(graph)
         }
     )
 }
