@@ -40,6 +40,8 @@ pub(super) struct LockServer {
     id_gen: Arc<IdGenerator>,
     /// Server addresses
     addrs: Vec<String>,
+    /// Client TLS config
+    client_tls_config: Option<()>, // TODO: Add QUIC TLS config support
 }
 
 impl LockServer {
@@ -49,7 +51,7 @@ impl LockServer {
         auth_store: Arc<AuthStore>,
         id_gen: Arc<IdGenerator>,
         addrs: &[String],
-        _client_tls_config: Option<&()>, // TODO: Add QUIC TLS config support
+        client_tls_config: Option<&()>, // TODO: Add QUIC TLS config support
     ) -> Self {
         let addrs = addrs.to_vec();
         Self {
@@ -57,6 +59,7 @@ impl LockServer {
             auth_store,
             id_gen,
             addrs,
+            client_tls_config: client_tls_config.copied(),
         }
     }
 
@@ -129,7 +132,7 @@ impl LockServer {
         let rev = my_rev.overflow_sub(1);
         // Create QUIC channel
         let channel = Channel::new(
-            // TODO: Use actual QUIC client
+            // TODO: Use actual QUIC client with TLS config
             std::sync::Arc::new(gm_quic::prelude::QuicClient::new(Default::default())),
             self.addrs.clone(),
             auth_info.and_then(|info| info.token.clone()),
