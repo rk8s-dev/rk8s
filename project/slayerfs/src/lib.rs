@@ -8,10 +8,12 @@ pub(crate) mod control;
 pub mod daemon;
 pub(crate) mod fs;
 pub mod fuse;
-pub(crate) mod meta;
+// Expose meta for E2E testing - tests should rely on design contracts, not impl details
+pub mod meta;
 pub(crate) mod posix;
 pub mod sdk_fs;
-pub(crate) mod vfs;
+// Expose vfs for E2E testing - tests should rely on design contracts, not impl details
+pub mod vfs;
 
 pub(crate) mod utils;
 
@@ -26,10 +28,14 @@ pub use crate::vfs::sdk::{LocalClient, VfsClient};
 pub use crate::cadapter::client::{ObjectBackend, ObjectClient};
 pub use crate::cadapter::localfs::LocalFsBackend;
 pub use crate::cadapter::s3::{S3Backend, S3Config};
-pub use crate::chunk::layout::ChunkLayout;
+pub use crate::chunk::ChunkLayout;
+pub use crate::chunk::compactor::{CompactResult, Compactor, CompactorError};
+pub use crate::chunk::gc::{BlockGcConfig, BlockStoreGC};
 pub use crate::chunk::store::{BlockKey, BlockStore, InMemoryBlockStore, ObjectBlockStore};
 pub use crate::meta::client::MetaClient;
-pub use crate::meta::config::{CacheConfig, ClientOptions, Config, DatabaseConfig, DatabaseType};
+pub use crate::meta::config::{
+    CacheConfig, ClientOptions, CompactConfig, Config, DatabaseConfig, DatabaseType,
+};
 pub use crate::meta::factory::MetaStoreFactory;
 pub use crate::meta::file_lock::{FileLockInfo, FileLockQuery, FileLockRange, FileLockType};
 pub use crate::meta::store::{

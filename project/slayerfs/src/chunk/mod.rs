@@ -15,6 +15,9 @@
 #![allow(unused_imports)]
 
 pub mod cache;
+pub mod compaction_worker;
+pub mod compactor;
+pub mod gc;
 pub mod layout;
 pub mod reader;
 pub mod singleflight;
@@ -27,8 +30,11 @@ pub mod writer;
 pub use layout::{
     ChunkLayout, DEFAULT_BLOCK_SIZE, DEFAULT_CHUNK_SIZE, chunk_index_of, within_chunk_offset,
 };
+pub use compaction_worker::{CompactionWorker, CompactionWorkerConfig};
+pub use compactor::{CompactResult, Compactor, CompactorError};
+pub use gc::{BlockGcConfig, BlockStoreGC};
 pub use singleflight::SingleFlight;
-pub use slice::{BlockSpan, ChunkOffset, SliceDesc, SliceOffset};
+pub use slice::{BlockSpan, ChunkOffset, SliceDesc, SliceOffset, block_span_iter_slice};
 pub use span::{BlockTag, ChunkTag, PageTag, Span, SpanTag};
 pub use store::{BlockStore, InMemoryBlockStore, ObjectBlockStore, S3BlockStore};
 pub use util::ChunkSpan;

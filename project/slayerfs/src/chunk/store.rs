@@ -58,8 +58,8 @@ pub trait BlockStore {
 
     async fn read_range(&self, key: BlockKey, offset: u64, buf: &mut [u8]) -> anyhow::Result<()>;
 
-    #[allow(dead_code)]
-    async fn delete_range(&self, key: BlockKey, len: u64) -> anyhow::Result<()>;
+    /// Delete `block_count` blocks starting from `key.1` (block_index) for slice `key.0`.
+    async fn delete_range(&self, key: BlockKey, block_count: u64) -> anyhow::Result<()>;
 }
 
 pub type BlockKey = (u64 /*slice_id*/, u32 /*block_index*/);
@@ -110,11 +110,11 @@ impl BlockStore for InMemoryBlockStore {
         Ok(())
     }
 
-    async fn delete_range(&self, key: BlockKey, len: u64) -> anyhow::Result<()> {
+    async fn delete_range(&self, key: BlockKey, block_count: u64) -> anyhow::Result<()> {
         let (chunk_id, block_index) = key;
         let mut guard = self.map.write().await;
         let start = block_index;
-        let end = start + len.as_u32();
+        let end = start + block_count.as_u32();
         for i in start..end {
             guard.remove(&(chunk_id, i));
         }
@@ -370,10 +370,10 @@ impl<B: ObjectBackend + Send + Sync> BlockStore for ObjectBlockStore<B> {
         Ok(())
     }
 
-    async fn delete_range(&self, key: BlockKey, len: u64) -> anyhow::Result<()> {
+    async fn delete_range(&self, key: BlockKey, block_count: u64) -> anyhow::Result<()> {
         let (chunk_id, block_index) = key;
         let start = block_index;
-        let end = start + len.as_u32();
+        let end = start + block_count.as_u32();
         for i in start..end {
             let key_str = Self::key_for((chunk_id, i));
             self.client
