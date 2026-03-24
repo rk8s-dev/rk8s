@@ -235,7 +235,7 @@ impl PodsWatcher {
                     Some((
                         vol.name.clone(),
                         capacity_bytes.unwrap_or(0),
-                        config.clone(),
+                        config.as_deref().cloned(),
                     ))
                 } else {
                     None

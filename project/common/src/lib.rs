@@ -321,7 +321,7 @@ pub enum VolumeSourceType {
         #[serde(default)]
         read_only: Option<bool>,
         #[serde(default)]
-        config: Option<SlayerFsVolumeConfig>,
+        config: Option<Box<SlayerFsVolumeConfig>>,
     },
 }
 
