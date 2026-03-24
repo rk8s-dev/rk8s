@@ -1,7 +1,8 @@
 //! FUSE/SDK-friendly VFS with path-based metadata ops and handle-based IO.
 
-use crate::chunk::layout::ChunkLayout;
 use crate::chunk::store::BlockStore;
+use crate::chunk::{BlockGcConfig, ChunkLayout, CompactionWorker, CompactionWorkerConfig};
+use crate::meta::config::CompactConfig;
 use crate::meta::MetaLayer;
 use crate::meta::client::MetaClient;
 use crate::meta::config::MetaClientConfig;
@@ -26,6 +27,46 @@ pub struct RenameFlags {
     pub exchange: bool,
     /// Remove the destination if it's a whiteout (RENAME_WHITEOUT)
     pub whiteout: bool,
+}
+
+/// Configuration for VFS background tasks
+#[derive(Debug, Clone)]
+pub struct VfsBackgroundConfig {
+    pub compaction: CompactionWorkerConfig,
+    pub gc: BlockGcConfig,
+    pub compact_config: CompactConfig,
+    pub enabled: bool,
+}
+
+impl VfsBackgroundConfig {
+    /// Create background config with block_size from layout
+    pub fn with_layout(layout: &ChunkLayout) -> Self {
+        Self {
+            compaction: CompactionWorkerConfig::default(),
+            gc: BlockGcConfig {
+                block_size: layout.block_size as u64,
+                ..Default::default()
+            },
+            compact_config: CompactConfig::default(),
+            enabled: true,
+        }
+    }
+}
+
+impl Default for VfsBackgroundConfig {
+    fn default() -> Self {
+        Self {
+            compaction: CompactionWorkerConfig::default(),
+            gc: BlockGcConfig::default(),
+            compact_config: CompactConfig::default(),
+            enabled: true,
+        }
+    }
+}
+
+struct VfsBackgroundTasks {
+    compaction_handle: tokio::task::JoinHandle<()>,
+    gc_handle: tokio::task::JoinHandle<()>,
 }
 
 use crate::vfs::Inode;
@@ -253,6 +294,9 @@ where
 {
     core: Arc<VfsCore<S, M>>,
     state: Arc<VfsState<S, M>>,
+    /// Background tasks (compaction and gc) - only present when enabled
+    #[allow(dead_code)]
+    background_tasks: Option<VfsBackgroundTasks>,
 }
 
 impl<S, M> Clone for VFS<S, M>
@@ -264,6 +308,8 @@ where
         Self {
             core: Arc::clone(&self.core),
             state: Arc::clone(&self.state),
+            // Note: background tasks are not cloned as they should be unique per VFS instance
+            background_tasks: None,
         }
     }
 }
@@ -297,7 +343,45 @@ where
 
         meta_client.initialize().await.map_err(VfsError::from)?;
 
-        Self::from_components(VFSConfig::new(layout), store, meta_client)
+        // Start background compaction and gc tasks
+        let bg_config = VfsBackgroundConfig::with_layout(&layout);
+        let background_tasks =
+            Self::start_background_tasks(&meta_client, store.clone(), layout, bg_config).await;
+
+        Self::from_components_with_background(
+            VFSConfig::new(layout),
+            store,
+            meta_client,
+            background_tasks,
+        )
+    }
+
+    /// Start background compaction and gc tasks
+    async fn start_background_tasks(
+        meta_client: &MetaClient<R>,
+        block_store: Arc<S>,
+        layout: ChunkLayout,
+        config: VfsBackgroundConfig,
+    ) -> Option<VfsBackgroundTasks> {
+        if !config.enabled {
+            return None;
+        }
+
+        let meta_store = meta_client.store();
+
+        let worker = CompactionWorker::with_config(
+            meta_store, 
+            block_store,
+            layout,
+            config.compact_config.clone(),
+            config.compact_config.lock_ttl.clone(),
+        );
+        let (compaction_handle, gc_handle) = worker.start(config.compaction, config.gc);
+
+        Some(VfsBackgroundTasks {
+            compaction_handle,
+            gc_handle,
+        })
     }
 }
 
@@ -321,6 +405,15 @@ where
         store: Arc<S>,
         meta_layer: Arc<M>,
     ) -> Result<Self, VfsError> {
+        Self::from_components_with_background(config, store, meta_layer, None)
+    }
+
+    fn from_components_with_background(
+        config: VFSConfig,
+        store: Arc<S>,
+        meta_layer: Arc<M>,
+        background_tasks: Option<VfsBackgroundTasks>,
+    ) -> Result<Self, VfsError> {
         let layout = config.write.layout;
         let root_ino = meta_layer.root_ino();
         let backend = Arc::new(Backend::new(store.clone(), meta_layer.clone()));
@@ -328,7 +421,11 @@ where
         let config = Arc::new(config);
         let state = Arc::new(VfsState::new(config, backend));
 
-        Ok(Self { core, state })
+        Ok(Self {
+            core,
+            state,
+            background_tasks,
+        })
     }
 
     pub(crate) fn root_ino(&self) -> i64 {

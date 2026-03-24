@@ -1355,8 +1355,8 @@ mod tests {
             self.inner.read_range(key, offset, buf).await
         }
 
-        async fn delete_range(&self, key: BlockKey, len: u64) -> anyhow::Result<()> {
-            self.inner.delete_range(key, len).await
+        async fn delete_range(&self, key: BlockKey, block_count: u64) -> anyhow::Result<()> {
+            self.inner.delete_range(key, block_count).await
         }
     }
 
