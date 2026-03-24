@@ -398,6 +398,7 @@ async fn create_meta_store(cfg: &BenchConfig) -> Result<Arc<dyn MetaStore>> {
                 },
                 cache: CacheConfig::default(),
                 client,
+                compact: Default::default(),
             };
             let handle = MetaStoreFactory::<DatabaseMetaStore>::create_from_config(config)
                 .await
@@ -415,6 +416,7 @@ async fn create_meta_store(cfg: &BenchConfig) -> Result<Arc<dyn MetaStore>> {
                 },
                 cache: CacheConfig::default(),
                 client,
+                compact: Default::default(),
             };
             let handle = MetaStoreFactory::<EtcdMetaStore>::create_from_config(config)
                 .await

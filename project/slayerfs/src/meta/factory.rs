@@ -144,6 +144,7 @@ pub async fn create_etcd_meta_store_from_urls(
         },
         cache: CacheConfig::default(),
         client: ClientOptions::default(),
+        compact: CompactConfig::default(),
     };
 
     MetaStoreFactory::<EtcdMetaStore>::create_from_config(config).await

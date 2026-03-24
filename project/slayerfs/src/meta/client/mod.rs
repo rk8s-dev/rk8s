@@ -2060,7 +2060,7 @@ mod tests {
     use crate::meta::config::{
         CacheConfig, ClientOptions, CompactConfig, Config, DatabaseConfig, DatabaseType,
     };
-    use crate::meta::stores::database_store::DatabaseMetaStore;
+    use crate::meta::stores::database::DatabaseMetaStore;
     use crate::vfs::chunk_id_for;
     use std::time::Duration;
 

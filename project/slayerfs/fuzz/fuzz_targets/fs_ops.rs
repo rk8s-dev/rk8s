@@ -12,9 +12,9 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use etcd_client::{Client as RawEtcdClient, DeleteOptions};
 use libfuzzer_sys::fuzz_target;
 use slayerfs::{
-    CacheConfig, ChunkLayout, ClientOptions, Config, DatabaseConfig, DatabaseMetaStore,
-    DatabaseType, EtcdMetaStore, LocalFsBackend, MetaClient, MetaStore, ObjectBlockStore,
-    ObjectClient, SetAttrFlags, SetAttrRequest, VFS, VfsFileAttr, VfsFileType,
+    CacheConfig, ChunkLayout, ClientOptions, CompactConfig, Config, DatabaseConfig,
+    DatabaseMetaStore, DatabaseType, EtcdMetaStore, LocalFsBackend, MetaClient, MetaStore,
+    ObjectBlockStore, ObjectClient, SetAttrFlags, SetAttrRequest, VFS, VfsFileAttr, VfsFileType,
 };
 use tokio::runtime::Builder;
 use tokio::task::JoinSet;
@@ -1234,6 +1234,7 @@ async fn new_local_vfs(root: &Path, meta: &FuzzMetaConfig) -> io::Result<SlayerV
                 },
                 cache: CacheConfig::default(),
                 client,
+                compact: CompactConfig::default(),
             };
             let store = DatabaseMetaStore::from_config(cfg)
                 .await
@@ -1247,6 +1248,7 @@ async fn new_local_vfs(root: &Path, meta: &FuzzMetaConfig) -> io::Result<SlayerV
                 },
                 cache: CacheConfig::default(),
                 client,
+                compact: CompactConfig::default(),
             };
             let store = EtcdMetaStore::from_config(cfg)
                 .await

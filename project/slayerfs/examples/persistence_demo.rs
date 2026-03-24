@@ -190,6 +190,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         };
 
+        // Create a wrapper that can be shared between VFS and GC
+        let block_store_for_gc: Arc<dyn slayerfs::chunk::BlockStore + Send + Sync> =
+            Arc::new(ObjectBlockStore::new(client.clone()));
+
         let fs = VFS::new(layout, store, meta_store.clone())
             .await
             .expect("create VFS");
@@ -199,11 +203,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let gc_handle = tokio::spawn({
             let meta_store = meta_store.clone();
             let object_client = client.clone();
+            let block_store = block_store_for_gc;
             async move {
                 use slayerfs::daemon::worker::start_gc;
                 use std::sync::Arc;
 
-                start_gc(meta_store, Arc::new(object_client), None).await;
+                start_gc(meta_store, Arc::new(object_client), block_store, None).await;
             }
         });
 
