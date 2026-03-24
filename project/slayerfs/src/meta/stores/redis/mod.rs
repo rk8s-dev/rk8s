@@ -2002,8 +2002,8 @@ impl MetaStore for RedisMetaStore {
         Ok(())
     }
 
-    #[tracing::instrument(level = "trace", skip(self), fields(lock_name = ?lock_name))]
-    async fn get_global_lock(&self, lock_name: LockName) -> bool {
+    #[tracing::instrument(level = "trace", skip(self), fields(lock_name = ?lock_name, ttl_secs))]
+    async fn get_global_lock(&self, lock_name: LockName, ttl_secs: u64) -> bool {
         let lock_name = lock_name.to_string();
         let mut conn = self.conn.clone();
         let now = Utc::now().timestamp_millis();
@@ -2032,7 +2032,7 @@ impl MetaStore for RedisMetaStore {
             "#,
         );
 
-        let diff = chrono::Duration::seconds(7).num_milliseconds();
+        let diff = chrono::Duration::seconds(ttl_secs as i64).num_milliseconds();
 
         let resp: Result<bool, _> = script
             .key(LOCKS_KEY)

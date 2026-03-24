@@ -920,13 +920,13 @@ pub trait MetaStore: Send + Sync {
         chunk_id: u64,
         new_slices: &[SliceDesc],
         old_slices_to_delay: &[u8],
-        expected_slice_count: usize,
+        expected_slices: &[SliceDesc],
     ) -> Result<(), MetaError> {
         let _ = (
             chunk_id,
             new_slices,
             old_slices_to_delay,
-            expected_slice_count,
+            expected_slices,
         );
         Err(MetaError::NotImplemented)
     }

@@ -2620,8 +2620,8 @@ impl MetaStore for EtcdMetaStore {
     async fn cleanup_sessions(&self) -> Result<(), MetaError> {
         return Ok(());
     }
-    #[tracing::instrument(level = "trace", skip(self), fields(lock_name = ?lock_name))]
-    async fn get_global_lock(&self, lock_name: LockName) -> bool {
+    #[tracing::instrument(level = "trace", skip(self), fields(lock_name = ?lock_name, ttl_secs))]
+    async fn get_global_lock(&self, lock_name: LockName, ttl_secs: u64) -> bool {
         let lock_key = lock_name.to_string();
         let result = EtcdTxn::new(&self.client)
             .max_retries(3)
@@ -2633,7 +2633,7 @@ impl MetaStore for EtcdMetaStore {
                     let current = tx.get_typed_json::<i64>(&lock_key).await?;
 
                     let (updated, acquired) = if let Some(current) = current {
-                        if now > current + Duration::seconds(7).num_milliseconds() {
+                        if now > current + Duration::seconds(ttl_secs as i64).num_milliseconds() {
                             (now, true)
                         } else {
                             (current, false)
