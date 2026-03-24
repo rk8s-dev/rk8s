@@ -1,4 +1,5 @@
 use super::*;
+use crate::CompactConfig;
 use crate::meta::config::{CacheConfig, ClientOptions, DatabaseConfig};
 use crate::meta::file_lock::{FileLockQuery, FileLockRange, FileLockType};
 use tokio::time;
@@ -12,6 +13,7 @@ fn test_config() -> Config {
         },
         cache: CacheConfig::default(),
         client: ClientOptions::default(),
+        compact: CompactConfig::default(),
     }
 }
 
@@ -24,6 +26,7 @@ fn file_db_config(path: &std::path::Path) -> Config {
         },
         cache: CacheConfig::default(),
         client: ClientOptions::default(),
+        compact: CompactConfig::default(),
     }
 }
 
@@ -37,6 +40,7 @@ fn shared_db_config() -> Config {
         },
         cache: CacheConfig::default(),
         client: ClientOptions::default(),
+        compact: CompactConfig::default(),
     }
 }
 
@@ -52,6 +56,7 @@ async fn new_test_store_with_session(session_id: Uuid) -> DatabaseMetaStore {
     store.set_sid(session_id).expect("Failed to set session ID");
     store
 }
+
 
 #[tokio::test]
 async fn test_next_id_unique_across_store_instances() {
