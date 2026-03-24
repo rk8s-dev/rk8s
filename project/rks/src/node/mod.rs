@@ -1,5 +1,4 @@
 use crate::api::xlinestore::XlineStore;
-use crate::csi::RksCsiController;
 use crate::csi::VolumeOrchestrator;
 use crate::network::manager::LocalManager;
 use crate::node::lease_sync::LeaseSynchronizer;
@@ -7,7 +6,6 @@ use crate::node::server::QUICServer;
 use crate::vault::Vault;
 use common::RksMessage;
 use common::lease::Lease;
-use dashmap::DashMap;
 use log::info;
 use log::warn;
 use nftables::{batch::Batch, schema, types};
@@ -16,8 +14,7 @@ use std::borrow::Cow;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::{Mutex, Notify, mpsc, oneshot};
-use uuid::Uuid;
+use tokio::sync::{Mutex, Notify, mpsc};
 
 pub mod cert;
 mod dispatch;
@@ -204,10 +201,7 @@ pub struct Shared {
     pub network_config: Arc<libnetwork::config::NetworkConfig>,
     pub service_ip_allocator: Option<Arc<crate::network::service_ip::ServiceIpAllocator>>,
     pub log_response_registry: Arc<LogResponseRegistry>,
-    #[allow(unused)]
-    pub csi_controller: Arc<RksCsiController>,
     pub volume_orchestrator: Arc<VolumeOrchestrator>,
-    pub pending_csi_requests: Arc<DashMap<Uuid, oneshot::Sender<libcsi::CsiMessage>>>,
 }
 
 impl Shared {
@@ -218,9 +212,7 @@ impl Shared {
         node_registry: Arc<NodeRegistry>,
         network_config: Arc<libnetwork::config::NetworkConfig>,
         service_ip_allocator: Option<Arc<crate::network::service_ip::ServiceIpAllocator>>,
-        csi_controller: Arc<RksCsiController>,
         volume_orchestrator: Arc<VolumeOrchestrator>,
-        pending_csi_requests: Arc<DashMap<Uuid, oneshot::Sender<libcsi::CsiMessage>>>,
     ) -> Self {
         Self {
             xline_store,
@@ -230,9 +222,7 @@ impl Shared {
             network_config,
             service_ip_allocator,
             log_response_registry: Arc::new(LogResponseRegistry::default()),
-            csi_controller,
             volume_orchestrator,
-            pending_csi_requests,
         }
     }
 }

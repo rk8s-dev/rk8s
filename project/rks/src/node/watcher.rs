@@ -232,7 +232,11 @@ impl PodsWatcher {
                     ..
                 } = &vol.source
                 {
-                    Some((vol.name.clone(), capacity_bytes.unwrap_or(0), config.clone()))
+                    Some((
+                        vol.name.clone(),
+                        capacity_bytes.unwrap_or(0),
+                        config.clone(),
+                    ))
                 } else {
                     None
                 }
@@ -243,10 +247,10 @@ impl PodsWatcher {
         let orchestrator = &self.shared.volume_orchestrator;
         for (vol_name, capacity_bytes, vol_config) in &slayerfs_volumes {
             let mut parameters = std::collections::HashMap::new();
-            if let Some(cfg) = vol_config {
-                if let Ok(json) = serde_json::to_string(cfg) {
-                    parameters.insert("slayerfs_config".to_owned(), json);
-                }
+            if let Some(cfg) = vol_config
+                && let Ok(json) = serde_json::to_string(cfg)
+            {
+                parameters.insert("slayerfs_config".to_owned(), json);
             }
             let req = CreateVolumeRequest {
                 name: format!("{}-{}", pod.metadata.name, vol_name),

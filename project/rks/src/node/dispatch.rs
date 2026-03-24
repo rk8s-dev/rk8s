@@ -35,18 +35,7 @@ pub async fn dispatch_worker(
         ),
 
         RksMessage::CsiResponse { id, message } => {
-            if let Some((_, sender)) = shared.pending_csi_requests.remove(&id) {
-                info!(
-                    target: "rks::node::worker_dispatch",
-                    "routing CSI response for request {id}"
-                );
-                let _ = sender.send(message);
-            } else {
-                warn!(
-                    target: "rks::node::worker_dispatch",
-                    "received CSI response for unknown request {id}"
-                );
-            }
+            shared.volume_orchestrator.route_response(id, message);
         }
 
         RksMessage::SetPodip((pod_name, pod_ip)) => {

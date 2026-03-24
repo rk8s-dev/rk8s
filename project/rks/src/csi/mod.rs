@@ -5,7 +5,6 @@
 //! identity (`CsiIdentity`), and xline-backed volume metadata storage.
 
 pub mod controller;
-pub mod identity;
 pub mod orchestrator;
 pub mod volume_store;
 

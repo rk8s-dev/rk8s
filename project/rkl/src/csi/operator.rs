@@ -101,9 +101,19 @@ impl SlayerFsOperator {
     pub async fn stage_volume(&self, req: NodeStageVolumeRequest) -> Result<(), CsiError> {
         let vol_id = &req.volume_id;
 
-        // Idempotent: already staged?
+        // Idempotent: already tracked in memory?
         if self.mount_handles.contains_key(vol_id) {
             info!(volume_id = %vol_id, "volume already staged, idempotent success");
+            return Ok(());
+        }
+
+        // Idempotent: mount survived from a previous process (e.g. after restart)?
+        if is_mount_point(&req.staging_target_path) {
+            info!(
+                volume_id = %vol_id,
+                path = %req.staging_target_path,
+                "staging path is already a mount point (recovered), idempotent success"
+            );
             return Ok(());
         }
 
@@ -151,28 +161,31 @@ impl SlayerFsOperator {
                     format!("sqlite://{}?mode=rwc", meta_db_path.display())
                 }
             }
-            SlayerFsMetaBackend::Redis => {
-                cfg.meta
-                    .redis
-                    .as_ref()
-                    .map(|r| r.url.clone())
-                    .unwrap_or_else(|| {
-                        warn!(
-                            "redis meta backend selected but no url provided, falling back to sqlite"
-                        );
-                        let meta_db_path = vol_data_dir.join("meta.db");
-                        format!("sqlite://{}?mode=rwc", meta_db_path.display())
-                    })
-            }
+            SlayerFsMetaBackend::Redis => cfg
+                .meta
+                .redis
+                .as_ref()
+                .map(|r| r.url.clone())
+                .unwrap_or_else(|| {
+                    warn!(
+                        "redis meta backend selected but no url provided, falling back to sqlite"
+                    );
+                    let meta_db_path = vol_data_dir.join("meta.db");
+                    format!("sqlite://{}?mode=rwc", meta_db_path.display())
+                }),
             SlayerFsMetaBackend::Etcd => {
                 warn!("etcd meta backend is not yet supported, falling back to sqlite");
                 let meta_db_path = vol_data_dir.join("meta.db");
                 format!("sqlite://{}?mode=rwc", meta_db_path.display())
             }
         };
-        let meta_handle = create_meta_store_from_url(&meta_url)
-            .await
-            .map_err(|e| CsiError::BackendError(format!("create meta store: {e}")))?;
+        let meta_handle = match create_meta_store_from_url(&meta_url).await {
+            Ok(h) => h,
+            Err(e) => {
+                let _ = std::fs::remove_dir_all(&vol_data_dir);
+                return Err(CsiError::BackendError(format!("create meta store: {e}")));
+            }
+        };
 
         // 6. Build layout (use config values if provided, else fall back to operator defaults)
         let layout = ChunkLayout {
@@ -180,19 +193,29 @@ impl SlayerFsOperator {
             block_size: cfg.layout.block_size.unwrap_or(self.layout.block_size),
         };
 
-        let vfs = slayerfs::VFS::new(layout, store, meta_handle.store().clone())
-            .await
-            .map_err(|e| CsiError::BackendError(format!("create VFS: {e}")))?;
+        let vfs = match slayerfs::VFS::new(layout, store, meta_handle.store().clone()).await {
+            Ok(v) => v,
+            Err(e) => {
+                let _ = std::fs::remove_dir_all(&vol_data_dir);
+                return Err(CsiError::BackendError(format!("create VFS: {e}")));
+            }
+        };
 
         // 7. Privileged FUSE mount
         let mount_opts = Self::default_mount_options();
-        let handle = rfuse3::raw::Session::new(mount_opts)
+        let handle = match rfuse3::raw::Session::new(mount_opts)
             .mount(vfs, &req.staging_target_path)
             .await
-            .map_err(|e| CsiError::MountFailed {
-                path: req.staging_target_path.clone(),
-                reason: format!("FUSE mount: {e}"),
-            })?;
+        {
+            Ok(h) => h,
+            Err(e) => {
+                let _ = std::fs::remove_dir_all(&vol_data_dir);
+                return Err(CsiError::MountFailed {
+                    path: req.staging_target_path.clone(),
+                    reason: format!("FUSE mount: {e}"),
+                });
+            }
+        };
 
         // 8. Store handle and persist state
         self.mount_handles.insert(vol_id.clone(), handle);
@@ -216,40 +239,50 @@ impl SlayerFsOperator {
     /// Unstage a volume: unmount the FUSE filesystem.
     ///
     /// Idempotent — succeeds without error if already unstaged.
+    /// Cleanup (directory removal, state deletion) runs even if unmount fails.
     pub async fn unstage_volume(
         &self,
         volume_id: &VolumeId,
         staging_target_path: &str,
     ) -> Result<(), CsiError> {
-        if let Some((_, handle)) = self.mount_handles.remove(volume_id) {
+        let unmount_err = if let Some((_, handle)) = self.mount_handles.remove(volume_id) {
             // Proper async unmount via rfuse3 API
-            handle
-                .unmount()
-                .await
-                .map_err(|e| CsiError::UnmountFailed {
-                    path: staging_target_path.to_owned(),
-                    reason: format!("FUSE unmount: {e}"),
-                })?;
-            info!(volume_id = %volume_id, "FUSE unmount completed");
+            match handle.unmount().await {
+                Ok(()) => {
+                    info!(volume_id = %volume_id, "FUSE unmount completed");
+                    None
+                }
+                Err(e) => {
+                    let err = CsiError::UnmountFailed {
+                        path: staging_target_path.to_owned(),
+                        reason: format!("FUSE unmount: {e}"),
+                    };
+                    error!(volume_id = %volume_id, error = %e, "FUSE unmount failed, continuing cleanup");
+                    Some(err)
+                }
+            }
         } else {
             // Idempotent: no handle tracked. Try a lazy umount in case the
             // mount survived from a previous process.
             let _ = nix::mount::umount2(Path::new(staging_target_path), MntFlags::MNT_DETACH);
             info!(volume_id = %volume_id, "volume not tracked, idempotent unstage");
-        }
+            None
+        };
 
-        // Clean up staging directory (best effort)
+        // Always clean up regardless of unmount result
         let _ = std::fs::remove_dir(staging_target_path);
 
-        // Clean up data directory
         let vol_data_dir = self.data_root.join(volume_id.to_string());
         let _ = std::fs::remove_dir_all(&vol_data_dir);
 
-        // Remove persisted state
         let _ = self.state_store.delete(volume_id);
 
         info!(volume_id = %volume_id, "volume unstaged");
-        Ok(())
+
+        match unmount_err {
+            Some(e) => Err(e),
+            None => Ok(()),
+        }
     }
 
     // ----- Publish (bind-mount) ---------------------------------------------
@@ -260,8 +293,8 @@ impl SlayerFsOperator {
     pub async fn publish_volume(&self, req: NodePublishVolumeRequest) -> Result<(), CsiError> {
         let vol_id = &req.volume_id;
 
-        // Verify the volume is staged
-        if !self.mount_handles.contains_key(vol_id) {
+        // Verify the volume is staged (in-memory handle or surviving mount)
+        if !self.mount_handles.contains_key(vol_id) && !is_mount_point(&req.staging_target_path) {
             return Err(CsiError::Internal(format!(
                 "volume {vol_id} is not staged, cannot publish"
             )));
@@ -400,6 +433,8 @@ impl SlayerFsOperator {
                         // cannot reclaim the MountHandle, but the FUSE
                         // mount is still alive in the kernel. The fallback
                         // umount2 path in unstage_volume handles cleanup.
+                        // stage_volume's /proc/mounts check ensures
+                        // idempotent re-stage requests also succeed.
                         info!(
                             volume_id = %state.volume_id,
                             state = ?state.state,
