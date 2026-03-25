@@ -1,6 +1,95 @@
 use std::{pin::Pin, sync::Arc};
 
-use crate::curp_proto::commandpb::protocol_server::Protocol;
+#[allow(
+    clippy::all,
+    clippy::restriction,
+    clippy::pedantic,
+    clippy::nursery,
+    clippy::cargo,
+    unused_qualifications,
+    unreachable_pub,
+    variant_size_differences,
+    missing_copy_implementations,
+    missing_docs,
+    trivial_casts,
+    unused_results
+)]
+pub(crate) mod commandpb {
+    pub mod protocol_server {
+        #![allow(
+            unused_variables,
+            dead_code,
+            missing_docs,
+            clippy::wildcard_imports,
+            clippy::let_unit_value
+        )]
+        use futures::Stream;
+        use xlinerpc::{Request, Response, Status};
+        /// Generated trait containing gRPC methods that should be implemented for
+        /// use with ProtocolServer.
+        #[async_trait]
+        pub trait Protocol: std::marker::Send + std::marker::Sync + 'static {
+            /// Server streaming response type for the ProposeStream method.
+            type ProposeStreamStream: Stream<
+                    Item = std::result::Result<::curp::rpc::OpResponse, Status>,
+                > + std::marker::Send
+                + 'static;
+            /// Unary
+            async fn propose_stream(
+                &self,
+                request: Request<::curp::rpc::ProposeRequest>,
+            ) -> std::result::Result<Response<Self::ProposeStreamStream>, Status>;
+            async fn record(
+                &self,
+                request: Request<::curp::rpc::RecordRequest>,
+            ) -> std::result::Result<Response<::curp::rpc::RecordResponse>, Status>;
+            async fn read_index(
+                &self,
+                request: Request<::curp::rpc::ReadIndexRequest>,
+            ) -> std::result::Result<Response<::curp::rpc::ReadIndexResponse>, Status>;
+            async fn propose_conf_change(
+                &self,
+                request: Request<::curp::rpc::ProposeConfChangeRequest>,
+            ) -> std::result::Result<
+                Response<::curp::rpc::ProposeConfChangeResponse>,
+                Status,
+            >;
+            async fn publish(
+                &self,
+                request: Request<::curp::rpc::PublishRequest>,
+            ) -> std::result::Result<Response<::curp::rpc::PublishResponse>, Status>;
+            async fn shutdown(
+                &self,
+                request: Request<::curp::rpc::ShutdownRequest>,
+            ) -> std::result::Result<Response<::curp::rpc::ShutdownResponse>, Status>;
+            async fn fetch_cluster(
+                &self,
+                request: Request<::curp::rpc::FetchClusterRequest>,
+            ) -> std::result::Result<
+                Response<::curp::rpc::FetchClusterResponse>,
+                Status,
+            >;
+            async fn fetch_read_state(
+                &self,
+                request: Request<::curp::rpc::FetchReadStateRequest>,
+            ) -> std::result::Result<
+                Response<::curp::rpc::FetchReadStateResponse>,
+                Status,
+            >;
+            async fn move_leader(
+                &self,
+                request: Request<::curp::rpc::MoveLeaderRequest>,
+            ) -> std::result::Result<Response<::curp::rpc::MoveLeaderResponse>, Status>;
+            /// Stream
+            async fn lease_keep_alive(
+                &self,
+                request: Request<impl Stream<Item = std::result::Result<::curp::rpc::LeaseKeepAliveMsg, Status>> + Send>,
+            ) -> std::result::Result<Response<::curp::rpc::LeaseKeepAliveMsg>, Status>;
+        }
+    }
+}
+
+use crate::server::auth_wrapper::commandpb::protocol_server::Protocol;
 use async_trait::async_trait;
 use curp::{
     cmd::PbCodec,
@@ -37,6 +126,25 @@ pub(crate) fn metadata_from_xlinerpc(meta: &MetaData) -> Metadata {
 /// Convert `CurpError` → `xlinerpc::Status`
 pub(crate) fn curp_error_to_xlinerpc_status(err: CurpError) -> Status {
     err.into()
+}
+
+/// Get token from metadata
+fn get_token(meta: &MetaData) -> Option<&str> {
+    meta.get_str("authorization")
+        .and_then(|result| match result {
+            Ok(token) => Some(token),
+            Err(e) => {
+                debug!("Failed to decode authorization token: {}", e);
+                None
+            }
+        })
+        .and_then(|s| match s.strip_prefix("Bearer ") {
+            Some(token) => Some(token),
+            None => {
+                debug!("Authorization token missing 'Bearer ' prefix");
+                None
+            }
+        })
 }
 
 /// Auth wrapper
