@@ -130,7 +130,8 @@ pub(crate) fn curp_error_to_xlinerpc_status(err: CurpError) -> Status {
 
 /// Get token from metadata
 fn get_token(meta: &MetaData) -> Option<&str> {
-    meta.get_str("authorization")
+    // First try to get token from authorization header (standard HTTP auth)
+    if let Some(token) = meta.get_str("authorization")
         .and_then(|result| match result {
             Ok(token) => Some(token),
             Err(e) => {
@@ -144,7 +145,23 @@ fn get_token(meta: &MetaData) -> Option<&str> {
                 debug!("Authorization token missing 'Bearer ' prefix");
                 None
             }
-        })
+        }) {
+        return Some(token);
+    }
+    
+    // Then try to get token from CURP-specific token header
+    if let Some(token) = meta.get_str("token")
+        .and_then(|result| match result {
+            Ok(token) => Some(token),
+            Err(e) => {
+                debug!("Failed to decode CURP token: {}", e);
+                None
+            }
+        }) {
+        return Some(token);
+    }
+    
+    None
 }
 
 /// Auth wrapper
