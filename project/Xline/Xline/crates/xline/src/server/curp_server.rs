@@ -11,6 +11,7 @@ use curp::rpc::{
 };
 use futures::{Stream, StreamExt};
 
+#[allow(unused)]
 pub(crate) struct Server<T> {
     server: Arc<T>,
 }
@@ -28,6 +29,7 @@ where
     pub(crate) fn from_arc(server: Arc<T>) -> Self {
         Self { server: server }
     }
+    #[allow(unused)]
     pub(crate) fn endpoint(self) -> RouterEndpoint<Arc<T>> {
         RouterEndpoint::new(self.server)
             .add_server_streaming_fn(

@@ -315,13 +315,13 @@ impl Server {
     pub(crate) fn endpoint(self) -> RouterEndpoint<Arc<LockServer>> {
         RouterEndpoint::new(self.lock_server)
             .add_unary_fn(
-                "/lock",
+                "/Lock",
                 move |this: Arc<LockServer>, request: tonic::Request<LockRequest>| async move {
                     this.lock(request).await
                 },
             )
             .add_unary_fn(
-                "/unlock",
+                "/Unlock",
                 move |this: Arc<LockServer>, request: tonic::Request<UnlockRequest>| async move {
                     this.unlock(request).await
                 },

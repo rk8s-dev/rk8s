@@ -57,6 +57,7 @@ pbkdf2 = { workspace = true }
 priority-queue = { workspace = true }
 prometheus = "0.13.4"
 prost = { workspace = true }
+qconnection = "0.4.0"
 rcgen = "0.13"
 rustls = { version = "0.23", default-features = false, features = ["std", "ring"] }
 rustls-pemfile = "2"
