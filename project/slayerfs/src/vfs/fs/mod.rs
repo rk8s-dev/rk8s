@@ -2,9 +2,9 @@
 
 use crate::chunk::store::BlockStore;
 use crate::chunk::{BlockGcConfig, ChunkLayout, CompactionWorker, CompactionWorkerConfig};
-use crate::meta::config::CompactConfig;
 use crate::meta::MetaLayer;
 use crate::meta::client::MetaClient;
+use crate::meta::config::CompactConfig;
 use crate::meta::config::MetaClientConfig;
 use crate::meta::file_lock::{FileLockInfo, FileLockQuery, FileLockRange, FileLockType};
 use crate::meta::store::{AclRule, MetaStore, SetAttrFlags, SetAttrRequest, StatFsSnapshot};
@@ -370,7 +370,7 @@ where
         let meta_store = meta_client.store();
 
         let worker = CompactionWorker::with_config(
-            meta_store, 
+            meta_store,
             block_store,
             layout,
             config.compact_config.clone(),

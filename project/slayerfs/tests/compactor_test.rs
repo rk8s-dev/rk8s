@@ -4,12 +4,12 @@
 //! a full filesystem setup.
 
 mod tests {
+    use slayerfs::DatabaseMetaStore;
     use slayerfs::chunk::{
         ChunkLayout, CompactResult, Compactor, slice::SliceDesc, store::InMemoryBlockStore,
     };
-    use slayerfs::DatabaseMetaStore;
     use slayerfs::meta::store::MetaStore;
-    use slayerfs::{Config, DatabaseType, DatabaseConfig};
+    use slayerfs::{Config, DatabaseConfig, DatabaseType};
     use std::sync::Arc;
     use tempfile::TempDir;
 

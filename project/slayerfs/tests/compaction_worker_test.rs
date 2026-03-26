@@ -8,13 +8,13 @@
 
 #[cfg(test)]
 mod tests {
+    use slayerfs::DatabaseMetaStore;
     use slayerfs::chunk::{
         compaction_worker::{
             ChunkLockGuard, CompactLockManager, CompactionWorker, CompactionWorkerConfig,
         },
         store::InMemoryBlockStore,
     };
-    use slayerfs::DatabaseMetaStore;
     use slayerfs::meta::store::MetaStore;
     use slayerfs::{Config, DatabaseConfig, DatabaseType};
     use std::sync::Arc;
@@ -36,7 +36,8 @@ mod tests {
             compact: Default::default(),
         };
 
-        let meta_store: Arc<DatabaseMetaStore> = Arc::new(DatabaseMetaStore::from_config(config).await.unwrap());
+        let meta_store: Arc<DatabaseMetaStore> =
+            Arc::new(DatabaseMetaStore::from_config(config).await.unwrap());
         let block_store = Arc::new(InMemoryBlockStore::new());
 
         meta_store.initialize().await.unwrap();
@@ -52,11 +53,13 @@ mod tests {
         let chunk_id = 1234u64;
 
         // First lock acquisition should succeed
-        let guard: Option<ChunkLockGuard<DatabaseMetaStore>> = lock_manager.try_lock(chunk_id, 5, false).await;
+        let guard: Option<ChunkLockGuard<DatabaseMetaStore>> =
+            lock_manager.try_lock(chunk_id, 5, false).await;
         assert!(guard.is_some(), "First lock acquisition should succeed");
 
         // Second attempt should fail (already locked locally)
-        let guard2: Option<ChunkLockGuard<DatabaseMetaStore>> = lock_manager.try_lock(chunk_id, 5, false).await;
+        let guard2: Option<ChunkLockGuard<DatabaseMetaStore>> =
+            lock_manager.try_lock(chunk_id, 5, false).await;
         assert!(guard2.is_none(), "Second lock should fail");
 
         // Release the lock
@@ -66,7 +69,8 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(100)).await;
 
         // Now it should succeed again
-        let guard3: Option<ChunkLockGuard<DatabaseMetaStore>> = lock_manager.try_lock(chunk_id, 5, false).await;
+        let guard3: Option<ChunkLockGuard<DatabaseMetaStore>> =
+            lock_manager.try_lock(chunk_id, 5, false).await;
         assert!(guard3.is_some(), "Lock should be available after release");
     }
 
@@ -81,7 +85,8 @@ mod tests {
         assert!(!lock_manager.is_locally_locked(chunk_id).await);
 
         // Acquire lock
-        let guard: Option<ChunkLockGuard<DatabaseMetaStore>> = lock_manager.try_lock(chunk_id, 5, false).await;
+        let guard: Option<ChunkLockGuard<DatabaseMetaStore>> =
+            lock_manager.try_lock(chunk_id, 5, false).await;
         assert!(guard.is_some());
         assert!(lock_manager.is_locally_locked(chunk_id).await);
 
@@ -101,7 +106,8 @@ mod tests {
         let chunk_id = 1234u64;
 
         // Acquire lock
-        let mut guard: ChunkLockGuard<DatabaseMetaStore> = lock_manager.try_lock(chunk_id, 5, false).await.unwrap();
+        let mut guard: ChunkLockGuard<DatabaseMetaStore> =
+            lock_manager.try_lock(chunk_id, 5, false).await.unwrap();
         assert!(lock_manager.is_locally_locked(chunk_id).await);
 
         // Explicitly unlock
@@ -120,10 +126,12 @@ mod tests {
         let lock_manager = CompactLockManager::new(meta_store);
 
         // Different chunks should not interfere
-        let guard1: Option<ChunkLockGuard<DatabaseMetaStore>> = lock_manager.try_lock(1, 5, false).await;
+        let guard1: Option<ChunkLockGuard<DatabaseMetaStore>> =
+            lock_manager.try_lock(1, 5, false).await;
         assert!(guard1.is_some());
 
-        let guard2: Option<ChunkLockGuard<DatabaseMetaStore>> = lock_manager.try_lock(2, 5, false).await;
+        let guard2: Option<ChunkLockGuard<DatabaseMetaStore>> =
+            lock_manager.try_lock(2, 5, false).await;
         assert!(guard2.is_some(), "Different chunk should be lockable");
 
         let guard3 = lock_manager.try_lock(1, 5, false).await;

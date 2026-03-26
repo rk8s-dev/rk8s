@@ -2,15 +2,13 @@
 #![allow(dead_code)]
 
 use slayerfs::chunk::{
+    ChunkLayout,
     slice::{SliceDesc, SliceOffset, block_span_iter_slice},
     store::BlockStore,
-    ChunkLayout,
 };
 use slayerfs::meta::SLICE_ID_KEY;
 use slayerfs::meta::store::MetaStore;
-use slayerfs::{
-    Config, DatabaseMetaStore, DatabaseType, InMemoryBlockStore,
-};
+use slayerfs::{Config, DatabaseMetaStore, DatabaseType, InMemoryBlockStore};
 use std::sync::Arc;
 use tempfile::TempDir;
 
@@ -51,7 +49,7 @@ pub async fn create_fragmented_file(
     num_overlapping_writes: usize,
 ) -> u64 {
     use slayerfs::vfs::chunk_id_for;
-    
+
     let chunk_id = chunk_id_for(ino, 0).unwrap();
     let layout = ChunkLayout::default();
 

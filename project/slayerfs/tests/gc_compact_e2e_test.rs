@@ -1,17 +1,15 @@
 mod common;
 
-use slayerfs::{
-    chunk::{SliceDesc, SliceOffset, block_span_iter_slice, store::BlockStore},
-};
-use slayerfs::meta::store::MetaStore;
+use slayerfs::chunk::{SliceDesc, SliceOffset, block_span_iter_slice, store::BlockStore};
 use slayerfs::meta::SLICE_ID_KEY;
+use slayerfs::meta::store::MetaStore;
 use slayerfs::vfs::chunk_id_for;
 use slayerfs::{
     BlockGcConfig, BlockStoreGC, ChunkLayout, CompactResult, Compactor, InMemoryBlockStore,
 };
 use std::time::Duration;
 
-use common::{setup_test_fs, generate_test_pattern};
+use common::{generate_test_pattern, setup_test_fs};
 
 #[tokio::test]
 async fn compaction_preserves_data_integrity() {

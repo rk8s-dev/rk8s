@@ -7,11 +7,11 @@
 //! - Error handling and retry logic
 
 mod tests {
+    use slayerfs::DatabaseMetaStore;
     use slayerfs::chunk::store::InMemoryBlockStore;
     use slayerfs::chunk::{BlockGcConfig, BlockStoreGC};
-    use slayerfs::DatabaseMetaStore;
     use slayerfs::meta::store::MetaStore;
-    use slayerfs::{Config, DatabaseType, DatabaseConfig};
+    use slayerfs::{Config, DatabaseConfig, DatabaseType};
     use std::sync::Arc;
     use std::time::Duration;
     use tempfile::TempDir;

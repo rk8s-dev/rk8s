@@ -3120,8 +3120,7 @@ impl MetaStore for DatabaseMetaStore {
             let expected_id = expected.slice_id as i64;
             match current_map.get(&expected_id) {
                 Some((offset, length)) => {
-                    if *offset != expected.offset.as_i64() 
-                        || *length != expected.length.as_i64() {
+                    if *offset != expected.offset.as_i64() || *length != expected.length.as_i64() {
                         warn!(
                             chunk_id = chunk_id,
                             slice_id = expected.slice_id,

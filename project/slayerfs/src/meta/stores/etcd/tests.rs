@@ -1,6 +1,8 @@
 use crate::meta::MetaStore;
 use crate::meta::config::Config;
-use crate::meta::config::{CacheConfig, ClientOptions, CompactConfig, DatabaseConfig, DatabaseType};
+use crate::meta::config::{
+    CacheConfig, ClientOptions, CompactConfig, DatabaseConfig, DatabaseType,
+};
 use crate::meta::file_lock::{FileLockQuery, FileLockRange, FileLockType};
 use crate::meta::store::{MetaError, SetAttrFlags, SetAttrRequest};
 use crate::meta::stores::EtcdMetaStore;

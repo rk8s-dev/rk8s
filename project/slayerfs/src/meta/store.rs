@@ -922,12 +922,7 @@ pub trait MetaStore: Send + Sync {
         old_slices_to_delay: &[u8],
         expected_slices: &[SliceDesc],
     ) -> Result<(), MetaError> {
-        let _ = (
-            chunk_id,
-            new_slices,
-            old_slices_to_delay,
-            expected_slices,
-        );
+        let _ = (chunk_id, new_slices, old_slices_to_delay, expected_slices);
         Err(MetaError::NotImplemented)
     }
 

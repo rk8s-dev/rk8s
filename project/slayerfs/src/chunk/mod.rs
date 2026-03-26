@@ -27,12 +27,12 @@ pub mod store;
 pub mod util;
 pub mod writer;
 
-pub use layout::{
-    ChunkLayout, DEFAULT_BLOCK_SIZE, DEFAULT_CHUNK_SIZE, chunk_index_of, within_chunk_offset,
-};
 pub use compaction_worker::{CompactionWorker, CompactionWorkerConfig};
 pub use compactor::{CompactResult, Compactor, CompactorError};
 pub use gc::{BlockGcConfig, BlockStoreGC};
+pub use layout::{
+    ChunkLayout, DEFAULT_BLOCK_SIZE, DEFAULT_CHUNK_SIZE, chunk_index_of, within_chunk_offset,
+};
 pub use singleflight::SingleFlight;
 pub use slice::{BlockSpan, ChunkOffset, SliceDesc, SliceOffset, block_span_iter_slice};
 pub use span::{BlockTag, ChunkTag, PageTag, Span, SpanTag};

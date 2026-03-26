@@ -258,12 +258,7 @@ where
 
         match self
             .meta_store
-            .replace_slices_for_compact_with_version(
-                chunk_id,
-                &[new_slice],
-                &delayed,
-                slices,
-            )
+            .replace_slices_for_compact_with_version(chunk_id, &[new_slice], &delayed, slices)
             .await
         {
             Ok(()) => {
@@ -335,7 +330,8 @@ where
                 )));
             }
 
-            self.read_slice_data_into(&slice, &mut merged_data[start..end]).await?;
+            self.read_slice_data_into(&slice, &mut merged_data[start..end])
+                .await?;
         }
 
         Ok(())

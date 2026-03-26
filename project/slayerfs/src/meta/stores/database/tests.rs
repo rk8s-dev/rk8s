@@ -57,7 +57,6 @@ async fn new_test_store_with_session(session_id: Uuid) -> DatabaseMetaStore {
     store
 }
 
-
 #[tokio::test]
 async fn test_next_id_unique_across_store_instances() {
     let temp_dir = tempfile::tempdir().expect("tempdir");

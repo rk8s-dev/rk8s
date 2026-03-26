@@ -1,4 +1,6 @@
-use crate::chunk::{BlockGcConfig, BlockStoreGC, BlockStore, ChunkLayout, CompactResult, Compactor};
+use crate::chunk::{
+    BlockGcConfig, BlockStore, BlockStoreGC, ChunkLayout, CompactResult, Compactor,
+};
 use crate::meta::config::{CompactConfig, LockTtlConfig};
 use crate::meta::store::{LockName, MetaError, MetaStore};
 use std::collections::HashSet;
@@ -174,7 +176,13 @@ where
 {
     #[allow(dead_code)]
     pub fn new(meta_store: Arc<M>, block_store: Arc<B>) -> Self {
-        Self::with_config(meta_store, block_store, ChunkLayout::default(), CompactConfig::default(), LockTtlConfig::default())
+        Self::with_config(
+            meta_store,
+            block_store,
+            ChunkLayout::default(),
+            CompactConfig::default(),
+            LockTtlConfig::default(),
+        )
     }
 
     pub fn with_config(
@@ -185,9 +193,16 @@ where
         lock_ttl_config: LockTtlConfig,
     ) -> Self {
         let meta_store_dyn: Arc<dyn MetaStore> = meta_store.clone();
-        let compactor: Arc<Compactor<B>> = 
-            Arc::new(Compactor::with_config(meta_store_dyn, block_store, layout, compact_config));
-        let lock_manager = Arc::new(CompactLockManager::with_ttl_config(Arc::clone(&meta_store), lock_ttl_config));
+        let compactor: Arc<Compactor<B>> = Arc::new(Compactor::with_config(
+            meta_store_dyn,
+            block_store,
+            layout,
+            compact_config,
+        ));
+        let lock_manager = Arc::new(CompactLockManager::with_ttl_config(
+            Arc::clone(&meta_store),
+            lock_ttl_config,
+        ));
         Self {
             meta_store,
             compactor,
@@ -245,7 +260,9 @@ where
     let chunk_ids = match meta_store.list_chunk_ids(config.max_chunks_per_run).await {
         Ok(ids) => ids,
         Err(MetaError::NotImplemented) => {
-            debug!("list_chunk_ids not implemented for this MetaStore backend, skipping compaction cycle");
+            debug!(
+                "list_chunk_ids not implemented for this MetaStore backend, skipping compaction cycle"
+            );
             return Ok(());
         }
         Err(e) => return Err(anyhow::anyhow!("Failed to list chunk IDs: {}", e)),
