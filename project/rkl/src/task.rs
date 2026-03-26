@@ -71,13 +71,47 @@ fn check_pause_alive(pid: i32) -> Result<(), PauseDeadError> {
 
 struct RkforgeImagePuller {}
 
+impl RkforgeImagePuller {
+    /// Build an [rkforge::config::auth::AuthConfig] from rks-provided credentials.
+    /// Falls back to the local rkforge config if no rks credentials are available.
+    fn build_auth_config(&self) -> Option<rkforge::config::auth::AuthConfig> {
+        let creds = crate::config::get_all_registry_credentials();
+        if creds.is_empty() {
+            return None;
+        }
+        let entries = creds
+            .into_iter()
+            .map(|c| rkforge::config::auth::AuthEntry::new(c.pat, c.registry))
+            .collect();
+        Some(rkforge::config::auth::AuthConfig {
+            entries,
+            insecure_registries: vec![],
+        })
+    }
+}
+
 #[async_trait::async_trait]
 impl ImagePuller for RkforgeImagePuller {
     async fn pull_or_get_image(&self, image_ref: &str) -> Result<(PathBuf, Vec<PathBuf>)> {
+        if let Some(auth_config) = self.build_auth_config() {
+            return rkforge::pull::pull_or_get_image_with_config(
+                image_ref,
+                None::<&str>,
+                &auth_config,
+            )
+            .await;
+        }
         rkforge::pull::pull_or_get_image(image_ref, None::<&str>).await
     }
 
     fn sync_pull_or_get_image(&self, image_ref: &str) -> Result<(PathBuf, Vec<PathBuf>)> {
+        if let Some(auth_config) = self.build_auth_config() {
+            return rkforge::pull::sync_pull_or_get_image_with_config(
+                image_ref,
+                None::<&str>,
+                &auth_config,
+            );
+        }
         rkforge::pull::sync_pull_or_get_image(image_ref, None::<&str>)
     }
 }

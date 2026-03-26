@@ -176,6 +176,80 @@ async fn pull_or_get_image_with_policy_and_tls(
     Ok((manifest_path, layers))
 }
 
+/// Pull or get an image using an externally provided [AuthConfig] instead of
+/// loading credentials from the local configuration file. This is used by rkl
+/// when it receives registry credentials from rks.
+pub fn sync_pull_or_get_image_with_config(
+    image_ref: impl AsRef<str>,
+    url: Option<impl AsRef<str>>,
+    auth_config: &AuthConfig,
+) -> anyhow::Result<(PathBuf, Vec<PathBuf>)> {
+    let image_ref = image_ref.as_ref();
+    let url = url.map(|u| u.as_ref().to_string());
+    let resolved_url = auth_config.resolve_url(url)?;
+    let (client, image_ref, auth_method) =
+        resolve_ref_with_auth(auth_config, &resolved_url, image_ref, false)?;
+    let do_pull = async move {
+        let (manifest, digest) = client
+            .pull_manifest(&image_ref, &auth_method)
+            .await
+            .map_err(|e| anyhow!("Failed to pull manifest: {e}"))?;
+
+        let layers = match &manifest {
+            OciManifest::Image(manifest) => {
+                pull_layers(&client, &image_ref, manifest, false, false).await
+            }
+            OciManifest::ImageIndex(_) => anyhow::bail!("Image indexes are not supported yet"),
+        }?;
+
+        let manifest_path = write_manifest(&image_ref, &manifest, &digest).await?;
+        Ok((manifest_path, layers))
+    };
+    match Handle::try_current() {
+        Ok(handle) => {
+            let pull_or_get = thread::spawn(move || handle.block_on(do_pull));
+            pull_or_get.join().map_err(|_| anyhow!("thread panicked"))?
+        }
+        Err(_) => {
+            let rt = RUNTIME.get_or_init(|| {
+                tokio::runtime::Builder::new_multi_thread()
+                    .enable_all()
+                    .build()
+                    .expect("Failed to build tokio runtime")
+            });
+            rt.block_on(do_pull)
+        }
+    }
+}
+
+/// Async variant of [sync_pull_or_get_image_with_config].
+pub async fn pull_or_get_image_with_config(
+    image_ref: impl AsRef<str>,
+    url: Option<impl AsRef<str>>,
+    auth_config: &AuthConfig,
+) -> anyhow::Result<(PathBuf, Vec<PathBuf>)> {
+    let image_ref = image_ref.as_ref();
+    let url = url.map(|u| u.as_ref().to_string());
+    let resolved_url = auth_config.resolve_url(url)?;
+    let (client, image_ref, auth_method) =
+        resolve_ref_with_auth(auth_config, &resolved_url, image_ref, false)?;
+
+    let (manifest, digest) = client
+        .pull_manifest(&image_ref, &auth_method)
+        .await
+        .with_context(|| "Failed to pull manifest")?;
+
+    let layers = match &manifest {
+        OciManifest::Image(manifest) => {
+            pull_layers(&client, &image_ref, manifest, false, false).await
+        }
+        OciManifest::ImageIndex(_) => anyhow::bail!("Image indexes are not supported yet"),
+    }?;
+
+    let manifest_path = write_manifest(&image_ref, &manifest, &digest).await?;
+    Ok((manifest_path, layers))
+}
+
 fn resolve_client_ref_auth(
     image_ref: &str,
     url: Option<String>,

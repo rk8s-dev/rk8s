@@ -116,6 +116,22 @@ impl<'a> NodeRegister<'a> {
             }
         }
 
+        // Always push registry credentials (even empty) so reconnecting
+        // workers clear stale credentials from a previous session.
+        if let Some(vault) = self.shared.vault.as_ref() {
+            match vault.list_registry_credentials().await {
+                Ok(creds) => {
+                    let msg = RksMessage::SetRegistryCredentials(creds);
+                    if let Err(e) = msg_tx.try_send(msg) {
+                        log::warn!("Failed to send registry credentials to {}: {}", node_id, e);
+                    }
+                }
+                Err(e) => {
+                    log::warn!("Failed to load registry credentials for {}: {}", node_id, e);
+                }
+            }
+        }
+
         self.conn.send_msg(&RksMessage::Ack).await?;
 
         let conn = self.conn.clone();

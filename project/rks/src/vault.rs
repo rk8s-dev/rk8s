@@ -4,7 +4,7 @@ use crate::protocol::config::{
 use anyhow::Context;
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64;
-use common::IssueCertificateRequest;
+use common::{IssueCertificateRequest, RegistryCredential};
 use libvault::RustyVault;
 use libvault::core::SealConfig;
 use libvault::modules::ResponseExt;
@@ -13,7 +13,7 @@ use libvault::modules::pki::types::IssueCertificateResponse;
 use libvault::storage::Backend;
 use libvault::storage::physical::file::FileBackend;
 use libvault::storage::xline::{XlineBackend, XlineOptions};
-use log::{debug, info};
+use log::{debug, info, warn};
 use serde_json::{Value, json};
 use std::fmt::{Display, Formatter};
 use std::path::Path;
@@ -274,6 +274,97 @@ impl Vault {
         Ok(())
     }
 
+    /// Store a registry credential (PAT) in the KV secret engine.
+    /// Path: `secret/registry/{registry_host}`
+    ///
+    /// The `registry` value is expected to be pre-normalized (lowercased, host:port only).
+    pub async fn store_registry_credential(&self, registry: &str, pat: &str) -> anyhow::Result<()> {
+        let path = format!("secret/registry/{registry}");
+        let data = json!({ "pat": pat, "registry": registry });
+        self.vault
+            .write(Some(self.root_token.as_str()), &path, data.to_map()?)
+            .await
+            .with_context(|| format!("Failed to store credential for registry {registry}"))?;
+        info!("stored registry credential for {registry}");
+        Ok(())
+    }
+
+    /// Remove a stored registry credential.
+    pub async fn delete_registry_credential(&self, registry: &str) -> anyhow::Result<()> {
+        let path = format!("secret/registry/{registry}");
+        self.vault
+            .delete(Some(self.root_token.as_str()), &path, None)
+            .await
+            .with_context(|| format!("Failed to delete credential for registry {registry}"))?;
+        info!("deleted registry credential for {registry}");
+        Ok(())
+    }
+
+    /// List all stored registry credentials.
+    pub async fn list_registry_credentials(&self) -> anyhow::Result<Vec<RegistryCredential>> {
+        let resp = self
+            .vault
+            .list(Some(self.root_token.as_str()), "secret/registry/")
+            .await;
+
+        let keys = match resp {
+            Ok(Some(resp)) => resp
+                .data
+                .and_then(|data| data.get("keys").cloned())
+                .and_then(|v| v.as_array().cloned())
+                .unwrap_or_default()
+                .into_iter()
+                .filter_map(|v| v.as_str().map(String::from))
+                .collect::<Vec<_>>(),
+            Ok(None) => vec![],
+            Err(e) => {
+                anyhow::bail!("failed to list registry credential keys from vault: {e}");
+            }
+        };
+
+        let mut credentials = Vec::with_capacity(keys.len());
+        for key in keys {
+            let registry = key.trim_end_matches('/');
+            match self.get_registry_credential(registry).await {
+                Ok(Some(cred)) => credentials.push(cred),
+                Ok(None) => warn!("registry key '{registry}' listed but not readable"),
+                Err(e) => warn!("failed to read registry credential for '{registry}': {e}"),
+            }
+        }
+        Ok(credentials)
+    }
+
+    /// Get a single registry credential by host.
+    pub async fn get_registry_credential(
+        &self,
+        registry: &str,
+    ) -> anyhow::Result<Option<RegistryCredential>> {
+        let path = format!("secret/registry/{registry}");
+        let resp = self.vault.read(Some(self.root_token.as_str()), &path).await;
+
+        match resp {
+            Ok(Some(resp)) => {
+                let data = resp.data.unwrap_or_default();
+                let pat = data
+                    .get("pat")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or_default()
+                    .to_string();
+                let registry = data
+                    .get("registry")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or(registry)
+                    .to_string();
+                Ok(Some(RegistryCredential { registry, pat }))
+            }
+            Ok(None) => Ok(None),
+            Err(e) => {
+                warn!("failed to read registry credential at '{path}': {e}");
+                Ok(None)
+            }
+        }
+    }
+
     pub async fn issue_cert(
         &self,
         role: CertRole,
@@ -314,6 +405,53 @@ impl Vault {
             ttl: "180d".to_string().into(),
         };
         self.issue_cert(CertRole::Rks, &req).await
+    }
+
+    /// Open vault using the file backend directly (no Xline needed).
+    /// Requires `rks gen certs` to have been run first.
+    pub async fn open_file_backend() -> anyhow::Result<Self> {
+        let folder = &config_ref().tls_config.vault_folder;
+        if folder.as_os_str().is_empty() {
+            anyhow::bail!(
+                "vault_folder is empty in config. \
+                 Set tls_config.vault_folder and run `rks gen certs` first."
+            );
+        }
+
+        let keys = extract_keys(&folder.join("keys.json"))
+            .await
+            .with_context(|| {
+                format!(
+                    "Cannot read {}/keys.json. Run `rks gen certs <config>` first.",
+                    folder.display()
+                )
+            })?;
+        let keys_ref = keys.iter().map(|e| e.as_slice()).collect::<Vec<_>>();
+
+        let mut vault = Vault::with_file_backend()?;
+        vault
+            .vault
+            .unseal(&keys_ref)
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to unseal file backend: {e}"))?;
+
+        let root_token = tokio::fs::read_to_string(folder.join("root_token.txt"))
+            .await
+            .with_context(|| "Failed to read root_token.txt")?;
+        vault.root_token = root_token;
+
+        info!("opened vault with file backend at {}", folder.display());
+        Ok(vault)
+    }
+
+    /// Open vault: tries Xline migration when TLS is enabled,
+    /// falls back to file backend otherwise.
+    pub async fn open() -> anyhow::Result<Self> {
+        if config_ref().tls_config.enable {
+            Self::migrate().await
+        } else {
+            Self::open_file_backend().await
+        }
     }
 
     pub async fn migrate() -> anyhow::Result<Self> {
@@ -391,4 +529,126 @@ async fn extract_keys(path: &Path) -> anyhow::Result<Vec<Vec<u8>>> {
                 .collect::<Vec<_>>()
         })
         .with_context(|| "keys.json doesn't contain a key named with `keys`")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use libvault::storage::physical::file::FileBackend;
+
+    /// Create a standalone vault with file backend for testing.
+    /// No external services (Xline) needed.
+    async fn setup_test_vault() -> anyhow::Result<(Vault, tempfile::TempDir)> {
+        let temp_dir = tempfile::tempdir()?;
+        let backend = FileBackend::with_folder(temp_dir.path())?;
+        let mut vault = Vault::new(Arc::new(backend))?;
+
+        let keys = vault
+            .vault
+            .init(&SealConfig {
+                secret_shares: 1,
+                secret_threshold: 1,
+            })
+            .await
+            .map_err(|e| anyhow::anyhow!("init failed: {e}"))?;
+
+        vault
+            .vault
+            .unseal(&[keys.secret_shares[0].as_slice()])
+            .await
+            .map_err(|e| anyhow::anyhow!("unseal failed: {e}"))?;
+
+        vault.root_token = keys.root_token.clone();
+        Ok((vault, temp_dir))
+    }
+
+    #[tokio::test]
+    async fn test_store_and_get_registry_credential() {
+        let (vault, _dir) = setup_test_vault().await.unwrap();
+
+        vault
+            .store_registry_credential("libra.tools", "test-token-123")
+            .await
+            .unwrap();
+
+        let cred = vault
+            .get_registry_credential("libra.tools")
+            .await
+            .unwrap()
+            .expect("credential should exist");
+
+        assert_eq!(cred.registry, "libra.tools");
+        assert_eq!(cred.pat, "test-token-123");
+    }
+
+    #[tokio::test]
+    async fn test_list_registry_credentials() {
+        let (vault, _dir) = setup_test_vault().await.unwrap();
+
+        vault
+            .store_registry_credential("libra.tools", "token1")
+            .await
+            .unwrap();
+        vault
+            .store_registry_credential("other.registry.io", "token2")
+            .await
+            .unwrap();
+
+        let creds = vault.list_registry_credentials().await.unwrap();
+        assert_eq!(creds.len(), 2);
+
+        let registries: Vec<&str> = creds.iter().map(|c| c.registry.as_str()).collect();
+        assert!(registries.contains(&"libra.tools"));
+        assert!(registries.contains(&"other.registry.io"));
+    }
+
+    #[tokio::test]
+    async fn test_delete_registry_credential() {
+        let (vault, _dir) = setup_test_vault().await.unwrap();
+
+        vault
+            .store_registry_credential("libra.tools", "token")
+            .await
+            .unwrap();
+
+        vault
+            .delete_registry_credential("libra.tools")
+            .await
+            .unwrap();
+
+        let cred = vault.get_registry_credential("libra.tools").await.unwrap();
+        assert!(cred.is_none(), "credential should be deleted");
+    }
+
+    #[tokio::test]
+    async fn test_list_empty_credentials() {
+        let (vault, _dir) = setup_test_vault().await.unwrap();
+
+        let creds = vault.list_registry_credentials().await.unwrap();
+        assert!(creds.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_overwrite_registry_credential() {
+        let (vault, _dir) = setup_test_vault().await.unwrap();
+
+        vault
+            .store_registry_credential("libra.tools", "old-token")
+            .await
+            .unwrap();
+        vault
+            .store_registry_credential("libra.tools", "new-token")
+            .await
+            .unwrap();
+
+        let cred = vault
+            .get_registry_credential("libra.tools")
+            .await
+            .unwrap()
+            .expect("credential should exist");
+        assert_eq!(cred.pat, "new-token");
+
+        let creds = vault.list_registry_credentials().await.unwrap();
+        assert_eq!(creds.len(), 1);
+    }
 }
