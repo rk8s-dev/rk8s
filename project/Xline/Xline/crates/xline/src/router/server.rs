@@ -1,7 +1,10 @@
 use super::{Body, Error as GlobalError, HeaderValue, Router, h3wrapper::QuicIncomingBody};
 use bytes::Bytes;
 use gm_quic::prelude::{BindUri, ParseBindUriError, QuicListeners, handy};
-use h3::{\n    quic::{BidiStream, SendStream},\n    server::RequestStream,\n};
+use h3::{
+    quic::{BidiStream, SendStream},
+    server::RequestStream,
+};
 use h3_shim;
 use http::{Request, Response};
 use std::{collections::HashMap, convert::Infallible, future::poll_fn, sync::Arc};
@@ -229,6 +232,10 @@ async fn unimplemented() -> impl axum::response::IntoResponse {
     let headers = [
         (http::header::CONTENT_TYPE,
             HeaderValue::from_static("application/grpc")),
+        ("grpc-status",
+            HeaderValue::from_static("12")),
+        ("grpc-message",
+            HeaderValue::from_static("UNIMPLEMENTED")),
     ];
     (status, headers)
 }

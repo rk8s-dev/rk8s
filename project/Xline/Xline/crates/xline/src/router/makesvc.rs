@@ -187,11 +187,27 @@ where
                 .map_err(|e| e)?;
 
             // For streaming response, we need to handle it differently
-            // This is a simplified implementation
+            // Collect all streaming responses and encode them
+            let mut response_bytes = Vec::new();
+            let mut stream = xline_response.into_inner();
+            
+            while let Some(item) = stream.next().await {
+                match item {
+                    Ok(output) => {
+                        let mut encoded = output.encode_to_vec();
+                        response_bytes.extend_from_slice(&encoded);
+                    }
+                    Err(e) => {
+                        return Err(Status::internal(format!("Streaming response error: {}", e)));
+                    }
+                }
+            }
+
+            // Create HTTP response
             let response = http::Response::builder()
                 .status(http::StatusCode::OK)
                 .header(http::header::CONTENT_TYPE, "application/grpc")
-                .body(http_body::Full::from(Bytes::new()))
+                .body(http_body::Full::from(Bytes::from(response_bytes)))
                 .unwrap();
 
             Ok(response)
@@ -259,11 +275,27 @@ where
                 .map_err(|e| e)?;
 
             // For server streaming response, we need to handle it differently
-            // This is a simplified implementation
+            // Collect all streaming responses and encode them
+            let mut response_bytes = Vec::new();
+            let mut stream = xline_response.into_inner();
+            
+            while let Some(item) = stream.next().await {
+                match item {
+                    Ok(output) => {
+                        let mut encoded = output.encode_to_vec();
+                        response_bytes.extend_from_slice(&encoded);
+                    }
+                    Err(e) => {
+                        return Err(Status::internal(format!("Server streaming response error: {}", e)));
+                    }
+                }
+            }
+
+            // Create HTTP response
             let response = http::Response::builder()
                 .status(http::StatusCode::OK)
                 .header(http::header::CONTENT_TYPE, "application/grpc")
-                .body(http_body::Full::from(Bytes::new()))
+                .body(http_body::Full::from(Bytes::from(response_bytes)))
                 .unwrap();
 
             Ok(response)
