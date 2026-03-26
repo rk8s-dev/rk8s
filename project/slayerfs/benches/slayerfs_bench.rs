@@ -15,7 +15,6 @@ use tokio::runtime::{Builder, Runtime};
 use tracing_chrome::{ChromeLayerBuilder, TraceStyle};
 use tracing_subscriber::{EnvFilter, layer::SubscriberExt, util::SubscriberInitExt};
 
-use bytes::Bytes;
 use slayerfs::{
     BlockKey, BlockStore, CacheConfig, ChunkLayout, ClientOptions, Config, DatabaseConfig,
     DatabaseMetaStore, DatabaseType, EtcdMetaStore, LocalFsBackend, MetaClient, MetaStore,

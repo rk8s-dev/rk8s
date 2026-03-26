@@ -1,12 +1,17 @@
 use crate::api::xlinestore::XlineStore;
 use crate::commands::{create, delete};
+use crate::network::service_ip::{
+    validate_and_allocate_cluster_ip, validate_cluster_ip_immutability,
+};
 use crate::node::Shared;
 use chrono::Utc;
 use common::quic::RksConnection;
 use common::*;
-use common::{Node, NodeStatus, PodTask, RksMessage};
+use common::{Node, NodeStatus, PodTask, RksMessage, ServiceSpec};
 use log::{error, info, warn};
+use std::net::Ipv4Addr;
 use std::sync::Arc;
+use tokio::time::{Duration, sleep};
 
 /// Dispatch worker-originated messages
 pub async fn dispatch_worker(
@@ -81,11 +86,40 @@ pub async fn dispatch_worker(
     Ok(())
 }
 
+/// Validate Service spec before creation or update.
+///
+/// Checks:
+/// - ClusterIP IPv4 format (if specified)
+///
+/// Range validation and allocation semantics are handled by
+/// `validate_and_allocate_cluster_ip` for a single source of truth.
+fn validate_service_spec(spec: &ServiceSpec) -> anyhow::Result<()> {
+    // Only validate ClusterIP services
+    if spec.service_type != "ClusterIP" {
+        return Ok(());
+    }
+
+    // If cluster_ip is specified, validate format
+    if let Some(ref ip_str) = spec.cluster_ip
+        && !ip_str.trim().is_empty()
+        && !ip_str.trim().eq_ignore_ascii_case("none")
+    {
+        // Try to parse as IPv4 address
+        ip_str
+            .trim()
+            .parse::<Ipv4Addr>()
+            .map_err(|_| anyhow::anyhow!("invalid cluster_ip format: {}", ip_str))?;
+        info!("Service cluster_ip validation passed: {}", ip_str);
+    }
+
+    Ok(())
+}
+
 /// Handle user-originated messages
 pub async fn dispatch_user(
     msg: RksMessage,
     conn: &RksConnection,
-    shared: &Arc<Shared>,
+    shared: &Arc<crate::node::Shared>,
 ) -> anyhow::Result<()> {
     let xline_store = &shared.xline_store;
     match msg {
@@ -362,36 +396,183 @@ pub async fn dispatch_user(
 
         // Service operations
         RksMessage::CreateService(mut svc) => {
-            if xline_store
-                .get_service_yaml(&svc.metadata.name)
-                .await?
-                .is_some()
-            {
-                let err_msg = format!("service \"{}\" already exists", svc.metadata.name);
-                conn.send_msg(&RksMessage::Error(err_msg)).await?;
+            // Validate service spec
+            if let Err(e) = validate_service_spec(&svc.spec) {
+                warn!(
+                    target: "rks::node::user_dispatch",
+                    "Service {} validation failed: {}",
+                    svc.metadata.name, e
+                );
+                conn.send_msg(&RksMessage::Error(format!(
+                    "Service validation failed: {}",
+                    e
+                )))
+                .await?;
                 return Ok(());
             }
+
+            // Auto-allocate ClusterIP if allocator is available
+            if let Some(ref allocator) = shared.service_ip_allocator
+                && let Err(e) = validate_and_allocate_cluster_ip(
+                    &svc.metadata.namespace,
+                    &svc.metadata.name,
+                    &mut svc.spec,
+                    &shared.network_config,
+                    allocator.registry.as_ref(),
+                    allocator.as_ref(),
+                )
+                .await
+            {
+                warn!(
+                    target: "rks::node::user_dispatch",
+                    "Service {} ClusterIP allocation failed: {}",
+                    svc.metadata.name, e
+                );
+                conn.send_msg(&RksMessage::Error(format!(
+                    "ClusterIP allocation failed: {}",
+                    e
+                )))
+                .await?;
+                return Ok(());
+            }
+
             let name = svc.metadata.name.clone();
             if svc.metadata.creation_timestamp.is_none() {
                 svc.metadata.creation_timestamp = Some(Utc::now());
             }
             let yaml = serde_yaml::to_string(&*svc)?;
-            xline_store.insert_service_yaml(&name, &yaml).await?;
+            let created = xline_store
+                .insert_service_yaml_if_absent(&name, &yaml)
+                .await?;
+            if !created {
+                // Concurrent create won the CAS; rollback reservation from this request.
+                if let Some(ref allocator) = shared.service_ip_allocator {
+                    let should_release = match xline_store.get_service_yaml(&name).await {
+                        Ok(Some(existing_yaml)) => {
+                            if let Ok(existing_svc) =
+                                serde_yaml::from_str::<ServiceTask>(&existing_yaml)
+                            {
+                                existing_svc.spec.cluster_ip != svc.spec.cluster_ip
+                            } else {
+                                true
+                            }
+                        }
+                        Ok(None) => true,
+                        Err(_) => true,
+                    };
+
+                    if should_release
+                        && let Err(e) = crate::network::service_ip::deallocate_cluster_ip(
+                            &name,
+                            &svc.spec,
+                            allocator.as_ref(),
+                        )
+                        .await
+                    {
+                        warn!(
+                            target: "rks::node::user_dispatch",
+                            "Failed to rollback reserved ClusterIP for concurrent create on Service {}: {}",
+                            name,
+                            e
+                        );
+                    }
+                }
+
+                conn.send_msg(&RksMessage::Error(format!(
+                    "service \"{}\" already exists",
+                    name
+                )))
+                .await?;
+                return Ok(());
+            }
             info!(
                 target: "rks::node::user_dispatch",
-                "created Service {name}"
+                "created Service {} with ClusterIP {:?}",
+                name, svc.spec.cluster_ip
             );
             conn.send_msg(&RksMessage::Ack).await?;
         }
 
         RksMessage::UpdateService(incoming_svc) => {
+            // Validate service spec
+            if let Err(e) = validate_service_spec(&incoming_svc.spec) {
+                warn!(
+                    target: "rks::node::user_dispatch",
+                    "Service {} validation failed: {}",
+                    incoming_svc.metadata.name, e
+                );
+                conn.send_msg(&RksMessage::Error(format!(
+                    "Service validation failed: {}",
+                    e
+                )))
+                .await?;
+                return Ok(());
+            }
+
             let name = incoming_svc.metadata.name.clone();
             if let Some(existing_yaml) = xline_store.get_service_yaml(&name).await? {
                 let mut final_svc: ServiceTask = serde_yaml::from_str(&existing_yaml)?;
-                if final_svc.spec != incoming_svc.spec {
+                let mut desired_spec = incoming_svc.spec.clone();
+
+                // Preserve allocated ClusterIP when client manifest omits cluster_ip.
+                let incoming_cluster_ip_missing = desired_spec
+                    .cluster_ip
+                    .as_ref()
+                    .map(|s| s.trim().is_empty())
+                    .unwrap_or(true);
+                if incoming_cluster_ip_missing {
+                    desired_spec.cluster_ip = final_svc.spec.cluster_ip.clone();
+                }
+
+                // Validate cluster_ip immutability
+                if let Err(e) =
+                    validate_cluster_ip_immutability(&name, &final_svc.spec, &desired_spec)
+                {
+                    warn!(
+                        target: "rks::node::user_dispatch",
+                        "Service {} update rejected: {}",
+                        name, e
+                    );
+                    conn.send_msg(&RksMessage::Error(format!(
+                        "Service update rejected: {}",
+                        e
+                    )))
+                    .await?;
+                    return Ok(());
+                }
+
+                // Re-run allocation/validation on update path to ensure:
+                // 1) missing legacy cluster_ip gets repaired,
+                // 2) manual cluster_ip is validated and tracked in registry.
+                if let Some(ref allocator) = shared.service_ip_allocator
+                    && let Err(e) = validate_and_allocate_cluster_ip(
+                        &final_svc.metadata.namespace,
+                        &name,
+                        &mut desired_spec,
+                        &shared.network_config,
+                        allocator.registry.as_ref(),
+                        allocator.as_ref(),
+                    )
+                    .await
+                {
+                    warn!(
+                        target: "rks::node::user_dispatch",
+                        "Service {} ClusterIP validation/allocation failed on update: {}",
+                        name,
+                        e
+                    );
+                    conn.send_msg(&RksMessage::Error(format!(
+                        "ClusterIP validation/allocation failed: {}",
+                        e
+                    )))
+                    .await?;
+                    return Ok(());
+                }
+
+                if final_svc.spec != desired_spec {
                     let current_gen = final_svc.metadata.generation.unwrap_or(0);
                     final_svc.metadata.generation = Some(current_gen + 1);
-                    final_svc.spec = incoming_svc.spec.clone();
+                    final_svc.spec = desired_spec;
                     info!(
                         target: "rks::node::user_dispatch",
                         "Service {} spec updated, add generation",
@@ -402,16 +583,96 @@ pub async fn dispatch_user(
                 xline_store.insert_service_yaml(&name, &yaml).await?;
                 info!(
                     target: "rks::node::user_dispatch",
-                    "updated Service {name} (preserved state)"
+                    "updated Service {} (preserved state)",
+                    name
                 );
             } else {
-                let yaml = serde_yaml::to_string(&*incoming_svc)?;
-                xline_store.insert_service_yaml(&name, &yaml).await?;
+                let mut new_svc = (*incoming_svc).clone();
+
+                if let Some(ref allocator) = shared.service_ip_allocator
+                    && let Err(e) = validate_and_allocate_cluster_ip(
+                        &new_svc.metadata.namespace,
+                        &new_svc.metadata.name,
+                        &mut new_svc.spec,
+                        &shared.network_config,
+                        allocator.registry.as_ref(),
+                        allocator.as_ref(),
+                    )
+                    .await
+                {
+                    warn!(
+                        target: "rks::node::user_dispatch",
+                        "Service {} ClusterIP allocation failed on upsert-create: {}",
+                        new_svc.metadata.name,
+                        e
+                    );
+                    conn.send_msg(&RksMessage::Error(format!(
+                        "ClusterIP allocation failed: {}",
+                        e
+                    )))
+                    .await?;
+                    return Ok(());
+                }
+
+                if new_svc.metadata.creation_timestamp.is_none() {
+                    new_svc.metadata.creation_timestamp = Some(Utc::now());
+                }
+
+                let yaml = serde_yaml::to_string(&new_svc)?;
+                let created = xline_store
+                    .insert_service_yaml_if_absent(&name, &yaml)
+                    .await?;
+                if !created {
+                    // Concurrent apply/create won the CAS; avoid leaving orphan IP reservation.
+                    if let Some(ref allocator) = shared.service_ip_allocator {
+                        let should_release = match xline_store.get_service_yaml(&name).await {
+                            Ok(Some(existing_yaml)) => {
+                                if let Ok(existing_svc) =
+                                    serde_yaml::from_str::<ServiceTask>(&existing_yaml)
+                                {
+                                    existing_svc.spec.cluster_ip != new_svc.spec.cluster_ip
+                                } else {
+                                    true
+                                }
+                            }
+                            Ok(None) => true,
+                            Err(_) => true,
+                        };
+
+                        if should_release
+                            && let Err(e) = crate::network::service_ip::deallocate_cluster_ip(
+                                &name,
+                                &new_svc.spec,
+                                allocator.as_ref(),
+                            )
+                            .await
+                        {
+                            warn!(
+                                target: "rks::node::user_dispatch",
+                                "Failed to rollback reserved ClusterIP for concurrent apply on Service {}: {}",
+                                name,
+                                e
+                            );
+                        }
+                    }
+
+                    conn.send_msg(&RksMessage::Error(format!(
+                        "Service {} was created concurrently, please retry apply",
+                        name
+                    )))
+                    .await?;
+                    return Ok(());
+                }
             }
             conn.send_msg(&RksMessage::Ack).await?;
         }
 
         RksMessage::DeleteService(name) => {
+            let existing_svc = xline_store
+                .get_service_yaml(&name)
+                .await?
+                .and_then(|yaml| serde_yaml::from_str::<ServiceTask>(&yaml).ok());
+
             xline_store
                 .delete_object(
                     common::ResourceKind::Service,
@@ -424,6 +685,58 @@ pub async fn dispatch_user(
                 "marked Service {} for deletion (background policy)",
                 name
             );
+
+            // Release IP only after Service object is actually removed.
+            if let Some(ref allocator) = shared.service_ip_allocator
+                && let Some(svc) = existing_svc
+            {
+                let xline_store = xline_store.clone();
+                let allocator = allocator.clone();
+                let service_name = name.clone();
+
+                tokio::spawn(async move {
+                    for _ in 0..300 {
+                        match xline_store.get_service_yaml(&service_name).await {
+                            Ok(None) => {
+                                if let Err(e) = crate::network::service_ip::deallocate_cluster_ip(
+                                    &service_name,
+                                    &svc.spec,
+                                    allocator.as_ref(),
+                                )
+                                .await
+                                {
+                                    warn!(
+                                        target: "rks::node::user_dispatch",
+                                        "Failed to deallocate ClusterIP for Service {} after final delete: {}",
+                                        service_name,
+                                        e
+                                    );
+                                }
+                                return;
+                            }
+                            Ok(Some(_)) => {
+                                sleep(Duration::from_secs(1)).await;
+                            }
+                            Err(e) => {
+                                warn!(
+                                    target: "rks::node::user_dispatch",
+                                    "Failed to verify Service {} deletion before IP release: {}",
+                                    service_name,
+                                    e
+                                );
+                                sleep(Duration::from_secs(1)).await;
+                            }
+                        }
+                    }
+
+                    info!(
+                        target: "rks::node::user_dispatch",
+                        "Service {} not fully deleted within timeout, keep ClusterIP reserved",
+                        service_name
+                    );
+                });
+            }
+
             conn.send_msg(&RksMessage::Ack).await?;
         }
 

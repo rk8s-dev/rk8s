@@ -45,6 +45,14 @@ impl From<Status> for XlineClientBuildError {
     }
 }
 
+impl From<tonic::Status> for XlineClientBuildError {
+    #[inline]
+    fn from(e: tonic::Status) -> Self {
+        let s: Status = e.into();
+        Self::from(s)
+    }
+}
+
 impl From<curp::rpc::CurpError> for XlineClientBuildError {
     #[inline]
     fn from(e: curp::rpc::CurpError) -> Self {

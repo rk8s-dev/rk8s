@@ -6,6 +6,8 @@ mod auth_wrapper;
 mod cluster_server;
 /// Command to be executed
 pub(crate) mod command;
+/// curp server
+mod curp_server;
 /// Xline kv server
 mod kv_server;
 /// Xline lease server
@@ -14,6 +16,8 @@ mod lease_server;
 mod lock_server;
 /// Xline maintenance client
 mod maintenance;
+/// Xline QUIC direct-RPC bridge
+mod quic_service;
 /// Xline watch server
 mod watch_server;
 /// Xline server

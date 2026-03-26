@@ -4,13 +4,10 @@ use std::task::{Context, Poll};
 use async_stream::stream;
 use bytes::Bytes;
 use clippy_utilities::OverflowArithmetic;
-use futures::future::BoxFuture;
-use http::{Request as HttpRequest, Response as HttpResponse};
-use http_body::Body;
-use tonic::body::BoxBody;
-use tonic::server::NamedService;
-use tower_service::Service as TowerService;
-use xlinerpc::{Request, Response as XlineResponse, Status};
+use http::uri::PathAndQuery;
+use tonic::Status;
+use tonic::client::Grpc;
+use tonic::codec::ProstCodec;
 use tonic::transport::{Channel, ClientTlsConfig, Endpoint};
 use tracing::debug;
 use utils::build_endpoint;
@@ -22,12 +19,13 @@ use xlineapi::{
 };
 use crate::{
     id_gen::IdGenerator,
+    router::endpoint::EndPoint as RouterEndpoint,
     rpc::{
         Compare, CompareResult, CompareTarget, DeleteRangeRequest, DeleteRangeResponse,
-        LeaseGrantRequest, LeaseGrantResponse, LockRequest, LockResponse, PutRequest,
-        RangeRequest, RangeResponse, RequestOp, RequestUnion, RequestWrapper, Response,
-        ResponseHeader, SortOrder, SortTarget, TargetUnion, TxnRequest, TxnResponse, UnlockRequest,
-        UnlockResponse, WatchCreateRequest, WatchRequest,
+        LeaseGrantRequest, LeaseGrantResponse, LockRequest, LockResponse, PutRequest, RangeRequest,
+        RangeResponse, Request, RequestOp, RequestUnion, RequestWrapper, Response, ResponseHeader,
+        SortOrder, SortTarget, TargetUnion, TxnRequest, TxnResponse, UnlockRequest, UnlockResponse,
+        WatchCreateRequest, WatchRequest,
     },
     storage::AuthStore,
 };
@@ -161,8 +159,9 @@ impl LockServer {
         auth_info: Option<&AuthInfo>,
     ) -> Result<(), Status> {
         let rev = my_rev.overflow_sub(1);
-        let mut watch_client =
-            WatchClient::new(Channel::balance_list(self.addrs.clone().into_iter()));
+        let channel = Channel::balance_list(self.addrs.clone().into_iter());
+        let mut grpc = Grpc::new(channel);
+        let path = PathAndQuery::from_static("/etcdserverpb.Watch/Watch");
         loop {
             let range_end = KeyRange::get_prefix(&pfx);
             #[allow(clippy::as_conversions)] // this cast is always safe
@@ -189,7 +188,14 @@ impl LockServer {
                     })),
                 };
             };
-            let mut response_stream = watch_client.watch(request_stream).await?.into_inner();
+            let mut response_stream: tonic::Streaming<crate::rpc::WatchResponse> = grpc
+                .streaming(
+                    tonic::Request::new(request_stream),
+                    path.clone(),
+                    ProstCodec::default(),
+                )
+                .await?
+                .into_inner();
             while let Some(watch_res) = response_stream.message().await? {
                 #[allow(clippy::as_conversions)] // this cast is always safe
                 if watch_res
@@ -229,10 +235,7 @@ impl LockServer {
         let res = Into::<LeaseGrantResponse>::into(cmd_res.into_inner());
         Ok(res.id)
     }
-}
 
-#[async_trait::async_trait]
-impl Lock for LockServer {
     /// Lock acquires a distributed shared lock on a given named lock.
     /// On success, it will return a unique key that exists so long as the
     /// lock is held by the caller. This key can be used in conjunction with
@@ -319,107 +322,33 @@ impl Lock for LockServer {
     ) -> Result<XlineResponse<UnlockResponse>, Status> {
         debug!("Receive UnlockRequest {:?}", request);
         let auth_info = self.auth_store.try_get_auth_info_from_request(&request)?;
-        let header = self.delete_key(&request.data().key, auth_info).await?;
-        Ok(XlineResponse::new(UnlockResponse { header }))
+        let header = self.delete_key(&request.get_ref().key, auth_info).await?;
+        Ok(tonic::Response::new(UnlockResponse { header }))
     }
 }
 
-// ============================================================================
-// gRPC service wrapper - for manual registration to tonic::transport::Server
-// ============================================================================
-
-/// gRPC Lock Service Wrapper
-#[derive(Debug, Clone)]
-pub struct RpcLockServer<S> {
-    inner: Arc<S>,
+pub(crate) struct Server {
+    lock_server: Arc<LockServer>,
 }
-
-impl<S> RpcLockServer<S>
-where
-    S: Lock + Send + Sync + 'static,
-{
-    /// Create a new RpcLockServer
-    pub fn new(service: S) -> Self {
+impl Server {
+    pub(crate) fn new(lock_server: LockServer) -> Self {
         Self {
-            inner: Arc::new(service),
+            lock_server: Arc::new(lock_server),
         }
     }
-}
-
-impl<S> NamedService for RpcLockServer<S>
-where
-    S: Lock + Send + Sync + 'static,
-{
-    const NAME: &'static str = "xline.Lock";
-}
-
-impl<S> TowerService<HttpRequest<BoxBody>> for RpcLockServer<S>
-where
-    S: Lock + Send + Sync + 'static,
-{
-    type Response = HttpResponse<BoxBody>;
-    type Error = Status;
-    type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
-
-    fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        Poll::Ready(Ok(()))
+    pub(crate) fn endpoint(self) -> RouterEndpoint<Arc<LockServer>> {
+        RouterEndpoint::new(self.lock_server)
+            .add_unary_fn(
+                "/lock",
+                move |this: Arc<LockServer>, request: tonic::Request<LockRequest>| async move {
+                    this.lock(request).await
+                },
+            )
+            .add_unary_fn(
+                "/unlock",
+                move |this: Arc<LockServer>, request: tonic::Request<UnlockRequest>| async move {
+                    this.unlock(request).await
+                },
+            )
     }
-
-    fn call(&mut self, req: HttpRequest<BoxBody>) -> Self::Future {
-        let inner = Arc::clone(&self.inner);
-        Box::pin(async move {
-            let path = req.uri().path();
-            match path {
-                "/xline.Lock/Lock" => {
-                    let request = parse_request::<LockRequest>(req).await?;
-                    let response = inner.lock(request).await?;
-                    Ok(build_response(response))
-                }
-                "/xline.Lock/Unlock" => {
-                    let request = parse_request::<UnlockRequest>(req).await?;
-                    let response = inner.unlock(request).await?;
-                    Ok(build_response(response))
-                }
-                _ => Err(tonic::Status::unimplemented("Unknown method")),
-            }
-        })
-    }
-}
-
-// ============================================================================
-// helper function
-// ============================================================================
-
-/// Parse gRPC request
-async fn parse_request<T>(req: HttpRequest<BoxBody>) -> Result<Request<T>, Status>
-where
-    T: prost::Message + Default,
-{
-    let (parts, body) = req.into_parts();
-    let bytes = hyper::body::to_bytes(body)
-        .await
-        .map_err(|e| Status::internal(e.to_string()))?;
-    let message = T::decode(bytes.as_ref())
-        .map_err(|e| Status::internal(e.to_string()))?;
-    let mut metadata = xlinerpc::MetaData::new();
-    for (key, value) in parts.headers.iter() {
-        if let Ok(value_str) = value.to_str() {
-            metadata.insert(key.as_str().as_bytes(), value_str.as_bytes());
-        }
-    }
-    Ok(Request::new(message, metadata))
-}
-
-/// Build gRPC response
-fn build_response<T>(response: XlineResponse<T>) -> HttpResponse<BoxBody>
-where
-    T: prost::Message,
-{
-    let mut buf = Vec::new();
-    response.data().encode(&mut buf).unwrap();
-    HttpResponse::builder()
-        .status(200)
-        .header("content-type", "application/grpc")
-        .body(BoxBody::new(Bytes::from(buf)))
-        .unwrap()
 }

@@ -226,4 +226,66 @@ mod tests {
         assert!(file_perm.is_regular_file());
         assert_eq!(file_perm.permission_bits(), 0o644);
     }
+
+    #[test]
+    fn test_chmod_preserves_file_type() {
+        let mut perm = Permission::default_file(0, 0);
+        assert!(perm.is_regular_file());
+
+        perm.chmod(0o755);
+        assert_eq!(perm.permission_bits(), 0o755);
+        assert!(
+            perm.is_regular_file(),
+            "chmod must not change file type bits"
+        );
+    }
+
+    #[test]
+    fn test_chmod_directory_preserves_type() {
+        let mut perm = Permission::default_directory(0, 0);
+        perm.chmod(0o700);
+        assert_eq!(perm.permission_bits(), 0o700);
+        assert!(
+            perm.is_directory(),
+            "chmod on directory must keep directory type"
+        );
+    }
+
+    #[test]
+    fn test_chmod_masks_to_0o7777() {
+        let mut perm = Permission::default_file(0, 0);
+        // Passing bits outside 0o7777 should be masked away.
+        perm.chmod(0o170_755);
+        // Only the low 12 bits of new_mode are applied.
+        assert_eq!(perm.permission_bits(), 0o755);
+        assert!(perm.is_regular_file());
+    }
+
+    #[test]
+    fn test_chmod_with_special_bits_at_permission_level() {
+        // Permission::chmod allows 0o7777 (including setuid/setgid/sticky).
+        // Higher-level callers (MetaStore::chmod, VFS::chmod) strip those bits
+        // before calling this method.
+        let mut perm = Permission::default_file(0, 0);
+        perm.chmod(0o4755);
+        // setuid bit is kept by Permission::chmod itself.
+        assert_eq!(perm.mode & 0o7777, 0o4755);
+    }
+
+    #[test]
+    fn test_chown_updates_uid_and_gid() {
+        let mut perm = Permission::default_file(0, 0);
+        perm.chown(1000, 2000);
+        assert_eq!(perm.uid, 1000);
+        assert_eq!(perm.gid, 2000);
+    }
+
+    #[test]
+    fn test_chown_preserves_mode() {
+        let mut perm = Permission::default_file(0, 0);
+        perm.chmod(0o755);
+        perm.chown(1000, 2000);
+        assert_eq!(perm.permission_bits(), 0o755, "chown must not alter mode");
+        assert!(perm.is_regular_file(), "chown must not alter file type");
+    }
 }

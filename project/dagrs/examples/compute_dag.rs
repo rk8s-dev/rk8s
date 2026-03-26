@@ -43,7 +43,8 @@ impl Action for Compute {
     }
 }
 
-fn main() {
+#[tokio::main]
+async fn main() {
     // Initialization log.
     env_logger::init();
 
@@ -91,9 +92,8 @@ fn main() {
     let mut env = EnvVar::new(node_table);
     env.set("base", 2usize);
     graph.set_env(env);
-
     // Start executing this dag.
-    match graph.start() {
+    match graph.async_start().await {
         Ok(_) => {
             let res = graph
                 .get_results::<usize>()

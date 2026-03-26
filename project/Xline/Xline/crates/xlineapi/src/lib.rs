@@ -253,47 +253,8 @@ pub use self::{
     },
     leasepb::Lease as PbLease,
     mvccpb::{Event, KeyValue, event::EventType},
-    v3lockpb::{
-        LockRequest, LockResponse, UnlockRequest, UnlockResponse,
-    },
+    v3lockpb::{LockRequest, LockResponse, UnlockRequest, UnlockResponse},
 };
-
-// service clients and servers are re-exported for downstream crates that
-// expect to access them directly (xline-client, xline-server, etc.).  The
-// `Rpc*` aliases preserve the historic names used in xline_server.rs.
-
-pub use etcdserverpb::auth_client::AuthClient;
-pub use etcdserverpb::auth_server::{Auth, AuthServer};
-
-pub use etcdserverpb::kv_client::KvClient;
-pub use etcdserverpb::kv_server::{Kv, KvServer};
-
-pub use etcdserverpb::watch_client::WatchClient;
-pub use etcdserverpb::watch_server::{Watch, WatchServer};
-
-pub use etcdserverpb::lease_client::LeaseClient;
-pub use etcdserverpb::lease_server::{Lease, LeaseServer};
-
-pub use v3lockpb::lock_client::LockClient;
-pub use v3lockpb::lock_server::{Lock, LockServer};
-
-pub use etcdserverpb::maintenance_client::MaintenanceClient;
-pub use etcdserverpb::maintenance_server::{Maintenance, MaintenanceServer};
-
-pub use etcdserverpb::cluster_client::ClusterClient;
-pub use etcdserverpb::cluster_server::{Cluster, ClusterServer};
-
-// backward‑compatible aliases matching names previously exported by the crate
-// so that `use xlineapi::RpcKvServer` etc continues to work without touching
-// every consumer.
-pub use etcdserverpb::kv_server::KvServer as RpcKvServer;
-pub use etcdserverpb::lock_server::LockServer as RpcLockServer;
-pub use etcdserverpb::lease_server::LeaseServer as RpcLeaseServer;
-pub use etcdserverpb::auth_server::AuthServer as RpcAuthServer;
-pub use etcdserverpb::watch_server::WatchServer as RpcWatchServer;
-pub use etcdserverpb::maintenance_server::MaintenanceServer as RpcMaintenanceServer;
-pub use etcdserverpb::cluster_server::ClusterServer as RpcClusterServer;
-
 
 impl User {
     /// Check if user has the given role

@@ -2,9 +2,8 @@ use std::time::Duration;
 
 use clap::{ArgMatches, Command, arg, value_parser};
 use tokio::signal::ctrl_c;
-use tonic::Streaming;
 use xline_client::{
-    Client,
+    Client, Streaming,
     error::{Result, XlineClientError},
     types::lease::LeaseKeeper,
 };

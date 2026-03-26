@@ -27,8 +27,10 @@ use ipnetwork::Ipv4Network;
 use crate::commands::compose::spec::ComposeSpec;
 use crate::commands::compose::spec::ServiceSpec;
 use crate::commands::container::ContainerRunner;
+use crate::commands::container::network::{bind_mount_netns, unbind_mount_netns};
 use anyhow::Result;
 use anyhow::anyhow;
+use tracing::{debug, warn};
 
 #[derive(Debug)]
 struct NetworkSubnet {
@@ -335,6 +337,7 @@ impl NetworkManager {
                     runner.id()
                 ));
             }
+            let netns_path_clone = netns_path.clone();
             let setup = Setup::new(netns_path);
             let json_path = create_tmp_netavark_json(&opts, &runner.id())?;
             let config_dir = default_netavark_config_dir();
@@ -349,6 +352,26 @@ impl NetworkManager {
                     false,
                 )
                 .map_err(|e| anyhow!("[container {}] netavark setup failed: {e}", runner.id()))?;
+
+            // Create bind mount backup of network namespace
+            let bind_mount_name = format!("rkforge-{}", runner.id());
+            match bind_mount_netns(&netns_path_clone, &bind_mount_name) {
+                Ok(bind_path) => {
+                    debug!(
+                        "Created bind mount backup at {:?} for container {}",
+                        bind_path,
+                        runner.id()
+                    );
+                }
+                Err(e) => {
+                    warn!(
+                        "Failed to create bind mount backup for container {}: {}",
+                        runner.id(),
+                        e
+                    );
+                    // Continue anyway, as bind mount is just a backup
+                }
+            }
         } else {
             return Err(anyhow!("Unsupported ipv6 type"));
         }
@@ -364,6 +387,9 @@ impl NetworkManager {
         json_path.push(format!("{}.network.json", id));
         // If the setup state file is missing, treat cleanup as idempotent.
         if !json_path.exists() {
+            // Still try to clean up bind mount if it exists
+            let bind_mount_name = format!("rkforge-{}", id);
+            let _ = unbind_mount_netns(&bind_mount_name);
             return Ok(());
         }
         teardown
@@ -381,6 +407,17 @@ impl NetworkManager {
         json_path.push("rkl-netavark");
         json_path.push(format!("{}.network.json", id));
         let _ = std::fs::remove_file(&json_path);
+
+        // Clean up bind mount backup
+        let bind_mount_name = format!("rkforge-{}", id);
+        if let Err(e) = unbind_mount_netns(&bind_mount_name) {
+            warn!(
+                "Failed to clean up bind mount backup for container {}: {}",
+                id, e
+            );
+            // Continue anyway
+        }
+
         Ok(())
     }
 }

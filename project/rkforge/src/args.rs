@@ -1,6 +1,14 @@
 use crate::commands::{ComposeCommand, PodCommand, VolumeCommand, config_cli::ConfigArgs};
+use crate::sandbox::cli::SandboxCommand;
+use crate::sandbox::vm::SandboxShimArgs;
 use crate::{copy, image, images, login, logout, overlayfs, pull, push, repo, run};
-use clap::{Parser, Subcommand};
+use clap::{ArgAction, Parser, Subcommand};
+
+const RUN_AFTER_HELP: &str = "\
+Examples:
+  rkforge run container.yaml --device /dev/dri/card0
+  rkforge run container.yaml --device /dev/nvidia0:/dev/nvidia0:rw --device /dev/nvidiactl
+";
 
 #[derive(Parser, Debug)]
 #[command(name = "rkforge", about = "A container runtime and management tool")]
@@ -58,6 +66,11 @@ pub enum Commands {
     Run(RunArgs),
     /// Save an image to a tar archive
     Save(images::SaveArgs),
+    /// Manage AI sandboxes
+    #[command(subcommand)]
+    Sandbox(SandboxCommand),
+    #[command(hide = true, name = "sandbox-shim")]
+    SandboxShim(SandboxShimArgs),
     /// Start one or more containers
     Start(StartArgs),
     /// Display the status of a container
@@ -83,11 +96,20 @@ pub enum Commands {
 
 /// Run a command in a new container
 #[derive(Parser, Debug, Clone)]
+#[command(after_help = RUN_AFTER_HELP)]
 pub struct RunArgs {
     #[arg(value_name = "CONTAINER_YAML")]
     pub container_yaml: String,
     #[arg(long, short = 'v')]
     pub volumes: Option<Vec<String>>,
+    /// Add a host device to the container.
+    /// Format: HOST_PATH[:CONTAINER_PATH[:PERMISSIONS]]
+    #[arg(
+        long,
+        action = ArgAction::Append,
+        value_name = "HOST_PATH[:CONTAINER_PATH[:PERMISSIONS]]"
+    )]
+    pub device: Vec<String>,
 }
 
 /// Create a new container
@@ -272,5 +294,51 @@ where
         Ok((s[..pos].parse()?, Some(s[pos + 1..].parse()?)))
     } else {
         Ok((s.parse()?, None))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::CommandFactory;
+
+    #[test]
+    fn run_args_accept_multiple_devices() {
+        let cli = Cli::parse_from([
+            "rkforge",
+            "run",
+            "container.yaml",
+            "--device",
+            "/dev/nvidia0",
+            "--device",
+            "/dev/nvidiactl:/dev/nvidiactl:rw",
+        ]);
+
+        match cli.command {
+            Commands::Run(args) => {
+                assert_eq!(args.container_yaml, "container.yaml");
+                assert_eq!(
+                    args.device,
+                    vec![
+                        "/dev/nvidia0".to_string(),
+                        "/dev/nvidiactl:/dev/nvidiactl:rw".to_string(),
+                    ]
+                );
+            }
+            other => panic!("expected run command, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn run_help_mentions_device_flag_and_examples() {
+        let mut command = Cli::command();
+        let help = command
+            .find_subcommand_mut("run")
+            .expect("run subcommand to exist")
+            .render_long_help()
+            .to_string();
+
+        assert!(help.contains("--device"));
+        assert!(help.contains("/dev/dri/card0"));
     }
 }

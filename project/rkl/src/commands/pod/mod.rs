@@ -13,7 +13,7 @@ use std::io::Read;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
-use tracing::info;
+use tracing::{info, warn};
 
 use common::PodTask;
 use libcontainer::syscall::syscall::create_syscall;
@@ -366,25 +366,41 @@ pub fn pod_execute(cmd: PodCommand) -> Result<()> {
             pod_yaml,
             cluster,
             tls_cfg,
-        } => pod_create(&pod_yaml, cluster, tls_cfg),
+        } => {
+            warn!("This command has been deprecated. Use 'rkl apply -f pod.yaml' instead.");
+            pod_create(&pod_yaml, cluster, tls_cfg)
+        }
         PodCommand::Start { pod_name } => start_pod(&pod_name),
         PodCommand::Delete {
             pod_name,
             cluster,
             tls_cfg,
-        } => pod_delete(&pod_name, cluster, tls_cfg),
-        PodCommand::State { pod_name } => state_pod(&pod_name),
+        } => {
+            warn!("This command has been deprecated. Use 'rkl delete pod POD_NAME' instead.");
+            pod_delete(&pod_name, cluster, tls_cfg)
+        }
+        PodCommand::State { pod_name } => {
+            warn!("This command has been deprecated. Use 'rkl get pod POD_NAME' instead.");
+            state_pod(&pod_name)
+        }
         PodCommand::Exec(exec) => {
+            warn!("This command has been deprecated. Use 'rkl exec POD_NAME -c' instead.");
             let exit_code = exec_pod(*exec)?;
             std::process::exit(exit_code);
         }
         PodCommand::Daemon { tls_cfg } => start_daemon(tls_cfg),
-        PodCommand::List { cluster, tls_cfg } => pod_list(cluster, tls_cfg),
+        PodCommand::List { cluster, tls_cfg } => {
+            warn!("This command has been deprecated. Use 'rkl get pods' instead.");
+            pod_list(cluster, tls_cfg)
+        }
         PodCommand::Get {
             pod_name,
             cluster,
             tls_cfg,
-        } => pod_get(&pod_name, cluster, tls_cfg),
+        } => {
+            warn!("This command has been deprecated. Use 'rkl get pod POD_NAME' instead.");
+            pod_get(&pod_name, cluster, tls_cfg)
+        }
         PodCommand::Logs {
             pod_name,
             container,
@@ -409,7 +425,7 @@ pub fn pod_execute(cmd: PodCommand) -> Result<()> {
     }
 }
 
-fn pod_list(addr: Option<String>, tls_cfg: TLSConnectionArgs) -> Result<()> {
+pub fn pod_list(addr: Option<String>, tls_cfg: TLSConnectionArgs) -> Result<()> {
     let env_addr = env::var("RKS_ADDRESS").ok();
     let rt = tokio::runtime::Runtime::new()?;
     match addr {
@@ -423,7 +439,7 @@ fn pod_list(addr: Option<String>, tls_cfg: TLSConnectionArgs) -> Result<()> {
     }
 }
 
-fn pod_get(pod_name: &str, addr: Option<String>, tls_cfg: TLSConnectionArgs) -> Result<()> {
+pub fn pod_get(pod_name: &str, addr: Option<String>, tls_cfg: TLSConnectionArgs) -> Result<()> {
     let env_addr = env::var("RKS_ADDRESS").ok();
     let rt = tokio::runtime::Runtime::new()?;
     match addr.or(env_addr) {
@@ -434,7 +450,7 @@ fn pod_get(pod_name: &str, addr: Option<String>, tls_cfg: TLSConnectionArgs) -> 
     }
 }
 
-fn pod_delete(pod_name: &str, addr: Option<String>, tls_cfg: TLSConnectionArgs) -> Result<()> {
+pub fn pod_delete(pod_name: &str, addr: Option<String>, tls_cfg: TLSConnectionArgs) -> Result<()> {
     let env_addr = env::var("RKS_ADDRESS").ok();
     let rt = tokio::runtime::Runtime::new()?;
     match addr {
@@ -448,7 +464,7 @@ fn pod_delete(pod_name: &str, addr: Option<String>, tls_cfg: TLSConnectionArgs) 
     }
 }
 
-fn pod_create(pod_yaml: &str, addr: Option<String>, tls_cfg: TLSConnectionArgs) -> Result<()> {
+pub fn pod_create(pod_yaml: &str, addr: Option<String>, tls_cfg: TLSConnectionArgs) -> Result<()> {
     let env_addr = env::var("RKS_ADDRESS").ok();
     let rt = tokio::runtime::Runtime::new()?;
     match addr {

@@ -19,7 +19,8 @@ struct _MyNodeGeneric<T, 'a> {
 #[auto_node]
 struct _MyUnitNode;
 
-fn main() {
+#[tokio::main]
+async fn main() {
     let mut node_table = NodeTable::default();
 
     let node_name = "auto_node".to_string();
@@ -35,9 +36,7 @@ fn main() {
     assert_eq!(&s.id(), node_table.get(&node_name).unwrap());
     assert_eq!(&s.name(), &node_name);
 
-    let output = tokio::runtime::Runtime::new()
-        .unwrap()
-        .block_on(async { s.run(Arc::new(EnvVar::new(NodeTable::default()))).await });
+    let output = s.run(Arc::new(EnvVar::new(NodeTable::default()))).await;
     match output {
         dagrs::Output::Out(content) => assert!(content.is_none()),
         _ => panic!(),

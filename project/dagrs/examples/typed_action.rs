@@ -61,7 +61,8 @@ impl TypedAction for Compute {
     }
 }
 
-fn main() {
+#[tokio::main]
+async fn main() {
     env_logger::init();
 
     let mut node_table = NodeTable::default();
@@ -103,8 +104,7 @@ fn main() {
     let mut env = EnvVar::new(node_table);
     env.set("base", 2usize);
     graph.set_env(env);
-
-    match graph.start() {
+    match graph.async_start().await {
         Ok(_) => {
             let res = graph
                 .get_results::<usize>()

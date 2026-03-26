@@ -5,8 +5,6 @@ on:
     paths:
       - "project/rkforge/**"
       - "project/common/**"
-      - "project/libbridge/**"
-      - "project/libipam/**"
       - "project/libruntime/**"
       - "project/libcontainer/**"
       - "project/libcni/**"
@@ -77,5 +75,4 @@ jobs:
         shell: bash
         run: |
           cd project
-          cargo build -p libbridge -p libipam
           cargo test -p rkforge --test test_container_lifecycle_qlean -- --nocapture

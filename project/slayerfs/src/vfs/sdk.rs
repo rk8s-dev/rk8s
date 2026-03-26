@@ -7,8 +7,8 @@
 //!
 //! All methods return `io::Result<T>` for consistent error handling.
 
-use crate::chuck::chunk::ChunkLayout;
-use crate::chuck::store::BlockStore;
+use crate::chunk::layout::ChunkLayout;
+use crate::chunk::store::BlockStore;
 use crate::fs::{FileSystem, FileSystemConfig, OpenFlags};
 use crate::meta::MetaStore;
 use crate::meta::factory::create_meta_store_from_url;
@@ -239,13 +239,12 @@ impl<S: BlockStore + Send + Sync + 'static, M: MetaStore + 'static> VfsClient<S,
 
 use crate::cadapter::client::ObjectClient;
 use crate::cadapter::localfs::LocalFsBackend;
-use crate::chuck::store::ObjectBlockStore;
+use crate::chunk::store::ObjectBlockStore;
 use std::sync::Arc;
 
 #[allow(dead_code)]
 pub type LocalClient = VfsClient<ObjectBlockStore<LocalFsBackend>, DatabaseMetaStore>;
 
-#[allow(dead_code)]
 impl LocalClient {
     #[allow(dead_code)]
     pub async fn new_local<P: AsRef<Path>>(root: P, layout: ChunkLayout) -> io::Result<Self> {

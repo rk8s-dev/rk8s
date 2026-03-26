@@ -17,6 +17,7 @@ use xlineapi::{
 use super::command::CommandExecutor;
 use crate::{
     header_gen::HeaderGenerator,
+    router::endpoint::EndPoint as RouterEndpoint,
     rpc::{
         AlarmRequest, AlarmResponse, DefragmentRequest, DefragmentResponse, DowngradeRequest,
         DowngradeResponse, HashKvRequest, HashKvResponse, HashRequest, HashResponse,
@@ -36,6 +37,7 @@ pub(crate) const MAINTENANCE_SNAPSHOT_CHUNK_SIZE: u64 = 64 * 1024;
 type SnapshotStream = Pin<Box<dyn Stream<Item = Result<SnapshotResponse, Status>> + Send>>;
 
 /// Maintenance Server
+#[derive(Clone)]
 pub(crate) struct MaintenanceServer {
     /// Kv Storage
     kv_store: Arc<KvStore>,
@@ -99,16 +101,8 @@ impl MaintenanceServer {
         let res = self.client.propose(&cmd, None, false).await??;
         Ok(res)
     }
-}
 
-/// Implement the generated gRPC service trait
-#[async_trait::async_trait]
-impl MaintenanceService for MaintenanceServer {
-    type AlarmStream = Pin<Box<dyn Stream<Item = Result<AlarmResponse, Status>> + Send>>;
-    type StatusStream = Pin<Box<dyn Stream<Item = Result<StatusResponse, Status>> + Send>>;
-    type SnapshotStream = Pin<Box<dyn Stream<Item = Result<SnapshotResponse, Status>> + Send>>;
-
-    async fn alarm(
+    pub(crate) async fn alarm(
         &self,
         request: Request<AlarmRequest>,
     ) -> Result<XlineResponse<Self::AlarmStream>, Status> {
@@ -128,7 +122,7 @@ impl MaintenanceService for MaintenanceServer {
         Ok(XlineResponse::new(Box::pin(stream)))
     }
 
-    async fn status(
+    pub(crate) async fn status(
         &self,
         _request: Request<StatusRequest>,
     ) -> Result<XlineResponse<Self::StatusStream>, Status> {
@@ -199,13 +193,16 @@ impl MaintenanceService for MaintenanceServer {
         }))
     }
 
-    async fn snapshot(
+    pub(crate) async fn snapshot(
         &self,
-        _request: Request<SnapshotRequest>,
-    ) -> Result<XlineResponse<Self::SnapshotStream>, Status> {
-        let stream = snapshot_stream(&self.header_gen, &self.db)?;
-        // Need to convert xlinerpc Stream to tonic Streaming
-        Ok(XlineResponse::new(Box::pin(stream)))
+        _request: tonic::Request<SnapshotRequest>,
+    ) -> Result<
+        tonic::Response<Pin<Box<dyn Stream<Item = Result<SnapshotResponse, Status>> + Send>>>,
+        Status,
+    > {
+        let stream = snapshot_stream(self.header_gen.as_ref(), self.db.as_ref())?;
+
+        Ok(tonic::Response::new(Box::pin(stream)))
     }
 
     async fn move_leader(
@@ -284,6 +281,73 @@ fn snapshot_stream(
     };
 
     Ok(stream)
+}
+
+pub(crate) struct Server {
+    server: Arc<MaintenanceServer>,
+}
+impl Server {
+    #[allow(unused)]
+    pub(crate) fn new(server: MaintenanceServer) -> Self {
+        Self {
+            server: Arc::new(server),
+        }
+    }
+    #[allow(unused)]
+    pub(crate) fn from_arc(server: Arc<MaintenanceServer>) -> Self {
+        Self { server: server }
+    }
+    pub(crate) fn endpoint(self) -> RouterEndpoint<Arc<MaintenanceServer>> {
+        RouterEndpoint::new(self.server)
+            .add_unary_fn(
+                "/Alarm",
+                move |this: Arc<MaintenanceServer>, request: tonic::Request<AlarmRequest>| async move {
+                    this.alarm(request).await
+                },
+            )
+            .add_unary_fn(
+                "/Status",
+                move |this: Arc<MaintenanceServer>, request: tonic::Request<StatusRequest>| async move {
+                    this.status(request).await
+                },
+            )
+            .add_unary_fn(
+                "/Defragment",
+                move |this: Arc<MaintenanceServer>, request: tonic::Request<DefragmentRequest>| async move {
+                    this.defragment(request).await
+                },
+            )
+            .add_unary_fn(
+                "/Hash",
+                move |this: Arc<MaintenanceServer>, request: tonic::Request<HashRequest>| async move {
+                    this.hash(request).await
+                },
+            )
+            .add_unary_fn(
+                "/HashKV",
+                move |this: Arc<MaintenanceServer>, request: tonic::Request<HashKvRequest>| async move {
+                    this.hash_kv(request).await
+                }
+            )
+            .add_server_streaming_fn(
+                "/Snapshot",
+                move |this: Arc<MaintenanceServer>, request: tonic::Request<SnapshotRequest>| async move {
+                    this.snapshot(request).await
+                },
+            )
+            .add_unary_fn(
+                "/MoveLeader",
+                move |this: Arc<MaintenanceServer>, request: tonic::Request<MoveLeaderRequest>| async move {
+                    this.move_leader(request).await
+                },
+            )
+            .add_unary_fn(
+                "/Downgrade",
+                move |this: Arc<MaintenanceServer>, request: tonic::Request<DowngradeRequest>| async move {
+                    this.downgrade(request).await
+                },
+            )
+    }
 }
 
 #[cfg(test)]

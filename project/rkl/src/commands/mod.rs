@@ -28,11 +28,16 @@ use chrono::{DateTime, Local};
 use tabwriter::TabWriter;
 use tracing::info;
 
+pub mod apply;
 pub mod container;
+pub mod delete;
 pub mod deployment;
+pub mod exec;
+pub mod get;
 pub mod logs;
 pub mod pod;
 pub mod replicaset;
+pub mod run;
 pub mod service;
 
 pub(crate) fn format_duration(duration: chrono::Duration) -> String {

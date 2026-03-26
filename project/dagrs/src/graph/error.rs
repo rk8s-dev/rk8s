@@ -13,8 +13,6 @@ pub enum GraphError {
         node_id: usize,
     },
     MultipleErrors(Vec<GraphError>),
-    /// Contains the original error message when runtime creation failed
-    RuntimeCreationFailed(String),
     /// Max loop limit exceeded
     LoopLimitExceeded(usize),
     /// Checkpoint operation failed

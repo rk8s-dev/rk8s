@@ -19,22 +19,19 @@ impl Action for HelloAction {
     }
 }
 
-fn main() {
+#[tokio::main]
+async fn main() {
     // create an empty `NodeTable`
     let mut node_table = NodeTable::new();
     // create a `DefaultNode` with action `HelloAction`
-    let hello_node = DefaultNode::with_action(
-        "Hello Dagrs".to_string(),
-        HelloAction::default(),
-        &mut node_table,
-    );
+    let hello_node =
+        DefaultNode::with_action("Hello Dagrs".to_string(), HelloAction, &mut node_table);
     let id: &dagrs::NodeId = &hello_node.id();
 
     // create a graph with this node and run
     let mut graph = Graph::new();
     graph.add_node(hello_node);
-
-    match graph.start() {
+    match graph.async_start().await {
         Ok(_) => {
             // verify the output of this node
             let outputs = graph.get_outputs();

@@ -78,7 +78,8 @@ impl Condition for VerifyGT {
     }
 }
 
-fn main() {
+#[tokio::main]
+async fn main() {
     // Initialization log.
     unsafe {
         env::set_var("RUST_LOG", "debug");
@@ -135,9 +136,8 @@ fn main() {
     let mut env = EnvVar::new(node_table);
     env.set("base", 2usize);
     graph.set_env(env);
-
     // Start executing this dag.
-    match graph.start() {
+    match graph.async_start().await {
         Ok(_) => {
             // Since node X's condition (VerifyGT(128)) is not met,
             // execution stops at node X and never reaches node G.

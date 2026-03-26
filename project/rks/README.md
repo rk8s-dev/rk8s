@@ -9,10 +9,8 @@
 cd rk8s/project/
 cargo build
 ```
-2. **Set up networking:**
+2. **Prepare network config:**
 ```bash
-sudo mkdir -p /opt/cni/bin
-sudo mv target/debug/libbridge target/debug/libipam target/debug/libnetwork /opt/cni/bin/
 sudo mkdir -p /etc/cni/net.d
 sudo mv test/test.conflist /etc/cni/net.d
 ```
@@ -52,6 +50,8 @@ dns_config:
 -   `addr`: The address and port where the RKS service listens. `addr` is the only field that you need modify.
 -   `xline_config`: Defines the backend Xline cluster, including endpoints, a prefix key for storing data, and a lease renewal margin.
 -   `network_config`: Specifies the network settings managed by RKS, such as the overall network range (`10.1.0.0/16`), the minimum and maximum subnets to allocate, and the subnet length (`/24`).
+-   `network_config.ServiceCIDR`: Optional Service network for ClusterIP allocation (for example `10.96.0.0/16`).
+-   `network_config.ServiceSubnetLen`: Currently kept for config compatibility/validation only, and does not change current ClusterIP allocation strategy.
 -   `tls_config`: RKS uses QUIC to communicate with RKL, and libvault is used as certificates manager. Set `enable = false` to disable authentication, otherwise set `vault_url` to configurate it. If `keep_dangerous_files` is false, the seal keys will be removed for security. 
 -   `dns_config`: RKS also serves as a dns server, set `Port` to specify its port.
 
@@ -313,6 +313,67 @@ sudo project/target/debug/rkl deployment rollback nginx-deployment --to-revision
 - If you set both `maxSurge=0` and `maxUnavailable=0`, and new Pods are not yet reporting `PodReady`, rollout can stall until Pods become ready or `progressDeadlineSeconds` expires. Use non-zero `maxSurge` or `maxUnavailable`, or ensure RKL reports PodReady promptly.
 
 - `revisionHistoryLimit` controls how many old ReplicaSets are kept for rollback/history.
+
+### 9.Manage Services
+
+RKS supports `Service` resources to provide stable access to Pods selected by labels.
+
+#### 9.1 Create a Service
+
+Here is an example of `service.yaml` (example taken from `project/rks/tests/test_service.yaml`):
+
+```yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: nginx-service
+spec:
+  type: ClusterIP
+  clusterIP: 10.96.0.100
+  selector:
+    matchLabels:
+      app: nginx
+  ports:
+    - name: http
+      protocol: TCP
+      port: 80
+      targetPort: 80
+```
+
+Create the Service:
+
+```bash
+sudo project/target/debug/rkl service create service.yaml --cluster 10.20.173.26:50051
+```
+
+#### 9.2 List / Get / Delete Services
+
+```bash
+sudo project/target/debug/rkl service list --cluster 10.20.173.26:50051
+sudo project/target/debug/rkl service get nginx-service --cluster 10.20.173.26:50051
+sudo project/target/debug/rkl service delete nginx-service --cluster 10.20.173.26:50051
+```
+
+The `list` command prints a table such as:
+
+```text
+NAME            TYPE       CLUSTER-IP    PORT(S)   AGE
+nginx-service   ClusterIP  10.96.0.100  80/TCP    45s
+```
+
+#### 9.3 Update a Service
+
+To update, modify the YAML file (for example update selector or ports) and apply it:
+
+```bash
+sudo project/target/debug/rkl service apply service.yaml --cluster 10.20.173.26:50051
+```
+
+#### 9.4 Notes
+
+- You can also use the alias `svc` instead of `service` (for example: `rkl svc list ...`).
+- `spec.selector` is optional. If you set it, it must contain at least one `matchLabels` or `matchExpressions` rule.
+- For headless Service, set `clusterIP: None`.
 
 ## Notes
 After restarting Xline, you need to clean up the existing CNI network bridge to avoid conflicts.  

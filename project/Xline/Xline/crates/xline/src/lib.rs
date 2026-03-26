@@ -186,6 +186,8 @@ pub mod metrics;
 pub mod restore;
 /// Revision check
 mod revision_check;
+/// Router Layer
+mod router;
 /// Xline server
 pub mod server;
 /// State of current node

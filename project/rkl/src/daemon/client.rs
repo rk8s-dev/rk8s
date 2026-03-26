@@ -312,7 +312,7 @@ pub async fn run_once(
                         }
                         Ok(RksMessage::DeletePod(name)) => {
                             info!("[worker] DeletePod {name}");
-                            match pod::standalone::delete_pod(&name) {
+                            match pod::standalone::delete_pod_async(&name).await {
                                 Ok(_) => {
                                     // Ensure probe deregistration completes before sending the Ack.
                                     // Previously this was spawned as a detached task which could

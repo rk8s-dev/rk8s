@@ -25,30 +25,6 @@ fn host_target_bin(project_dir: &Path, name: &str) -> PathBuf {
     project_dir.join("target").join("debug").join(name)
 }
 
-fn ensure_host_cni_plugins(project_dir: &Path) -> Result<(PathBuf, PathBuf)> {
-    let libbridge = host_target_bin(project_dir, "libbridge");
-    let libipam = host_target_bin(project_dir, "libipam");
-    if libbridge.exists() && libipam.exists() {
-        return Ok((libbridge, libipam));
-    }
-
-    let status = Command::new("cargo")
-        .current_dir(project_dir)
-        .args(["build", "-p", "libbridge", "-p", "libipam"])
-        .status()
-        .context("failed to run cargo build for libbridge/libipam")?;
-    if !status.success() {
-        bail!("failed to build libbridge/libipam");
-    }
-
-    if !libbridge.exists() {
-        bail!("libbridge binary not found at {}", libbridge.display());
-    }
-    if !libipam.exists() {
-        bail!("libipam binary not found at {}", libipam.display());
-    }
-    Ok((libbridge, libipam))
-}
 fn ensure_aardvark_dns(project_dir: &Path) -> Result<PathBuf> {
     let aardvark_path = host_target_bin(project_dir, "aardvark-dns");
     if aardvark_path.exists() {
@@ -135,7 +111,6 @@ async fn test_container_lifecycle_sync_mode_with_qlean() -> Result<()> {
     let project_dir = project_dir();
     let rkforge_bin = PathBuf::from(env!("CARGO_BIN_EXE_rkforge"));
     let aardvark_path = ensure_aardvark_dns(&project_dir)?;
-    let (libbridge, libipam) = ensure_host_cni_plugins(&project_dir)?;
     let bundles_dir = project_dir.join("test").join("bundles");
     let pause_bundle = bundles_dir.join("pause");
     if !pause_bundle.exists() {
@@ -173,17 +148,11 @@ async fn test_container_lifecycle_sync_mode_with_qlean() -> Result<()> {
             .await?;
             vm.upload(&rkforge_bin, "/usr/local/bin").await?;
             vm.upload(&aardvark_path, "/usr/bin").await?;
-            vm.upload(&libbridge, "/opt/cni/bin").await?;
-            vm.upload(&libipam, "/opt/cni/bin").await?;
             vm.upload(&pause_bundle, "/root/bundles").await?;
             vm.upload(&create_yaml, "/root/specs").await?;
             vm.upload(&run_yaml, "/root/specs").await?;
 
-            vm_exec_ok(
-                vm,
-                "chmod +x /usr/local/bin/rkforge /opt/cni/bin/libbridge /opt/cni/bin/libipam /usr/bin/aardvark-dns",
-            )
-            .await?;
+            vm_exec_ok(vm, "chmod +x /usr/local/bin/rkforge /usr/bin/aardvark-dns").await?;
             vm_exec_ok(vm, "chmod -R a+rx /root/bundles/pause/rootfs || true").await?;
 
             vm_exec_ok(vm, "/usr/local/bin/rkforge create /root/specs/create.yml").await?;

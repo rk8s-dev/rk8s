@@ -21,13 +21,9 @@ serde = { workspace = true }
 thiserror = { workspace = true }
 tonic = { workspace = true, features = ["codegen"] }
 utils = { path = "../utils" }
-futures = { workspace = true }
-http = "1.0"
-http-body = "1.0"
-bytes = "1.0"
-tower-service = "0.3"
-percent-encoding = "2.3"
 
+[build-dependencies]
+prost-build = { workspace = true }
 
 [dev-dependencies]
 strum = "0.26"

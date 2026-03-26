@@ -40,13 +40,13 @@ pub struct Model {
 pub enum Relation {}
 
 impl ActiveModelBehavior for ActiveModel {}
-#[allow(dead_code)]
 impl Model {
     pub fn permission(&self) -> &Permission {
         &self.permission
     }
 
     #[allow(clippy::too_many_arguments)]
+    #[allow(dead_code)]
     pub fn from_permission(
         inode: i64,
         size: i64,
@@ -73,18 +73,22 @@ impl Model {
         }
     }
 
+    #[allow(dead_code)]
     pub fn set_permission(&mut self, permission: Permission) {
         self.permission = permission;
     }
 
+    #[allow(dead_code)]
     pub fn mode(&self) -> u32 {
         self.permission.mode
     }
 
+    #[allow(dead_code)]
     pub fn uid(&self) -> u32 {
         self.permission.uid
     }
 
+    #[allow(dead_code)]
     pub fn gid(&self) -> u32 {
         self.permission.gid
     }

@@ -10,8 +10,10 @@ pub(crate) mod server;
 
 pub use channel::DnsFallback;
 pub use channel::QuicChannel;
-pub use codec::MethodId;
-pub use server::QuicGrpcServer;
+pub use codec::{
+    Frame, FrameReader, FrameWriter, MethodId, read_request_header, status_error, status_ok,
+};
+pub use server::{QuicGrpcServer, QuicServiceExt};
 
 #[doc(hidden)]
 pub use codec::ALL_METHOD_IDS;

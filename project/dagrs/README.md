@@ -104,18 +104,70 @@ Each stage is defined as a task with its dependencies and execution command. The
 
 For more detailed info about this example, please see the [notebook.ipynb](examples/dagrs-sklearn/examples/notebook.ipynb) jupyter notebook file.
 
+## Quick Start
+
+Dagrs execution is async-only. Runtime lifecycle is managed by callers.
+
+```rust
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let mut graph = build_graph_somehow();
+    graph.async_start().await?;
+    Ok(())
+}
+```
+
+- Execution entry: `Graph::async_start().await`.
+- `Graph::start_with_runtime()` has been removed.
+- Use async channel APIs (`recv_from().await`, `send_to(...).await`, `broadcast(...).await`, `close(...).await`).
+
 ## Changelog
 
-### v0.5.2
+### v0.8.0
+
+#### 🚀 Runtime/API Changes
+
+- **Async-only Execution**: `Graph::async_start()` is the only execution entry point.
+- **Removed Sync Adapter**: `Graph::start_with_runtime(&runtime)` has been removed.
+- **Removed Blocking Channel APIs**:
+  - `InChannels` / `TypedInChannels`: removed `blocking_recv_from`, `blocking_map`.
+  - `OutChannels` / `TypedOutChannels`: removed `blocking_send_to`, `blocking_broadcast`.
+- **Internal Async Cleanup**: runtime internals no longer use blocking channel paths.
+
+#### 💡 Migration
+
+- Replace `start_with_runtime(&runtime)` with `async_start().await`.
+- Replace blocking channel calls with async methods:
+  - `recv_from().await`, `recv_any().await`, `map(...).await`
+  - `send_to(...).await`, `broadcast(...).await`, `close(...).await`
+
+### v0.7.0
+
+#### 🚀 Runtime/API Changes
+
+- **Runtime Decoupling**: Dagrs no longer creates or owns a Tokio runtime internally.
+- **Primary Entry**: `Graph::async_start()` is the recommended execution entry.
+- **Removed API**: `Graph::start()` has been removed.
+
+#### 💡 Migration
+
+- Existing `Graph::start()` callers should migrate to `async_start().await`.
+
+### v0.6.0
 
 #### 🚀 New Features
 
-- **Async Execution Interface**: Added `run_async()` method to `Graph`, providing an async API that allows using dagrs within existing Tokio runtime environments. `start()` method now serves as a synchronous wrapper around the async API, maintaining backward compatibility while providing better async support
+- **Loop Node (REQ-001)**: Introduced `LoopNode` and `FlowControl::Loop` to support iterative DAG execution.
+- **Checkpoint Mechanism (REQ-002)**: Added checkpoint persistence and resume support for graph execution state.
+- **Dynamic Router (REQ-003)**: Added `RouterNode` for runtime branch selection and automatic branch pruning.
+- **Typed Channels (REQ-004)**: Added typed channel wrappers for safer node-to-node data transfer.
+- **Execution Hooks (REQ-006)**: Enhanced `ExecutionHook` with retry lifecycle callbacks.
+- **State Subscription (REQ-007)**: Added graph event subscription based on `tokio::sync::broadcast`.
 
 #### 💡 Usage Recommendations
 
-- In environments with an existing Tokio runtime (e.g., async main functions, web services), use `run_async().await` instead of `start()`
-- In simple standalone applications or testing scenarios, you can continue using the `start()` method
+- Use loop nodes and router nodes to model iterative and branching workflows.
+- Use checkpoints and event subscriptions when you need resumability and runtime observability.
 
 ## Contribution
 
