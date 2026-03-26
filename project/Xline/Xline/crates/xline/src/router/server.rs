@@ -1,22 +1,13 @@
-// use crate::{
-// body::{boxed, BoxBody},
-// metadata::GRPC_CONTENT_TYPE,
-// server::NamedService,
-// Status,
-// };
 use super::{Body, Error as GlobalError, HeaderValue, Router, h3wrapper::QuicIncomingBody};
 use bytes::Bytes;
 use gm_quic::prelude::{BindUri, ParseBindUriError, QuicListeners, handy};
-use h3::{
-    quic::{BidiStream, SendStream},
-    server::RequestStream,
-};
+use h3::{\n    quic::{BidiStream, SendStream},\n    server::RequestStream,\n};
 use h3_shim;
 use http::{Request, Response};
 use std::{collections::HashMap, convert::Infallible, future::poll_fn, sync::Arc};
 use tower::Service;
 use utils::config::TlsConfig;
-// use anyhow::Result;
+use anyhow::Result;
 
 /// A Server for creating axum routers for gRPC services
 #[derive(Debug, Default, Clone)]
@@ -236,11 +227,8 @@ async fn unimplemented() -> impl axum::response::IntoResponse {
     tracing::error!("unimplemented");
     let status = http::StatusCode::OK;
     let headers = [
-        (tonic::Status::GRPC_STATUS, HeaderValue::from_static("12")),
-        (
-            http::header::CONTENT_TYPE,
-            tonic::metadata::GRPC_CONTENT_TYPE,
-        ),
+        (http::header::CONTENT_TYPE,
+            HeaderValue::from_static("application/grpc")),
     ];
     (status, headers)
 }
