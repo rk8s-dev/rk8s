@@ -4,52 +4,51 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "buildscript_run", "rust_binary", "rust_library")
 
 http_archive(
-    name = "ref-cast-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/ref-cast/ref-cast-1.0.25.crate"],
     sha256 = "f354300ae66f76f1c85c5f84693f0ce81d747e2c3f21a45fef496d89c960bf7d",
     type = "tar.gz",
     strip_prefix = "ref-cast-1.0.25",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "ref-cast-manifest",
-    vendor = ":ref-cast-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "ref-cast",
-    srcs = [":ref-cast-vendor"],
+    srcs = [":vendor"],
     crate = "ref_cast",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
-        "OUT_DIR": "$(location :ref-cast-build-script-run[out_dir])",
+        "OUT_DIR": "$(location :build-script-run[out_dir])",
     },
     rustc_flags = [
-        "@$(location :ref-cast-build-script-run[rustc_flags])",
-        "@$(location :ref-cast-manifest[env_flags])",
+        "@$(location :build-script-run[rustc_flags])",
+        "@$(location :manifest[env_flags])",
     ],
     visibility = ["PUBLIC"],
     deps = ["//third-party/rust/crates/ref-cast-impl/1.0.25:ref-cast-impl"],
 )
 
 rust_binary(
-    name = "ref-cast-build-script-build",
-    srcs = [":ref-cast-vendor"],
+    name = "build-script-build",
+    srcs = [":vendor"],
     crate = "build_script_build",
     crate_root = "vendor/build.rs",
     edition = "2021",
-    rustc_flags = ["@$(location :ref-cast-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = [],
 )
 
 buildscript_run(
-    name = "ref-cast-build-script-run",
+    name = "build-script-run",
     package_name = "ref-cast",
-    buildscript_rule = ":ref-cast-build-script-build",
-    env_srcs = [":ref-cast-manifest[env_dict]"],
+    buildscript_rule = ":build-script-build",
+    env_srcs = [":manifest[env_dict]"],
     version = "1.0.25",
-    manifest_dir = ":ref-cast-vendor",
+    manifest_dir = ":vendor",
     visibility = ["PUBLIC"],
 )

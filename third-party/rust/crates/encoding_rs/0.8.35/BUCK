@@ -4,22 +4,21 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "encoding_rs-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/encoding_rs/encoding_rs-0.8.35.crate"],
     sha256 = "75030f3c4f45dafd7586dd6780965a8c7e8e285a5ecb86713e63a79c5b2766f3",
     type = "tar.gz",
     strip_prefix = "encoding_rs-0.8.35",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "encoding_rs-manifest",
-    vendor = ":encoding_rs-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "encoding_rs",
-    srcs = [":encoding_rs-vendor"],
+    srcs = [":vendor"],
     crate = "encoding_rs",
     crate_root = "vendor/src/lib.rs",
     edition = "2018",
@@ -27,7 +26,7 @@ rust_library(
         "alloc",
         "default",
     ],
-    rustc_flags = ["@$(location :encoding_rs-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = ["//third-party/rust/crates/cfg-if/1.0.4:cfg-if"],
 )

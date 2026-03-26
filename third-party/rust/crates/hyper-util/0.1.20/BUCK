@@ -4,22 +4,21 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "hyper-util-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/hyper-util/hyper-util-0.1.20.crate"],
     sha256 = "96547c2556ec9d12fb1578c4eaf448b04993e7fb79cbaad930a656880a6bdfa0",
     type = "tar.gz",
     strip_prefix = "hyper-util-0.1.20",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "hyper-util-manifest",
-    vendor = ":hyper-util-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "hyper-util",
-    srcs = [":hyper-util-vendor"],
+    srcs = [":vendor"],
     crate = "hyper_util",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
@@ -36,7 +35,7 @@ rust_library(
         "service",
         "tokio",
     ],
-    rustc_flags = ["@$(location :hyper-util-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     os_deps = {
         "macos": ["//third-party/rust/crates/system-configuration/0.7.0:system-configuration"],
         "windows": ["//third-party/rust/crates/windows-registry/0.6.1:windows-registry"],

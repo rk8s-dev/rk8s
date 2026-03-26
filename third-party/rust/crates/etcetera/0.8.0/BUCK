@@ -4,26 +4,25 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "etcetera-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/etcetera/etcetera-0.8.0.crate"],
     sha256 = "136d1b5283a1ab77bd9257427ffd09d8667ced0570b6f938942bc7568ed5b943",
     type = "tar.gz",
     strip_prefix = "etcetera-0.8.0",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "etcetera-manifest",
-    vendor = ":etcetera-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "etcetera",
-    srcs = [":etcetera-vendor"],
+    srcs = [":vendor"],
     crate = "etcetera",
     crate_root = "vendor/src/lib.rs",
     edition = "2018",
-    rustc_flags = ["@$(location :etcetera-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     os_deps = {
         "windows": ["//third-party/rust/crates/windows-sys/0.48.0:windows-sys"],
     },

@@ -4,32 +4,31 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "buildscript_run", "rust_binary", "rust_library")
 
 http_archive(
-    name = "etcd-client-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/etcd-client/etcd-client-0.17.0.crate"],
     sha256 = "8acfe553027cd07fc5fafa81a84f19a7a87eaffaccd2162b6db05e8d6ce98084",
     type = "tar.gz",
     strip_prefix = "etcd-client-0.17.0",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "etcd-client-manifest",
-    vendor = ":etcd-client-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "etcd-client",
-    srcs = [":etcd-client-vendor"],
+    srcs = [":vendor"],
     crate = "etcd_client",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
-        "OUT_DIR": "$(location :etcd-client-build-script-run[out_dir])",
+        "OUT_DIR": "$(location :build-script-run[out_dir])",
     },
     features = ["tls"],
     rustc_flags = [
-        "@$(location :etcd-client-build-script-run[rustc_flags])",
-        "@$(location :etcd-client-manifest[env_flags])",
+        "@$(location :build-script-run[rustc_flags])",
+        "@$(location :manifest[env_flags])",
     ],
     visibility = ["PUBLIC"],
     deps = [
@@ -45,13 +44,13 @@ rust_library(
 )
 
 rust_binary(
-    name = "etcd-client-build-script-build",
-    srcs = [":etcd-client-vendor"],
+    name = "build-script-build",
+    srcs = [":vendor"],
     crate = "build_script_build",
     crate_root = "vendor/build.rs",
     edition = "2021",
     features = ["tls"],
-    rustc_flags = ["@$(location :etcd-client-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = [],
     deps = [
         "//third-party/rust/crates/tonic-build/0.14.4:tonic-build",
@@ -60,12 +59,12 @@ rust_binary(
 )
 
 buildscript_run(
-    name = "etcd-client-build-script-run",
+    name = "build-script-run",
     package_name = "etcd-client",
-    buildscript_rule = ":etcd-client-build-script-build",
-    env_srcs = [":etcd-client-manifest[env_dict]"],
+    buildscript_rule = ":build-script-build",
+    env_srcs = [":manifest[env_dict]"],
     features = ["tls"],
     version = "0.17.0",
-    manifest_dir = ":etcd-client-vendor",
+    manifest_dir = ":vendor",
     visibility = ["PUBLIC"],
 )

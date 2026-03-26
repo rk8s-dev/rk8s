@@ -4,32 +4,31 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "buildscript_run", "rust_binary", "rust_library")
 
 http_archive(
-    name = "openssl-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/openssl/openssl-0.10.75.crate"],
     sha256 = "08838db121398ad17ab8531ce9de97b244589089e290a384c900cb9ff7434328",
     type = "tar.gz",
     strip_prefix = "openssl-0.10.75",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "openssl-manifest",
-    vendor = ":openssl-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "openssl",
-    srcs = [":openssl-vendor"],
+    srcs = [":vendor"],
     crate = "openssl",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
-        "OUT_DIR": "$(location :openssl-build-script-run[out_dir])",
+        "OUT_DIR": "$(location :build-script-run[out_dir])",
     },
     features = ["default"],
     rustc_flags = [
-        "@$(location :openssl-build-script-run[rustc_flags])",
-        "@$(location :openssl-manifest[env_flags])",
+        "@$(location :build-script-run[rustc_flags])",
+        "@$(location :manifest[env_flags])",
     ],
     named_deps = {
         "ffi": "//third-party/rust/crates/openssl-sys/0.9.111:openssl-sys",
@@ -46,26 +45,26 @@ rust_library(
 )
 
 rust_binary(
-    name = "openssl-build-script-build",
-    srcs = [":openssl-vendor"],
+    name = "build-script-build",
+    srcs = [":vendor"],
     crate = "build_script_build",
     crate_root = "vendor/build.rs",
     edition = "2021",
     features = ["default"],
-    rustc_flags = ["@$(location :openssl-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = [],
 )
 
 buildscript_run(
-    name = "openssl-build-script-run",
+    name = "build-script-run",
     package_name = "openssl",
-    buildscript_rule = ":openssl-build-script-build",
+    buildscript_rule = ":build-script-build",
     env_srcs = [
-        "//third-party/rust/crates/openssl-sys/0.9.111:openssl-sys-build-script-main-run[metadata]",
-        ":openssl-manifest[env_dict]",
+        "//third-party/rust/crates/openssl-sys/0.9.111:build-script-main-run[metadata]",
+        ":manifest[env_dict]",
     ],
     features = ["default"],
     version = "0.10.75",
-    manifest_dir = ":openssl-vendor",
+    manifest_dir = ":vendor",
     visibility = ["PUBLIC"],
 )

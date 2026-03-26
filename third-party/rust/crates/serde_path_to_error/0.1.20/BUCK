@@ -4,26 +4,25 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "serde_path_to_error-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/serde_path_to_error/serde_path_to_error-0.1.20.crate"],
     sha256 = "10a9ff822e371bb5403e391ecd83e182e0e77ba7f6fe0160b795797109d1b457",
     type = "tar.gz",
     strip_prefix = "serde_path_to_error-0.1.20",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "serde_path_to_error-manifest",
-    vendor = ":serde_path_to_error-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "serde_path_to_error",
-    srcs = [":serde_path_to_error-vendor"],
+    srcs = [":vendor"],
     crate = "serde_path_to_error",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
-    rustc_flags = ["@$(location :serde_path_to_error-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/itoa/1.0.17:itoa",

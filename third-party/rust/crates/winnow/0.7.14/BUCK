@@ -4,22 +4,21 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "winnow-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/winnow/winnow-0.7.14.crate"],
     sha256 = "5a5364e9d77fcdeeaa6062ced926ee3381faa2ee02d3eb83a5c27a8825540829",
     type = "tar.gz",
     strip_prefix = "winnow-0.7.14",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "winnow-manifest",
-    vendor = ":winnow-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "winnow",
-    srcs = [":winnow-vendor"],
+    srcs = [":vendor"],
     crate = "winnow",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
@@ -28,7 +27,7 @@ rust_library(
         "default",
         "std",
     ],
-    rustc_flags = ["@$(location :winnow-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = ["//third-party/rust/crates/memchr/2.8.0:memchr"],
 )

@@ -5,6 +5,35 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.0] - 2026-03-17
+
+### Changed
+- **Async-only Execution API**: `Graph::async_start()` is now the only execution entry point.
+- **Async-only Channel API**:
+  - Removed all blocking channel operations from `InChannels` / `OutChannels`.
+  - Removed all blocking channel operations from `TypedInChannels` / `TypedOutChannels`.
+  - Channel closing is now asynchronous (`close(...).await`, `close_all().await` in internal paths).
+- **Examples & Tests**:
+  - Migrated all runtime-based sync invocation examples to async (`#[tokio::main]` + `async_start().await`).
+  - Migrated graph execution tests to async style (`#[tokio::test]`) and removed runtime `block_on` wrappers.
+
+### Removed
+- `Graph::start_with_runtime(&runtime)` sync adapter.
+- `GraphError::BlockingCallInAsyncContext` (no longer needed after sync adapter removal).
+- Internal blocking channel paths (`blocking_lock` / `blocking_recv` / `blocking_send`) in `dagrs` runtime code.
+
+### Migration
+- Replace:
+  - `graph.start_with_runtime(&runtime)?`
+- With:
+  - `graph.async_start().await?`
+- Replace any blocking channel usage with async equivalents:
+  - `recv_from().await`, `recv_any().await`, `map(...).await`
+  - `send_to(...).await`, `broadcast(...).await`, `close(...).await`
+
+### Planned
+- **Visualization (REQ-005)**: Export DAG structure to DOT/Mermaid format (Scheduled for next release).
+
 ## [0.7.0] - 2026-03-16
 
 ### Added

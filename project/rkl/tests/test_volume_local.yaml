@@ -1,0 +1,31 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: my-pod-local
+spec:
+  containers:
+    - name: app
+      image: busybox:latest
+      command:
+        - /bin/sh
+        - -c
+        - "while true; do echo hello >> /data/log.txt; sleep 5; done"
+      volumeMounts:
+        - name: data-vol
+          mountPath: /data
+  volumes:
+    - name: data-vol
+      type: slayerFs
+      capacity_bytes: 1073741824
+      config:
+        data:
+          backend: local-fs
+          localfs:
+            data_dir: /var/lib/rkl/slayerfs/data
+        meta:
+          backend: sqlx
+          sqlx:
+            url: "sqlite::memory:"
+        layout:
+          chunk_size: 67108864
+          block_size: 4194304

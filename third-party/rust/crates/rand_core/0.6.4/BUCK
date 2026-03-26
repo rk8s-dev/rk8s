@@ -4,22 +4,21 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "rand_core-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/rand_core/rand_core-0.6.4.crate"],
     sha256 = "ec0be4795e2f6a28069bec0b5ff3e2ac9bafc99e6a9a7dc3547996c5c816922c",
     type = "tar.gz",
     strip_prefix = "rand_core-0.6.4",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "rand_core-manifest",
-    vendor = ":rand_core-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "rand_core",
-    srcs = [":rand_core-vendor"],
+    srcs = [":vendor"],
     crate = "rand_core",
     crate_root = "vendor/src/lib.rs",
     edition = "2018",
@@ -28,7 +27,7 @@ rust_library(
         "getrandom",
         "std",
     ],
-    rustc_flags = ["@$(location :rand_core-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = ["//third-party/rust/crates/getrandom/0.2.17:getrandom"],
 )

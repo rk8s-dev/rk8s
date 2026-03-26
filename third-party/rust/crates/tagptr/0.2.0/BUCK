@@ -4,25 +4,24 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "tagptr-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/tagptr/tagptr-0.2.0.crate"],
     sha256 = "7b2093cf4c8eb1e67749a6762251bc9cd836b6fc171623bd0a9d324d37af2417",
     type = "tar.gz",
     strip_prefix = "tagptr-0.2.0",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "tagptr-manifest",
-    vendor = ":tagptr-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "tagptr",
-    srcs = [":tagptr-vendor"],
+    srcs = [":vendor"],
     crate = "tagptr",
     crate_root = "vendor/src/lib.rs",
     edition = "2018",
-    rustc_flags = ["@$(location :tagptr-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
 )

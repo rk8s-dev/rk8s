@@ -4,26 +4,25 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "nftables-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/nftables/nftables-0.6.3.crate"],
     sha256 = "3c57e7343eed9e9330e084eef12651b15be3c8ed7825915a0ffa33736b852bed",
     type = "tar.gz",
     strip_prefix = "nftables-0.6.3",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "nftables-manifest",
-    vendor = ":nftables-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "nftables",
-    srcs = [":nftables-vendor"],
+    srcs = [":vendor"],
     crate = "nftables",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
-    rustc_flags = ["@$(location :nftables-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/schemars/1.2.1:schemars",

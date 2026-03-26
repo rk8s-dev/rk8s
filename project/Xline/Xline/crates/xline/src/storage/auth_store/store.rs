@@ -16,13 +16,13 @@ use pbkdf2::{
     Pbkdf2,
     password_hash::{PasswordHash, PasswordVerifier},
 };
-use tonic::Status;
 use utils::parking_lot_lock::RwLockMap;
 use xlineapi::{
     AuthInfo,
     command::{CommandResponse, KeyRange, SyncResponse},
     execute_error::ExecuteError,
 };
+use xlinerpc::Status;
 // TODO: use our own status type
 // use xlinerpc::status::Status;
 
@@ -128,19 +128,21 @@ impl AuthStore {
         }
     }
 
-    /// Try get auth info from tonic request
+    /// Try get auth info from request
     #[allow(clippy::result_large_err)]
     pub(crate) fn try_get_auth_info_from_request<T>(
         &self,
-        request: &tonic::Request<T>,
+        request: &xlinerpc::Request<T>,
     ) -> Result<Option<AuthInfo>, Status> {
         if !self.is_enabled() {
             return Ok(None);
         }
-        if let Some(token) = get_token(request.metadata()) {
+        // Extract token from request metadata
+        if let Some(token) = crate::server::auth_server::get_token(request.meta()) {
             let auth_info = self.verify(&token)?;
             return Ok(Some(auth_info));
         }
+        // Extract CN from client certificate if present
         if let Some(cn) = get_cn(request) {
             let auth_info = AuthInfo {
                 username: cn,
@@ -1186,12 +1188,15 @@ impl AuthStore {
     }
 }
 
-/// Get common name from tonic request
-fn get_cn<T>(request: &tonic::Request<T>) -> Option<String> {
-    let chain = request.peer_certs()?;
-    let cert_der = chain.first()?;
-    let cert = x509_certificate::X509Certificate::from_der(cert_der.as_ref()).ok()?;
-    cert.subject_common_name()
+/// Get common name from request
+fn get_cn<T>(request: &xlinerpc::Request<T>) -> Option<String> {
+    // Extract CN from metadata if present
+    // This assumes that the server has already extracted the CN from the client certificate
+    // and added it to the metadata during request processing
+    request
+        .meta()
+        .get_str("x-client-cert-cn")
+        .and_then(|res| res.ok().map(String::from))
 }
 
 #[cfg(test)]

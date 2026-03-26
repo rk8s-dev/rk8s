@@ -4,27 +4,26 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "hcl-rs-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/hcl-rs/hcl-rs-0.18.7.crate"],
     sha256 = "48af7144c49a8db969e8a9d00cd470e1a446a3a73f6fa5eafc1eeb3d44d61ff4",
     type = "tar.gz",
     strip_prefix = "hcl-rs-0.18.7",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "hcl-rs-manifest",
-    vendor = ":hcl-rs-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "hcl-rs",
-    srcs = [":hcl-rs-vendor"],
+    srcs = [":vendor"],
     crate = "hcl",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
     features = ["default"],
-    rustc_flags = ["@$(location :hcl-rs-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     named_deps = {
         "vecmap": "//third-party/rust/crates/vecmap-rs/0.2.4:vecmap-rs",
     },

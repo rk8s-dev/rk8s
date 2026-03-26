@@ -4,27 +4,26 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "buildscript_run", "rust_binary", "rust_library")
 
 http_archive(
-    name = "io-lifetimes-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/io-lifetimes/io-lifetimes-1.0.11.crate"],
     sha256 = "eae7b9aee968036d54dce06cebaefd919e4472e753296daccd6d344e3e2df0c2",
     type = "tar.gz",
     strip_prefix = "io-lifetimes-1.0.11",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "io-lifetimes-manifest",
-    vendor = ":io-lifetimes-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "io-lifetimes",
-    srcs = [":io-lifetimes-vendor"],
+    srcs = [":vendor"],
     crate = "io_lifetimes",
     crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
-        "OUT_DIR": "$(location :io-lifetimes-build-script-run[out_dir])",
+        "OUT_DIR": "$(location :build-script-run[out_dir])",
     },
     features = [
         "close",
@@ -33,8 +32,8 @@ rust_library(
         "windows-sys",
     ],
     rustc_flags = [
-        "@$(location :io-lifetimes-build-script-run[rustc_flags])",
-        "@$(location :io-lifetimes-manifest[env_flags])",
+        "@$(location :build-script-run[rustc_flags])",
+        "@$(location :manifest[env_flags])",
     ],
     os_deps = {
         "linux": ["//third-party/rust/crates/libc/0.2.182:libc"],
@@ -45,8 +44,8 @@ rust_library(
 )
 
 rust_binary(
-    name = "io-lifetimes-build-script-build",
-    srcs = [":io-lifetimes-vendor"],
+    name = "build-script-build",
+    srcs = [":vendor"],
     crate = "build_script_build",
     crate_root = "vendor/build.rs",
     edition = "2018",
@@ -56,15 +55,15 @@ rust_binary(
         "libc",
         "windows-sys",
     ],
-    rustc_flags = ["@$(location :io-lifetimes-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = [],
 )
 
 buildscript_run(
-    name = "io-lifetimes-build-script-run",
+    name = "build-script-run",
     package_name = "io-lifetimes",
-    buildscript_rule = ":io-lifetimes-build-script-build",
-    env_srcs = [":io-lifetimes-manifest[env_dict]"],
+    buildscript_rule = ":build-script-build",
+    env_srcs = [":manifest[env_dict]"],
     features = [
         "close",
         "hermit-abi",
@@ -72,6 +71,6 @@ buildscript_run(
         "windows-sys",
     ],
     version = "1.0.11",
-    manifest_dir = ":io-lifetimes-vendor",
+    manifest_dir = ":vendor",
     visibility = ["PUBLIC"],
 )

@@ -4,27 +4,26 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "buildscript_run", "rust_binary", "rust_library")
 
 http_archive(
-    name = "oid-registry-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/oid-registry/oid-registry-0.8.1.crate"],
     sha256 = "12f40cff3dde1b6087cc5d5f5d4d65712f34016a03ed60e9c08dcc392736b5b7",
     type = "tar.gz",
     strip_prefix = "oid-registry-0.8.1",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "oid-registry-manifest",
-    vendor = ":oid-registry-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "oid-registry",
-    srcs = [":oid-registry-vendor"],
+    srcs = [":vendor"],
     crate = "oid_registry",
     crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
-        "OUT_DIR": "$(location :oid-registry-build-script-run[out_dir])",
+        "OUT_DIR": "$(location :build-script-run[out_dir])",
     },
     features = [
         "crypto",
@@ -40,16 +39,16 @@ rust_library(
         "x962",
     ],
     rustc_flags = [
-        "@$(location :oid-registry-build-script-run[rustc_flags])",
-        "@$(location :oid-registry-manifest[env_flags])",
+        "@$(location :build-script-run[rustc_flags])",
+        "@$(location :manifest[env_flags])",
     ],
     visibility = ["PUBLIC"],
     deps = ["//third-party/rust/crates/asn1-rs/0.7.1:asn1-rs"],
 )
 
 rust_binary(
-    name = "oid-registry-build-script-build",
-    srcs = [":oid-registry-vendor"],
+    name = "build-script-build",
+    srcs = [":vendor"],
     crate = "build_script_build",
     crate_root = "vendor/build.rs",
     edition = "2018",
@@ -66,15 +65,15 @@ rust_binary(
         "x509",
         "x962",
     ],
-    rustc_flags = ["@$(location :oid-registry-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = [],
 )
 
 buildscript_run(
-    name = "oid-registry-build-script-run",
+    name = "build-script-run",
     package_name = "oid-registry",
-    buildscript_rule = ":oid-registry-build-script-build",
-    env_srcs = [":oid-registry-manifest[env_dict]"],
+    buildscript_rule = ":build-script-build",
+    env_srcs = [":manifest[env_dict]"],
     features = [
         "crypto",
         "default",
@@ -89,6 +88,6 @@ buildscript_run(
         "x962",
     ],
     version = "0.8.1",
-    manifest_dir = ":oid-registry-vendor",
+    manifest_dir = ":vendor",
     visibility = ["PUBLIC"],
 )

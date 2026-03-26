@@ -4,25 +4,24 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "windows-link-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/windows-link/windows-link-0.1.3.crate"],
     sha256 = "5e6ad25900d524eaabdbbb96d20b4311e1e7ae1699af4fb28c17ae66c80d798a",
     type = "tar.gz",
     strip_prefix = "windows-link-0.1.3",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "windows-link-manifest",
-    vendor = ":windows-link-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "windows-link",
-    srcs = [":windows-link-vendor"],
+    srcs = [":vendor"],
     crate = "windows_link",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
-    rustc_flags = ["@$(location :windows-link-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
 )

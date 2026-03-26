@@ -4,26 +4,25 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "sea-bae-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/sea-bae/sea-bae-0.2.1.crate"],
     sha256 = "f694a6ab48f14bc063cfadff30ab551d3c7e46d8f81836c51989d548f44a2a25",
     type = "tar.gz",
     strip_prefix = "sea-bae-0.2.1",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "sea-bae-manifest",
-    vendor = ":sea-bae-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "sea-bae",
-    srcs = [":sea-bae-vendor"],
+    srcs = [":vendor"],
     crate = "sea_bae",
     crate_root = "vendor/src/lib.rs",
     edition = "2018",
-    rustc_flags = ["@$(location :sea-bae-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     proc_macro = True,
     visibility = ["PUBLIC"],
     deps = [

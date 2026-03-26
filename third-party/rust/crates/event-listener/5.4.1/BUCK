@@ -4,22 +4,21 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "event-listener-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/event-listener/event-listener-5.4.1.crate"],
     sha256 = "e13b66accf52311f30a0db42147dadea9850cb48cd070028831ae5f5d4b856ab",
     type = "tar.gz",
     strip_prefix = "event-listener-5.4.1",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "event-listener-manifest",
-    vendor = ":event-listener-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "event-listener",
-    srcs = [":event-listener-vendor"],
+    srcs = [":vendor"],
     crate = "event_listener",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
@@ -31,7 +30,7 @@ rust_library(
         "portable_atomic_crate",
         "std",
     ],
-    rustc_flags = ["@$(location :event-listener-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     named_deps = {
         "portable_atomic_crate": "//third-party/rust/crates/portable-atomic/1.13.1:portable-atomic",
     },

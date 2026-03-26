@@ -4,22 +4,21 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "aes-gcm-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/aes-gcm/aes-gcm-0.10.3.crate"],
     sha256 = "831010a0f742e1209b3bcea8fab6a8e149051ba6099432c8cb2cc117dec3ead1",
     type = "tar.gz",
     strip_prefix = "aes-gcm-0.10.3",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "aes-gcm-manifest",
-    vendor = ":aes-gcm-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "aes-gcm",
-    srcs = [":aes-gcm-vendor"],
+    srcs = [":vendor"],
     crate = "aes_gcm",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
@@ -30,7 +29,7 @@ rust_library(
         "getrandom",
         "rand_core",
     ],
-    rustc_flags = ["@$(location :aes-gcm-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/aead/0.5.2:aead",

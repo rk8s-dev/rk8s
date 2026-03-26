@@ -4,26 +4,25 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "protobuf-parse-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/protobuf-parse/protobuf-parse-3.2.0.crate"],
     sha256 = "9d39b14605eaa1f6a340aec7f320b34064feb26c93aec35d6a9a2272a8ddfa49",
     type = "tar.gz",
     strip_prefix = "protobuf-parse-3.2.0",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "protobuf-parse-manifest",
-    vendor = ":protobuf-parse-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "protobuf-parse",
-    srcs = [":protobuf-parse-vendor"],
+    srcs = [":vendor"],
     crate = "protobuf_parse",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
-    rustc_flags = ["@$(location :protobuf-parse-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/anyhow/1.0.101:anyhow",

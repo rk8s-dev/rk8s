@@ -4,22 +4,21 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "sea-orm-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/sea-orm/sea-orm-1.1.19.crate"],
     sha256 = "6d945f62558fac19e5988680d2fdf747b734c2dbc6ce2cb81ba33ed8dde5b103",
     type = "tar.gz",
     strip_prefix = "sea-orm-1.1.19",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "sea-orm-manifest",
-    vendor = ":sea-orm-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "sea-orm",
-    srcs = [":sea-orm-vendor"],
+    srcs = [":vendor"],
     crate = "sea_orm",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
@@ -47,7 +46,7 @@ rust_library(
         "with-time",
         "with-uuid",
     ],
-    rustc_flags = ["@$(location :sea-orm-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/async-stream/0.3.6:async-stream",

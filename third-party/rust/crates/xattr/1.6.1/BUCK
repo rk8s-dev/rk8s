@@ -4,22 +4,21 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "xattr-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/xattr/xattr-1.6.1.crate"],
     sha256 = "32e45ad4206f6d2479085147f02bc2ef834ac85886624a23575ae137c8aa8156",
     type = "tar.gz",
     strip_prefix = "xattr-1.6.1",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "xattr-manifest",
-    vendor = ":xattr-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "xattr",
-    srcs = [":xattr-vendor"],
+    srcs = [":vendor"],
     crate = "xattr",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
@@ -27,7 +26,7 @@ rust_library(
         "default",
         "unsupported",
     ],
-    rustc_flags = ["@$(location :xattr-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     os_deps = {
         "linux": ["//third-party/rust/crates/rustix/1.1.3:rustix"],
         "macos": ["//third-party/rust/crates/rustix/1.1.3:rustix"],

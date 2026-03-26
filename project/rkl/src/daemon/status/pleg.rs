@@ -281,7 +281,7 @@ async fn relist(state: &mut State) -> anyhow::Result<Vec<PodLifecycleEvent>> {
         let mut seen_container_ids = HashSet::new();
         let all_containers = old_containers
             .into_iter()
-            .chain(current_containers.into_iter())
+            .chain(current_containers)
             .filter(|c| seen_container_ids.insert(c.state.id.clone()))
             .collect::<Vec<_>>();
 

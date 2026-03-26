@@ -4,26 +4,25 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "blocking-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/blocking/blocking-1.6.2.crate"],
     sha256 = "e83f8d02be6967315521be875afa792a316e28d57b5a2d401897e2a7921b7f21",
     type = "tar.gz",
     strip_prefix = "blocking-1.6.2",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "blocking-manifest",
-    vendor = ":blocking-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "blocking",
-    srcs = [":blocking-vendor"],
+    srcs = [":vendor"],
     crate = "blocking",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
-    rustc_flags = ["@$(location :blocking-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/async-channel/2.5.0:async-channel",

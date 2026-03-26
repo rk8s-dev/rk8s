@@ -57,7 +57,6 @@ pub mod yaml_parser;
 pub mod yaml_task;
 
 use thiserror::Error;
-use yaml_rust;
 
 use crate::utils::parser::ParseError;
 
@@ -111,6 +110,6 @@ impl From<FileContentError> for ParseError {
 
 impl From<FileNotFound> for ParseError {
     fn from(value: FileNotFound) -> Self {
-        ParseError(value.to_string().into())
+        ParseError(value.to_string())
     }
 }

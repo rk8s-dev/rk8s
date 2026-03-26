@@ -174,11 +174,7 @@ mod rpc {
 }
 /// Command conflict implementation
 mod conflict;
-/// Curp protocol service (Protocol trait + ProtocolServer).
-///
-/// Extracted from tonic_build codegen output. Message types resolve to
-/// `curp::rpc::*` via extern_path mapping. No build-time codegen required.
-pub(crate) mod curp_proto;
+// Curp protocol service (Protocol trait + ProtocolServer) has been moved to auth_wrapper.rs
 /// Xline metrics
 pub mod metrics;
 /// restore module, only for test

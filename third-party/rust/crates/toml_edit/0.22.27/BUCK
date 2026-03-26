@@ -4,22 +4,21 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "toml_edit-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/toml_edit/toml_edit-0.22.27.crate"],
     sha256 = "41fe8c660ae4257887cf66394862d21dbca4a6ddd26f04a3560410406a2f819a",
     type = "tar.gz",
     strip_prefix = "toml_edit-0.22.27",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "toml_edit-manifest",
-    vendor = ":toml_edit-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "toml_edit",
-    srcs = [":toml_edit-vendor"],
+    srcs = [":vendor"],
     crate = "toml_edit",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
@@ -28,7 +27,7 @@ rust_library(
         "parse",
         "serde",
     ],
-    rustc_flags = ["@$(location :toml_edit-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/indexmap/2.13.0:indexmap",

@@ -4,22 +4,21 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "rcgen-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/rcgen/rcgen-0.12.1.crate"],
     sha256 = "48406db8ac1f3cbc7dcdb56ec355343817958a356ff430259bb07baf7607e1e1",
     type = "tar.gz",
     strip_prefix = "rcgen-0.12.1",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "rcgen-manifest",
-    vendor = ":rcgen-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "rcgen",
-    srcs = [":rcgen-vendor"],
+    srcs = [":vendor"],
     crate = "rcgen",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
@@ -28,7 +27,7 @@ rust_library(
         "pem",
         "ring",
     ],
-    rustc_flags = ["@$(location :rcgen-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/pem/3.0.6:pem",

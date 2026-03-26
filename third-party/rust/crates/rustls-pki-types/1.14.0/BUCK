@@ -4,22 +4,21 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "rustls-pki-types-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/rustls-pki-types/rustls-pki-types-1.14.0.crate"],
     sha256 = "be040f8b0a225e40375822a563fa9524378b9d63112f53e19ffff34df5d33fdd",
     type = "tar.gz",
     strip_prefix = "rustls-pki-types-1.14.0",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "rustls-pki-types-manifest",
-    vendor = ":rustls-pki-types-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "rustls-pki-types",
-    srcs = [":rustls-pki-types-vendor"],
+    srcs = [":vendor"],
     crate = "rustls_pki_types",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
@@ -30,7 +29,7 @@ rust_library(
         "web",
         "web-time",
     ],
-    rustc_flags = ["@$(location :rustls-pki-types-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = ["//third-party/rust/crates/zeroize/1.8.2:zeroize"],
 )

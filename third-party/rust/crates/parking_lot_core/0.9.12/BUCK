@@ -4,31 +4,30 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "buildscript_run", "rust_binary", "rust_library")
 
 http_archive(
-    name = "parking_lot_core-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/parking_lot_core/parking_lot_core-0.9.12.crate"],
     sha256 = "2621685985a2ebf1c516881c026032ac7deafcda1a2c9b7850dc81e3dfcb64c1",
     type = "tar.gz",
     strip_prefix = "parking_lot_core-0.9.12",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "parking_lot_core-manifest",
-    vendor = ":parking_lot_core-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "parking_lot_core",
-    srcs = [":parking_lot_core-vendor"],
+    srcs = [":vendor"],
     crate = "parking_lot_core",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
-        "OUT_DIR": "$(location :parking_lot_core-build-script-run[out_dir])",
+        "OUT_DIR": "$(location :build-script-run[out_dir])",
     },
     rustc_flags = [
-        "@$(location :parking_lot_core-build-script-run[rustc_flags])",
-        "@$(location :parking_lot_core-manifest[env_flags])",
+        "@$(location :build-script-run[rustc_flags])",
+        "@$(location :manifest[env_flags])",
     ],
     os_deps = {
         "linux": ["//third-party/rust/crates/libc/0.2.182:libc"],
@@ -43,21 +42,21 @@ rust_library(
 )
 
 rust_binary(
-    name = "parking_lot_core-build-script-build",
-    srcs = [":parking_lot_core-vendor"],
+    name = "build-script-build",
+    srcs = [":vendor"],
     crate = "build_script_build",
     crate_root = "vendor/build.rs",
     edition = "2021",
-    rustc_flags = ["@$(location :parking_lot_core-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = [],
 )
 
 buildscript_run(
-    name = "parking_lot_core-build-script-run",
+    name = "build-script-run",
     package_name = "parking_lot_core",
-    buildscript_rule = ":parking_lot_core-build-script-build",
-    env_srcs = [":parking_lot_core-manifest[env_dict]"],
+    buildscript_rule = ":build-script-build",
+    env_srcs = [":manifest[env_dict]"],
     version = "0.9.12",
-    manifest_dir = ":parking_lot_core-vendor",
+    manifest_dir = ":vendor",
     visibility = ["PUBLIC"],
 )

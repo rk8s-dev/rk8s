@@ -4,26 +4,25 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "zerovec-derive-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/zerovec-derive/zerovec-derive-0.11.2.crate"],
     sha256 = "eadce39539ca5cb3985590102671f2567e659fca9666581ad3411d59207951f3",
     type = "tar.gz",
     strip_prefix = "zerovec-derive-0.11.2",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "zerovec-derive-manifest",
-    vendor = ":zerovec-derive-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "zerovec-derive",
-    srcs = [":zerovec-derive-vendor"],
+    srcs = [":vendor"],
     crate = "zerovec_derive",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
-    rustc_flags = ["@$(location :zerovec-derive-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     proc_macro = True,
     visibility = ["PUBLIC"],
     deps = [

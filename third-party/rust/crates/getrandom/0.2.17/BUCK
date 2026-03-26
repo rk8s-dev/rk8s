@@ -4,22 +4,21 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "getrandom-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/getrandom/getrandom-0.2.17.crate"],
     sha256 = "ff2abc00be7fca6ebc474524697ae276ad847ad0a6b3faa4bcb027e9a4614ad0",
     type = "tar.gz",
     strip_prefix = "getrandom-0.2.17",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "getrandom-manifest",
-    vendor = ":getrandom-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "getrandom",
-    srcs = [":getrandom-vendor"],
+    srcs = [":vendor"],
     crate = "getrandom",
     crate_root = "vendor/src/lib.rs",
     edition = "2018",
@@ -30,7 +29,7 @@ rust_library(
         "std",
         "wasm-bindgen",
     ],
-    rustc_flags = ["@$(location :getrandom-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     os_deps = {
         "linux": ["//third-party/rust/crates/libc/0.2.182:libc"],
         "macos": ["//third-party/rust/crates/libc/0.2.182:libc"],

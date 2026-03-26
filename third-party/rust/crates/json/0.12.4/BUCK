@@ -4,25 +4,24 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "json-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/json/json-0.12.4.crate"],
     sha256 = "078e285eafdfb6c4b434e0d31e8cfcb5115b651496faca5749b88fafd4f23bfd",
     type = "tar.gz",
     strip_prefix = "json-0.12.4",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "json-manifest",
-    vendor = ":json-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "json",
-    srcs = [":json-vendor"],
+    srcs = [":vendor"],
     crate = "json",
     crate_root = "vendor/src/lib.rs",
     edition = "2018",
-    rustc_flags = ["@$(location :json-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
 )

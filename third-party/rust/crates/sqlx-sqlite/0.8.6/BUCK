@@ -4,22 +4,21 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "sqlx-sqlite-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/sqlx-sqlite/sqlx-sqlite-0.8.6.crate"],
     sha256 = "c2d12fe70b2c1b4401038055f90f151b78208de1f9f89a7dbfd41587a10c3eea",
     type = "tar.gz",
     strip_prefix = "sqlx-sqlite-0.8.6",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "sqlx-sqlite-manifest",
-    vendor = ":sqlx-sqlite-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "sqlx-sqlite",
-    srcs = [":sqlx-sqlite-vendor"],
+    srcs = [":vendor"],
     crate = "sqlx_sqlite",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
@@ -34,7 +33,7 @@ rust_library(
         "time",
         "uuid",
     ],
-    rustc_flags = ["@$(location :sqlx-sqlite-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/atoi/2.0.0:atoi",

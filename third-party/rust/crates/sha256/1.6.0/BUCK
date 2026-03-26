@@ -4,22 +4,21 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "sha256-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/sha256/sha256-1.6.0.crate"],
     sha256 = "f880fc8562bdeb709793f00eb42a2ad0e672c4f883bbe59122b926eca935c8f6",
     type = "tar.gz",
     strip_prefix = "sha256-1.6.0",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "sha256-manifest",
-    vendor = ":sha256-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "sha256",
-    srcs = [":sha256-vendor"],
+    srcs = [":vendor"],
     crate = "sha256",
     crate_root = "vendor/src/lib.rs",
     edition = "2018",
@@ -28,7 +27,7 @@ rust_library(
         "default",
         "tokio",
     ],
-    rustc_flags = ["@$(location :sha256-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/async-trait/0.1.89:async-trait",

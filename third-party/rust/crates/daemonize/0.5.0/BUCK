@@ -4,26 +4,25 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "daemonize-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/daemonize/daemonize-0.5.0.crate"],
     sha256 = "ab8bfdaacb3c887a54d41bdf48d3af8873b3f5566469f8ba21b92057509f116e",
     type = "tar.gz",
     strip_prefix = "daemonize-0.5.0",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "daemonize-manifest",
-    vendor = ":daemonize-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "daemonize",
-    srcs = [":daemonize-vendor"],
+    srcs = [":vendor"],
     crate = "daemonize",
     crate_root = "vendor/src/lib.rs",
     edition = "2015",
-    rustc_flags = ["@$(location :daemonize-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = ["//third-party/rust/crates/libc/0.2.182:libc"],
 )

@@ -4,26 +4,25 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "proc-macro-error-attr2-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/proc-macro-error-attr2/proc-macro-error-attr2-2.0.0.crate"],
     sha256 = "96de42df36bb9bba5542fe9f1a054b8cc87e172759a1868aa05c1f3acc89dfc5",
     type = "tar.gz",
     strip_prefix = "proc-macro-error-attr2-2.0.0",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "proc-macro-error-attr2-manifest",
-    vendor = ":proc-macro-error-attr2-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "proc-macro-error-attr2",
-    srcs = [":proc-macro-error-attr2-vendor"],
+    srcs = [":vendor"],
     crate = "proc_macro_error_attr2",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
-    rustc_flags = ["@$(location :proc-macro-error-attr2-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     proc_macro = True,
     visibility = ["PUBLIC"],
     deps = [

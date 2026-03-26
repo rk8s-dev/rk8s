@@ -4,22 +4,21 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "pkcs8-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/pkcs8/pkcs8-0.10.2.crate"],
     sha256 = "f950b2377845cebe5cf8b5165cb3cc1a5e0fa5cfa3e1f7f55707d8fd82e0a7b7",
     type = "tar.gz",
     strip_prefix = "pkcs8-0.10.2",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "pkcs8-manifest",
-    vendor = ":pkcs8-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "pkcs8",
-    srcs = [":pkcs8-vendor"],
+    srcs = [":vendor"],
     crate = "pkcs8",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
@@ -31,7 +30,7 @@ rust_library(
         "rand_core",
         "std",
     ],
-    rustc_flags = ["@$(location :pkcs8-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/der/0.7.10:der",

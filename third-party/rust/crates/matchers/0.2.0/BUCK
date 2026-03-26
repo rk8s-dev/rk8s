@@ -4,26 +4,25 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "matchers-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/matchers/matchers-0.2.0.crate"],
     sha256 = "d1525a2a28c7f4fa0fc98bb91ae755d1e2d1505079e05539e35bc876b5d65ae9",
     type = "tar.gz",
     strip_prefix = "matchers-0.2.0",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "matchers-manifest",
-    vendor = ":matchers-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "matchers",
-    srcs = [":matchers-vendor"],
+    srcs = [":vendor"],
     crate = "matchers",
     crate_root = "vendor/src/lib.rs",
     edition = "2018",
-    rustc_flags = ["@$(location :matchers-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = ["//third-party/rust/crates/regex-automata/0.4.14:regex-automata"],
 )

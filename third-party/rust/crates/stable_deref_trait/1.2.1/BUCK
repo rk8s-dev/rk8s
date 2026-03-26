@@ -4,22 +4,21 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "stable_deref_trait-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/stable_deref_trait/stable_deref_trait-1.2.1.crate"],
     sha256 = "6ce2be8dc25455e1f91df71bfa12ad37d7af1092ae736f3a6cd0e37bc7810596",
     type = "tar.gz",
     strip_prefix = "stable_deref_trait-1.2.1",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "stable_deref_trait-manifest",
-    vendor = ":stable_deref_trait-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "stable_deref_trait",
-    srcs = [":stable_deref_trait-vendor"],
+    srcs = [":vendor"],
     crate = "stable_deref_trait",
     crate_root = "vendor/src/lib.rs",
     edition = "2015",
@@ -28,6 +27,6 @@ rust_library(
         "default",
         "std",
     ],
-    rustc_flags = ["@$(location :stable_deref_trait-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
 )

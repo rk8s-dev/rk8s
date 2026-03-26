@@ -4,22 +4,21 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "tracing-log-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/tracing-log/tracing-log-0.2.0.crate"],
     sha256 = "ee855f1f400bd0e5c02d150ae5de3840039a3f54b025156404e34c23c03f47c3",
     type = "tar.gz",
     strip_prefix = "tracing-log-0.2.0",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "tracing-log-manifest",
-    vendor = ":tracing-log-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "tracing-log",
-    srcs = [":tracing-log-vendor"],
+    srcs = [":vendor"],
     crate = "tracing_log",
     crate_root = "vendor/src/lib.rs",
     edition = "2018",
@@ -28,7 +27,7 @@ rust_library(
         "log-tracer",
         "std",
     ],
-    rustc_flags = ["@$(location :tracing-log-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/log/0.4.29:log",

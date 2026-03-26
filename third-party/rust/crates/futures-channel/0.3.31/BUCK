@@ -4,22 +4,21 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "futures-channel-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/futures-channel/futures-channel-0.3.31.crate"],
     sha256 = "2dff15bf788c671c1934e366d07e30c1814a8ef514e1af724a602e8a2fbe1b10",
     type = "tar.gz",
     strip_prefix = "futures-channel-0.3.31",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "futures-channel-manifest",
-    vendor = ":futures-channel-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "futures-channel",
-    srcs = [":futures-channel-vendor"],
+    srcs = [":vendor"],
     crate = "futures_channel",
     crate_root = "vendor/src/lib.rs",
     edition = "2018",
@@ -30,7 +29,7 @@ rust_library(
         "sink",
         "std",
     ],
-    rustc_flags = ["@$(location :futures-channel-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/futures-core/0.3.31:futures-core",

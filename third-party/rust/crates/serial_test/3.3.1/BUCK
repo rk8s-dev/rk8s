@@ -4,22 +4,21 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "serial_test-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/serial_test/serial_test-3.3.1.crate"],
     sha256 = "0d0b343e184fc3b7bb44dff0705fffcf4b3756ba6aff420dddd8b24ca145e555",
     type = "tar.gz",
     strip_prefix = "serial_test-3.3.1",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "serial_test-manifest",
-    vendor = ":serial_test-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "serial_test",
-    srcs = [":serial_test-vendor"],
+    srcs = [":vendor"],
     crate = "serial_test",
     crate_root = "vendor/src/lib.rs",
     edition = "2018",
@@ -28,7 +27,7 @@ rust_library(
         "default",
         "logging",
     ],
-    rustc_flags = ["@$(location :serial_test-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/futures-executor/0.3.31:futures-executor",

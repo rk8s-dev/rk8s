@@ -4,26 +4,25 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "russh-sftp-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/russh-sftp/russh-sftp-2.1.1.crate"],
     sha256 = "3bb94393cafad0530145b8f626d8687f1ee1dedb93d7ba7740d6ae81868b13b5",
     type = "tar.gz",
     strip_prefix = "russh-sftp-2.1.1",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "russh-sftp-manifest",
-    vendor = ":russh-sftp-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "russh-sftp",
-    srcs = [":russh-sftp-vendor"],
+    srcs = [":vendor"],
     crate = "russh_sftp",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
-    rustc_flags = ["@$(location :russh-sftp-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/bitflags/2.11.0:bitflags",

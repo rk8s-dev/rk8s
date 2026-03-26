@@ -4,22 +4,21 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "ipnetwork-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/ipnetwork/ipnetwork-0.17.0.crate"],
     sha256 = "02c3eaab3ac0ede60ffa41add21970a7df7d91772c03383aac6c2c3d53cc716b",
     type = "tar.gz",
     strip_prefix = "ipnetwork-0.17.0",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "ipnetwork-manifest",
-    vendor = ":ipnetwork-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "ipnetwork",
-    srcs = [":ipnetwork-vendor"],
+    srcs = [":vendor"],
     crate = "ipnetwork",
     crate_root = "vendor/src/lib.rs",
     edition = "2018",
@@ -27,7 +26,7 @@ rust_library(
         "default",
         "serde",
     ],
-    rustc_flags = ["@$(location :ipnetwork-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = ["//third-party/rust/crates/serde/1.0.228:serde"],
 )

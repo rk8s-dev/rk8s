@@ -4,22 +4,21 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "time-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/time/time-0.3.47.crate"],
     sha256 = "743bd48c283afc0388f9b8827b976905fb217ad9e647fae3a379a9283c4def2c",
     type = "tar.gz",
     strip_prefix = "time-0.3.47",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "time-manifest",
-    vendor = ":time-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "time",
-    srcs = [":time-vendor"],
+    srcs = [":vendor"],
     crate = "time",
     crate_root = "vendor/src/lib.rs",
     edition = "2024",
@@ -34,7 +33,7 @@ rust_library(
         "serde-well-known",
         "std",
     ],
-    rustc_flags = ["@$(location :time-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     os_deps = {
         "linux": [
             "//third-party/rust/crates/libc/0.2.182:libc",

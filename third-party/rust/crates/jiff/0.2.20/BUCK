@@ -4,22 +4,21 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "jiff-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/jiff/jiff-0.2.20.crate"],
     sha256 = "c867c356cc096b33f4981825ab281ecba3db0acefe60329f044c1789d94c6543",
     type = "tar.gz",
     strip_prefix = "jiff-0.2.20",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "jiff-manifest",
-    vendor = ":jiff-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "jiff",
-    srcs = [":jiff-vendor"],
+    srcs = [":vendor"],
     crate = "jiff",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
@@ -27,7 +26,7 @@ rust_library(
         "alloc",
         "std",
     ],
-    rustc_flags = ["@$(location :jiff-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/log/0.4.29:log",

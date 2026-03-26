@@ -2,15 +2,14 @@ use std::sync::Arc;
 
 use async_stream::stream;
 use clippy_utilities::OverflowArithmetic;
-use tonic::Status;
-use tonic::transport::{Channel, ClientTlsConfig, Endpoint};
+use xlinerpc::Status;
 use tracing::debug;
-use utils::build_endpoint;
 use xlineapi::{
     AuthInfo, EventType,
     command::{Command, CommandResponse, CurpClient, KeyRange, SyncResponse},
     execute_error::ExecuteError,
 };
+use xlinerpc::Status;
 // TODO: use our own status type
 // use xlinerpc::status::Status;
 use crate::{
@@ -21,7 +20,7 @@ use crate::{
         LeaseGrantRequest, LeaseGrantResponse, LockRequest, LockResponse, PutRequest, RangeRequest,
         RangeResponse, Request, RequestOp, RequestUnion, RequestWrapper, Response, ResponseHeader,
         SortOrder, SortTarget, TargetUnion, TxnRequest, TxnResponse, UnlockRequest, UnlockResponse,
-        WatchClient, WatchCreateRequest, WatchRequest,
+        WatchCreateRequest, WatchRequest,
     },
     storage::AuthStore,
 };
@@ -38,7 +37,7 @@ pub(super) struct LockServer {
     /// Id Generator
     id_gen: Arc<IdGenerator>,
     /// Server addresses
-    addrs: Vec<Endpoint>,
+    addrs: Vec<String>,
 }
 
 impl LockServer {
@@ -48,15 +47,9 @@ impl LockServer {
         auth_store: Arc<AuthStore>,
         id_gen: Arc<IdGenerator>,
         addrs: &[String],
-        client_tls_config: Option<&ClientTlsConfig>,
+        _client_tls_config: Option<()>,
     ) -> Self {
-        let addrs = addrs
-            .iter()
-            .map(|addr| {
-                build_endpoint(addr, client_tls_config)
-                    .unwrap_or_else(|_e| panic!("invalid address: {addr}"))
-            })
-            .collect();
+        let addrs = addrs.to_vec();
         Self {
             client,
             auth_store,
@@ -132,8 +125,6 @@ impl LockServer {
         auth_info: Option<&AuthInfo>,
     ) -> Result<(), Status> {
         let rev = my_rev.overflow_sub(1);
-        let mut watch_client =
-            WatchClient::new(Channel::balance_list(self.addrs.clone().into_iter()));
         loop {
             let range_end = KeyRange::get_prefix(&pfx);
             #[allow(clippy::as_conversions)] // this cast is always safe
@@ -152,25 +143,10 @@ impl LockServer {
                 Some(kv) => kv.key.clone(),
                 None => return Ok(()),
             };
-            let request_stream = stream! {
-                yield WatchRequest {
-                    request_union: Some(RequestUnion::CreateRequest(WatchCreateRequest {
-                        key: last_key,
-                        ..Default::default()
-                    })),
-                };
-            };
-            let mut response_stream = watch_client.watch(request_stream).await?.into_inner();
-            while let Some(watch_res) = response_stream.message().await? {
-                #[allow(clippy::as_conversions)] // this cast is always safe
-                if watch_res
-                    .events
-                    .iter()
-                    .any(|e| e.r#type == EventType::Delete as i32)
-                {
-                    break;
-                }
-            }
+
+            // For now, we'll just poll periodically instead of using streaming
+            // TODO: Implement proper watch with QUIC
+            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
         }
     }
 
@@ -209,11 +185,11 @@ impl LockServer {
     /// lease associate with the owner expires.
     async fn lock(
         &self,
-        request: tonic::Request<LockRequest>,
-    ) -> Result<tonic::Response<LockResponse>, Status> {
+        request: xlinerpc::Request<LockRequest>,
+    ) -> Result<xlinerpc::Response<LockResponse>, Status> {
         debug!("Receive LockRequest {:?}", request);
         let auth_info = self.auth_store.try_get_auth_info_from_request(&request)?;
-        let lock_req = request.into_inner();
+        let lock_req = request.data();
         let lease_id = if lock_req.lease == 0 {
             self.lease_grant(auth_info.clone()).await?
         } else {
@@ -275,7 +251,7 @@ impl LockServer {
             header,
             key: key.into_bytes(),
         };
-        Ok(tonic::Response::new(res))
+        Ok(xlinerpc::Response::from_data(res))
     }
 
     /// Unlock takes a key returned by Lock and releases the hold on lock. The
@@ -283,12 +259,12 @@ impl LockServer {
     /// ownership of the lock.
     async fn unlock(
         &self,
-        request: tonic::Request<UnlockRequest>,
-    ) -> Result<tonic::Response<UnlockResponse>, Status> {
+        request: xlinerpc::Request<UnlockRequest>,
+    ) -> Result<xlinerpc::Response<UnlockResponse>, Status> {
         debug!("Receive UnlockRequest {:?}", request);
         let auth_info = self.auth_store.try_get_auth_info_from_request(&request)?;
-        let header = self.delete_key(&request.get_ref().key, auth_info).await?;
-        Ok(tonic::Response::new(UnlockResponse { header }))
+        let header = self.delete_key(&request.data().key, auth_info).await?;
+        Ok(xlinerpc::Response::from_data(UnlockResponse { header }))
     }
 }
 
@@ -304,14 +280,14 @@ impl Server {
     pub(crate) fn endpoint(self) -> RouterEndpoint<Arc<LockServer>> {
         RouterEndpoint::new(self.lock_server)
             .add_unary_fn(
-                "/lock",
-                move |this: Arc<LockServer>, request: tonic::Request<LockRequest>| async move {
+                "/Lock",
+                move |this: Arc<LockServer>, request: xlinerpc::Request<LockRequest>| async move {
                     this.lock(request).await
                 },
             )
             .add_unary_fn(
-                "/unlock",
-                move |this: Arc<LockServer>, request: tonic::Request<UnlockRequest>| async move {
+                "/Unlock",
+                move |this: Arc<LockServer>, request: xlinerpc::Request<UnlockRequest>| async move {
                     this.unlock(request).await
                 },
             )

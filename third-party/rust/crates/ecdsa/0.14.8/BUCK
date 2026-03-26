@@ -4,22 +4,21 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "ecdsa-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/ecdsa/ecdsa-0.14.8.crate"],
     sha256 = "413301934810f597c1d19ca71c8710e99a3f1ba28a0d2ebc01551a2daeea3c5c",
     type = "tar.gz",
     strip_prefix = "ecdsa-0.14.8",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "ecdsa-manifest",
-    vendor = ":ecdsa-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "ecdsa",
-    srcs = [":ecdsa-vendor"],
+    srcs = [":vendor"],
     crate = "ecdsa",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
@@ -35,7 +34,7 @@ rust_library(
         "std",
         "verify",
     ],
-    rustc_flags = ["@$(location :ecdsa-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/der/0.6.1:der",

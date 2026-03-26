@@ -4,22 +4,21 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "jsonwebtoken-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/jsonwebtoken/jsonwebtoken-9.3.1.crate"],
     sha256 = "5a87cc7a48537badeae96744432de36f4be2b4a34a05a5ef32e9dd8a1c169dde",
     type = "tar.gz",
     strip_prefix = "jsonwebtoken-9.3.1",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "jsonwebtoken-manifest",
-    vendor = ":jsonwebtoken-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "jsonwebtoken",
-    srcs = [":jsonwebtoken-vendor"],
+    srcs = [":vendor"],
     crate = "jsonwebtoken",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
@@ -29,7 +28,7 @@ rust_library(
         "simple_asn1",
         "use_pem",
     ],
-    rustc_flags = ["@$(location :jsonwebtoken-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     os_deps = {
         "linux": ["//third-party/rust/crates/ring/0.17.14:ring"],
         "macos": ["//third-party/rust/crates/ring/0.17.14:ring"],

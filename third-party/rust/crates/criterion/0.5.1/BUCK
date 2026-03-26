@@ -4,22 +4,21 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "criterion-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/criterion/criterion-0.5.1.crate"],
     sha256 = "f2b12d017a929603d80db1831cd3a24082f8137ce19c69e6447f54f5fc8d692f",
     type = "tar.gz",
     strip_prefix = "criterion-0.5.1",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "criterion-manifest",
-    vendor = ":criterion-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "criterion",
-    srcs = [":criterion-vendor"],
+    srcs = [":vendor"],
     crate = "criterion",
     crate_root = "vendor/src/lib.rs",
     edition = "2018",
@@ -30,7 +29,7 @@ rust_library(
         "plotters",
         "rayon",
     ],
-    rustc_flags = ["@$(location :criterion-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/anes/0.1.6:anes",

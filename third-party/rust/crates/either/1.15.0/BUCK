@@ -4,22 +4,21 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "either-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/either/either-1.15.0.crate"],
     sha256 = "48c757948c5ede0e46177b7add2e67155f70e33c07fea8284df6576da70b3719",
     type = "tar.gz",
     strip_prefix = "either-1.15.0",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "either-manifest",
-    vendor = ":either-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "either",
-    srcs = [":either-vendor"],
+    srcs = [":vendor"],
     crate = "either",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
@@ -29,7 +28,7 @@ rust_library(
         "std",
         "use_std",
     ],
-    rustc_flags = ["@$(location :either-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = ["//third-party/rust/crates/serde/1.0.228:serde"],
 )

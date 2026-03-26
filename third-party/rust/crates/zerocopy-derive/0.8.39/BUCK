@@ -4,26 +4,25 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "zerocopy-derive-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/zerocopy-derive/zerocopy-derive-0.8.39.crate"],
     sha256 = "4122cd3169e94605190e77839c9a40d40ed048d305bfdc146e7df40ab0f3e517",
     type = "tar.gz",
     strip_prefix = "zerocopy-derive-0.8.39",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "zerocopy-derive-manifest",
-    vendor = ":zerocopy-derive-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "zerocopy-derive",
-    srcs = [":zerocopy-derive-vendor"],
+    srcs = [":vendor"],
     crate = "zerocopy_derive",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
-    rustc_flags = ["@$(location :zerocopy-derive-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     proc_macro = True,
     visibility = ["PUBLIC"],
     deps = [

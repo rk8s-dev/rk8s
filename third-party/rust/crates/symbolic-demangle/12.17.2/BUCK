@@ -4,27 +4,26 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "buildscript_run", "rust_binary", "rust_library")
 
 http_archive(
-    name = "symbolic-demangle-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/symbolic-demangle/symbolic-demangle-12.17.2.crate"],
     sha256 = "79b237cfbe320601dd24b4ac817a5b68bb28f5508e33f08d42be0682cadc8ac9",
     type = "tar.gz",
     strip_prefix = "symbolic-demangle-12.17.2",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "symbolic-demangle-manifest",
-    vendor = ":symbolic-demangle-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "symbolic-demangle",
-    srcs = [":symbolic-demangle-vendor"],
+    srcs = [":vendor"],
     crate = "symbolic_demangle",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
-        "OUT_DIR": "$(location :symbolic-demangle-build-script-run[out_dir])",
+        "OUT_DIR": "$(location :build-script-run[out_dir])",
     },
     features = [
         "cpp",
@@ -33,8 +32,8 @@ rust_library(
         "rustc-demangle",
     ],
     rustc_flags = [
-        "@$(location :symbolic-demangle-build-script-run[rustc_flags])",
-        "@$(location :symbolic-demangle-manifest[env_flags])",
+        "@$(location :build-script-run[rustc_flags])",
+        "@$(location :manifest[env_flags])",
     ],
     visibility = ["PUBLIC"],
     deps = [
@@ -45,8 +44,8 @@ rust_library(
 )
 
 rust_binary(
-    name = "symbolic-demangle-build-script-build",
-    srcs = [":symbolic-demangle-vendor"],
+    name = "build-script-build",
+    srcs = [":vendor"],
     crate = "build_script_build",
     crate_root = "vendor/build.rs",
     edition = "2021",
@@ -56,15 +55,15 @@ rust_binary(
         "rust",
         "rustc-demangle",
     ],
-    rustc_flags = ["@$(location :symbolic-demangle-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = [],
 )
 
 buildscript_run(
-    name = "symbolic-demangle-build-script-run",
+    name = "build-script-run",
     package_name = "symbolic-demangle",
-    buildscript_rule = ":symbolic-demangle-build-script-build",
-    env_srcs = [":symbolic-demangle-manifest[env_dict]"],
+    buildscript_rule = ":build-script-build",
+    env_srcs = [":manifest[env_dict]"],
     features = [
         "cpp",
         "cpp_demangle",
@@ -72,6 +71,6 @@ buildscript_run(
         "rustc-demangle",
     ],
     version = "12.17.2",
-    manifest_dir = ":symbolic-demangle-vendor",
+    manifest_dir = ":vendor",
     visibility = ["PUBLIC"],
 )

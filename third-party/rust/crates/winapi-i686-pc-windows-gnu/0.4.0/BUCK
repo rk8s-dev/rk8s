@@ -4,51 +4,50 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "buildscript_run", "rust_binary", "rust_library")
 
 http_archive(
-    name = "winapi-i686-pc-windows-gnu-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/winapi-i686-pc-windows-gnu/winapi-i686-pc-windows-gnu-0.4.0.crate"],
     sha256 = "ac3b87c63620426dd9b991e5ce0329eff545bccbbb34f3be09ff6fb6ab51b7b6",
     type = "tar.gz",
     strip_prefix = "winapi-i686-pc-windows-gnu-0.4.0",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "winapi-i686-pc-windows-gnu-manifest",
-    vendor = ":winapi-i686-pc-windows-gnu-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "winapi-i686-pc-windows-gnu",
-    srcs = [":winapi-i686-pc-windows-gnu-vendor"],
+    srcs = [":vendor"],
     crate = "winapi_i686_pc_windows_gnu",
     crate_root = "vendor/src/lib.rs",
     edition = "2015",
     env = {
-        "OUT_DIR": "$(location :winapi-i686-pc-windows-gnu-build-script-run[out_dir])",
+        "OUT_DIR": "$(location :build-script-run[out_dir])",
     },
     rustc_flags = [
-        "@$(location :winapi-i686-pc-windows-gnu-build-script-run[rustc_flags])",
-        "@$(location :winapi-i686-pc-windows-gnu-manifest[env_flags])",
+        "@$(location :build-script-run[rustc_flags])",
+        "@$(location :manifest[env_flags])",
     ],
     visibility = ["PUBLIC"],
 )
 
 rust_binary(
-    name = "winapi-i686-pc-windows-gnu-build-script-build",
-    srcs = [":winapi-i686-pc-windows-gnu-vendor"],
+    name = "build-script-build",
+    srcs = [":vendor"],
     crate = "build_script_build",
     crate_root = "vendor/build.rs",
     edition = "2015",
-    rustc_flags = ["@$(location :winapi-i686-pc-windows-gnu-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = [],
 )
 
 buildscript_run(
-    name = "winapi-i686-pc-windows-gnu-build-script-run",
+    name = "build-script-run",
     package_name = "winapi-i686-pc-windows-gnu",
-    buildscript_rule = ":winapi-i686-pc-windows-gnu-build-script-build",
-    env_srcs = [":winapi-i686-pc-windows-gnu-manifest[env_dict]"],
+    buildscript_rule = ":build-script-build",
+    env_srcs = [":manifest[env_dict]"],
     version = "0.4.0",
-    manifest_dir = ":winapi-i686-pc-windows-gnu-vendor",
+    manifest_dir = ":vendor",
     visibility = ["PUBLIC"],
 )

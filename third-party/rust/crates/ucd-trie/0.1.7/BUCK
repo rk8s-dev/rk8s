@@ -4,26 +4,25 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "ucd-trie-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/ucd-trie/ucd-trie-0.1.7.crate"],
     sha256 = "2896d95c02a80c6d6a5d6e953d479f5ddf2dfdb6a244441010e373ac0fb88971",
     type = "tar.gz",
     strip_prefix = "ucd-trie-0.1.7",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "ucd-trie-manifest",
-    vendor = ":ucd-trie-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "ucd-trie",
-    srcs = [":ucd-trie-vendor"],
+    srcs = [":vendor"],
     crate = "ucd_trie",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
     features = ["std"],
-    rustc_flags = ["@$(location :ucd-trie-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
 )

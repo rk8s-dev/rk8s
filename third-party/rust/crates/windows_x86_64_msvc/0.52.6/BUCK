@@ -4,51 +4,50 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "buildscript_run", "rust_binary", "rust_library")
 
 http_archive(
-    name = "windows_x86_64_msvc-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/windows_x86_64_msvc/windows_x86_64_msvc-0.52.6.crate"],
     sha256 = "589f6da84c646204747d1270a2a5661ea66ed1cced2631d546fdfb155959f9ec",
     type = "tar.gz",
     strip_prefix = "windows_x86_64_msvc-0.52.6",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "windows_x86_64_msvc-manifest",
-    vendor = ":windows_x86_64_msvc-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "windows_x86_64_msvc",
-    srcs = [":windows_x86_64_msvc-vendor"],
+    srcs = [":vendor"],
     crate = "windows_x86_64_msvc",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
-        "OUT_DIR": "$(location :windows_x86_64_msvc-build-script-run[out_dir])",
+        "OUT_DIR": "$(location :build-script-run[out_dir])",
     },
     rustc_flags = [
-        "@$(location :windows_x86_64_msvc-build-script-run[rustc_flags])",
-        "@$(location :windows_x86_64_msvc-manifest[env_flags])",
+        "@$(location :build-script-run[rustc_flags])",
+        "@$(location :manifest[env_flags])",
     ],
     visibility = ["PUBLIC"],
 )
 
 rust_binary(
-    name = "windows_x86_64_msvc-build-script-build",
-    srcs = [":windows_x86_64_msvc-vendor"],
+    name = "build-script-build",
+    srcs = [":vendor"],
     crate = "build_script_build",
     crate_root = "vendor/build.rs",
     edition = "2021",
-    rustc_flags = ["@$(location :windows_x86_64_msvc-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = [],
 )
 
 buildscript_run(
-    name = "windows_x86_64_msvc-build-script-run",
+    name = "build-script-run",
     package_name = "windows_x86_64_msvc",
-    buildscript_rule = ":windows_x86_64_msvc-build-script-build",
-    env_srcs = [":windows_x86_64_msvc-manifest[env_dict]"],
+    buildscript_rule = ":build-script-build",
+    env_srcs = [":manifest[env_dict]"],
     version = "0.52.6",
-    manifest_dir = ":windows_x86_64_msvc-vendor",
+    manifest_dir = ":vendor",
     visibility = ["PUBLIC"],
 )

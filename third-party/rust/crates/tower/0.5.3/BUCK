@@ -4,22 +4,21 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "tower-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/tower/tower-0.5.3.crate"],
     sha256 = "ebe5ef63511595f1344e2d5cfa636d973292adc0eec1f0ad45fae9f0851ab1d4",
     type = "tar.gz",
     strip_prefix = "tower-0.5.3",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "tower-manifest",
-    vendor = ":tower-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "tower",
-    srcs = [":tower-vendor"],
+    srcs = [":vendor"],
     crate = "tower",
     crate_root = "vendor/src/lib.rs",
     edition = "2018",
@@ -46,7 +45,7 @@ rust_library(
         "tracing",
         "util",
     ],
-    rustc_flags = ["@$(location :tower-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/futures-core/0.3.31:futures-core",

@@ -4,23 +4,22 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 filegroup(
-    name = "libcni-vendor",
+    name = "vendor",
     srcs = glob(["**/**"]),
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "libcni-manifest",
-    vendor = ":libcni-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "libcni",
-    srcs = [":libcni-vendor"],
+    srcs = [":vendor"],
     crate = "libcni",
     crate_root = "vendor/src/lib.rs",
     edition = "2024",
-    rustc_flags = ["@$(location :libcni-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/anyhow/1.0.101:anyhow",

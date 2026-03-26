@@ -4,31 +4,30 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "buildscript_run", "rust_binary", "rust_library")
 
 http_archive(
-    name = "context-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/context/context-3.0.0.crate"],
     sha256 = "0adf149597f6e75ab7c41ec360dd1a74c86667cf0ef09bd3c207d508665f60e8",
     type = "tar.gz",
     strip_prefix = "context-3.0.0",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "context-manifest",
-    vendor = ":context-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "context",
-    srcs = [":context-vendor"],
+    srcs = [":vendor"],
     crate = "context",
     crate_root = "vendor/src/lib.rs",
     edition = "2015",
     env = {
-        "OUT_DIR": "$(location :context-build-script-run[out_dir])",
+        "OUT_DIR": "$(location :build-script-run[out_dir])",
     },
     rustc_flags = [
-        "@$(location :context-build-script-run[rustc_flags])",
-        "@$(location :context-manifest[env_flags])",
+        "@$(location :build-script-run[rustc_flags])",
+        "@$(location :manifest[env_flags])",
     ],
     os_deps = {
         "windows": ["//third-party/rust/crates/winapi/0.3.9:winapi"],
@@ -38,22 +37,22 @@ rust_library(
 )
 
 rust_binary(
-    name = "context-build-script-build",
-    srcs = [":context-vendor"],
+    name = "build-script-build",
+    srcs = [":vendor"],
     crate = "build_script_build",
     crate_root = "vendor/build.rs",
     edition = "2015",
-    rustc_flags = ["@$(location :context-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = [],
     deps = ["//third-party/rust/crates/cc/1.2.56:cc"],
 )
 
 buildscript_run(
-    name = "context-build-script-run",
+    name = "build-script-run",
     package_name = "context",
-    buildscript_rule = ":context-build-script-build",
-    env_srcs = [":context-manifest[env_dict]"],
+    buildscript_rule = ":build-script-build",
+    env_srcs = [":manifest[env_dict]"],
     version = "3.0.0",
-    manifest_dir = ":context-vendor",
+    manifest_dir = ":vendor",
     visibility = ["PUBLIC"],
 )

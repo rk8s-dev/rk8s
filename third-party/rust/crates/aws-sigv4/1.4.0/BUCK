@@ -4,22 +4,21 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "aws-sigv4-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/aws-sigv4/aws-sigv4-1.4.0.crate"],
     sha256 = "68f6ae9b71597dc5fd115d52849d7a5556ad9265885ad3492ea8d73b93bbc46e",
     type = "tar.gz",
     strip_prefix = "aws-sigv4-1.4.0",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "aws-sigv4-manifest",
-    vendor = ":aws-sigv4-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "aws-sigv4",
-    srcs = [":aws-sigv4-vendor"],
+    srcs = [":vendor"],
     crate = "aws_sigv4",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
@@ -31,7 +30,7 @@ rust_library(
         "sign-http",
         "sigv4a",
     ],
-    rustc_flags = ["@$(location :aws-sigv4-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     named_deps = {
         "http0": "//third-party/rust/crates/http/0.2.12:http",
     },

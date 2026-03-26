@@ -4,26 +4,25 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "dockerfile-parser-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/dockerfile-parser/dockerfile-parser-0.9.0.crate"],
     sha256 = "aa53f9cb1532d7d7c19e269848ede84d7c80d59264c658469f0051a1d88c2780",
     type = "tar.gz",
     strip_prefix = "dockerfile-parser-0.9.0",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "dockerfile-parser-manifest",
-    vendor = ":dockerfile-parser-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "dockerfile-parser",
-    srcs = [":dockerfile-parser-vendor"],
+    srcs = [":vendor"],
     crate = "dockerfile_parser",
     crate_root = "vendor/src/lib.rs",
     edition = "2018",
-    rustc_flags = ["@$(location :dockerfile-parser-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/enquote/1.1.0:enquote",

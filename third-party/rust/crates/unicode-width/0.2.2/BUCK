@@ -4,22 +4,21 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "unicode-width-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/unicode-width/unicode-width-0.2.2.crate"],
     sha256 = "b4ac048d71ede7ee76d585517add45da530660ef4390e49b098733c6e897f254",
     type = "tar.gz",
     strip_prefix = "unicode-width-0.2.2",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "unicode-width-manifest",
-    vendor = ":unicode-width-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "unicode-width",
-    srcs = [":unicode-width-vendor"],
+    srcs = [":vendor"],
     crate = "unicode_width",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
@@ -27,6 +26,6 @@ rust_library(
         "cjk",
         "default",
     ],
-    rustc_flags = ["@$(location :unicode-width-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
 )

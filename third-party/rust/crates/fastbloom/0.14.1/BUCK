@@ -4,22 +4,21 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "fastbloom-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/fastbloom/fastbloom-0.14.1.crate"],
     sha256 = "4e7f34442dbe69c60fe8eaf58a8cafff81a1f278816d8ab4db255b3bef4ac3c4",
     type = "tar.gz",
     strip_prefix = "fastbloom-0.14.1",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "fastbloom-manifest",
-    vendor = ":fastbloom-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "fastbloom",
-    srcs = [":fastbloom-vendor"],
+    srcs = [":vendor"],
     crate = "fastbloom",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
@@ -28,7 +27,7 @@ rust_library(
         "rand",
         "std",
     ],
-    rustc_flags = ["@$(location :fastbloom-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/getrandom/0.3.4:getrandom",

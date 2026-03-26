@@ -4,26 +4,25 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "nibble_vec-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/nibble_vec/nibble_vec-0.1.0.crate"],
     sha256 = "77a5d83df9f36fe23f0c3648c6bbb8b0298bb5f1939c8f2704431371f4b84d43",
     type = "tar.gz",
     strip_prefix = "nibble_vec-0.1.0",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "nibble_vec-manifest",
-    vendor = ":nibble_vec-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "nibble_vec",
-    srcs = [":nibble_vec-vendor"],
+    srcs = [":vendor"],
     crate = "nibble_vec",
     crate_root = "vendor/src/lib.rs",
     edition = "2018",
-    rustc_flags = ["@$(location :nibble_vec-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = ["//third-party/rust/crates/smallvec/1.15.1:smallvec"],
 )

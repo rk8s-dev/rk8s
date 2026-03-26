@@ -4,27 +4,26 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "buildscript_run", "rust_binary", "rust_library")
 
 http_archive(
-    name = "nix-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/nix/nix-0.30.1.crate"],
     sha256 = "74523f3a35e05aba87a1d978330aef40f67b0304ac79c1c00b294c9830543db6",
     type = "tar.gz",
     strip_prefix = "nix-0.30.1",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "nix-manifest",
-    vendor = ":nix-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "nix",
-    srcs = [":nix-vendor"],
+    srcs = [":vendor"],
     crate = "nix",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
-        "OUT_DIR": "$(location :nix-build-script-run[out_dir])",
+        "OUT_DIR": "$(location :build-script-run[out_dir])",
     },
     features = [
         "default",
@@ -43,8 +42,8 @@ rust_library(
         "user",
     ],
     rustc_flags = [
-        "@$(location :nix-build-script-run[rustc_flags])",
-        "@$(location :nix-manifest[env_flags])",
+        "@$(location :build-script-run[rustc_flags])",
+        "@$(location :manifest[env_flags])",
     ],
     visibility = ["PUBLIC"],
     deps = [
@@ -56,8 +55,8 @@ rust_library(
 )
 
 rust_binary(
-    name = "nix-build-script-build",
-    srcs = [":nix-vendor"],
+    name = "build-script-build",
+    srcs = [":vendor"],
     crate = "build_script_build",
     crate_root = "vendor/build.rs",
     edition = "2021",
@@ -77,16 +76,16 @@ rust_binary(
         "time",
         "user",
     ],
-    rustc_flags = ["@$(location :nix-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = [],
     deps = ["//third-party/rust/crates/cfg_aliases/0.2.1:cfg_aliases"],
 )
 
 buildscript_run(
-    name = "nix-build-script-run",
+    name = "build-script-run",
     package_name = "nix",
-    buildscript_rule = ":nix-build-script-build",
-    env_srcs = [":nix-manifest[env_dict]"],
+    buildscript_rule = ":build-script-build",
+    env_srcs = [":manifest[env_dict]"],
     features = [
         "default",
         "event",
@@ -104,6 +103,6 @@ buildscript_run(
         "user",
     ],
     version = "0.30.1",
-    manifest_dir = ":nix-vendor",
+    manifest_dir = ":vendor",
     visibility = ["PUBLIC"],
 )

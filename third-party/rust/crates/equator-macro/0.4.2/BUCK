@@ -4,26 +4,25 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "equator-macro-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/equator-macro/equator-macro-0.4.2.crate"],
     sha256 = "44f23cf4b44bfce11a86ace86f8a73ffdec849c9fd00a386a53d278bd9e81fb3",
     type = "tar.gz",
     strip_prefix = "equator-macro-0.4.2",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "equator-macro-manifest",
-    vendor = ":equator-macro-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "equator-macro",
-    srcs = [":equator-macro-vendor"],
+    srcs = [":vendor"],
     crate = "equator_macro",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
-    rustc_flags = ["@$(location :equator-macro-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     proc_macro = True,
     visibility = ["PUBLIC"],
     deps = [

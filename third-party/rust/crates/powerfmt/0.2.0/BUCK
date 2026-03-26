@@ -4,25 +4,24 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "powerfmt-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/powerfmt/powerfmt-0.2.0.crate"],
     sha256 = "439ee305def115ba05938db6eb1644ff94165c5ab5e9420d1c1bcedbba909391",
     type = "tar.gz",
     strip_prefix = "powerfmt-0.2.0",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "powerfmt-manifest",
-    vendor = ":powerfmt-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "powerfmt",
-    srcs = [":powerfmt-vendor"],
+    srcs = [":vendor"],
     crate = "powerfmt",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
-    rustc_flags = ["@$(location :powerfmt-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
 )

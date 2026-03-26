@@ -4,22 +4,21 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "event-listener-strategy-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/event-listener-strategy/event-listener-strategy-0.5.4.crate"],
     sha256 = "8be9f3dfaaffdae2972880079a491a1a8bb7cbed0b8dd7a347f668b4150a3b93",
     type = "tar.gz",
     strip_prefix = "event-listener-strategy-0.5.4",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "event-listener-strategy-manifest",
-    vendor = ":event-listener-strategy-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "event-listener-strategy",
-    srcs = [":event-listener-strategy-vendor"],
+    srcs = [":vendor"],
     crate = "event_listener_strategy",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
@@ -27,7 +26,7 @@ rust_library(
         "default",
         "std",
     ],
-    rustc_flags = ["@$(location :event-listener-strategy-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/event-listener/5.4.1:event-listener",

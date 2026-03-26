@@ -4,26 +4,25 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "pastey-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/pastey/pastey-0.1.1.crate"],
     sha256 = "35fb2e5f958ec131621fdd531e9fc186ed768cbe395337403ae56c17a74c68ec",
     type = "tar.gz",
     strip_prefix = "pastey-0.1.1",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "pastey-manifest",
-    vendor = ":pastey-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "pastey",
-    srcs = [":pastey-vendor"],
+    srcs = [":vendor"],
     crate = "pastey",
     crate_root = "vendor/src/lib.rs",
     edition = "2018",
-    rustc_flags = ["@$(location :pastey-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     proc_macro = True,
     visibility = ["PUBLIC"],
 )

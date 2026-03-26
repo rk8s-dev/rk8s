@@ -4,26 +4,25 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "aws-sdk-ssooidc-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/aws-sdk-ssooidc/aws-sdk-ssooidc-1.96.0.crate"],
     sha256 = "e3e3a4cb3b124833eafea9afd1a6cc5f8ddf3efefffc6651ef76a03cbc6b4981",
     type = "tar.gz",
     strip_prefix = "aws-sdk-ssooidc-1.96.0",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "aws-sdk-ssooidc-manifest",
-    vendor = ":aws-sdk-ssooidc-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "aws-sdk-ssooidc",
-    srcs = [":aws-sdk-ssooidc-vendor"],
+    srcs = [":vendor"],
     crate = "aws_sdk_ssooidc",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
-    rustc_flags = ["@$(location :aws-sdk-ssooidc-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     named_deps = {
         "http_1x": "//third-party/rust/crates/http/1.4.0:http",
     },

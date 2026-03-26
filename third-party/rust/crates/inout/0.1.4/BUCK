@@ -4,22 +4,21 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "inout-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/inout/inout-0.1.4.crate"],
     sha256 = "879f10e63c20629ecabbb64a8010319738c66a5cd0c29b02d63d272b03751d01",
     type = "tar.gz",
     strip_prefix = "inout-0.1.4",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "inout-manifest",
-    vendor = ":inout-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "inout",
-    srcs = [":inout-vendor"],
+    srcs = [":vendor"],
     crate = "inout",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
@@ -27,7 +26,7 @@ rust_library(
         "block-padding",
         "std",
     ],
-    rustc_flags = ["@$(location :inout-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/block-padding/0.3.3:block-padding",

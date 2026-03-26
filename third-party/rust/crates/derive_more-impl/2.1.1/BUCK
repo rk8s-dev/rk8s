@@ -4,22 +4,21 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "derive_more-impl-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/derive_more-impl/derive_more-impl-2.1.1.crate"],
     sha256 = "799a97264921d8623a957f6c3b9011f3b5492f557bbb7a5a19b7fa6d06ba8dcb",
     type = "tar.gz",
     strip_prefix = "derive_more-impl-2.1.1",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "derive_more-impl-manifest",
-    vendor = ":derive_more-impl-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "derive_more-impl",
-    srcs = [":derive_more-impl-vendor"],
+    srcs = [":vendor"],
     crate = "derive_more_impl",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
@@ -28,7 +27,7 @@ rust_library(
         "default",
         "display",
     ],
-    rustc_flags = ["@$(location :derive_more-impl-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     proc_macro = True,
     visibility = ["PUBLIC"],
     deps = [

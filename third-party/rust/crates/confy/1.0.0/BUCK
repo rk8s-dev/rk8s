@@ -4,22 +4,21 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "confy-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/confy/confy-1.0.0.crate"],
     sha256 = "f29222b549d4e3ded127989d523da9e928918d0d0d7f7c1690b439d0d538bae9",
     type = "tar.gz",
     strip_prefix = "confy-1.0.0",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "confy-manifest",
-    vendor = ":confy-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "confy",
-    srcs = [":confy-vendor"],
+    srcs = [":vendor"],
     crate = "confy",
     crate_root = "vendor/src/lib.rs",
     edition = "2024",
@@ -28,7 +27,7 @@ rust_library(
         "toml",
         "toml_conf",
     ],
-    rustc_flags = ["@$(location :confy-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/directories/6.0.0:directories",

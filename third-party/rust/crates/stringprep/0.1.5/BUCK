@@ -4,26 +4,25 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "stringprep-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/stringprep/stringprep-0.1.5.crate"],
     sha256 = "7b4df3d392d81bd458a8a621b8bffbd2302a12ffe288a9d931670948749463b1",
     type = "tar.gz",
     strip_prefix = "stringprep-0.1.5",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "stringprep-manifest",
-    vendor = ":stringprep-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "stringprep",
-    srcs = [":stringprep-vendor"],
+    srcs = [":vendor"],
     crate = "stringprep",
     crate_root = "vendor/src/lib.rs",
     edition = "2015",
-    rustc_flags = ["@$(location :stringprep-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/unicode-bidi/0.3.18:unicode-bidi",

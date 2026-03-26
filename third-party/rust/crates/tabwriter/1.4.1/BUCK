@@ -4,27 +4,26 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "tabwriter-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/tabwriter/tabwriter-1.4.1.crate"],
     sha256 = "fce91f2f0ec87dff7e6bcbbeb267439aa1188703003c6055193c821487400432",
     type = "tar.gz",
     strip_prefix = "tabwriter-1.4.1",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "tabwriter-manifest",
-    vendor = ":tabwriter-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "tabwriter",
-    srcs = [":tabwriter-vendor"],
+    srcs = [":vendor"],
     crate = "tabwriter",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
     features = ["default"],
-    rustc_flags = ["@$(location :tabwriter-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = ["//third-party/rust/crates/unicode-width/0.2.2:unicode-width"],
 )

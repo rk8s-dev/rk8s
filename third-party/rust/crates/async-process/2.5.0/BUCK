@@ -4,26 +4,25 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "async-process-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/async-process/async-process-2.5.0.crate"],
     sha256 = "fc50921ec0055cdd8a16de48773bfeec5c972598674347252c0399676be7da75",
     type = "tar.gz",
     strip_prefix = "async-process-2.5.0",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "async-process-manifest",
-    vendor = ":async-process-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "async-process",
-    srcs = [":async-process-vendor"],
+    srcs = [":vendor"],
     crate = "async_process",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
-    rustc_flags = ["@$(location :async-process-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     os_deps = {
         "linux": [
             "//third-party/rust/crates/async-channel/2.5.0:async-channel",

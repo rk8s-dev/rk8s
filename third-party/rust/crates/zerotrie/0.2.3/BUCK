@@ -4,22 +4,21 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "zerotrie-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/zerotrie/zerotrie-0.2.3.crate"],
     sha256 = "2a59c17a5562d507e4b54960e8569ebee33bee890c70aa3fe7b97e85a9fd7851",
     type = "tar.gz",
     strip_prefix = "zerotrie-0.2.3",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "zerotrie-manifest",
-    vendor = ":zerotrie-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "zerotrie",
-    srcs = [":zerotrie-vendor"],
+    srcs = [":vendor"],
     crate = "zerotrie",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
@@ -27,7 +26,7 @@ rust_library(
         "yoke",
         "zerofrom",
     ],
-    rustc_flags = ["@$(location :zerotrie-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/displaydoc/0.2.5:displaydoc",

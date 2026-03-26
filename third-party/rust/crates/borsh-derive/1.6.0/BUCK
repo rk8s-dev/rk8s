@@ -4,22 +4,21 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "borsh-derive-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/borsh-derive/borsh-derive-1.6.0.crate"],
     sha256 = "0686c856aa6aac0c4498f936d7d6a02df690f614c03e4d906d1018062b5c5e2c",
     type = "tar.gz",
     strip_prefix = "borsh-derive-1.6.0",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "borsh-derive-manifest",
-    vendor = ":borsh-derive-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "borsh-derive",
-    srcs = [":borsh-derive-vendor"],
+    srcs = [":vendor"],
     crate = "borsh_derive",
     crate_root = "vendor/src/lib.rs",
     edition = "2018",
@@ -27,7 +26,7 @@ rust_library(
         "default",
         "schema",
     ],
-    rustc_flags = ["@$(location :borsh-derive-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     proc_macro = True,
     visibility = ["PUBLIC"],
     deps = [

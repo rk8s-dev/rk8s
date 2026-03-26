@@ -4,26 +4,25 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "aws-smithy-eventstream-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/aws-smithy-eventstream/aws-smithy-eventstream-0.60.19.crate"],
     sha256 = "1c0b3e587fbaa5d7f7e870544508af8ce82ea47cd30376e69e1e37c4ac746f79",
     type = "tar.gz",
     strip_prefix = "aws-smithy-eventstream-0.60.19",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "aws-smithy-eventstream-manifest",
-    vendor = ":aws-smithy-eventstream-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "aws-smithy-eventstream",
-    srcs = [":aws-smithy-eventstream-vendor"],
+    srcs = [":vendor"],
     crate = "aws_smithy_eventstream",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
-    rustc_flags = ["@$(location :aws-smithy-eventstream-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/aws-smithy-types/1.4.4:aws-smithy-types",

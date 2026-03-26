@@ -4,22 +4,21 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "anstyle-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/anstyle/anstyle-1.0.13.crate"],
     sha256 = "5192cca8006f1fd4f7237516f40fa183bb07f8fbdfedaa0036de5ea9b0b45e78",
     type = "tar.gz",
     strip_prefix = "anstyle-1.0.13",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "anstyle-manifest",
-    vendor = ":anstyle-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "anstyle",
-    srcs = [":anstyle-vendor"],
+    srcs = [":vendor"],
     crate = "anstyle",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
@@ -27,6 +26,6 @@ rust_library(
         "default",
         "std",
     ],
-    rustc_flags = ["@$(location :anstyle-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
 )

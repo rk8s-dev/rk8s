@@ -14,6 +14,8 @@ services:
     restart: unless-stopped
     ports:
       - "${OCI_REGISTRY_PORT}:8968"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - registry_data:${OCI_REGISTRY_ROOTDIR}
     environment:
@@ -37,6 +39,8 @@ services:
 
       JWT_SECRET: ${JWT_SECRET}
       JWT_LIFETIME_SECONDS: ${JWT_LIFETIME_SECONDS}
+      OCI_REGISTRY_AUTH_API_URL: ${OCI_REGISTRY_AUTH_API_URL}
+      INTERNAL_VERIFY_TOKEN: ${INTERNAL_VERIFY_TOKEN}
       RUST_LOG: ${RUST_LOG}
 
       GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID}

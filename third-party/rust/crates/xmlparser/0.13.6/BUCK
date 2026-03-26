@@ -4,22 +4,21 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "xmlparser-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/xmlparser/xmlparser-0.13.6.crate"],
     sha256 = "66fee0b777b0f5ac1c69bb06d361268faafa61cd4682ae064a171c16c433e9e4",
     type = "tar.gz",
     strip_prefix = "xmlparser-0.13.6",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "xmlparser-manifest",
-    vendor = ":xmlparser-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "xmlparser",
-    srcs = [":xmlparser-vendor"],
+    srcs = [":vendor"],
     crate = "xmlparser",
     crate_root = "vendor/src/lib.rs",
     edition = "2018",
@@ -27,6 +26,6 @@ rust_library(
         "default",
         "std",
     ],
-    rustc_flags = ["@$(location :xmlparser-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
 )

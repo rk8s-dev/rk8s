@@ -8,27 +8,80 @@ use std::{
     time::Duration,
 };
 
-use curp::rpc::{CurpError, CurpErrorWrapper};
-use futures::{Stream, StreamExt, future::BoxFuture};
-use gm_quic::prelude::{Connection, QuicClient, StreamReader, StreamWriter};
+use bytes::{Buf, Bytes, BytesMut};
+use futures::{Stream, StreamExt};
+use gm_quic::prelude::{Connection as GmConnection, QuicClient};
+use h3::client::RequestStream;
+use h3_shim::BidiStream;
 use prost::Message;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::RwLock;
-use xlinerpc::status::{Code, Status};
-
-const SEND_TASK_GRACE_PERIOD: Duration = Duration::from_millis(100);
-const MAX_FRAME_LEN: usize = 16 * 1024 * 1024;
-const FRAME_DATA: u8 = 0x01;
-const FRAME_END: u8 = 0x02;
-const FRAME_STATUS: u8 = 0x03;
-const STATUS_OK: u8 = 0x00;
-const STATUS_ERROR: u8 = 0x01;
+use xlinerpc::status::Status;
 
 pub(crate) use curp::rpc::MethodId;
 
+use crate::error::{h3_stream_error_to_status, http_status_to_result};
+use crate::h3_pool::H3ConnectionPool;
+
+/// Type alias for h3 request stream with BidiStream
+type H3RequestStream = RequestStream<BidiStream<Bytes>, Bytes>;
+
+/// gRPC frame header size: 1 byte compression flag + 4 bytes length
+const GRPC_HEADER_SIZE: usize = 5;
+
+/// Calculate total frame size from gRPC header buffer.
+/// Returns (length, total bytes) where `length` is the message length and `total` is
+/// the entire frame size including the header.
+fn grpc_calculate_frame_size(buf: &[u8]) -> (usize, usize) {
+    let len = u32::from_be_bytes([buf[1], buf[2], buf[3], buf[4]]) as usize;
+    let total = GRPC_HEADER_SIZE + len;
+    (len, total)
+}
+
+/// Encode a protobuf message into a gRPC framed bytes buffer.
+///
+/// gRPC frame format:
+/// ```text
+/// [0]        = compression flag (0 = uncompressed, 1 = compressed)
+/// [1..5]     = message length (big-endian u32)
+/// [5..5+len] = message body (protobuf)
+/// ```
+fn grpc_frame_encode<M: Message>(msg: &M) -> Bytes {
+    let body = msg.encode_to_vec();
+    let len = body.len() as u32;
+    let mut buf = BytesMut::with_capacity(GRPC_HEADER_SIZE + body.len());
+    buf.extend_from_slice(&[0u8]); // uncompressed
+    buf.extend_from_slice(&len.to_be_bytes());
+    buf.extend_from_slice(&body);
+    buf.freeze()
+}
+
+/// Decode a gRPC framed buffer into a protobuf message.
+///
+/// Returns the protobuf message and the number of bytes consumed.
+fn grpc_frame_decode<M: Message + Default>(buf: &[u8]) -> Result<(M, usize), Status> {
+    if buf.len() < GRPC_HEADER_SIZE {
+        return Err(Status::internal("gRPC frame header too short"));
+    }
+    let compressed = buf[0] != 0;
+    if compressed {
+        return Err(Status::internal(
+            "compressed gRPC frames are not supported (compression flag set)",
+        ));
+    }
+    let len = u32::from_be_bytes([buf[1], buf[2], buf[3], buf[4]]) as usize;
+    let total = GRPC_HEADER_SIZE + len;
+    if buf.len() < total {
+        return Err(Status::internal("gRPC frame body too short"));
+    }
+    let body = &buf[GRPC_HEADER_SIZE..total];
+    let msg =
+        M::decode(body).map_err(|e| Status::internal(format!("protobuf decode error: {e}")))?;
+    Ok((msg, total))
+}
+
 #[derive(Clone)]
 pub(crate) struct Channel {
-    client: Arc<QuicClient>,
+    pool: Arc<H3ConnectionPool>,
     addrs: Arc<RwLock<Vec<String>>>,
     index: Arc<AtomicUsize>,
     token: Option<Arc<str>>,
@@ -53,7 +106,7 @@ impl Channel {
         timeout: Duration,
     ) -> Self {
         Self {
-            client,
+            pool: Arc::new(H3ConnectionPool::new(client)),
             addrs: Arc::new(RwLock::new(addrs)),
             index: Arc::new(AtomicUsize::new(0)),
             token: token.map(String::into_boxed_str).map(Arc::from),
@@ -64,7 +117,7 @@ impl Channel {
     #[inline]
     pub(crate) fn with_token(&self, token: Option<String>) -> Self {
         Self {
-            client: Arc::clone(&self.client),
+            pool: Arc::clone(&self.pool),
             addrs: Arc::clone(&self.addrs),
             index: Arc::clone(&self.index),
             token: token.map(String::into_boxed_str).map(Arc::from),
@@ -80,43 +133,235 @@ impl Channel {
             .unwrap_or_default()
     }
 
+    /// Convert MethodId to hex string for HTTP header
+    fn method_id_to_hex(method: MethodId) -> String {
+        format!("{:04X}", method.as_u16())
+    }
+
+    /// Map MethodId to the corresponding service URL path
+    fn method_to_path(method: MethodId) -> &'static str {
+        match method {
+            // Xline Auth -> /etcdserverpb.Auth
+            MethodId::XlineAuthenticate => "/etcdserverpb.Auth/Authenticate",
+
+            // Xline Lease -> /etcdserverpb.Lease
+            MethodId::XlineLeaseRevoke => "/etcdserverpb.Lease/LeaseRevoke",
+            MethodId::XlineLeaseKeepAlive => "/etcdserverpb.Lease/LeaseKeepAlive",
+            MethodId::XlineLeaseTtl => "/etcdserverpb.Lease/LeaseTimeToLive",
+
+            // Xline Watch -> /etcdserverpb.Watch
+            MethodId::XlineWatch => "/etcdserverpb.Watch/Watch",
+
+            // Xline Maintenance -> /etcdserverpb.Maintenance
+            MethodId::XlineSnapshot => "/etcdserverpb.Maintenance/Snapshot",
+            MethodId::XlineAlarm => "/etcdserverpb.Maintenance/Alarm",
+            MethodId::XlineMaintStatus => "/etcdserverpb.Maintenance/Status",
+
+            // Xline Cluster -> /etcdserverpb.Cluster
+            MethodId::XlineMemberAdd => "/etcdserverpb.Cluster/MemberAdd",
+            MethodId::XlineMemberRemove => "/etcdserverpb.Cluster/MemberRemove",
+            MethodId::XlineMemberPromote => "/etcdserverpb.Cluster/MemberPromote",
+            MethodId::XlineMemberUpdate => "/etcdserverpb.Cluster/MemberUpdate",
+            MethodId::XlineMemberList => "/etcdserverpb.Cluster/MemberList",
+
+            // Xline KV -> /etcdserverpb.KV
+            MethodId::XlineCompact => "/etcdserverpb.KV/Compact",
+
+            // All curp protocol methods
+            MethodId::FetchCluster => "/commandpb.Protocol/FetchCluster",
+            MethodId::FetchReadState => "/commandpb.Protocol/FetchReadState",
+            MethodId::Record => "/commandpb.Protocol/Record",
+            MethodId::ReadIndex => "/commandpb.Protocol/ReadIndex",
+            MethodId::Shutdown => "/commandpb.Protocol/Shutdown",
+            MethodId::ProposeConfChange => "/commandpb.Protocol/ProposeConfChange",
+            MethodId::Publish => "/commandpb.Protocol/Publish",
+            MethodId::MoveLeader => "/commandpb.Protocol/MoveLeader",
+            MethodId::ProposeStream => "/commandpb.Protocol/ProposeStream",
+            MethodId::LeaseKeepAlive => "/commandpb.Protocol/LeaseKeepAlive",
+
+            // Inner protocol methods (currently not used by xline client) - fall back to service path
+            _ => "/commandpb.Protocol/Propose",
+        }
+    }
+
+    async fn get_endpoint(&self) -> Result<String, Status> {
+        let addrs = self.addrs.read().await;
+        if addrs.is_empty() {
+            return Err(Status::unavailable("no available endpoints"));
+        }
+
+        let len = addrs.len();
+        let idx = self.index.fetch_add(1, Ordering::Relaxed) % len;
+        let addr = addrs[idx]
+            .strip_prefix("quic://")
+            .or_else(|| addrs[idx].strip_prefix("https://"))
+            .or_else(|| addrs[idx].strip_prefix("http://"))
+            .unwrap_or(&addrs[idx]);
+        Ok(addr.to_string())
+    }
+
+    /// Build an HTTP request with method id and metadata headers
+    fn build_request(
+        method: MethodId,
+        metadata: &[(String, String)],
+        endpoint: &str,
+    ) -> Result<http::Request<()>, Status> {
+        let path = Self::method_to_path(method);
+        let uri = format!("https://{endpoint}{path}");
+
+        let mut builder = http::Request::builder().method(http::Method::POST).uri(uri);
+
+        // Use parsed header values to avoid invalid header errors
+        let method_id_header = http::header::HeaderName::from_bytes(b"x-method-id")
+            .map_err(|e| Status::internal(format!("invalid x-method-id header: {e}")))?;
+        builder = builder.header(method_id_header, Self::method_id_to_hex(method));
+
+        let content_type = http::header::HeaderName::from_bytes(b"content-type")
+            .map_err(|e| Status::internal(format!("invalid content-type header: {e}")))?;
+        builder = builder.header(content_type, "application/grpc+proto");
+
+        for (key, value) in metadata {
+            let header_name = http::header::HeaderName::from_bytes(key.as_bytes())
+                .map_err(|e| Status::internal(format!("invalid header name {key}: {e}")))?;
+            let header_value = http::header::HeaderValue::from_str(value)
+                .map_err(|e| Status::internal(format!("invalid header value for {key}: {e}")))?;
+            builder = builder.header(header_name, header_value);
+        }
+
+        builder
+            .body(())
+            .map_err(|e| Status::internal(format!("build request error: {e}")))
+    }
+
+    /// Helper: create new connection and send request
+    async fn create_connection(&self, endpoint_str: &str) -> Result<GmConnection, Status> {
+        let client = self.pool.client();
+        let conn = client
+            .connect(endpoint_str)
+            .await
+            .map_err(|e| Status::unavailable(format!("QUIC connect error: {e}")))?;
+        Ok(conn)
+    }
+
     pub(crate) async fn unary<Req, Resp>(&self, method: MethodId, req: Req) -> Result<Resp, Status>
     where
         Req: Message,
         Resp: Message + Default,
     {
-        let conn = self.connection().await?;
-        tokio::time::timeout(self.timeout, async {
-            let (recv, send) = Self::open_bi_stream(&conn).await?;
-            let mut writer = FrameWriter::new(send);
-            let mut reader = FrameReader::new(recv);
+        let endpoint_str = self.get_endpoint().await?;
+        let conn = self.create_connection(&endpoint_str).await?;
 
-            writer
-                .write_request_header(method, &self.metadata())
-                .await?;
-            writer.write_data(req.encode_to_vec()).await?;
-            writer.write_end().await?;
-            writer.flush().await?;
-            writer.shutdown().await?;
+        let (mut h3_driver, mut send_req) =
+            h3::client::new(h3_shim::QuicConnection::new(Arc::new(conn)))
+                .await
+                .map_err(|e| Status::unavailable(format!("h3 init error: {e}")))?;
 
-            let payload = match reader.read_frame().await? {
-                Frame::Data(data) => data,
-                Frame::Status(status) => return Err(status),
-                Frame::End => return Err(Status::internal("unexpected END in unary response")),
-            };
-            match reader.read_frame().await? {
-                Frame::Status(status) if status.code() == Code::Ok => {}
-                Frame::Status(status) => return Err(status),
-                Frame::Data(_) | Frame::End => {
-                    return Err(Status::internal("expected STATUS frame in unary response"));
+        let request = Self::build_request(method, &self.metadata(), &endpoint_str)?;
+        let mut stream = send_req
+            .send_request(request)
+            .await
+            .map_err(h3_stream_error_to_status)?;
+
+        // Send gRPC framed request body
+        let grpc_body = grpc_frame_encode(&req);
+        stream
+            .send_data(grpc_body)
+            .await
+            .map_err(h3_stream_error_to_status)?;
+
+        // Finish sending
+        stream.finish().await.map_err(h3_stream_error_to_status)?;
+
+        // Receive response
+        let resp = stream
+            .recv_response()
+            .await
+            .map_err(h3_stream_error_to_status)?;
+
+        // Check HTTP status
+        http_status_to_result(resp.status())?;
+
+        // Receive gRPC framed response body
+        let mut buf = Vec::new();
+        loop {
+            match stream.recv_data().await {
+                Ok(Some(data)) => {
+                    tracing::debug!("Received data chunk: {} bytes", data.chunk().len());
+                    buf.extend_from_slice(data.chunk());
+                }
+                Ok(None) => break, // No more data
+                Err(e) => {
+                    tracing::error!("Error receiving data: {:?}", e);
+                    // Try to get trailers for grpc status
+                    if let Ok(Some(trailers)) = stream.recv_trailers().await {
+                        tracing::debug!("Received trailers: {:?}", trailers);
+                        if let Some(status) = trailers.get("grpc-status") {
+                            let status_str = status.to_str().unwrap_or("unknown");
+                            if status_str != "0" {
+                                return Err(Status::internal(format!(
+                                    "gRPC error status: {}",
+                                    status_str
+                                )));
+                            }
+                        }
+                    }
+                    return Err(h3_stream_error_to_status(e));
                 }
             }
+        }
 
-            Resp::decode(payload.as_slice())
-                .map_err(|e| Status::internal(format!("decode response error: {e}")))
-        })
-        .await
-        .map_err(|_| Status::deadline_exceeded("request timeout"))?
+        // Always check gRPC status from trailers after all data is received
+        if let Ok(Some(trailers)) = stream.recv_trailers().await {
+            tracing::debug!("Received trailers: {:?}", trailers);
+            if let Some(status) = trailers.get("grpc-status") {
+                let status_str = status.to_str().unwrap_or("unknown");
+                if status_str != "0" {
+                    let msg = trailers
+                        .get("grpc-message")
+                        .and_then(|v| v.to_str().ok())
+                        .unwrap_or("unknown");
+                    let code = status_str.parse::<i32>().unwrap_or(2);
+                    return Err(Status::new(code.into(), msg.to_string()));
+                }
+            }
+        }
+
+        tracing::debug!("Total response buffer size: {} bytes", buf.len());
+
+        // If we got no data at all, check for gRPC status in response trailers
+        if buf.is_empty() {
+            if let Ok(Some(trailers)) = stream.recv_trailers().await {
+                tracing::debug!("Empty body, trailers: {:?}", trailers);
+                if let Some(status) = trailers.get("grpc-status") {
+                    let status_str = status.to_str().unwrap_or("unknown");
+                    if status_str != "0" {
+                        let msg = trailers
+                            .get("grpc-message")
+                            .and_then(|v| v.to_str().ok())
+                            .unwrap_or("unknown");
+                        return Err(Status::internal(format!(
+                            "gRPC error: {} - {}",
+                            status_str, msg
+                        )));
+                    }
+                }
+            }
+            return Err(Status::internal("empty response body"));
+        }
+
+        // Decode gRPC frame -> protobuf
+        tracing::debug!(
+            "Buffer content (first 20 bytes): {:02x?}",
+            &buf[..buf.len().min(20)]
+        );
+        let (msg, _) = grpc_frame_decode::<Resp>(&buf)?;
+
+        // Spawn a background task to drive the h3 connection state machine
+        let _ = tokio::spawn(async move {
+            let _ = h3_driver.wait_idle().await;
+        });
+
+        Ok(msg)
     }
 
     pub(crate) async fn server_streaming<Req, Resp>(
@@ -128,106 +373,200 @@ impl Channel {
         Req: Message,
         Resp: Message + Default + Send + Unpin + 'static,
     {
-        let conn = self.connection().await?;
-        let (recv, send) = tokio::time::timeout(self.timeout, Self::open_bi_stream(&conn))
+        let endpoint_str = self.get_endpoint().await?;
+        let conn = self.create_connection(&endpoint_str).await?;
+
+        let (mut h3_driver, mut send_req) =
+            h3::client::new(h3_shim::QuicConnection::new(Arc::new(conn)))
+                .await
+                .map_err(|e| Status::unavailable(format!("h3 init error: {e}")))?;
+
+        let request = Self::build_request(method, &self.metadata(), &endpoint_str)?;
+        let mut stream = send_req
+            .send_request(request)
             .await
-            .map_err(|_| Status::deadline_exceeded("request timeout"))??;
+            .map_err(h3_stream_error_to_status)?;
 
-        let mut writer = FrameWriter::new(send);
-        writer
-            .write_request_header(method, &self.metadata())
-            .await?;
-        writer.write_data(req.encode_to_vec()).await?;
-        writer.write_end().await?;
-        writer.flush().await?;
-        writer.shutdown().await?;
+        // Send gRPC framed request body
+        let grpc_body = grpc_frame_encode(&req);
+        stream
+            .send_data(grpc_body)
+            .await
+            .map_err(h3_stream_error_to_status)?;
 
-        Ok(Streaming::new(Box::pin(ResponseStream::new(
-            FrameReader::new(recv),
-            conn,
-        ))))
+        // Finish sending
+        stream.finish().await.map_err(h3_stream_error_to_status)?;
+
+        // Receive response headers
+        let resp = stream
+            .recv_response()
+            .await
+            .map_err(h3_stream_error_to_status)?;
+
+        // Check HTTP status
+        http_status_to_result(resp.status())?;
+
+        // Spawn a background task to drive the h3 connection
+        let _ = tokio::spawn(async move {
+            let _ = h3_driver.wait_idle().await;
+        });
+
+        Ok(Streaming::new(Box::pin(GrpcResponseStream {
+            stream,
+            buf: Vec::new(),
+            finished: false,
+            _marker: std::marker::PhantomData,
+        })))
     }
 
     pub(crate) async fn client_streaming<Req, Resp, St>(
         &self,
         method: MethodId,
-        stream: St,
+        input: St,
     ) -> Result<Streaming<Resp>, Status>
     where
         Req: Message + Send + 'static,
         Resp: Message + Default + Send + Unpin + 'static,
         St: Stream<Item = Req> + Send + 'static,
     {
-        let conn = self.connection().await?;
-        let (recv, send) = tokio::time::timeout(self.timeout, Self::open_bi_stream(&conn))
+        let endpoint_str = self.get_endpoint().await?;
+        let conn = self.create_connection(&endpoint_str).await?;
+
+        let (mut h3_driver, mut send_req) =
+            h3::client::new(h3_shim::QuicConnection::new(Arc::new(conn)))
+                .await
+                .map_err(|e| Status::unavailable(format!("h3 init error: {e}")))?;
+
+        let request = Self::build_request(method, &self.metadata(), &endpoint_str)?;
+        let mut stream = send_req
+            .send_request(request)
             .await
-            .map_err(|_| Status::deadline_exceeded("request timeout"))??;
+            .map_err(h3_stream_error_to_status)?;
 
-        let mut writer = FrameWriter::new(send);
-        writer
-            .write_request_header(method, &self.metadata())
-            .await?;
-        writer.flush().await?;
-
-        let send_task = tokio::spawn(async move {
-            futures::pin_mut!(stream);
-            while let Some(req) = stream.next().await {
-                writer.write_data(req.encode_to_vec()).await?;
-            }
-            writer.write_end().await?;
-            writer.flush().await?;
-            writer.shutdown().await
-        });
-
-        Ok(Streaming::new(Box::pin(ResponseStream::with_send_task(
-            FrameReader::new(recv),
-            conn,
-            send_task,
-        ))))
-    }
-
-    async fn connection(&self) -> Result<Connection, Status> {
-        let addrs = self.addrs.read().await;
-        if addrs.is_empty() {
-            return Err(Status::unavailable("no available endpoints"));
+        // Send all messages from the input stream
+        futures::pin_mut!(input);
+        while let Some(msg) = input.next().await {
+            let grpc_body = grpc_frame_encode(&msg);
+            stream
+                .send_data(grpc_body)
+                .await
+                .map_err(h3_stream_error_to_status)?;
         }
 
-        let len = addrs.len();
-        let start = self.index.fetch_add(1, Ordering::Relaxed) % len;
-        let snapshot: Vec<_> = addrs.iter().cloned().collect();
-        drop(addrs);
+        // Finish sending
+        stream.finish().await.map_err(h3_stream_error_to_status)?;
 
-        let mut last_err = None;
-        for offset in 0..len {
-            let idx = (start + offset) % len;
-            let addr = snapshot[idx]
-                .strip_prefix("quic://")
-                .or_else(|| snapshot[idx].strip_prefix("https://"))
-                .or_else(|| snapshot[idx].strip_prefix("http://"))
-                .unwrap_or(&snapshot[idx]);
-            match self.client.connect(addr).await {
-                Ok(conn) => return Ok(conn),
-                Err(err) => {
-                    last_err = Some(Status::unavailable(format!(
-                        "QUIC connect error for {addr}: {err}"
-                    )));
+        // Receive response headers
+        let resp = stream
+            .recv_response()
+            .await
+            .map_err(h3_stream_error_to_status)?;
+
+        // Check HTTP status
+        http_status_to_result(resp.status())?;
+
+        // Spawn a background task to drive the h3 connection
+        let _ = tokio::spawn(async move {
+            let _ = h3_driver.wait_idle().await;
+        });
+
+        Ok(Streaming::new(Box::pin(GrpcResponseStream {
+            stream,
+            buf: Vec::new(),
+            finished: false,
+            _marker: std::marker::PhantomData,
+        })))
+    }
+}
+
+/// gRPC framed response stream - accumulates data and decodes gRPC frames
+struct GrpcResponseStream<T> {
+    stream: H3RequestStream,
+    buf: Vec<u8>,
+    finished: bool,
+    _marker: std::marker::PhantomData<T>,
+}
+
+impl<T> Stream for GrpcResponseStream<T>
+where
+    T: Message + Default + Send + Unpin + 'static,
+{
+    type Item = Result<T, Status>;
+
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        let this = self.get_mut();
+
+        if this.finished {
+            return Poll::Ready(None);
+        }
+
+        // Try to decode a complete frame from existing buffer
+        if this.buf.len() >= GRPC_HEADER_SIZE {
+            let (_, total) = grpc_calculate_frame_size(&this.buf);
+            if this.buf.len() >= total {
+                // We have a complete frame
+                let mut msg_buf = Vec::with_capacity(total);
+                msg_buf.extend_from_slice(&this.buf[0..total]);
+                let _ = this.buf.drain(0..total);
+
+                match grpc_frame_decode::<T>(&msg_buf) {
+                    Ok((msg, _)) => return Poll::Ready(Some(Ok(msg))),
+                    Err(e) => {
+                        this.finished = true;
+                        return Poll::Ready(Some(Err(e)));
+                    }
                 }
             }
         }
 
-        Err(last_err.unwrap_or_else(|| Status::unavailable("QUIC connect error")))
-    }
+        // Poll for more data
+        let mut recv_fut = Box::pin(this.stream.recv_data());
+        match recv_fut.as_mut().poll(cx) {
+            Poll::Ready(Ok(Some(data))) => {
+                this.buf.extend_from_slice(data.chunk());
 
-    async fn open_bi_stream(conn: &Connection) -> Result<(StreamReader, StreamWriter), Status> {
-        let opened = conn
-            .open_bi_stream()
-            .await
-            .map_err(|e| Status::internal(format!("open stream error: {e}")))?;
-        match opened {
-            Some((_id, (reader, writer))) => Ok((reader, writer)),
-            None => Err(Status::resource_exhausted(
-                "stream concurrency limit reached",
-            )),
+                // Try to decode
+                if this.buf.len() >= GRPC_HEADER_SIZE {
+                    let (_, total) = grpc_calculate_frame_size(&this.buf);
+                    if this.buf.len() >= total {
+                        let mut msg_buf = Vec::with_capacity(total);
+                        msg_buf.extend_from_slice(&this.buf[0..total]);
+                        let _ = this.buf.drain(0..total);
+
+                        match grpc_frame_decode::<T>(&msg_buf) {
+                            Ok((msg, _)) => return Poll::Ready(Some(Ok(msg))),
+                            Err(e) => {
+                                this.finished = true;
+                                return Poll::Ready(Some(Err(e)));
+                            }
+                        }
+                    }
+                }
+                cx.waker().wake_by_ref();
+                Poll::Pending
+            }
+            Poll::Ready(Ok(None)) => {
+                // Stream ended
+                this.finished = true;
+                if !this.buf.is_empty() {
+                    // Try to decode remaining data
+                    if this.buf.len() >= GRPC_HEADER_SIZE {
+                        match grpc_frame_decode::<T>(&this.buf) {
+                            Ok((msg, _)) => {
+                                this.buf.clear();
+                                return Poll::Ready(Some(Ok(msg)));
+                            }
+                            Err(e) => return Poll::Ready(Some(Err(e))),
+                        }
+                    }
+                }
+                Poll::Ready(None)
+            }
+            Poll::Ready(Err(e)) => {
+                this.finished = true;
+                Poll::Ready(Some(Err(h3_stream_error_to_status(e))))
+            }
+            Poll::Pending => Poll::Pending,
         }
     }
 }
@@ -260,246 +599,5 @@ impl<T> Stream for Streaming<T> {
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         self.get_mut().inner.as_mut().poll_next(cx)
-    }
-}
-
-enum Frame {
-    Data(Vec<u8>),
-    End,
-    Status(Status),
-}
-
-struct FrameWriter {
-    inner: StreamWriter,
-}
-
-impl FrameWriter {
-    #[inline]
-    fn new(inner: StreamWriter) -> Self {
-        Self { inner }
-    }
-
-    async fn write_request_header(
-        &mut self,
-        method: MethodId,
-        metadata: &[(String, String)],
-    ) -> Result<(), Status> {
-        self.inner
-            .write_u16(method.as_u16())
-            .await
-            .map_err(Status::from)?;
-        let count = u16::try_from(metadata.len())
-            .map_err(|_| Status::internal("too many metadata entries"))?;
-        self.inner.write_u16(count).await.map_err(Status::from)?;
-        for (key, value) in metadata {
-            self.write_bytes(key.as_bytes()).await?;
-            self.write_bytes(value.as_bytes()).await?;
-        }
-        Ok(())
-    }
-
-    async fn write_data(&mut self, data: Vec<u8>) -> Result<(), Status> {
-        self.inner
-            .write_u8(FRAME_DATA)
-            .await
-            .map_err(Status::from)?;
-        self.write_vec(data).await
-    }
-
-    async fn write_end(&mut self) -> Result<(), Status> {
-        self.inner.write_u8(FRAME_END).await.map_err(Status::from)
-    }
-
-    async fn flush(&mut self) -> Result<(), Status> {
-        self.inner.flush().await.map_err(Status::from)
-    }
-
-    async fn shutdown(&mut self) -> Result<(), Status> {
-        self.inner.shutdown().await.map_err(Status::from)
-    }
-
-    async fn write_vec(&mut self, bytes: Vec<u8>) -> Result<(), Status> {
-        let len = u32::try_from(bytes.len()).map_err(|_| Status::internal("frame too large"))?;
-        self.inner.write_u32(len).await.map_err(Status::from)?;
-        self.inner.write_all(&bytes).await.map_err(Status::from)
-    }
-
-    async fn write_bytes(&mut self, bytes: &[u8]) -> Result<(), Status> {
-        let len = u16::try_from(bytes.len()).map_err(|_| Status::internal("metadata too large"))?;
-        self.inner.write_u16(len).await.map_err(Status::from)?;
-        self.inner.write_all(bytes).await.map_err(Status::from)
-    }
-}
-
-struct FrameReader {
-    inner: StreamReader,
-}
-
-impl FrameReader {
-    #[inline]
-    fn new(inner: StreamReader) -> Self {
-        Self { inner }
-    }
-
-    async fn read_frame(&mut self) -> Result<Frame, Status> {
-        match self.inner.read_u8().await.map_err(Status::from)? {
-            FRAME_DATA => Ok(Frame::Data(self.read_vec().await?)),
-            FRAME_END => Ok(Frame::End),
-            FRAME_STATUS => {
-                let code = self.inner.read_u8().await.map_err(Status::from)?;
-                let details = self.read_vec().await?;
-                match code {
-                    STATUS_OK => Ok(Frame::Status(Status::new(Code::Ok, String::new()))),
-                    STATUS_ERROR => {
-                        let err = if details.is_empty() {
-                            CurpError::from(Status::internal("missing error details"))
-                        } else {
-                            CurpErrorWrapper::decode(details.as_slice())
-                                .map_err(|e| {
-                                    Status::internal(format!("decode error details: {e}"))
-                                })?
-                                .err
-                                .unwrap_or_else(|| {
-                                    CurpError::from(Status::internal("missing error"))
-                                })
-                        };
-                        Ok(Frame::Status(Status::from(err)))
-                    }
-                    other => Err(Status::internal(format!("unknown status code: {other}"))),
-                }
-            }
-            kind => Err(Status::internal(format!("unknown frame kind: {kind}"))),
-        }
-    }
-
-    async fn read_vec(&mut self) -> Result<Vec<u8>, Status> {
-        let len = usize::try_from(self.inner.read_u32().await.map_err(Status::from)?)
-            .map_err(|_| Status::internal("invalid frame length"))?;
-        if len > MAX_FRAME_LEN {
-            return Err(Status::internal("frame too large"));
-        }
-        let mut buf = vec![0; len];
-        let _read = self
-            .inner
-            .read_exact(&mut buf)
-            .await
-            .map_err(Status::from)?;
-        Ok(buf)
-    }
-}
-
-struct ResponseStream<T> {
-    state: ResponseState,
-    done: bool,
-    _conn: Connection,
-    _send_task: Option<tokio::task::JoinHandle<Result<(), Status>>>,
-    _marker: std::marker::PhantomData<T>,
-}
-
-enum ResponseState {
-    Idle(FrameReader),
-    Reading(BoxFuture<'static, (Result<Frame, Status>, FrameReader)>),
-    Poisoned,
-}
-
-impl<T> ResponseStream<T> {
-    fn new(reader: FrameReader, conn: Connection) -> Self {
-        Self {
-            state: ResponseState::Idle(reader),
-            done: false,
-            _conn: conn,
-            _send_task: None,
-            _marker: std::marker::PhantomData,
-        }
-    }
-
-    fn with_send_task(
-        reader: FrameReader,
-        conn: Connection,
-        send_task: tokio::task::JoinHandle<Result<(), Status>>,
-    ) -> Self {
-        Self {
-            state: ResponseState::Idle(reader),
-            done: false,
-            _conn: conn,
-            _send_task: Some(send_task),
-            _marker: std::marker::PhantomData,
-        }
-    }
-}
-
-impl<T> Drop for ResponseStream<T> {
-    fn drop(&mut self) {
-        if let Some(handle) = self._send_task.take() {
-            let _jh = tokio::spawn(async move {
-                tokio::pin!(handle);
-                tokio::select! {
-                    _ = &mut handle => {}
-                    _ = tokio::time::sleep(SEND_TASK_GRACE_PERIOD) => {
-                        handle.abort();
-                        let _ = (&mut handle).await;
-                    }
-                }
-            });
-        }
-    }
-}
-
-impl<T> Stream for ResponseStream<T>
-where
-    T: Message + Default + Send + Unpin + 'static,
-{
-    type Item = Result<T, Status>;
-
-    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        let this = self.get_mut();
-        if this.done {
-            return Poll::Ready(None);
-        }
-
-        if matches!(this.state, ResponseState::Idle(_)) {
-            let state = std::mem::replace(&mut this.state, ResponseState::Poisoned);
-            if let ResponseState::Idle(mut reader) = state {
-                this.state = ResponseState::Reading(Box::pin(async move {
-                    let frame = reader.read_frame().await;
-                    (frame, reader)
-                }));
-            }
-        }
-
-        if let ResponseState::Reading(ref mut fut) = this.state {
-            match fut.as_mut().poll(cx) {
-                Poll::Ready((result, reader)) => {
-                    this.state = ResponseState::Idle(reader);
-                    match result {
-                        Ok(Frame::Data(data)) => {
-                            Poll::Ready(Some(T::decode(data.as_slice()).map_err(|e| {
-                                Status::internal(format!("decode response error: {e}"))
-                            })))
-                        }
-                        Ok(Frame::Status(status)) if status.code() == Code::Ok => {
-                            this.done = true;
-                            Poll::Ready(None)
-                        }
-                        Ok(Frame::Status(status)) => {
-                            this.done = true;
-                            Poll::Ready(Some(Err(status)))
-                        }
-                        Ok(Frame::End) => {
-                            this.done = true;
-                            Poll::Ready(Some(Err(Status::internal("unexpected END frame"))))
-                        }
-                        Err(err) => {
-                            this.done = true;
-                            Poll::Ready(Some(Err(err)))
-                        }
-                    }
-                }
-                Poll::Pending => Poll::Pending,
-            }
-        } else {
-            this.done = true;
-            Poll::Ready(Some(Err(Status::internal("stream state poisoned"))))
-        }
     }
 }
