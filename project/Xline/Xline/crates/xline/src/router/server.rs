@@ -10,7 +10,6 @@ use http::{Request, Response};
 use std::{collections::HashMap, convert::Infallible, future::poll_fn, sync::Arc};
 use tower::Service;
 use utils::config::TlsConfig;
-use anyhow::Result;
 
 /// A Server for creating axum routers for gRPC services
 #[derive(Debug, Default, Clone)]
