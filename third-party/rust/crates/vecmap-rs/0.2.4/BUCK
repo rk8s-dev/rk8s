@@ -4,22 +4,21 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "vecmap-rs-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/vecmap-rs/vecmap-rs-0.2.4.crate"],
     sha256 = "f9758649b51083aa8008666f41c23f05abca1766aad4cc447b195dd83ef1297b",
     type = "tar.gz",
     strip_prefix = "vecmap-rs-0.2.4",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "vecmap-rs-manifest",
-    vendor = ":vecmap-rs-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "vecmap-rs",
-    srcs = [":vecmap-rs-vendor"],
+    srcs = [":vendor"],
     crate = "vecmap",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
@@ -27,7 +26,7 @@ rust_library(
         "default",
         "serde",
     ],
-    rustc_flags = ["@$(location :vecmap-rs-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = ["//third-party/rust/crates/serde/1.0.228:serde"],
 )

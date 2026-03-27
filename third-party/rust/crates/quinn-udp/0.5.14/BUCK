@@ -4,35 +4,34 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "buildscript_run", "rust_binary", "rust_library")
 
 http_archive(
-    name = "quinn-udp-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/quinn-udp/quinn-udp-0.5.14.crate"],
     sha256 = "addec6a0dcad8a8d96a771f815f0eaf55f9d1805756410b39f5fa81332574cbd",
     type = "tar.gz",
     strip_prefix = "quinn-udp-0.5.14",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "quinn-udp-manifest",
-    vendor = ":quinn-udp-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "quinn-udp",
-    srcs = [":quinn-udp-vendor"],
+    srcs = [":vendor"],
     crate = "quinn_udp",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
-        "OUT_DIR": "$(location :quinn-udp-build-script-run[out_dir])",
+        "OUT_DIR": "$(location :build-script-run[out_dir])",
     },
     features = [
         "log",
         "tracing",
     ],
     rustc_flags = [
-        "@$(location :quinn-udp-build-script-run[rustc_flags])",
-        "@$(location :quinn-udp-manifest[env_flags])",
+        "@$(location :build-script-run[rustc_flags])",
+        "@$(location :manifest[env_flags])",
     ],
     os_deps = {
         "linux": ["//third-party/rust/crates/socket2/0.6.2:socket2"],
@@ -51,8 +50,8 @@ rust_library(
 )
 
 rust_binary(
-    name = "quinn-udp-build-script-build",
-    srcs = [":quinn-udp-vendor"],
+    name = "build-script-build",
+    srcs = [":vendor"],
     crate = "build_script_build",
     crate_root = "vendor/build.rs",
     edition = "2021",
@@ -60,21 +59,21 @@ rust_binary(
         "log",
         "tracing",
     ],
-    rustc_flags = ["@$(location :quinn-udp-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = [],
     deps = ["//third-party/rust/crates/cfg_aliases/0.2.1:cfg_aliases"],
 )
 
 buildscript_run(
-    name = "quinn-udp-build-script-run",
+    name = "build-script-run",
     package_name = "quinn-udp",
-    buildscript_rule = ":quinn-udp-build-script-build",
-    env_srcs = [":quinn-udp-manifest[env_dict]"],
+    buildscript_rule = ":build-script-build",
+    env_srcs = [":manifest[env_dict]"],
     features = [
         "log",
         "tracing",
     ],
     version = "0.5.14",
-    manifest_dir = ":quinn-udp-vendor",
+    manifest_dir = ":vendor",
     visibility = ["PUBLIC"],
 )

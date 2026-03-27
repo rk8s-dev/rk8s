@@ -4,22 +4,21 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "hyper-rustls-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/hyper-rustls/hyper-rustls-0.27.7.crate"],
     sha256 = "e3c93eb611681b207e1fe55d5a71ecf91572ec8a6705cdb6857f7d8d5242cf58",
     type = "tar.gz",
     strip_prefix = "hyper-rustls-0.27.7",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "hyper-rustls-manifest",
-    vendor = ":hyper-rustls-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "hyper-rustls",
-    srcs = [":hyper-rustls-vendor"],
+    srcs = [":vendor"],
     crate = "hyper_rustls",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
@@ -34,7 +33,7 @@ rust_library(
         "webpki-roots",
         "webpki-tokio",
     ],
-    rustc_flags = ["@$(location :hyper-rustls-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     named_deps = {
         "pki_types": "//third-party/rust/crates/rustls-pki-types/1.14.0:rustls-pki-types",
     },

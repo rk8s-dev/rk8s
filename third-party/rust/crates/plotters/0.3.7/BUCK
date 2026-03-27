@@ -4,22 +4,21 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "plotters-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/plotters/plotters-0.3.7.crate"],
     sha256 = "5aeb6f403d7a4911efb1e33402027fc44f29b5bf6def3effcc22d7bb75f2b747",
     type = "tar.gz",
     strip_prefix = "plotters-0.3.7",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "plotters-manifest",
-    vendor = ":plotters-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "plotters",
-    srcs = [":plotters-vendor"],
+    srcs = [":vendor"],
     crate = "plotters",
     crate_root = "vendor/src/lib.rs",
     edition = "2018",
@@ -29,7 +28,7 @@ rust_library(
         "plotters-svg",
         "svg_backend",
     ],
-    rustc_flags = ["@$(location :plotters-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/num-traits/0.2.19:num-traits",

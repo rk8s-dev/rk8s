@@ -1,0 +1,37 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: my-pod-s3
+spec:
+  containers:
+    - name: app
+      image: busybox:latest
+      command:
+        - /bin/sh
+        - -c
+        - "while true; do echo hello >> /data/log.txt; sleep 5; done"
+      volumeMounts:
+        - name: data-vol
+          mountPath: /data
+  volumes:
+    - name: data-vol
+      type: slayerFs
+      capacity_bytes: 10737418240
+      config:
+        data:
+          backend: s3
+          s3:
+            bucket: my-rk8s-bucket
+            endpoint: "http://127.0.0.1:9000"
+            region: us-east-1
+            part_size: 16777216
+            max_concurrency: 8
+            force_path_style: true
+        meta:
+          backend: etcd
+          etcd:
+            urls:
+              - "http://127.0.0.1:2379"
+        layout:
+          chunk_size: 67108864
+          block_size: 4194304

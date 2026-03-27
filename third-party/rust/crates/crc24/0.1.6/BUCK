@@ -4,51 +4,50 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "buildscript_run", "rust_binary", "rust_library")
 
 http_archive(
-    name = "crc24-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/crc24/crc24-0.1.6.crate"],
     sha256 = "fd121741cf3eb82c08dd3023eb55bf2665e5f60ec20f89760cf836ae4562e6a0",
     type = "tar.gz",
     strip_prefix = "crc24-0.1.6",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "crc24-manifest",
-    vendor = ":crc24-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "crc24",
-    srcs = [":crc24-vendor"],
+    srcs = [":vendor"],
     crate = "crc24",
     crate_root = "vendor/src/lib.rs",
     edition = "2015",
     env = {
-        "OUT_DIR": "$(location :crc24-build-script-tablegen-run[out_dir])",
+        "OUT_DIR": "$(location :build-script-tablegen-run[out_dir])",
     },
     rustc_flags = [
-        "@$(location :crc24-build-script-tablegen-run[rustc_flags])",
-        "@$(location :crc24-manifest[env_flags])",
+        "@$(location :build-script-tablegen-run[rustc_flags])",
+        "@$(location :manifest[env_flags])",
     ],
     visibility = ["PUBLIC"],
 )
 
 rust_binary(
-    name = "crc24-build-script-tablegen",
-    srcs = [":crc24-vendor"],
+    name = "build-script-tablegen",
+    srcs = [":vendor"],
     crate = "build_script_tablegen",
     crate_root = "vendor/src/tablegen.rs",
     edition = "2015",
-    rustc_flags = ["@$(location :crc24-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = [],
 )
 
 buildscript_run(
-    name = "crc24-build-script-tablegen-run",
+    name = "build-script-tablegen-run",
     package_name = "crc24",
-    buildscript_rule = ":crc24-build-script-tablegen",
-    env_srcs = [":crc24-manifest[env_dict]"],
+    buildscript_rule = ":build-script-tablegen",
+    env_srcs = [":manifest[env_dict]"],
     version = "0.1.6",
-    manifest_dir = ":crc24-vendor",
+    manifest_dir = ":vendor",
     visibility = ["PUBLIC"],
 )

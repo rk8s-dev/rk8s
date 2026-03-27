@@ -4,26 +4,25 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "aws-smithy-checksums-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/aws-smithy-checksums/aws-smithy-checksums-0.63.12.crate"],
     sha256 = "87294a084b43d649d967efe58aa1f9e0adc260e13a6938eb904c0ae9b45824ae",
     type = "tar.gz",
     strip_prefix = "aws-smithy-checksums-0.63.12",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "aws-smithy-checksums-manifest",
-    vendor = ":aws-smithy-checksums-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "aws-smithy-checksums",
-    srcs = [":aws-smithy-checksums-vendor"],
+    srcs = [":vendor"],
     crate = "aws_smithy_checksums",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
-    rustc_flags = ["@$(location :aws-smithy-checksums-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     named_deps = {
         "md5": "//third-party/rust/crates/md-5/0.10.6:md-5",
     },

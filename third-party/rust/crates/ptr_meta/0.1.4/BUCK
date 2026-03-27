@@ -4,27 +4,26 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "ptr_meta-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/ptr_meta/ptr_meta-0.1.4.crate"],
     sha256 = "0738ccf7ea06b608c10564b31debd4f5bc5e197fc8bfe088f68ae5ce81e7a4f1",
     type = "tar.gz",
     strip_prefix = "ptr_meta-0.1.4",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "ptr_meta-manifest",
-    vendor = ":ptr_meta-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "ptr_meta",
-    srcs = [":ptr_meta-vendor"],
+    srcs = [":vendor"],
     crate = "ptr_meta",
     crate_root = "vendor/src/lib.rs",
     edition = "2018",
     features = ["std"],
-    rustc_flags = ["@$(location :ptr_meta-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = ["//third-party/rust/crates/ptr_meta_derive/0.1.4:ptr_meta_derive"],
 )

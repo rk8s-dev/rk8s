@@ -4,22 +4,21 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "mio-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/mio/mio-1.1.1.crate"],
     sha256 = "a69bcab0ad47271a0234d9422b131806bf3968021e5dc9328caf2d4cd58557fc",
     type = "tar.gz",
     strip_prefix = "mio-1.1.1",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "mio-manifest",
-    vendor = ":mio-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "mio",
-    srcs = [":mio-vendor"],
+    srcs = [":vendor"],
     crate = "mio",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
@@ -28,7 +27,7 @@ rust_library(
         "os-ext",
         "os-poll",
     ],
-    rustc_flags = ["@$(location :mio-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     os_deps = {
         "linux": ["//third-party/rust/crates/libc/0.2.182:libc"],
         "macos": ["//third-party/rust/crates/libc/0.2.182:libc"],

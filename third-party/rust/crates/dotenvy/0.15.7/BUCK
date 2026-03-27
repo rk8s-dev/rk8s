@@ -4,25 +4,24 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "dotenvy-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/dotenvy/dotenvy-0.15.7.crate"],
     sha256 = "1aaf95b3e5c8f23aa320147307562d361db0ae0d51242340f558153b4eb2439b",
     type = "tar.gz",
     strip_prefix = "dotenvy-0.15.7",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "dotenvy-manifest",
-    vendor = ":dotenvy-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "dotenvy",
-    srcs = [":dotenvy-vendor"],
+    srcs = [":vendor"],
     crate = "dotenvy",
     crate_root = "vendor/src/lib.rs",
     edition = "2018",
-    rustc_flags = ["@$(location :dotenvy-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
 )

@@ -4,22 +4,21 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "fnv-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/fnv/fnv-1.0.7.crate"],
     sha256 = "3f9eec918d3f24069decb9af1554cad7c880e2da24a9afd88aca000531ab82c1",
     type = "tar.gz",
     strip_prefix = "fnv-1.0.7",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "fnv-manifest",
-    vendor = ":fnv-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "fnv",
-    srcs = [":fnv-vendor"],
+    srcs = [":vendor"],
     crate = "fnv",
     crate_root = "vendor/lib.rs",
     edition = "2015",
@@ -27,6 +26,6 @@ rust_library(
         "default",
         "std",
     ],
-    rustc_flags = ["@$(location :fnv-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
 )

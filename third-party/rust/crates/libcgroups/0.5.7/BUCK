@@ -4,22 +4,21 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "libcgroups-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/libcgroups/libcgroups-0.5.7.crate"],
     sha256 = "acabc2d6b351af9406d5bddfe86697c3791fda2a6d6d03b90d86af1f0998751e",
     type = "tar.gz",
     strip_prefix = "libcgroups-0.5.7",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "libcgroups-manifest",
-    vendor = ":libcgroups-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "libcgroups",
-    srcs = [":libcgroups-vendor"],
+    srcs = [":vendor"],
     crate = "libcgroups",
     crate_root = "vendor/src/lib.rs",
     edition = "2024",
@@ -28,7 +27,7 @@ rust_library(
         "v1",
         "v2",
     ],
-    rustc_flags = ["@$(location :libcgroups-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/fixedbitset/0.5.7:fixedbitset",

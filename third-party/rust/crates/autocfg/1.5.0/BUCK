@@ -4,25 +4,24 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "autocfg-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/autocfg/autocfg-1.5.0.crate"],
     sha256 = "c08606f8c3cbf4ce6ec8e28fb0014a2c086708fe954eaa885384a6165172e7e8",
     type = "tar.gz",
     strip_prefix = "autocfg-1.5.0",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "autocfg-manifest",
-    vendor = ":autocfg-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "autocfg",
-    srcs = [":autocfg-vendor"],
+    srcs = [":vendor"],
     crate = "autocfg",
     crate_root = "vendor/src/lib.rs",
     edition = "2015",
-    rustc_flags = ["@$(location :autocfg-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
 )

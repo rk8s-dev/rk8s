@@ -4,22 +4,21 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "schemars-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/schemars/schemars-1.2.1.crate"],
     sha256 = "a2b42f36aa1cd011945615b92222f6bf73c599a102a300334cd7f8dbeec726cc",
     type = "tar.gz",
     strip_prefix = "schemars-1.2.1",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "schemars-manifest",
-    vendor = ":schemars-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "schemars",
-    srcs = [":schemars-vendor"],
+    srcs = [":vendor"],
     crate = "schemars",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
@@ -29,7 +28,7 @@ rust_library(
         "schemars_derive",
         "std",
     ],
-    rustc_flags = ["@$(location :schemars-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/dyn-clone/1.0.20:dyn-clone",

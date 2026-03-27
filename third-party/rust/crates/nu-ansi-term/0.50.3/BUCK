@@ -4,22 +4,21 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "nu-ansi-term-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/nu-ansi-term/nu-ansi-term-0.50.3.crate"],
     sha256 = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5",
     type = "tar.gz",
     strip_prefix = "nu-ansi-term-0.50.3",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "nu-ansi-term-manifest",
-    vendor = ":nu-ansi-term-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "nu-ansi-term",
-    srcs = [":nu-ansi-term-vendor"],
+    srcs = [":vendor"],
     crate = "nu_ansi_term",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
@@ -27,7 +26,7 @@ rust_library(
         "default",
         "std",
     ],
-    rustc_flags = ["@$(location :nu-ansi-term-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     os_named_deps = {
         "windows": {
             "windows": "//third-party/rust/crates/windows-sys/0.61.2:windows-sys",

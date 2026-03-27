@@ -4,22 +4,21 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "lazy_static-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/lazy_static/lazy_static-1.5.0.crate"],
     sha256 = "bbd2bcb4c963f2ddae06a2efc7e9f3591312473c50c6685e1f298068316e66fe",
     type = "tar.gz",
     strip_prefix = "lazy_static-1.5.0",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "lazy_static-manifest",
-    vendor = ":lazy_static-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "lazy_static",
-    srcs = [":lazy_static-vendor"],
+    srcs = [":vendor"],
     crate = "lazy_static",
     crate_root = "vendor/src/lib.rs",
     edition = "2015",
@@ -27,7 +26,7 @@ rust_library(
         "spin",
         "spin_no_std",
     ],
-    rustc_flags = ["@$(location :lazy_static-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = ["//third-party/rust/crates/spin/0.9.8:spin"],
 )

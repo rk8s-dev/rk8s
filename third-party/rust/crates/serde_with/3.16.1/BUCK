@@ -4,22 +4,21 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "serde_with-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/serde_with/serde_with-3.16.1.crate"],
     sha256 = "4fa237f2807440d238e0364a218270b98f767a00d3dada77b1c53ae88940e2e7",
     type = "tar.gz",
     strip_prefix = "serde_with-3.16.1",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "serde_with-manifest",
-    vendor = ":serde_with-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "serde_with",
-    srcs = [":serde_with-vendor"],
+    srcs = [":vendor"],
     crate = "serde_with",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
@@ -29,7 +28,7 @@ rust_library(
         "macros",
         "std",
     ],
-    rustc_flags = ["@$(location :serde_with-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     named_deps = {
         "chrono_0_4": "//third-party/rust/crates/chrono/0.4.43:chrono",
         "indexmap_1": "//third-party/rust/crates/indexmap/1.9.3:indexmap",

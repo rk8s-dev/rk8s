@@ -4,26 +4,25 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "rayon-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/rayon/rayon-1.11.0.crate"],
     sha256 = "368f01d005bf8fd9b1206fb6fa653e6c4a81ceb1466406b81792d87c5677a58f",
     type = "tar.gz",
     strip_prefix = "rayon-1.11.0",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "rayon-manifest",
-    vendor = ":rayon-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "rayon",
-    srcs = [":rayon-vendor"],
+    srcs = [":vendor"],
     crate = "rayon",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
-    rustc_flags = ["@$(location :rayon-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/either/1.15.0:either",

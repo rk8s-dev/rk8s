@@ -4,22 +4,21 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "ssh-key-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/ssh-key/ssh-key-0.6.7.crate"],
     sha256 = "3b86f5297f0f04d08cabaa0f6bff7cb6aec4d9c3b49d87990d63da9d9156a8c3",
     type = "tar.gz",
     strip_prefix = "ssh-key-0.6.7",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "ssh-key-manifest",
-    vendor = ":ssh-key-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "ssh-key",
-    srcs = [":ssh-key-vendor"],
+    srcs = [":vendor"],
     crate = "ssh_key",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
@@ -36,7 +35,7 @@ rust_library(
         "rsa",
         "std",
     ],
-    rustc_flags = ["@$(location :ssh-key-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     named_deps = {
         "bigint": "//third-party/rust/crates/num-bigint-dig/0.8.6:num-bigint-dig",
         "cipher": "//third-party/rust/crates/ssh-cipher/0.2.0:ssh-cipher",

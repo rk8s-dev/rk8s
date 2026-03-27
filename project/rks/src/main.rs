@@ -2,6 +2,7 @@ mod api;
 mod cli;
 mod commands;
 mod controllers;
+mod csi;
 mod dns;
 mod internal;
 mod login;
@@ -94,6 +95,14 @@ async fn handle_start_command() -> anyhow::Result<()> {
 
     let node_registry = Arc::new(NodeRegistry::default());
 
+    let volume_store = Arc::new(csi::VolumeStore::new(xline_store.clone()));
+    let csi_controller = Arc::new(csi::RksCsiController::new(volume_store));
+
+    let volume_orchestrator = Arc::new(csi::VolumeOrchestrator::new(
+        csi_controller,
+        node_registry.clone(),
+    ));
+
     // Get network config and initialize Service IP allocator
     let (network_config, service_ip_allocator) =
         init_service_ip_components(cfg, &local_manager, &xline_options, &xline_store).await?;
@@ -117,6 +126,7 @@ async fn handle_start_command() -> anyhow::Result<()> {
         node_registry.clone(),
         network_config,
         service_ip_allocator,
+        volume_orchestrator,
     ));
 
     internal::start_internal_server(vault.clone(), node_registry).await?;

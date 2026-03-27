@@ -4,25 +4,24 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "glob-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/glob/glob-0.3.3.crate"],
     sha256 = "0cc23270f6e1808e30a928bdc84dea0b9b4136a8bc82338574f23baf47bbd280",
     type = "tar.gz",
     strip_prefix = "glob-0.3.3",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "glob-manifest",
-    vendor = ":glob-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "glob",
-    srcs = [":glob-vendor"],
+    srcs = [":vendor"],
     crate = "glob",
     crate_root = "vendor/src/lib.rs",
     edition = "2015",
-    rustc_flags = ["@$(location :glob-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
 )

@@ -4,22 +4,21 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "wasm-bindgen-futures-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/wasm-bindgen-futures/wasm-bindgen-futures-0.4.58.crate"],
     sha256 = "70a6e77fd0ae8029c9ea0063f87c46fde723e7d887703d74ad2616d792e51e6f",
     type = "tar.gz",
     strip_prefix = "wasm-bindgen-futures-0.4.58",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "wasm-bindgen-futures-manifest",
-    vendor = ":wasm-bindgen-futures-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "wasm-bindgen-futures",
-    srcs = [":wasm-bindgen-futures-vendor"],
+    srcs = [":vendor"],
     crate = "wasm_bindgen_futures",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
@@ -28,7 +27,7 @@ rust_library(
         "futures-util",
         "std",
     ],
-    rustc_flags = ["@$(location :wasm-bindgen-futures-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/cfg-if/1.0.4:cfg-if",

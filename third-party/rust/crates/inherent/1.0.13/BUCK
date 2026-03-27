@@ -4,26 +4,25 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "inherent-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/inherent/inherent-1.0.13.crate"],
     sha256 = "c727f80bfa4a6c6e2508d2f05b6f4bfce242030bd88ed15ae5331c5b5d30fba7",
     type = "tar.gz",
     strip_prefix = "inherent-1.0.13",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "inherent-manifest",
-    vendor = ":inherent-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "inherent",
-    srcs = [":inherent-vendor"],
+    srcs = [":vendor"],
     crate = "inherent",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
-    rustc_flags = ["@$(location :inherent-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     proc_macro = True,
     visibility = ["PUBLIC"],
     deps = [

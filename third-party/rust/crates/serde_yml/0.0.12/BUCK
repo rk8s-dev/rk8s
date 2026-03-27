@@ -4,32 +4,31 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "buildscript_run", "rust_binary", "rust_library")
 
 http_archive(
-    name = "serde_yml-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/serde_yml/serde_yml-0.0.12.crate"],
     sha256 = "59e2dd588bf1597a252c3b920e0143eb99b0f76e4e082f4c92ce34fbc9e71ddd",
     type = "tar.gz",
     strip_prefix = "serde_yml-0.0.12",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "serde_yml-manifest",
-    vendor = ":serde_yml-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "serde_yml",
-    srcs = [":serde_yml-vendor"],
+    srcs = [":vendor"],
     crate = "serde_yml",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
-        "OUT_DIR": "$(location :serde_yml-build-script-run[out_dir])",
+        "OUT_DIR": "$(location :build-script-run[out_dir])",
     },
     features = ["default"],
     rustc_flags = [
-        "@$(location :serde_yml-build-script-run[rustc_flags])",
-        "@$(location :serde_yml-manifest[env_flags])",
+        "@$(location :build-script-run[rustc_flags])",
+        "@$(location :manifest[env_flags])",
     ],
     visibility = ["PUBLIC"],
     deps = [
@@ -43,24 +42,24 @@ rust_library(
 )
 
 rust_binary(
-    name = "serde_yml-build-script-build",
-    srcs = [":serde_yml-vendor"],
+    name = "build-script-build",
+    srcs = [":vendor"],
     crate = "build_script_build",
     crate_root = "vendor/build.rs",
     edition = "2021",
     features = ["default"],
-    rustc_flags = ["@$(location :serde_yml-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = [],
     deps = ["//third-party/rust/crates/version_check/0.9.5:version_check"],
 )
 
 buildscript_run(
-    name = "serde_yml-build-script-run",
+    name = "build-script-run",
     package_name = "serde_yml",
-    buildscript_rule = ":serde_yml-build-script-build",
-    env_srcs = [":serde_yml-manifest[env_dict]"],
+    buildscript_rule = ":build-script-build",
+    env_srcs = [":manifest[env_dict]"],
     features = ["default"],
     version = "0.0.12",
-    manifest_dir = ":serde_yml-vendor",
+    manifest_dir = ":vendor",
     visibility = ["PUBLIC"],
 )

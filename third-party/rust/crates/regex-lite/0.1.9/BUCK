@@ -4,22 +4,21 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "regex-lite-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/regex-lite/regex-lite-0.1.9.crate"],
     sha256 = "cab834c73d247e67f4fae452806d17d3c7501756d98c8808d7c9c7aa7d18f973",
     type = "tar.gz",
     strip_prefix = "regex-lite-0.1.9",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "regex-lite-manifest",
-    vendor = ":regex-lite-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "regex-lite",
-    srcs = [":regex-lite-vendor"],
+    srcs = [":vendor"],
     crate = "regex_lite",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
@@ -28,6 +27,6 @@ rust_library(
         "std",
         "string",
     ],
-    rustc_flags = ["@$(location :regex-lite-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
 )

@@ -17,9 +17,9 @@ use tokio::time::{Duration, sleep};
 pub async fn dispatch_worker(
     msg: RksMessage,
     conn: &RksConnection,
-    xline_store: &Arc<XlineStore>,
     shared: &Arc<Shared>,
 ) -> anyhow::Result<()> {
+    let xline_store = &shared.xline_store;
     match msg {
         RksMessage::Heartbeat { node_name, status } => {
             handle_heartbeat(xline_store, &node_name, status).await?;
@@ -33,6 +33,10 @@ pub async fn dispatch_worker(
             target: "rks::node::worker_dispatch",
             "received Ack"
         ),
+
+        RksMessage::CsiResponse { id, message } => {
+            shared.volume_orchestrator.route_response(id, message);
+        }
 
         RksMessage::SetPodip((pod_name, pod_ip)) => {
             if let Some(pod_yaml) = xline_store.get_pod_yaml(&pod_name).await? {

@@ -4,22 +4,21 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "combine-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/combine/combine-4.6.7.crate"],
     sha256 = "ba5a308b75df32fe02788e748662718f03fde005016435c444eea572398219fd",
     type = "tar.gz",
     strip_prefix = "combine-4.6.7",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "combine-manifest",
-    vendor = ":combine-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "combine",
-    srcs = [":combine-vendor"],
+    srcs = [":vendor"],
     crate = "combine",
     crate_root = "vendor/src/lib.rs",
     edition = "2018",
@@ -34,7 +33,7 @@ rust_library(
         "tokio-dep",
         "tokio-util",
     ],
-    rustc_flags = ["@$(location :combine-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     named_deps = {
         "futures_core_03": "//third-party/rust/crates/futures-core/0.3.31:futures-core",
         "tokio_dep": "//third-party/rust/crates/tokio/1.49.0:tokio",

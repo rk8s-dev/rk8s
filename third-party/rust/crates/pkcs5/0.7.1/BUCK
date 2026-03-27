@@ -4,22 +4,21 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "pkcs5-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/pkcs5/pkcs5-0.7.1.crate"],
     sha256 = "e847e2c91a18bfa887dd028ec33f2fe6f25db77db3619024764914affe8b69a6",
     type = "tar.gz",
     strip_prefix = "pkcs5-0.7.1",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "pkcs5-manifest",
-    vendor = ":pkcs5-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "pkcs5",
-    srcs = [":pkcs5-vendor"],
+    srcs = [":vendor"],
     crate = "pkcs5",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
@@ -27,7 +26,7 @@ rust_library(
         "alloc",
         "pbes2",
     ],
-    rustc_flags = ["@$(location :pkcs5-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/aes/0.8.4:aes",

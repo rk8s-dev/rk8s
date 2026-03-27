@@ -296,6 +296,136 @@ pub enum NodeSelectorOperator {
     Lt,
 }
 
+/// A volume declared in the pod specification.
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+pub struct Volume {
+    /// Logical name of the volume, referenced by containers.
+    pub name: String,
+    /// Volume source type and configuration.
+    #[serde(flatten)]
+    pub source: VolumeSourceType,
+}
+
+/// Supported volume source types.
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+#[serde(tag = "type", rename_all = "camelCase")]
+pub enum VolumeSourceType {
+    /// Ephemeral in-memory or disk-backed volume.
+    EmptyDir,
+    /// Mount a host filesystem path.
+    HostPath { path: String },
+    /// SlayerFS-backed persistent volume.
+    SlayerFs {
+        #[serde(default)]
+        capacity_bytes: Option<u64>,
+        #[serde(default)]
+        read_only: Option<bool>,
+        #[serde(default)]
+        config: Option<Box<SlayerFsVolumeConfig>>,
+    },
+}
+
+/// Data backend kind for a SlayerFS volume.
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum SlayerFsDataBackend {
+    #[default]
+    LocalFs,
+    S3,
+}
+
+/// Metadata backend kind for a SlayerFS volume.
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum SlayerFsMetaBackend {
+    #[default]
+    Sqlx,
+    Redis,
+    Etcd,
+}
+
+/// Local-filesystem data backend config.
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq, Default)]
+pub struct SlayerFsLocalFsConfig {
+    #[serde(default)]
+    pub data_dir: String,
+}
+
+/// S3 data backend config.
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq, Default)]
+pub struct SlayerFsS3Config {
+    #[serde(default)]
+    pub bucket: String,
+    #[serde(default)]
+    pub endpoint: Option<String>,
+    #[serde(default)]
+    pub region: Option<String>,
+    #[serde(default)]
+    pub part_size: Option<usize>,
+    #[serde(default)]
+    pub max_concurrency: Option<usize>,
+    #[serde(default)]
+    pub force_path_style: Option<bool>,
+}
+
+/// Data storage configuration for a SlayerFS volume.
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq, Default)]
+pub struct SlayerFsDataConfig {
+    #[serde(default)]
+    pub backend: SlayerFsDataBackend,
+    #[serde(default)]
+    pub localfs: Option<SlayerFsLocalFsConfig>,
+    #[serde(default)]
+    pub s3: Option<SlayerFsS3Config>,
+}
+
+/// URL-backed metadata config (sqlx/redis).
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq, Default)]
+pub struct SlayerFsUrlConfig {
+    #[serde(default)]
+    pub url: String,
+}
+
+/// etcd metadata config.
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq, Default)]
+pub struct SlayerFsEtcdConfig {
+    #[serde(default)]
+    pub urls: Vec<String>,
+}
+
+/// Metadata storage configuration for a SlayerFS volume.
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq, Default)]
+pub struct SlayerFsMetaConfig {
+    #[serde(default)]
+    pub backend: SlayerFsMetaBackend,
+    #[serde(default)]
+    pub sqlx: Option<SlayerFsUrlConfig>,
+    #[serde(default)]
+    pub redis: Option<SlayerFsUrlConfig>,
+    #[serde(default)]
+    pub etcd: Option<SlayerFsEtcdConfig>,
+}
+
+/// Chunk layout configuration for a SlayerFS volume.
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq, Default)]
+pub struct SlayerFsLayoutConfig {
+    #[serde(default)]
+    pub chunk_size: Option<u64>,
+    #[serde(default)]
+    pub block_size: Option<u32>,
+}
+
+/// Full SlayerFS volume configuration, mirroring the slayerfs mount-config.yaml format.
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq, Default)]
+pub struct SlayerFsVolumeConfig {
+    #[serde(default)]
+    pub data: SlayerFsDataConfig,
+    #[serde(default)]
+    pub meta: SlayerFsMetaConfig,
+    #[serde(default)]
+    pub layout: SlayerFsLayoutConfig,
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq, Default)]
 pub struct PodSpec {
     //if pod is distributed to a node ,then this field should be filled with node-id
@@ -311,6 +441,8 @@ pub struct PodSpec {
     pub affinity: Option<Affinity>,
     #[serde(default)]
     pub restart_policy: RestartPolicy,
+    #[serde(default)]
+    pub volumes: Vec<Volume>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq, Default)]
@@ -813,6 +945,16 @@ pub enum RksMessage {
         previous: bool,
     },
 
+    // CSI volume lifecycle
+    CsiRequest {
+        id: uuid::Uuid,
+        message: libcsi::CsiMessage,
+    },
+    CsiResponse {
+        id: uuid::Uuid,
+        message: libcsi::CsiMessage,
+    },
+
     //response
     Ack,
     Error(String),
@@ -932,6 +1074,12 @@ impl std::fmt::Debug for RksMessage {
                 write!(f, "RksMessage::UpdateNftablesRules (len={})", rules.len())
             }
             Self::GetRegistryCredentials => f.write_str("RksMessage::GetRegistryCredentials"),
+            Self::CsiRequest { id, message } => {
+                write!(f, "RksMessage::CsiRequest(id={}, {:?})", id, message)
+            }
+            Self::CsiResponse { id, message } => {
+                write!(f, "RksMessage::CsiResponse(id={}, {:?})", id, message)
+            }
             // response
             Self::Ack => f.write_str("RksMessage::Ack"),
             Self::Error(err_msg) => write!(f, "RksMessage::Error({})", err_msg),
@@ -1120,6 +1268,8 @@ impl Display for RksMessage {
                 pod_name, pod_namespace
             ),
             Self::GetRegistryCredentials => f.write_str("Get registry credentials from rks"),
+            Self::CsiRequest { id, message } => write!(f, "CSI request [{}]: {}", id, message),
+            Self::CsiResponse { id, message } => write!(f, "CSI response [{}]: {}", id, message),
 
             // response
             Self::Ack => f.write_str("Acknowledge message receipt"),

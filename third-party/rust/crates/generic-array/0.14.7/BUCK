@@ -4,35 +4,34 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "buildscript_run", "rust_binary", "rust_library")
 
 http_archive(
-    name = "generic-array-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/generic-array/generic-array-0.14.7.crate"],
     sha256 = "85649ca51fd72272d7821adaf274ad91c288277713d9c18820d8499a7ff69e9a",
     type = "tar.gz",
     strip_prefix = "generic-array-0.14.7",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "generic-array-manifest",
-    vendor = ":generic-array-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "generic-array",
-    srcs = [":generic-array-vendor"],
+    srcs = [":vendor"],
     crate = "generic_array",
     crate_root = "vendor/src/lib.rs",
     edition = "2015",
     env = {
-        "OUT_DIR": "$(location :generic-array-build-script-run[out_dir])",
+        "OUT_DIR": "$(location :build-script-run[out_dir])",
     },
     features = [
         "more_lengths",
         "zeroize",
     ],
     rustc_flags = [
-        "@$(location :generic-array-build-script-run[rustc_flags])",
-        "@$(location :generic-array-manifest[env_flags])",
+        "@$(location :build-script-run[rustc_flags])",
+        "@$(location :manifest[env_flags])",
     ],
     visibility = ["PUBLIC"],
     deps = [
@@ -42,8 +41,8 @@ rust_library(
 )
 
 rust_binary(
-    name = "generic-array-build-script-build",
-    srcs = [":generic-array-vendor"],
+    name = "build-script-build",
+    srcs = [":vendor"],
     crate = "build_script_build",
     crate_root = "vendor/build.rs",
     edition = "2015",
@@ -51,21 +50,21 @@ rust_binary(
         "more_lengths",
         "zeroize",
     ],
-    rustc_flags = ["@$(location :generic-array-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = [],
     deps = ["//third-party/rust/crates/version_check/0.9.5:version_check"],
 )
 
 buildscript_run(
-    name = "generic-array-build-script-run",
+    name = "build-script-run",
     package_name = "generic-array",
-    buildscript_rule = ":generic-array-build-script-build",
-    env_srcs = [":generic-array-manifest[env_dict]"],
+    buildscript_rule = ":build-script-build",
+    env_srcs = [":manifest[env_dict]"],
     features = [
         "more_lengths",
         "zeroize",
     ],
     version = "0.14.7",
-    manifest_dir = ":generic-array-vendor",
+    manifest_dir = ":vendor",
     visibility = ["PUBLIC"],
 )

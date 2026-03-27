@@ -4,26 +4,25 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "hickory-client-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/hickory-client/hickory-client-0.25.2.crate"],
     sha256 = "c466cd63a4217d5b2b8e32f23f58312741ce96e3c84bf7438677d2baff0fc555",
     type = "tar.gz",
     strip_prefix = "hickory-client-0.25.2",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "hickory-client-manifest",
-    vendor = ":hickory-client-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "hickory-client",
-    srcs = [":hickory-client-vendor"],
+    srcs = [":vendor"],
     crate = "hickory_client",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
-    rustc_flags = ["@$(location :hickory-client-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/cfg-if/1.0.4:cfg-if",

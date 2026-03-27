@@ -4,27 +4,26 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "buildscript_run", "rust_binary", "rust_library")
 
 http_archive(
-    name = "rustls-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/rustls/rustls-0.23.36.crate"],
     sha256 = "c665f33d38cea657d9614f766881e4d510e0eda4239891eea56b4cadcf01801b",
     type = "tar.gz",
     strip_prefix = "rustls-0.23.36",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "rustls-manifest",
-    vendor = ":rustls-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "rustls",
-    srcs = [":rustls-vendor"],
+    srcs = [":vendor"],
     crate = "rustls",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
-        "OUT_DIR": "$(location :rustls-build-script-run[out_dir])",
+        "OUT_DIR": "$(location :build-script-run[out_dir])",
     },
     features = [
         "aws-lc-rs",
@@ -38,8 +37,8 @@ rust_library(
         "tls12",
     ],
     rustc_flags = [
-        "@$(location :rustls-build-script-run[rustc_flags])",
-        "@$(location :rustls-manifest[env_flags])",
+        "@$(location :build-script-run[rustc_flags])",
+        "@$(location :manifest[env_flags])",
     ],
     named_deps = {
         "pki_types": "//third-party/rust/crates/rustls-pki-types/1.14.0:rustls-pki-types",
@@ -57,8 +56,8 @@ rust_library(
 )
 
 rust_binary(
-    name = "rustls-build-script-build",
-    srcs = [":rustls-vendor"],
+    name = "build-script-build",
+    srcs = [":vendor"],
     crate = "build_script_build",
     crate_root = "vendor/build.rs",
     edition = "2021",
@@ -73,18 +72,18 @@ rust_binary(
         "std",
         "tls12",
     ],
-    rustc_flags = ["@$(location :rustls-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = [],
 )
 
 buildscript_run(
-    name = "rustls-build-script-run",
+    name = "build-script-run",
     package_name = "rustls",
-    buildscript_rule = ":rustls-build-script-build",
+    buildscript_rule = ":build-script-build",
     env_srcs = [
-        "//third-party/rust/crates/aws-lc-rs/1.15.4:aws-lc-rs-build-script-run[metadata]",
-        "//third-party/rust/crates/ring/0.17.14:ring-build-script-run[metadata]",
-        ":rustls-manifest[env_dict]",
+        "//third-party/rust/crates/aws-lc-rs/1.15.4:build-script-run[metadata]",
+        "//third-party/rust/crates/ring/0.17.14:build-script-run[metadata]",
+        ":manifest[env_dict]",
     ],
     features = [
         "aws-lc-rs",
@@ -98,6 +97,6 @@ buildscript_run(
         "tls12",
     ],
     version = "0.23.36",
-    manifest_dir = ":rustls-vendor",
+    manifest_dir = ":vendor",
     visibility = ["PUBLIC"],
 )

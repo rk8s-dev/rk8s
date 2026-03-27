@@ -4,26 +4,25 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "hashlink-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/hashlink/hashlink-0.10.0.crate"],
     sha256 = "7382cf6263419f2d8df38c55d7da83da5c18aef87fc7a7fc1fb1e344edfe14c1",
     type = "tar.gz",
     strip_prefix = "hashlink-0.10.0",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "hashlink-manifest",
-    vendor = ":hashlink-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "hashlink",
-    srcs = [":hashlink-vendor"],
+    srcs = [":vendor"],
     crate = "hashlink",
     crate_root = "vendor/src/lib.rs",
     edition = "2018",
-    rustc_flags = ["@$(location :hashlink-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = ["//third-party/rust/crates/hashbrown/0.15.5:hashbrown"],
 )

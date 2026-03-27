@@ -4,22 +4,21 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "wasm-encoder-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/wasm-encoder/wasm-encoder-0.244.0.crate"],
     sha256 = "990065f2fe63003fe337b932cfb5e3b80e0b4d0f5ff650e6985b1048f62c8319",
     type = "tar.gz",
     strip_prefix = "wasm-encoder-0.244.0",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "wasm-encoder-manifest",
-    vendor = ":wasm-encoder-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "wasm-encoder",
-    srcs = [":wasm-encoder-vendor"],
+    srcs = [":vendor"],
     crate = "wasm_encoder",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
@@ -28,7 +27,7 @@ rust_library(
         "std",
         "wasmparser",
     ],
-    rustc_flags = ["@$(location :wasm-encoder-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/leb128fmt/0.1.0:leb128fmt",

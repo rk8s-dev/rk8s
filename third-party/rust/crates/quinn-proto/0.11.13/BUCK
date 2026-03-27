@@ -4,22 +4,21 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "quinn-proto-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/quinn-proto/quinn-proto-0.11.13.crate"],
     sha256 = "f1906b49b0c3bc04b5fe5d86a77925ae6524a19b816ae38ce1e426255f1d8a31",
     type = "tar.gz",
     strip_prefix = "quinn-proto-0.11.13",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "quinn-proto-manifest",
-    vendor = ":quinn-proto-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "quinn-proto",
-    srcs = [":quinn-proto-vendor"],
+    srcs = [":vendor"],
     crate = "quinn_proto",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
@@ -32,7 +31,7 @@ rust_library(
         "rustls-aws-lc-rs",
         "rustls-ring",
     ],
-    rustc_flags = ["@$(location :quinn-proto-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/aws-lc-rs/1.15.4:aws-lc-rs",

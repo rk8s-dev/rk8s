@@ -4,25 +4,24 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "inventory-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/inventory/inventory-0.3.21.crate"],
     sha256 = "bc61209c082fbeb19919bee74b176221b27223e27b65d781eb91af24eb1fb46e",
     type = "tar.gz",
     strip_prefix = "inventory-0.3.21",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "inventory-manifest",
-    vendor = ":inventory-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "inventory",
-    srcs = [":inventory-vendor"],
+    srcs = [":vendor"],
     crate = "inventory",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
-    rustc_flags = ["@$(location :inventory-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
 )

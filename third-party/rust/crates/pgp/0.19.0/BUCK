@@ -4,22 +4,21 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "pgp-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/pgp/pgp-0.19.0.crate"],
     sha256 = "eaffe1ec22db286599c30ae6be75b37493b558735d86c8e59ec5c38794415fe4",
     type = "tar.gz",
     strip_prefix = "pgp-0.19.0",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "pgp-manifest",
-    vendor = ":pgp-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "pgp",
-    srcs = [":pgp-vendor"],
+    srcs = [":vendor"],
     crate = "pgp",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
@@ -27,7 +26,7 @@ rust_library(
         "bzip2",
         "default",
     ],
-    rustc_flags = ["@$(location :pgp-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     named_deps = {
         "md5": "//third-party/rust/crates/md-5/0.10.6:md-5",
         "num_bigint": "//third-party/rust/crates/num-bigint-dig/0.8.6:num-bigint-dig",

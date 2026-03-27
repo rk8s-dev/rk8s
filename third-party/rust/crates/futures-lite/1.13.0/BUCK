@@ -4,22 +4,21 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "futures-lite-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/futures-lite/futures-lite-1.13.0.crate"],
     sha256 = "49a9d51ce47660b1e808d3c990b4709f2f415d928835a17dfd16991515c46bce",
     type = "tar.gz",
     strip_prefix = "futures-lite-1.13.0",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "futures-lite-manifest",
-    vendor = ":futures-lite-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "futures-lite",
-    srcs = [":futures-lite-vendor"],
+    srcs = [":vendor"],
     crate = "futures_lite",
     crate_root = "vendor/src/lib.rs",
     edition = "2018",
@@ -33,7 +32,7 @@ rust_library(
         "std",
         "waker-fn",
     ],
-    rustc_flags = ["@$(location :futures-lite-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/fastrand/1.9.0:fastrand",

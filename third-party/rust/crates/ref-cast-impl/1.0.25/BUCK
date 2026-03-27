@@ -4,26 +4,25 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "ref-cast-impl-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/ref-cast-impl/ref-cast-impl-1.0.25.crate"],
     sha256 = "b7186006dcb21920990093f30e3dea63b7d6e977bf1256be20c3563a5db070da",
     type = "tar.gz",
     strip_prefix = "ref-cast-impl-1.0.25",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "ref-cast-impl-manifest",
-    vendor = ":ref-cast-impl-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "ref-cast-impl",
-    srcs = [":ref-cast-impl-vendor"],
+    srcs = [":vendor"],
     crate = "ref_cast_impl",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
-    rustc_flags = ["@$(location :ref-cast-impl-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     proc_macro = True,
     visibility = ["PUBLIC"],
     deps = [

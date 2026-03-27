@@ -4,26 +4,25 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "olpc-cjson-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/olpc-cjson/olpc-cjson-0.1.4.crate"],
     sha256 = "696183c9b5fe81a7715d074fd632e8bd46f4ccc0231a3ed7fc580a80de5f7083",
     type = "tar.gz",
     strip_prefix = "olpc-cjson-0.1.4",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "olpc-cjson-manifest",
-    vendor = ":olpc-cjson-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "olpc-cjson",
-    srcs = [":olpc-cjson-vendor"],
+    srcs = [":vendor"],
     crate = "olpc_cjson",
     crate_root = "vendor/src/lib.rs",
     edition = "2018",
-    rustc_flags = ["@$(location :olpc-cjson-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/serde/1.0.228:serde",

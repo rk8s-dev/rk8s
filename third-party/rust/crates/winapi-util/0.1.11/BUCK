@@ -4,26 +4,25 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "winapi-util-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/winapi-util/winapi-util-0.1.11.crate"],
     sha256 = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22",
     type = "tar.gz",
     strip_prefix = "winapi-util-0.1.11",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "winapi-util-manifest",
-    vendor = ":winapi-util-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "winapi-util",
-    srcs = [":winapi-util-vendor"],
+    srcs = [":vendor"],
     crate = "winapi_util",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
-    rustc_flags = ["@$(location :winapi-util-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     os_deps = {
         "windows": ["//third-party/rust/crates/windows-sys/0.61.2:windows-sys"],
     },

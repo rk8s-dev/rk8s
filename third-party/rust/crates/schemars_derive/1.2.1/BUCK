@@ -4,26 +4,25 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "schemars_derive-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/schemars_derive/schemars_derive-1.2.1.crate"],
     sha256 = "7d115b50f4aaeea07e79c1912f645c7513d81715d0420f8bc77a18c6260b307f",
     type = "tar.gz",
     strip_prefix = "schemars_derive-1.2.1",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "schemars_derive-manifest",
-    vendor = ":schemars_derive-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "schemars_derive",
-    srcs = [":schemars_derive-vendor"],
+    srcs = [":vendor"],
     crate = "schemars_derive",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
-    rustc_flags = ["@$(location :schemars_derive-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     proc_macro = True,
     visibility = ["PUBLIC"],
     deps = [

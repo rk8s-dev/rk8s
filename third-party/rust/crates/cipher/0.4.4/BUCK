@@ -4,27 +4,26 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "cipher-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/cipher/cipher-0.4.4.crate"],
     sha256 = "773f3b9af64447d2ce9850330c473515014aa235e6a783b02db81ff39e4a3dad",
     type = "tar.gz",
     strip_prefix = "cipher-0.4.4",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "cipher-manifest",
-    vendor = ":cipher-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "cipher",
-    srcs = [":cipher-vendor"],
+    srcs = [":vendor"],
     crate = "cipher",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
     features = ["block-padding"],
-    rustc_flags = ["@$(location :cipher-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/crypto-common/0.1.7:crypto-common",

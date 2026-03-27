@@ -4,26 +4,25 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "serde_derive_internals-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/serde_derive_internals/serde_derive_internals-0.29.1.crate"],
     sha256 = "18d26a20a969b9e3fdf2fc2d9f21eda6c40e2de84c9408bb5d3b05d499aae711",
     type = "tar.gz",
     strip_prefix = "serde_derive_internals-0.29.1",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "serde_derive_internals-manifest",
-    vendor = ":serde_derive_internals-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "serde_derive_internals",
-    srcs = [":serde_derive_internals-vendor"],
+    srcs = [":vendor"],
     crate = "serde_derive_internals",
     crate_root = "vendor/lib.rs",
     edition = "2015",
-    rustc_flags = ["@$(location :serde_derive_internals-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/proc-macro2/1.0.106:proc-macro2",

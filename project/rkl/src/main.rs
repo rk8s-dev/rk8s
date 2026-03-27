@@ -9,6 +9,7 @@ use tracing_subscriber::{EnvFilter, Registry, layer::SubscriberExt};
 
 mod commands;
 mod config;
+mod csi;
 mod daemon;
 mod network;
 mod quic;

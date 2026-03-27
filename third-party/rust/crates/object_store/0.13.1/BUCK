@@ -4,22 +4,21 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "object_store-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/object_store/object_store-0.13.1.crate"],
     sha256 = "c2858065e55c148d294a9f3aae3b0fa9458edadb41a108397094566f4e3c0dfb",
     type = "tar.gz",
     strip_prefix = "object_store-0.13.1",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "object_store-manifest",
-    vendor = ":object_store-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "object_store",
-    srcs = [":object_store-vendor"],
+    srcs = [":vendor"],
     crate = "object_store",
     crate_root = "vendor/src/lib.rs",
     edition = "2024",
@@ -42,7 +41,7 @@ rust_library(
         "serde_urlencoded",
         "walkdir",
     ],
-    rustc_flags = ["@$(location :object_store-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     named_deps = {
         "md5": "//third-party/rust/crates/md-5/0.10.6:md-5",
     },

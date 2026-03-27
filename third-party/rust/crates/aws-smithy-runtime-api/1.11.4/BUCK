@@ -4,22 +4,21 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "aws-smithy-runtime-api-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/aws-smithy-runtime-api/aws-smithy-runtime-api-1.11.4.crate"],
     sha256 = "8c55e0837e9b8526f49e0b9bfa9ee18ddee70e853f5bc09c5d11ebceddcb0fec",
     type = "tar.gz",
     strip_prefix = "aws-smithy-runtime-api-1.11.4",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "aws-smithy-runtime-api-manifest",
-    vendor = ":aws-smithy-runtime-api-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "aws-smithy-runtime-api",
-    srcs = [":aws-smithy-runtime-api-vendor"],
+    srcs = [":vendor"],
     crate = "aws_smithy_runtime_api",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
@@ -31,7 +30,7 @@ rust_library(
         "http-auth",
         "test-util",
     ],
-    rustc_flags = ["@$(location :aws-smithy-runtime-api-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     named_deps = {
         "http_02x": "//third-party/rust/crates/http/0.2.12:http",
         "http_1x": "//third-party/rust/crates/http/1.4.0:http",

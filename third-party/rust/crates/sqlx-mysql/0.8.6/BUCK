@@ -4,22 +4,21 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "sqlx-mysql-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/sqlx-mysql/sqlx-mysql-0.8.6.crate"],
     sha256 = "aa003f0038df784eb8fecbbac13affe3da23b45194bd57dba231c8f48199c526",
     type = "tar.gz",
     strip_prefix = "sqlx-mysql-0.8.6",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "sqlx-mysql-manifest",
-    vendor = ":sqlx-mysql-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "sqlx-mysql",
-    srcs = [":sqlx-mysql-vendor"],
+    srcs = [":vendor"],
     crate = "sqlx_mysql",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
@@ -35,7 +34,7 @@ rust_library(
         "time",
         "uuid",
     ],
-    rustc_flags = ["@$(location :sqlx-mysql-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     named_deps = {
         "md5": "//third-party/rust/crates/md-5/0.10.6:md-5",
     },

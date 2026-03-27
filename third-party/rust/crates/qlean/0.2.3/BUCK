@@ -4,26 +4,25 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "qlean-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/qlean/qlean-0.2.3.crate"],
     sha256 = "9d9aaf1d6d6b54a552028d6f74cb10d16973bc6964cec84f100ef146412e7237",
     type = "tar.gz",
     strip_prefix = "qlean-0.2.3",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "qlean-manifest",
-    vendor = ":qlean-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "qlean",
-    srcs = [":qlean-vendor"],
+    srcs = [":vendor"],
     crate = "qlean",
     crate_root = "vendor/src/lib.rs",
     edition = "2024",
-    rustc_flags = ["@$(location :qlean-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/anyhow/1.0.101:anyhow",

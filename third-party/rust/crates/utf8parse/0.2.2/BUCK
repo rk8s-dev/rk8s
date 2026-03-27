@@ -4,26 +4,25 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "utf8parse-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/utf8parse/utf8parse-0.2.2.crate"],
     sha256 = "06abde3611657adf66d383f00b093d7faecc7fa57071cce2578660c9f1010821",
     type = "tar.gz",
     strip_prefix = "utf8parse-0.2.2",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "utf8parse-manifest",
-    vendor = ":utf8parse-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "utf8parse",
-    srcs = [":utf8parse-vendor"],
+    srcs = [":vendor"],
     crate = "utf8parse",
     crate_root = "vendor/src/lib.rs",
     edition = "2018",
     features = ["default"],
-    rustc_flags = ["@$(location :utf8parse-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
 )

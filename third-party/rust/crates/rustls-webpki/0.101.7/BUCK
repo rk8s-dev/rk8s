@@ -4,22 +4,21 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "rustls-webpki-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/rustls-webpki/rustls-webpki-0.101.7.crate"],
     sha256 = "8b6275d1ee7a1cd780b64aca7726599a1dbc893b1e64144529e55c3c2f745765",
     type = "tar.gz",
     strip_prefix = "rustls-webpki-0.101.7",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "rustls-webpki-manifest",
-    vendor = ":rustls-webpki-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "rustls-webpki",
-    srcs = [":rustls-webpki-vendor"],
+    srcs = [":vendor"],
     crate = "webpki",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
@@ -28,7 +27,7 @@ rust_library(
         "default",
         "std",
     ],
-    rustc_flags = ["@$(location :rustls-webpki-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/ring/0.17.14:ring",

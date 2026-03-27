@@ -4,22 +4,21 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "lock_api-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/lock_api/lock_api-0.4.14.crate"],
     sha256 = "224399e74b87b5f3557511d98dff8b14089b3dadafcab6bb93eab67d3aace965",
     type = "tar.gz",
     strip_prefix = "lock_api-0.4.14",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "lock_api-manifest",
-    vendor = ":lock_api-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "lock_api",
-    srcs = [":lock_api-vendor"],
+    srcs = [":vendor"],
     crate = "lock_api",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
@@ -27,7 +26,7 @@ rust_library(
         "atomic_usize",
         "default",
     ],
-    rustc_flags = ["@$(location :lock_api-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = ["//third-party/rust/crates/scopeguard/1.2.0:scopeguard"],
 )

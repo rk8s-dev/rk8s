@@ -691,6 +691,48 @@ impl XlineStore {
         .await
     }
 
+    /// Put a raw key-value pair into xline.
+    pub async fn put_raw(&self, key: &str, value: &str) -> Result<()> {
+        let mut client = self.client.write().await;
+        client.put(key, value, Some(PutOptions::new())).await?;
+        Ok(())
+    }
+
+    /// Get a raw value by key from xline.
+    pub async fn get_raw(&self, key: &str) -> Result<Option<String>> {
+        let mut client = self.client.write().await;
+        let resp = client.get(key, None).await?;
+        Ok(resp
+            .kvs()
+            .first()
+            .map(|kv| String::from_utf8_lossy(kv.value()).to_string()))
+    }
+
+    /// Delete a raw key from xline.
+    pub async fn delete_raw(&self, key: &str) -> Result<()> {
+        let mut client = self.client.write().await;
+        client.delete(key, None).await?;
+        Ok(())
+    }
+
+    /// List all key-value pairs under a prefix.
+    pub async fn list_raw(&self, prefix: &str) -> Result<Vec<(String, String)>> {
+        let mut client = self.client.write().await;
+        let resp = client
+            .get(prefix, Some(GetOptions::new().with_prefix()))
+            .await?;
+        Ok(resp
+            .kvs()
+            .iter()
+            .map(|kv| {
+                (
+                    String::from_utf8_lossy(kv.key()).to_string(),
+                    String::from_utf8_lossy(kv.value()).to_string(),
+                )
+            })
+            .collect())
+    }
+
     pub async fn get_object_yaml(&self, kind: ResourceKind, name: &str) -> Result<Option<String>> {
         match kind {
             ResourceKind::Pod => self.get_pod_yaml(name).await,

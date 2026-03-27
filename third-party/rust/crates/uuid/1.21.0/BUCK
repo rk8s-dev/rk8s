@@ -4,22 +4,21 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "uuid-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/uuid/uuid-1.21.0.crate"],
     sha256 = "b672338555252d43fd2240c714dc444b8c6fb0a5c5335e65a07bba7742735ddb",
     type = "tar.gz",
     strip_prefix = "uuid-1.21.0",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "uuid-manifest",
-    vendor = ":uuid-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "uuid",
-    srcs = [":uuid-vendor"],
+    srcs = [":vendor"],
     crate = "uuid",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
@@ -33,7 +32,7 @@ rust_library(
         "v4",
         "v7",
     ],
-    rustc_flags = ["@$(location :uuid-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     os_deps = {
         "linux": [
             "//third-party/rust/crates/getrandom/0.4.1:getrandom",

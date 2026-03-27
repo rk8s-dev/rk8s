@@ -4,22 +4,21 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "ppv-lite86-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/ppv-lite86/ppv-lite86-0.2.21.crate"],
     sha256 = "85eae3c4ed2f50dcfe72643da4befc30deadb458a9b590d720cde2f2b1e97da9",
     type = "tar.gz",
     strip_prefix = "ppv-lite86-0.2.21",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "ppv-lite86-manifest",
-    vendor = ":ppv-lite86-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "ppv-lite86",
-    srcs = [":ppv-lite86-vendor"],
+    srcs = [":vendor"],
     crate = "ppv_lite86",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
@@ -27,7 +26,7 @@ rust_library(
         "simd",
         "std",
     ],
-    rustc_flags = ["@$(location :ppv-lite86-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = ["//third-party/rust/crates/zerocopy/0.8.39:zerocopy"],
 )

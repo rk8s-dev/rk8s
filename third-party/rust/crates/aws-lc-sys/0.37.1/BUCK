@@ -4,44 +4,43 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "buildscript_run", "rust_binary", "rust_library")
 
 http_archive(
-    name = "aws-lc-sys-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/aws-lc-sys/aws-lc-sys-0.37.1.crate"],
     sha256 = "b092fe214090261288111db7a2b2c2118e5a7f30dc2569f1732c4069a6840549",
     type = "tar.gz",
     strip_prefix = "aws-lc-sys-0.37.1",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "aws-lc-sys-manifest",
-    vendor = ":aws-lc-sys-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "aws-lc-sys",
-    srcs = [":aws-lc-sys-vendor"],
+    srcs = [":vendor"],
     crate = "aws_lc_sys",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
-        "OUT_DIR": "$(location :aws-lc-sys-build-script-main-run[out_dir])",
+        "OUT_DIR": "$(location :build-script-main-run[out_dir])",
     },
     features = ["prebuilt-nasm"],
     rustc_flags = [
-        "@$(location :aws-lc-sys-build-script-main-run[rustc_flags])",
-        "@$(location :aws-lc-sys-manifest[env_flags])",
+        "@$(location :build-script-main-run[rustc_flags])",
+        "@$(location :manifest[env_flags])",
     ],
     visibility = ["PUBLIC"],
 )
 
 rust_binary(
-    name = "aws-lc-sys-build-script-main",
-    srcs = [":aws-lc-sys-vendor"],
+    name = "build-script-main",
+    srcs = [":vendor"],
     crate = "build_script_main",
     crate_root = "vendor/builder/main.rs",
     edition = "2021",
     features = ["prebuilt-nasm"],
-    rustc_flags = ["@$(location :aws-lc-sys-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = [],
     deps = [
         "//third-party/rust/crates/cc/1.2.56:cc",
@@ -52,12 +51,12 @@ rust_binary(
 )
 
 buildscript_run(
-    name = "aws-lc-sys-build-script-main-run",
+    name = "build-script-main-run",
     package_name = "aws-lc-sys",
-    buildscript_rule = ":aws-lc-sys-build-script-main",
-    env_srcs = [":aws-lc-sys-manifest[env_dict]"],
+    buildscript_rule = ":build-script-main",
+    env_srcs = [":manifest[env_dict]"],
     features = ["prebuilt-nasm"],
     version = "0.37.1",
-    manifest_dir = ":aws-lc-sys-vendor",
+    manifest_dir = ":vendor",
     visibility = ["PUBLIC"],
 )

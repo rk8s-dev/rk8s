@@ -4,27 +4,26 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "semver-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/semver/semver-0.11.0.crate"],
     sha256 = "f301af10236f6df4160f7c3f04eec6dbc70ace82d23326abad5edee88801c6b6",
     type = "tar.gz",
     strip_prefix = "semver-0.11.0",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "semver-manifest",
-    vendor = ":semver-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "semver",
-    srcs = [":semver-vendor"],
+    srcs = [":vendor"],
     crate = "semver",
     crate_root = "vendor/src/lib.rs",
     edition = "2015",
     features = ["default"],
-    rustc_flags = ["@$(location :semver-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = ["//third-party/rust/crates/semver-parser/0.10.3:semver-parser"],
 )

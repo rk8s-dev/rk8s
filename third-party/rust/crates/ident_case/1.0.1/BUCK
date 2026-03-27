@@ -4,25 +4,24 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "ident_case-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/ident_case/ident_case-1.0.1.crate"],
     sha256 = "b9e0384b61958566e926dc50660321d12159025e767c18e043daf26b70104c39",
     type = "tar.gz",
     strip_prefix = "ident_case-1.0.1",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "ident_case-manifest",
-    vendor = ":ident_case-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "ident_case",
-    srcs = [":ident_case-vendor"],
+    srcs = [":vendor"],
     crate = "ident_case",
     crate_root = "vendor/src/lib.rs",
     edition = "2015",
-    rustc_flags = ["@$(location :ident_case-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
 )

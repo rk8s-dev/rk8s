@@ -4,22 +4,21 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "sqlx-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/sqlx/sqlx-0.8.6.crate"],
     sha256 = "1fefb893899429669dcdd979aff487bd78f4064e5e7907e4269081e0ef7d97dc",
     type = "tar.gz",
     strip_prefix = "sqlx-0.8.6",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "sqlx-manifest",
-    vendor = ":sqlx-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "sqlx",
-    srcs = [":sqlx-vendor"],
+    srcs = [":vendor"],
     crate = "sqlx",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
@@ -47,7 +46,7 @@ rust_library(
         "tls-rustls-ring-webpki",
         "uuid",
     ],
-    rustc_flags = ["@$(location :sqlx-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/sqlx-core/0.8.6:sqlx-core",

@@ -4,22 +4,21 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "tempfile-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/tempfile/tempfile-3.25.0.crate"],
     sha256 = "0136791f7c95b1f6dd99f9cc786b91bb81c3800b639b3478e561ddb7be95e5f1",
     type = "tar.gz",
     strip_prefix = "tempfile-3.25.0",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "tempfile-manifest",
-    vendor = ":tempfile-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "tempfile",
-    srcs = [":tempfile-vendor"],
+    srcs = [":vendor"],
     crate = "tempfile",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
@@ -27,7 +26,7 @@ rust_library(
         "default",
         "getrandom",
     ],
-    rustc_flags = ["@$(location :tempfile-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     os_deps = {
         "linux": [
             "//third-party/rust/crates/getrandom/0.4.1:getrandom",

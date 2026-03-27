@@ -1403,6 +1403,7 @@ mod tests {
                 tolerations: Vec::new(),
                 affinity: None,
                 restart_policy,
+                volumes: vec![],
             },
             status: PodStatus::default(),
         }

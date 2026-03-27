@@ -4,25 +4,24 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "web-time-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/web-time/web-time-1.1.0.crate"],
     sha256 = "5a6580f308b1fad9207618087a65c04e7a10bc77e02c8e84e9b00dd4b12fa0bb",
     type = "tar.gz",
     strip_prefix = "web-time-1.1.0",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "web-time-manifest",
-    vendor = ":web-time-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "web-time",
-    srcs = [":web-time-vendor"],
+    srcs = [":vendor"],
     crate = "web_time",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
-    rustc_flags = ["@$(location :web-time-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
 )

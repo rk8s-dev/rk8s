@@ -4,22 +4,21 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "futures-sink-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/futures-sink/futures-sink-0.3.31.crate"],
     sha256 = "e575fab7d1e0dcb8d0c7bcf9a63ee213816ab51902e6d244a95819acacf1d4f7",
     type = "tar.gz",
     strip_prefix = "futures-sink-0.3.31",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "futures-sink-manifest",
-    vendor = ":futures-sink-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "futures-sink",
-    srcs = [":futures-sink-vendor"],
+    srcs = [":vendor"],
     crate = "futures_sink",
     crate_root = "vendor/src/lib.rs",
     edition = "2018",
@@ -28,6 +27,6 @@ rust_library(
         "default",
         "std",
     ],
-    rustc_flags = ["@$(location :futures-sink-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
 )

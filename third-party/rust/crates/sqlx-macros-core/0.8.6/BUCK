@@ -4,22 +4,21 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "sqlx-macros-core-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/sqlx-macros-core/sqlx-macros-core-0.8.6.crate"],
     sha256 = "19a9c1841124ac5a61741f96e1d9e2ec77424bf323962dd894bdb93f37d5219b",
     type = "tar.gz",
     strip_prefix = "sqlx-macros-core-0.8.6",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "sqlx-macros-core-manifest",
-    vendor = ":sqlx-macros-core-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "sqlx-macros-core",
-    srcs = [":sqlx-macros-core-vendor"],
+    srcs = [":vendor"],
     crate = "sqlx_macros_core",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
@@ -43,7 +42,7 @@ rust_library(
         "tokio",
         "uuid",
     ],
-    rustc_flags = ["@$(location :sqlx-macros-core-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/dotenvy/0.15.7:dotenvy",

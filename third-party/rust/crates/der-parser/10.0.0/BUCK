@@ -4,22 +4,21 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "der-parser-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/der-parser/der-parser-10.0.0.crate"],
     sha256 = "07da5016415d5a3c4dd39b11ed26f915f52fc4e0dc197d87908bc916e51bc1a6",
     type = "tar.gz",
     strip_prefix = "der-parser-10.0.0",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "der-parser-manifest",
-    vendor = ":der-parser-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "der-parser",
-    srcs = [":der-parser-vendor"],
+    srcs = [":vendor"],
     crate = "der_parser",
     crate_root = "vendor/src/lib.rs",
     edition = "2018",
@@ -29,7 +28,7 @@ rust_library(
         "num-bigint",
         "std",
     ],
-    rustc_flags = ["@$(location :der-parser-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/asn1-rs/0.7.1:asn1-rs",

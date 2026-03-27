@@ -4,22 +4,21 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "rtnetlink-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/rtnetlink/rtnetlink-0.18.1.crate"],
     sha256 = "08fd15aa4c64c34d0b3178e45ec6dad313a9f02b193376d501668a7950264bb7",
     type = "tar.gz",
     strip_prefix = "rtnetlink-0.18.1",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "rtnetlink-manifest",
-    vendor = ":rtnetlink-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "rtnetlink",
-    srcs = [":rtnetlink-vendor"],
+    srcs = [":vendor"],
     crate = "rtnetlink",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
@@ -28,7 +27,7 @@ rust_library(
         "tokio",
         "tokio_socket",
     ],
-    rustc_flags = ["@$(location :rtnetlink-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/futures/0.3.31:futures",

@@ -4,43 +4,42 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "buildscript_run", "rust_binary", "rust_library")
 
 http_archive(
-    name = "tiny-keccak-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/tiny-keccak/tiny-keccak-2.0.2.crate"],
     sha256 = "2c9d3793400a45f954c52e73d068316d76b6f4e36977e3fcebb13a2721e80237",
     type = "tar.gz",
     strip_prefix = "tiny-keccak-2.0.2",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "tiny-keccak-manifest",
-    vendor = ":tiny-keccak-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "tiny-keccak",
-    srcs = [":tiny-keccak-vendor"],
+    srcs = [":vendor"],
     crate = "tiny_keccak",
     crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
-        "OUT_DIR": "$(location :tiny-keccak-build-script-run[out_dir])",
+        "OUT_DIR": "$(location :build-script-run[out_dir])",
     },
     features = [
         "default",
         "shake",
     ],
     rustc_flags = [
-        "@$(location :tiny-keccak-build-script-run[rustc_flags])",
-        "@$(location :tiny-keccak-manifest[env_flags])",
+        "@$(location :build-script-run[rustc_flags])",
+        "@$(location :manifest[env_flags])",
     ],
     visibility = ["PUBLIC"],
     deps = ["//third-party/rust/crates/crunchy/0.2.4:crunchy"],
 )
 
 rust_binary(
-    name = "tiny-keccak-build-script-build",
-    srcs = [":tiny-keccak-vendor"],
+    name = "build-script-build",
+    srcs = [":vendor"],
     crate = "build_script_build",
     crate_root = "vendor/build.rs",
     edition = "2018",
@@ -48,20 +47,20 @@ rust_binary(
         "default",
         "shake",
     ],
-    rustc_flags = ["@$(location :tiny-keccak-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = [],
 )
 
 buildscript_run(
-    name = "tiny-keccak-build-script-run",
+    name = "build-script-run",
     package_name = "tiny-keccak",
-    buildscript_rule = ":tiny-keccak-build-script-build",
-    env_srcs = [":tiny-keccak-manifest[env_dict]"],
+    buildscript_rule = ":build-script-build",
+    env_srcs = [":manifest[env_dict]"],
     features = [
         "default",
         "shake",
     ],
     version = "2.0.2",
-    manifest_dir = ":tiny-keccak-vendor",
+    manifest_dir = ":vendor",
     visibility = ["PUBLIC"],
 )

@@ -4,26 +4,25 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "tinytemplate-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/tinytemplate/tinytemplate-1.2.1.crate"],
     sha256 = "be4d6b5f19ff7664e8c98d03e2139cb510db9b0a60b55f8e8709b689d939b6bc",
     type = "tar.gz",
     strip_prefix = "tinytemplate-1.2.1",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "tinytemplate-manifest",
-    vendor = ":tinytemplate-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "tinytemplate",
-    srcs = [":tinytemplate-vendor"],
+    srcs = [":vendor"],
     crate = "tinytemplate",
     crate_root = "vendor/src/lib.rs",
     edition = "2015",
-    rustc_flags = ["@$(location :tinytemplate-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/serde/1.0.228:serde",

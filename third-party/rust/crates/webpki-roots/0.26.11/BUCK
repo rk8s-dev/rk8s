@@ -4,26 +4,25 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "webpki-roots-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/webpki-roots/webpki-roots-0.26.11.crate"],
     sha256 = "521bc38abb08001b01866da9f51eb7c5d647a19260e00054a8c7fd5f9e57f7a9",
     type = "tar.gz",
     strip_prefix = "webpki-roots-0.26.11",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "webpki-roots-manifest",
-    vendor = ":webpki-roots-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "webpki-roots",
-    srcs = [":webpki-roots-vendor"],
+    srcs = [":vendor"],
     crate = "webpki_roots",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
-    rustc_flags = ["@$(location :webpki-roots-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     named_deps = {
         "parent": "//third-party/rust/crates/webpki-roots/1.0.6:webpki-roots",
     },

@@ -4,26 +4,25 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "async-executor-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/async-executor/async-executor-1.13.3.crate"],
     sha256 = "497c00e0fd83a72a79a39fcbd8e3e2f055d6f6c7e025f3b3d91f4f8e76527fb8",
     type = "tar.gz",
     strip_prefix = "async-executor-1.13.3",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "async-executor-manifest",
-    vendor = ":async-executor-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "async-executor",
-    srcs = [":async-executor-vendor"],
+    srcs = [":vendor"],
     crate = "async_executor",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
-    rustc_flags = ["@$(location :async-executor-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/async-task/4.7.1:async-task",

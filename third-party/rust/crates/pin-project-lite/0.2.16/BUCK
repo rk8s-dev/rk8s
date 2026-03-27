@@ -4,25 +4,24 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "pin-project-lite-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/pin-project-lite/pin-project-lite-0.2.16.crate"],
     sha256 = "3b3cff922bd51709b605d9ead9aa71031d81447142d828eb4a6eba76fe619f9b",
     type = "tar.gz",
     strip_prefix = "pin-project-lite-0.2.16",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "pin-project-lite-manifest",
-    vendor = ":pin-project-lite-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "pin-project-lite",
-    srcs = [":pin-project-lite-vendor"],
+    srcs = [":vendor"],
     crate = "pin_project_lite",
     crate_root = "vendor/src/lib.rs",
     edition = "2018",
-    rustc_flags = ["@$(location :pin-project-lite-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
 )

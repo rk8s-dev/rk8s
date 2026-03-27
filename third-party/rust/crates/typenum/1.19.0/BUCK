@@ -4,54 +4,53 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "buildscript_run", "rust_binary", "rust_library")
 
 http_archive(
-    name = "typenum-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/typenum/typenum-1.19.0.crate"],
     sha256 = "562d481066bde0658276a35467c4af00bdc6ee726305698a55b86e61d7ad82bb",
     type = "tar.gz",
     strip_prefix = "typenum-1.19.0",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "typenum-manifest",
-    vendor = ":typenum-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "typenum",
-    srcs = [":typenum-vendor"],
+    srcs = [":vendor"],
     crate = "typenum",
     crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
-        "OUT_DIR": "$(location :typenum-build-script-run[out_dir])",
+        "OUT_DIR": "$(location :build-script-run[out_dir])",
     },
     features = ["const-generics"],
     rustc_flags = [
-        "@$(location :typenum-build-script-run[rustc_flags])",
-        "@$(location :typenum-manifest[env_flags])",
+        "@$(location :build-script-run[rustc_flags])",
+        "@$(location :manifest[env_flags])",
     ],
     visibility = ["PUBLIC"],
 )
 
 rust_binary(
-    name = "typenum-build-script-build",
-    srcs = [":typenum-vendor"],
+    name = "build-script-build",
+    srcs = [":vendor"],
     crate = "build_script_build",
     crate_root = "vendor/build.rs",
     edition = "2018",
     features = ["const-generics"],
-    rustc_flags = ["@$(location :typenum-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = [],
 )
 
 buildscript_run(
-    name = "typenum-build-script-run",
+    name = "build-script-run",
     package_name = "typenum",
-    buildscript_rule = ":typenum-build-script-build",
-    env_srcs = [":typenum-manifest[env_dict]"],
+    buildscript_rule = ":build-script-build",
+    env_srcs = [":manifest[env_dict]"],
     features = ["const-generics"],
     version = "1.19.0",
-    manifest_dir = ":typenum-vendor",
+    manifest_dir = ":vendor",
     visibility = ["PUBLIC"],
 )

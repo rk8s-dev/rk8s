@@ -4,22 +4,21 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "ocb3-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/ocb3/ocb3-0.1.0.crate"],
     sha256 = "c196e0276c471c843dd5777e7543a36a298a4be942a2a688d8111cd43390dedb",
     type = "tar.gz",
     strip_prefix = "ocb3-0.1.0",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "ocb3-manifest",
-    vendor = ":ocb3-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "ocb3",
-    srcs = [":ocb3-vendor"],
+    srcs = [":vendor"],
     crate = "ocb3",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
@@ -29,7 +28,7 @@ rust_library(
         "getrandom",
         "rand_core",
     ],
-    rustc_flags = ["@$(location :ocb3-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/aead/0.5.2:aead",

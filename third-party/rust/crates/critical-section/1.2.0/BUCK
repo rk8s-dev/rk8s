@@ -4,25 +4,24 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "critical-section-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/critical-section/critical-section-1.2.0.crate"],
     sha256 = "790eea4361631c5e7d22598ecd5723ff611904e3344ce8720784c93e3d83d40b",
     type = "tar.gz",
     strip_prefix = "critical-section-1.2.0",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "critical-section-manifest",
-    vendor = ":critical-section-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "critical-section",
-    srcs = [":critical-section-vendor"],
+    srcs = [":vendor"],
     crate = "critical_section",
     crate_root = "vendor/src/lib.rs",
     edition = "2018",
-    rustc_flags = ["@$(location :critical-section-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
 )

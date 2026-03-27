@@ -4,22 +4,21 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "pest-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/pest/pest-2.8.6.crate"],
     sha256 = "e0848c601009d37dfa3430c4666e147e49cdcf1b92ecd3e63657d8a5f19da662",
     type = "tar.gz",
     strip_prefix = "pest-2.8.6",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "pest-manifest",
-    vendor = ":pest-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "pest",
-    srcs = [":pest-vendor"],
+    srcs = [":vendor"],
     crate = "pest",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
@@ -28,7 +27,7 @@ rust_library(
         "memchr",
         "std",
     ],
-    rustc_flags = ["@$(location :pest-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/memchr/2.8.0:memchr",

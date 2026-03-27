@@ -4,26 +4,25 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "windows-targets-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/windows-targets/windows-targets-0.53.5.crate"],
     sha256 = "4945f9f551b88e0d65f3db0bc25c33b8acea4d9e41163edf90dcd0b19f9069f3",
     type = "tar.gz",
     strip_prefix = "windows-targets-0.53.5",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "windows-targets-manifest",
-    vendor = ":windows-targets-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "windows-targets",
-    srcs = [":windows-targets-vendor"],
+    srcs = [":vendor"],
     crate = "windows_targets",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
-    rustc_flags = ["@$(location :windows-targets-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     os_deps = {
         "linux": ["//third-party/rust/crates/windows_x86_64_gnu/0.53.1:windows_x86_64_gnu"],
         "windows": ["//third-party/rust/crates/windows_x86_64_msvc/0.53.1:windows_x86_64_msvc"],

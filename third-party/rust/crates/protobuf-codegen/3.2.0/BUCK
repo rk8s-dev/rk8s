@@ -4,26 +4,25 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "protobuf-codegen-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/protobuf-codegen/protobuf-codegen-3.2.0.crate"],
     sha256 = "0dd418ac3c91caa4032d37cb80ff0d44e2ebe637b2fb243b6234bf89cdac4901",
     type = "tar.gz",
     strip_prefix = "protobuf-codegen-3.2.0",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "protobuf-codegen-manifest",
-    vendor = ":protobuf-codegen-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "protobuf-codegen",
-    srcs = [":protobuf-codegen-vendor"],
+    srcs = [":vendor"],
     crate = "protobuf_codegen",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
-    rustc_flags = ["@$(location :protobuf-codegen-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/anyhow/1.0.101:anyhow",

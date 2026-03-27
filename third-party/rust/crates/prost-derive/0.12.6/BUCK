@@ -4,26 +4,25 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "prost-derive-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/prost-derive/prost-derive-0.12.6.crate"],
     sha256 = "81bddcdb20abf9501610992b6759a4c888aef7d1a7247ef75e2404275ac24af1",
     type = "tar.gz",
     strip_prefix = "prost-derive-0.12.6",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "prost-derive-manifest",
-    vendor = ":prost-derive-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "prost-derive",
-    srcs = [":prost-derive-vendor"],
+    srcs = [":vendor"],
     crate = "prost_derive",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
-    rustc_flags = ["@$(location :prost-derive-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     proc_macro = True,
     visibility = ["PUBLIC"],
     deps = [

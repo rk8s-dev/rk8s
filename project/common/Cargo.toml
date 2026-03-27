@@ -13,6 +13,7 @@ path = "src/lib.rs"
 [dependencies]
 serde = { workspace = true, features = ["derive"] }
 libcni = { workspace = true }
+libcsi = { workspace = true }
 serde_json = { workspace = true }
 chrono = { workspace = true, features = ["serde"] }
 quinn = { workspace = true }
