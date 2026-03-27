@@ -9,18 +9,33 @@ use xlinerpc::{Request as XlineRequest, Response as XlineResponse, Status, MetaD
 use tower::Service;
 use bytes::Bytes;
 
+/// Create an HTTP response for a gRPC error
+fn create_error_response(status: Status) -> http::Response<http_body::Full<Bytes>> {
+    let status_code = status.code();
+    let status_message = status.message().to_string();
+    
+    http::Response::builder()
+        .status(http::StatusCode::OK) // gRPC errors still use 200 OK at HTTP level
+        .header(http::header::CONTENT_TYPE, "application/grpc")
+        .header("grpc-status", status_code.to_string())
+        .header("grpc-message", status_message)
+        .body(http_body::Full::from(Bytes::new()))
+        .unwrap()
+}
+
 /// Custom body for gRPC streaming responses that encodes items incrementally
 #[pin_project::pin_project]
-pub(crate) struct GrpcStreamingBody<S>
+pub(crate) struct GrpcStreamingBody<S, M>
 where
-    S: Stream<Item = Result<impl Message + Default + Clone, Status>> + Send + 'static,
+    S: Stream<Item = Result<M, Status>> + Send + 'static,
+    M: Message + Default + Clone,
 {
     #[pin]
     inner: S,
     encoding_buffer: Vec<u8>,
 }
 
-impl<S, M>GrpcStreamingBody<S>
+impl<S, M> GrpcStreamingBody<S, M>
 where
     S: Stream<Item = Result<M, Status>> + Send + 'static,
     M: Message + Default + Clone,
@@ -33,7 +48,7 @@ where
     }
 }
 
-impl<S, M> Body for GrpcStreamingBody<S>
+impl<S, M> Body for GrpcStreamingBody<S, M>
 where
     S: Stream<Item = Result<M, Status>> + Send + 'static,
     M: Message + Default + Clone,
@@ -179,23 +194,42 @@ where
     }
 
     fn call(&mut self, request: Request<B>) -> Self::Future {
-        let method = self.svc.inner.clone();
+        let mut method = self.svc.inner.clone();
         let fut = async move {
             // Read body
-            let body_bytes = hyper::body::to_bytes(request.into_body()).await
-                .map_err(|e| Status::internal(format!("Failed to read body: {}", e)))?;
+            let body_bytes = match hyper::body::to_bytes(request.into_body()).await {
+                Ok(bytes) => bytes,
+                Err(e) => {
+                    let status = Status::internal(format!("Failed to read body: {}", e));
+                    return Ok(create_error_response(status));
+                }
+            };
 
             // Decode request
-            let xline_request = XlineRequest::<Input>::decode_from_slice(&body_bytes)
-                .map_err(|e| Status::internal(format!("Failed to decode request: {}", e)))?;
+            let xline_request = match XlineRequest::<Input>::decode_from_slice(&body_bytes) {
+                Ok(req) => req,
+                Err(e) => {
+                    let status = Status::internal(format!("Failed to decode request: {}", e));
+                    return Ok(create_error_response(status));
+                }
+            };
 
             // Call service
-            let xline_response = method.call(xline_request).await
-                .map_err(|e| e)?;
+            let xline_response = match method.call(xline_request).await {
+                Ok(resp) => resp,
+                Err(status) => {
+                    return Ok(create_error_response(status));
+                }
+            };
 
             // Encode response
-            let response_bytes = xline_response.encode_to_vec()
-                .map_err(|e| Status::internal(format!("Failed to encode response: {}", e)))?;
+            let response_bytes = match xline_response.encode_to_vec() {
+                Ok(bytes) => bytes,
+                Err(e) => {
+                    let status = Status::internal(format!("Failed to encode response: {}", e));
+                    return Ok(create_error_response(status));
+                }
+            };
 
             // Create HTTP response
             let response = http::Response::builder()
@@ -250,7 +284,7 @@ where
     B: Body + Send + 'static,
     B::Error: Into<super::Error> + Send + 'static,
 {
-    type Response = http::Response<GrpcStreamingBody<RspStream>>;
+    type Response = http::Response<GrpcStreamingBody<RspStream, Output>>;
     type Error = std::convert::Infallible;
     type Future = futures::future::BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
@@ -259,23 +293,37 @@ where
     }
 
     fn call(&mut self, request: Request<B>) -> Self::Future {
-        let method = self.svc.inner.clone();
+        let mut method = self.svc.inner.clone();
         let fut = async move {
             // Read body
-            let body_bytes = hyper::body::to_bytes(request.into_body()).await
-                .map_err(|e| Status::internal(format!("Failed to read body: {}", e)))?;
+            let body_bytes = match hyper::body::to_bytes(request.into_body()).await {
+                Ok(bytes) => bytes,
+                Err(e) => {
+                    let status = Status::internal(format!("Failed to read body: {}", e));
+                    return Ok(create_error_response(status));
+                }
+            };
 
             // Decode request
-            let xline_request = XlineRequest::<Input>::decode_from_slice(&body_bytes)
-                .map_err(|e| Status::internal(format!("Failed to decode request: {}", e)))?;
+            let xline_request = match XlineRequest::<Input>::decode_from_slice(&body_bytes) {
+                Ok(req) => req,
+                Err(e) => {
+                    let status = Status::internal(format!("Failed to decode request: {}", e));
+                    return Ok(create_error_response(status));
+                }
+            };
 
             // Call service
-            let xline_response = method.call(xline_request).await
-                .map_err(|e| e)?;
+            let xline_response = match method.call(xline_request).await {
+                Ok(resp) => resp,
+                Err(status) => {
+                    return Ok(create_error_response(status));
+                }
+            };
 
             // Create streaming response body that encodes items incrementally
             let stream = xline_response.into_inner();
-            let body = GrpcStreamingBody::new(stream);
+            let body = GrpcStreamingBody::<RspStream, Output>::new(stream);
 
             // Create HTTP response with streaming body
             let response = http::Response::builder()
@@ -325,7 +373,7 @@ where
     B: Body + Send + 'static,
     B::Error: Into<super::Error> + Send + 'static,
 {
-    type Response = http::Response<GrpcStreamingBody<RspStream>>;
+    type Response = http::Response<GrpcStreamingBody<RspStream, Output>>;
     type Error = std::convert::Infallible;
     type Future = futures::future::BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
@@ -334,23 +382,37 @@ where
     }
 
     fn call(&mut self, request: Request<B>) -> Self::Future {
-        let method = self.svc.inner.clone();
+        let mut method = self.svc.inner.clone();
         let fut = async move {
             // Read body
-            let body_bytes = hyper::body::to_bytes(request.into_body()).await
-                .map_err(|e| Status::internal(format!("Failed to read body: {}", e)))?;
+            let body_bytes = match hyper::body::to_bytes(request.into_body()).await {
+                Ok(bytes) => bytes,
+                Err(e) => {
+                    let status = Status::internal(format!("Failed to read body: {}", e));
+                    return Ok(create_error_response(status));
+                }
+            };
 
             // Decode request
-            let xline_request = XlineRequest::<Input>::decode_from_slice(&body_bytes)
-                .map_err(|e| Status::internal(format!("Failed to decode request: {}", e)))?;
+            let xline_request = match XlineRequest::<Input>::decode_from_slice(&body_bytes) {
+                Ok(req) => req,
+                Err(e) => {
+                    let status = Status::internal(format!("Failed to decode request: {}", e));
+                    return Ok(create_error_response(status));
+                }
+            };
 
             // Call service
-            let xline_response = method.call(xline_request).await
-                .map_err(|e| e)?;
+            let xline_response = match method.call(xline_request).await {
+                Ok(resp) => resp,
+                Err(status) => {
+                    return Ok(create_error_response(status));
+                }
+            };
 
             // Create streaming response body that encodes items incrementally
             let stream = xline_response.into_inner();
-            let body = GrpcStreamingBody::new(stream);
+            let body = GrpcStreamingBody::<RspStream, Output>::new(stream);
 
             // Create HTTP response with streaming body
             let response = http::Response::builder()

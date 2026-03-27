@@ -2,7 +2,7 @@ use crate::router::makesvc::WithEncodingOption;
 
 use super::{
     Router, StateRouter,
-    makesvc::{MakeClientStreamingSvc, MakeServerStreamingSvc, MakeStreamingSvc, MakeUnarySVC},
+    makesvc::{MakeClientStreamingSvc, MakeServerStreamingSvc, MakeStreamingSvc, MakeUnarySvc},
 };
 use prost::Message;
 use tokio_stream::Stream;
@@ -46,7 +46,7 @@ where
     {
         self.router = self.router.route_service(
             name,
-            WithEncodingOption::<_>::new(MakeUnarySVC::new(service)),
+            WithEncodingOption::<_>::new(MakeUnarySvc::new(service)),
         );
         self
     }
@@ -67,7 +67,7 @@ where
 
         self.router = self.router.route_service(
             name,
-            axum::routing::post_service(WithEncodingOption::<_>::new(MakeUnarySVC::new(
+            axum::routing::post_service(WithEncodingOption::<_>::new(MakeUnarySvc::new(
                 handler_service,
             ))),
         );
