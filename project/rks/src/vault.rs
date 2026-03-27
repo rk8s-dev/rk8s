@@ -14,12 +14,12 @@ use libvault::storage::Backend;
 use libvault::storage::physical::file::FileBackend;
 use libvault::storage::xline::{XlineBackend, XlineOptions};
 use log::{debug, info, warn};
-use openssl::{asn1::Asn1Time, x509::X509};
 use serde_json::{Value, json};
-use std::cmp::Ordering;
 use std::fmt::{Display, Formatter};
+use std::io::Cursor;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use x509_parser::prelude::{FromDer, X509Certificate};
 
 #[derive(Clone, Copy)]
 pub enum CertRole {
@@ -473,11 +473,17 @@ impl Vault {
     }
 
     fn cached_rks_client_identity_needs_refresh(cert_pem: &str) -> anyhow::Result<bool> {
-        let cert = X509::from_pem(cert_pem.as_bytes())
-            .with_context(|| "Failed to parse cached rks client certificate")?;
-        let now = Asn1Time::days_from_now(0)?;
-        let ordering = cert.not_after().compare(&now)?;
-        Ok(matches!(ordering, Ordering::Less | Ordering::Equal))
+        let mut reader = Cursor::new(cert_pem.as_bytes());
+        let certs = rustls_pemfile::certs(&mut reader)
+            .collect::<std::io::Result<Vec<_>>>()
+            .with_context(|| "Failed to extract cached rks client certificate from PEM chain")?;
+        let cert = certs
+            .first()
+            .with_context(|| "No valid certs found in cached rks client certificate")?;
+        let (_, parsed) = X509Certificate::from_der(cert.as_ref()).map_err(|err| {
+            anyhow::anyhow!("Failed to parse cached rks client certificate: {err}")
+        })?;
+        Ok(parsed.validity().not_after.to_datetime() <= time::OffsetDateTime::now_utc())
     }
 
     async fn ensure_rks_client_identity() -> anyhow::Result<()> {
