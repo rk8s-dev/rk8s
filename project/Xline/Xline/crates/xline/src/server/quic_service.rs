@@ -53,7 +53,10 @@ impl XlineQuicService {
 
     fn tonic_request<T>(message: T, meta: &Metadata) -> Result<xlinerpc::Request<T>, CurpError> {
         let mut request = xlinerpc::Request::from_data(message);
-        // TODO: Add metadata support
+        // Propagate metadata from QUIC request
+        for (key, value) in meta.iter() {
+            request.meta_mut().insert(key, value);
+        }
         Ok(request)
     }
 

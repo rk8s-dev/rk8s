@@ -9,6 +9,34 @@ use xlinerpc::{Request as XlineRequest, Response as XlineResponse, Status, MetaD
 use tower::Service;
 use bytes::Bytes;
 
+/// Decode a gRPC frame from bytes
+/// gRPC frame format: [flags (1 byte)] [length (4 bytes)] [data]
+fn decode_grpc_frame(data: &[u8]) -> Result<&[u8], String> {
+    if data.len() < 5 {
+        return Err("Insufficient data for gRPC frame".to_string());
+    }
+    
+    // Skip flags (1 byte)
+    let length_start = 1;
+    
+    // Read length (4 bytes, big-endian)
+    let length = u32::from_be_bytes([
+        data[length_start],
+        data[length_start + 1],
+        data[length_start + 2],
+        data[length_start + 3]
+    ]) as usize;
+    
+    let data_start = length_start + 4;
+    let expected_end = data_start + length;
+    
+    if expected_end > data.len() {
+        return Err("Invalid gRPC frame length".to_string());
+    }
+    
+    Ok(&data[data_start..expected_end])
+}
+
 /// Create an HTTP response for a gRPC error
 fn create_error_response(status: Status) -> http::Response<http_body::Full<Bytes>> {
     let status_code = status.code();
@@ -205,11 +233,17 @@ where
                 }
             };
 
-            // Decode request
-            let xline_request = match XlineRequest::<Input>::decode_from_slice(&body_bytes) {
-                Ok(req) => req,
+            // Decode gRPC frame first
+            let xline_request = match decode_grpc_frame(&body_bytes) {
+                Ok(frame_data) => match XlineRequest::<Input>::decode_from_slice(&frame_data) {
+                    Ok(req) => req,
+                    Err(e) => {
+                        let status = Status::internal(format!("Failed to decode request: {}", e));
+                        return Ok(create_error_response(status));
+                    }
+                },
                 Err(e) => {
-                    let status = Status::internal(format!("Failed to decode request: {}", e));
+                    let status = Status::internal(format!("Failed to decode gRPC frame: {}", e));
                     return Ok(create_error_response(status));
                 }
             };
@@ -304,11 +338,17 @@ where
                 }
             };
 
-            // Decode request
-            let xline_request = match XlineRequest::<Input>::decode_from_slice(&body_bytes) {
-                Ok(req) => req,
+            // Decode gRPC frame first
+            let xline_request = match decode_grpc_frame(&body_bytes) {
+                Ok(frame_data) => match XlineRequest::<Input>::decode_from_slice(&frame_data) {
+                    Ok(req) => req,
+                    Err(e) => {
+                        let status = Status::internal(format!("Failed to decode request: {}", e));
+                        return Ok(create_error_response(status));
+                    }
+                },
                 Err(e) => {
-                    let status = Status::internal(format!("Failed to decode request: {}", e));
+                    let status = Status::internal(format!("Failed to decode gRPC frame: {}", e));
                     return Ok(create_error_response(status));
                 }
             };
@@ -393,11 +433,17 @@ where
                 }
             };
 
-            // Decode request
-            let xline_request = match XlineRequest::<Input>::decode_from_slice(&body_bytes) {
-                Ok(req) => req,
+            // Decode gRPC frame first
+            let xline_request = match decode_grpc_frame(&body_bytes) {
+                Ok(frame_data) => match XlineRequest::<Input>::decode_from_slice(&frame_data) {
+                    Ok(req) => req,
+                    Err(e) => {
+                        let status = Status::internal(format!("Failed to decode request: {}", e));
+                        return Ok(create_error_response(status));
+                    }
+                },
                 Err(e) => {
-                    let status = Status::internal(format!("Failed to decode request: {}", e));
+                    let status = Status::internal(format!("Failed to decode gRPC frame: {}", e));
                     return Ok(create_error_response(status));
                 }
             };

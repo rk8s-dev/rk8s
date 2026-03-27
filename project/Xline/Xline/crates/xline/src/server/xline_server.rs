@@ -589,7 +589,7 @@ impl XlineServer {
                 Arc::clone(&id_gen),
                 &self.cluster_info.self_peer_urls(),
                 None, // client_tls_config is not used with gm-quic
-            );
+            ),
             LeaseServer::new(
                 lease_storage,
                 Arc::clone(&auth_storage),

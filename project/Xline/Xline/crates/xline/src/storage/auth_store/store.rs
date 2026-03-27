@@ -137,11 +137,11 @@ impl AuthStore {
         if !self.is_enabled() {
             return Ok(None);
         }
-        // TODO: Implement token extraction from xlinerpc request
-        // if let Some(token) = get_token(request.metadata()) {
-        //     let auth_info = self.verify(&token)?;
-        //     return Ok(Some(auth_info));
-        // }
+        // Extract token from request metadata
+        if let Some(token) = crate::server::auth_server::get_token(request.meta()) {
+            let auth_info = self.verify(&token)?;
+            return Ok(Some(auth_info));
+        }
         // TODO: Implement CN extraction from xlinerpc request
         // if let Some(cn) = get_cn(request) {
         //     let auth_info = AuthInfo {

@@ -155,8 +155,8 @@ impl WatchServer {
         &self,
         request: xlinerpc::Request<impl Stream<Item = Result<WatchRequest, Status>> + Send + 'static>,
     ) -> Result<xlinerpc::Response<ReceiverStream<Result<WatchResponse, Status>>>, Status> {
-        Ok(xlinerpc::Response::from_data(debug!("Receive Watch Connection {:?}", request);
-        Ok(tonic::Response::new(
+        debug!("Receive Watch Connection {:?}", request);
+        Ok(xlinerpc::Response::from_data(
             self.watch_stream(request.into_inner()),
         ))
     }
