@@ -135,6 +135,15 @@ impl<'a> NodeRegister<'a> {
             None => Some(Vec::new()),
         };
         if let Some(initial_registry_credentials) = initial_registry_credentials {
+            if !initial_registry_credentials.is_empty()
+                && !crate::protocol::config::config_ref().tls_config.enable
+            {
+                log::warn!(
+                    "Sending {} registry credential(s) to {node_id} over non-TLS QUIC; \
+                     enable TLS in production to protect secrets in transit",
+                    initial_registry_credentials.len(),
+                );
+            }
             let msg = RksMessage::SetRegistryCredentials(initial_registry_credentials);
             if let Err(e) = msg_tx.try_send(msg) {
                 log::warn!("Failed to send registry credentials to {}: {}", node_id, e);

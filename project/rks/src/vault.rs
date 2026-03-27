@@ -330,16 +330,17 @@ impl Vault {
         let mut credentials = Vec::with_capacity(keys.len());
         for key in keys {
             let registry = key.trim_end_matches('/');
-            let cred = self
-                .get_registry_credential(registry)
-                .await
-                .with_context(|| format!("failed to read registry credential for '{registry}'"))?;
-            let Some(cred) = cred else {
-                anyhow::bail!(
-                    "registry key '{registry}' listed in vault but did not resolve to a valid credential"
-                );
-            };
-            credentials.push(cred);
+            match self.get_registry_credential(registry).await {
+                Ok(Some(cred)) => credentials.push(cred),
+                Ok(None) => {
+                    warn!(
+                        "registry key '{registry}' listed in vault but has no valid credential; skipping"
+                    );
+                }
+                Err(e) => {
+                    warn!("failed to read registry credential for '{registry}': {e}; skipping");
+                }
+            }
         }
         Ok(credentials)
     }
@@ -862,7 +863,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_list_registry_credentials_fails_on_invalid_listed_entry() {
+    async fn test_list_registry_credentials_skips_invalid_entry() {
         let (vault, _dir) = setup_test_vault().await.unwrap();
 
         vault
@@ -884,12 +885,13 @@ mod tests {
             .await
             .unwrap();
 
-        let err = vault.list_registry_credentials().await.unwrap_err();
-        assert!(
-            err.to_string()
-                .contains("registry key 'bad.registry' listed in vault but did not resolve to a valid credential"),
-            "unexpected error: {err}"
+        let creds = vault.list_registry_credentials().await.unwrap();
+        assert_eq!(
+            creds.len(),
+            1,
+            "should skip the invalid entry and return only the valid one"
         );
+        assert_eq!(creds[0].registry, "libra.tools");
     }
 
     fn issue_test_cert(

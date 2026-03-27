@@ -42,17 +42,6 @@ pub fn set_registry_credentials(creds: Vec<RegistryCredential>) {
     }
 }
 
-/// Look up a PAT for a given registry host.
-#[allow(dead_code)]
-pub fn get_registry_pat(registry: &str) -> Option<String> {
-    REGISTRY_CREDENTIALS
-        .read()
-        .ok()?
-        .iter()
-        .find(|c| c.registry == registry)
-        .map(|c| c.pat.clone())
-}
-
 /// Return a snapshot of all stored credentials.
 pub fn get_all_registry_credentials() -> Vec<RegistryCredential> {
     REGISTRY_CREDENTIALS
