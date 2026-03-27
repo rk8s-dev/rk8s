@@ -25,7 +25,6 @@ h3-shim = "0.4.0"
 http = "1.0"
 prost = { workspace = true }
 rustls = { version = "0.23", default-features = false, features = ["std", "ring"] }
-rustls-native-certs = "0.6"
 rustls-pemfile = "2"
 thiserror = { workspace = true }
 tokio = { workspace = true }

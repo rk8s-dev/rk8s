@@ -280,8 +280,6 @@ pub(crate) trait InnerCurpService: Send + Sync + 'static {
     async fn try_become_leader_now(&self) -> Result<(), CurpError>;
 }
 
-mod messages;
-
 // Skip for generated code
 #[allow(
     clippy::all,
@@ -298,8 +296,13 @@ mod messages;
     unused_results
 )]
 mod proto {
-    pub use super::messages::commandpb;
-    pub use super::messages::inner_messagepb;
+    pub(crate) mod commandpb {
+        include!(concat!(env!("OUT_DIR"), "/commandpb.rs"));
+    }
+
+    pub(crate) mod inner_messagepb {
+        include!(concat!(env!("OUT_DIR"), "/inner_messagepb.rs"));
+    }
 }
 
 impl From<PbProposeId> for ProposeId {

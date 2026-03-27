@@ -174,10 +174,42 @@ pub mod classifier;
 pub mod command;
 pub mod execute_error;
 pub mod interval;
-mod messages;
 pub mod request_validation;
 
-use messages::{authpb, commandpb, errorpb, etcdserverpb, leasepb, mvccpb, v3lockpb};
+#[allow(dead_code)]
+mod etcdserverpb {
+    tonic::include_proto!("etcdserverpb");
+}
+
+#[allow(dead_code)]
+mod authpb {
+    tonic::include_proto!("authpb");
+}
+
+#[allow(dead_code)]
+mod mvccpb {
+    tonic::include_proto!("mvccpb");
+}
+
+#[allow(dead_code)]
+mod v3lockpb {
+    tonic::include_proto!("v3lockpb");
+}
+
+#[allow(dead_code)]
+mod leasepb {
+    tonic::include_proto!("leasepb");
+}
+
+#[allow(dead_code)]
+mod commandpb {
+    tonic::include_proto!("commandpb");
+}
+
+#[allow(dead_code)]
+mod errorpb {
+    tonic::include_proto!("errorpb");
+}
 
 use std::fmt::Display;
 

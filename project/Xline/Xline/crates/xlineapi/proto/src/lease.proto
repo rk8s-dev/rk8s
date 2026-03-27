@@ -1,0 +1,30 @@
+syntax = "proto3";
+package leasepb;
+
+import "rpc.proto";
+//import "gogoproto/gogo.proto";
+//import "etcd/api/etcdserverpb/rpc.proto";
+
+option go_package = ".;xlineapi";
+option java_package = "com.xline.protobuf";
+option java_outer_classname = "LeaseProto";
+option java_multiple_files = true;
+//option (gogoproto.marshaler_all) = true;
+//option (gogoproto.sizer_all) = true;
+//option (gogoproto.unmarshaler_all) = true;
+//option (gogoproto.goproto_getters_all) = false;
+//option (gogoproto.goproto_enum_prefix_all) = false;
+
+message Lease {
+  int64 ID = 1;
+  int64 TTL = 2;
+  int64 RemainingTTL = 3;
+}
+
+message LeaseInternalRequest {
+  etcdserverpb.LeaseTimeToLiveRequest LeaseTimeToLiveRequest = 1;
+}
+
+message LeaseInternalResponse {
+  etcdserverpb.LeaseTimeToLiveResponse LeaseTimeToLiveResponse = 1;
+}
