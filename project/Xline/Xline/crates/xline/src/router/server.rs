@@ -175,7 +175,7 @@ impl Server {
             if let qbase::net::route::EndpointAddr::Socket(socket_addr) = pathway.local() {
                 let local_port = socket_addr.addr().port();
                 if self.peer_ports.contains(&local_port) {
-                    let _ = self.grpc_server.spawn_connection(new_conn).await;
+                    let _ = self.grpc_server.spawn_connection(new_conn);
                 } else if self.client_ports.contains(&local_port) {
                     let h3_conn = match h3::server::Connection::new(h3_shim::QuicConnection::new(
                         Arc::new(new_conn),
