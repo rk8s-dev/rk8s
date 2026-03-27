@@ -1,12 +1,98 @@
 use http::Request;
-use http_body::Body;
+use http_body::{Body, SizeHint};
 use prost::Message;
+use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
-use tokio_stream::Stream;
+use tokio_stream::StreamExt;
 use xlinerpc::{Request as XlineRequest, Response as XlineResponse, Status, MetaData, BinaryCodec};
 use tower::Service;
 use bytes::Bytes;
+
+/// Custom body for gRPC streaming responses that encodes items incrementally
+#[pin_project::pin_project]
+pub(crate) struct GrpcStreamingBody<S>
+where
+    S: Stream<Item = Result<impl Message + Default + Clone, Status>> + Send + 'static,
+{
+    #[pin]
+    inner: S,
+    encoding_buffer: Vec<u8>,
+}
+
+impl<S, M>GrpcStreamingBody<S>
+where
+    S: Stream<Item = Result<M, Status>> + Send + 'static,
+    M: Message + Default + Clone,
+{
+    pub(crate) fn new(stream: S) -> Self {
+        Self {
+            inner: stream,
+            encoding_buffer: Vec::new(),
+        }
+    }
+}
+
+impl<S, M> Body for GrpcStreamingBody<S>
+where
+    S: Stream<Item = Result<M, Status>> + Send + 'static,
+    M: Message + Default + Clone,
+{
+    type Data = Bytes;
+    type Error = Status;
+
+    fn poll_data(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+    ) -> Poll<Option<Result<Self::Data, Self::Error>>> {
+        let mut this = self.project();
+
+        loop {
+            // If we have buffered data, send it
+            if !this.encoding_buffer.is_empty() {
+                let data = Bytes::from(this.encoding_buffer.drain(..).collect());
+                return Poll::Ready(Some(Ok(data)));
+            }
+
+            // Get the next item from the stream
+            match this.inner.poll_next_unpin(cx) {
+                Poll::Ready(Some(Ok(item))) => {
+                    // Encode the item into the buffer
+                    if let Err(e) = item.encode(this.encoding_buffer) {
+                        return Poll::Ready(Some(Err(Status::internal(format!("Failed to encode item: {}", e)))));
+                    }
+                }
+                Poll::Ready(Some(Err(e))) => {
+                    return Poll::Ready(Some(Err(Status::internal(format!("Stream error: {}", e)))));
+                }
+                Poll::Ready(None) => {
+                    return Poll::Ready(None); // Stream completed
+                }
+                Poll::Pending => {
+                    return Poll::Pending; // Wait for more data
+                }
+            }
+        }
+    }
+
+    fn poll_trailers(
+        self: Pin<&mut Self>,
+        _cx: &mut Context<'_>,
+    ) -> Poll<Result<Option<http::HeaderMap>, Self::Error>> {
+        // Send gRPC trailers
+        let mut trailers = http::HeaderMap::new();
+        trailers.insert("grpc-status", http::HeaderValue::from_static("0"));
+        Poll::Ready(Ok(Some(trailers)))
+    }
+
+    fn is_end_stream(&self) -> bool {
+        self.encoding_buffer.is_empty()
+    }
+
+    fn size_hint(&self) -> SizeHint {
+        SizeHint::default() // We don't know the size in advance for streaming
+    }
+}
 
 #[derive(Clone)]
 pub(crate) struct WithEncodingOption<T> {
@@ -48,25 +134,21 @@ impl<T> WithEncodingOption<T> {
     // /// Limits the maximum size of an encoded message.
     // ///
     // /// Default: `usize::MAX`
-    // pub(crate) fn max_encoding_message_size(mut self, limit: usize) -> Self {
-    //     self.max_encoding_message_size = Some(limit);
-    //     self
-    // }
 }
 
 #[derive(Clone)]
-pub(crate) struct MakeUnarySVC<SVC, Input, Output> {
+pub(crate) struct MakeUnarySvc<SVC, Input, Output> {
     inner: SVC,
     _1: std::marker::PhantomData<Input>,
     _2: std::marker::PhantomData<Output>,
 }
 
-impl<SVC, Input, Output> MakeUnarySVC<SVC, Input, Output>
+impl<SVC, Input, Output> MakeUnarySvc<SVC, Input, Output>
 where
     SVC: Clone,
 {
     pub(crate) fn new(service: SVC) -> Self {
-        MakeUnarySVC {
+        MakeUnarySvc {
             inner: service,
             _1: std::marker::PhantomData,
             _2: std::marker::PhantomData,
@@ -75,7 +157,7 @@ where
 }
 
 impl<B, SVC, Input, Output> Service<Request<B>>
-    for WithEncodingOption<MakeUnarySVC<SVC, Input, Output>>
+    for WithEncodingOption<MakeUnarySvc<SVC, Input, Output>>
 where
     Input: Message + Default + Send + 'static,
     Output: Message + Default + Send + 'static + Clone,
@@ -119,6 +201,7 @@ where
             let response = http::Response::builder()
                 .status(http::StatusCode::OK)
                 .header(http::header::CONTENT_TYPE, "application/grpc")
+                .header("grpc-status", "0") // gRPC OK status code
                 .body(http_body::Full::from(Bytes::from(response_bytes)))
                 .unwrap();
 
@@ -129,14 +212,18 @@ where
 }
 
 #[derive(Clone)]
-pub(crate) struct MakeStreamingSvc<SVC, Input, Output> {
+pub(crate) struct MakeStreamingSvc<SVC, Input, Output, RspStream>
+where
+    RspStream: Stream<Item = Result<Output, Status>> + Send + 'static,
+{
     inner: SVC,
     _1: std::marker::PhantomData<Input>,
     _2: std::marker::PhantomData<Output>,
 }
 
-impl<SVC, Input, Output> MakeStreamingSvc<SVC, Input, Output>
+impl<SVC, Input, Output, RspStream> MakeStreamingSvc<SVC, Input, Output, RspStream>
 where
+    RspStream: Stream<Item = Result<Output, Status>> + Send + 'static,
     SVC: Clone,
 {
     pub(crate) fn new(service: SVC) -> Self {
@@ -149,7 +236,7 @@ where
 }
 
 impl<B, SVC, Input, Output, RspStream> Service<Request<B>>
-    for WithEncodingOption<MakeStreamingSvc<SVC, Input, Output>>
+    for WithEncodingOption<MakeStreamingSvc<SVC, Input, Output, RspStream>>
 where
     Input: Message + Default + Send + 'static,
     Output: Message + Default + Send + 'static + Clone,
@@ -163,7 +250,7 @@ where
     B: Body + Send + 'static,
     B::Error: Into<super::Error> + Send + 'static,
 {
-    type Response = http::Response<http_body::Full<Bytes>>;
+    type Response = http::Response<GrpcStreamingBody<RspStream>>;
     type Error = std::convert::Infallible;
     type Future = futures::future::BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
@@ -186,28 +273,15 @@ where
             let xline_response = method.call(xline_request).await
                 .map_err(|e| e)?;
 
-            // For streaming response, we need to handle it differently
-            // Collect all streaming responses and encode them
-            let mut response_bytes = Vec::new();
-            let mut stream = xline_response.into_inner();
-            
-            while let Some(item) = stream.next().await {
-                match item {
-                    Ok(output) => {
-                        let mut encoded = output.encode_to_vec();
-                        response_bytes.extend_from_slice(&encoded);
-                    }
-                    Err(e) => {
-                        return Err(Status::internal(format!("Streaming response error: {}", e)));
-                    }
-                }
-            }
+            // Create streaming response body that encodes items incrementally
+            let stream = xline_response.into_inner();
+            let body = GrpcStreamingBody::new(stream);
 
-            // Create HTTP response
+            // Create HTTP response with streaming body
             let response = http::Response::builder()
                 .status(http::StatusCode::OK)
                 .header(http::header::CONTENT_TYPE, "application/grpc")
-                .body(http_body::Full::from(Bytes::from(response_bytes)))
+                .body(body)
                 .unwrap();
 
             Ok(response)
@@ -251,7 +325,7 @@ where
     B: Body + Send + 'static,
     B::Error: Into<super::Error> + Send + 'static,
 {
-    type Response = http::Response<http_body::Full<Bytes>>;
+    type Response = http::Response<GrpcStreamingBody<RspStream>>;
     type Error = std::convert::Infallible;
     type Future = futures::future::BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
@@ -274,28 +348,15 @@ where
             let xline_response = method.call(xline_request).await
                 .map_err(|e| e)?;
 
-            // For server streaming response, we need to handle it differently
-            // Collect all streaming responses and encode them
-            let mut response_bytes = Vec::new();
-            let mut stream = xline_response.into_inner();
-            
-            while let Some(item) = stream.next().await {
-                match item {
-                    Ok(output) => {
-                        let mut encoded = output.encode_to_vec();
-                        response_bytes.extend_from_slice(&encoded);
-                    }
-                    Err(e) => {
-                        return Err(Status::internal(format!("Server streaming response error: {}", e)));
-                    }
-                }
-            }
+            // Create streaming response body that encodes items incrementally
+            let stream = xline_response.into_inner();
+            let body = GrpcStreamingBody::new(stream);
 
-            // Create HTTP response
+            // Create HTTP response with streaming body
             let response = http::Response::builder()
                 .status(http::StatusCode::OK)
                 .header(http::header::CONTENT_TYPE, "application/grpc")
-                .body(http_body::Full::from(Bytes::from(response_bytes)))
+                .body(body)
                 .unwrap();
 
             Ok(response)
@@ -349,17 +410,97 @@ where
     fn call(&mut self, request: Request<B>) -> Self::Future {
         let method = self.svc.inner.clone();
         let fut = async move {
-            // Read body
-            let body_bytes = hyper::body::to_bytes(request.into_body()).await
+            // Read and decode streaming request
+            let body = request.into_body();
+            let mut body_bytes = hyper::body::aggregate(body).await
                 .map_err(|e| Status::internal(format!("Failed to read body: {}", e)))?;
 
-            // Decode request
-            let xline_request = XlineRequest::<Input>::decode_from_slice(&body_bytes)
-                .map_err(|e| Status::internal(format!("Failed to decode request: {}", e)))?;
+            let mut all_requests = Vec::new();
+            let mut buffer = Vec::new();
+            let codec = BinaryCodec::new();
 
-            // Call service
-            let xline_response = method.call(xline_request).await
-                .map_err(|e| e)?;
+            // Read all bytes from the body
+            while let Some(chunk) = body_bytes.data_ref() {
+                buffer.extend_from_slice(chunk);
+                if let Err(e) = body_bytes.advance(chunk.len()) {
+                    return Err(Status::internal(format!("Failed to advance body: {}", e)));
+                }
+            }
+
+            // Parse multiple frames from the buffer
+            let mut pos = 0;
+            while pos < buffer.len() {
+                // Each frame starts with a 4-byte metadata length
+                if pos + 4 > buffer.len() {
+                    return Err(Status::internal("Incomplete frame: missing metadata length"));
+                }
+                
+                // Read metadata length to determine frame boundaries
+                let meta_len = u32::from_be_bytes([
+                    buffer[pos],
+                    buffer[pos + 1],
+                    buffer[pos + 2],
+                    buffer[pos + 3]
+                ]) as usize;
+                pos += 4;
+                
+                // Calculate total frame size
+                // Minimum frame size is metadata (meta_len) + at least 1 byte of protobuf data
+                if pos + meta_len + 1 > buffer.len() {
+                    return Err(Status::internal("Incomplete frame: insufficient data"));
+                }
+                
+                // Extract full frame (including the 4-byte meta_len we already read)
+                let frame_start = pos - 4;
+                let frame_end = pos + meta_len + 1;
+                
+                // Find the actual end of the frame by looking for the next frame's metadata length
+                // This is necessary because protobuf data can be variable length
+                let mut next_frame_pos = frame_end;
+                while next_frame_pos + 4 <= buffer.len() {
+                    let next_meta_len = u32::from_be_bytes([
+                        buffer[next_frame_pos],
+                        buffer[next_frame_pos + 1],
+                        buffer[next_frame_pos + 2],
+                        buffer[next_frame_pos + 3]
+                    ]) as usize;
+                    
+                    // Check if this looks like a valid frame start
+                    if next_frame_pos + 4 + next_meta_len + 1 <= buffer.len() {
+                        break;
+                    }
+                    next_frame_pos += 1;
+                }
+                
+                // If we didn't find a next frame, this is the last frame
+                let actual_frame_end = if next_frame_pos + 4 <= buffer.len() {
+                    next_frame_pos
+                } else {
+                    buffer.len()
+                };
+                
+                // Decode the frame
+                let frame = &buffer[frame_start..actual_frame_end];
+                let xline_request = XlineRequest::<Input>::decode_from_slice(frame)
+                    .map_err(|e| Status::internal(format!("Failed to decode request frame: {}", e)))?;
+                
+                all_requests.push(xline_request);
+                pos = actual_frame_end;
+            }
+
+            // For client streaming, we need to decide how to handle multiple requests
+            // This implementation processes all requests and returns the response from the last one
+            // Depending on the service implementation, this might need to be adjusted
+            let mut last_response = None;
+            for xline_request in all_requests {
+                let xline_response = method.clone().call(xline_request).await
+                    .map_err(|e| e)?;
+                last_response = Some(xline_response);
+            }
+
+            let xline_response = last_response.ok_or_else(|| {
+                Status::internal("No requests received in client stream")
+            })?;
 
             // Encode response
             let response_bytes = xline_response.encode_to_vec()
@@ -369,6 +510,7 @@ where
             let response = http::Response::builder()
                 .status(http::StatusCode::OK)
                 .header(http::header::CONTENT_TYPE, "application/grpc")
+                .header("grpc-status", "0") // gRPC OK status code
                 .body(http_body::Full::from(Bytes::from(response_bytes)))
                 .unwrap();
 
