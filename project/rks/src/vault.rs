@@ -14,7 +14,9 @@ use libvault::storage::Backend;
 use libvault::storage::physical::file::FileBackend;
 use libvault::storage::xline::{XlineBackend, XlineOptions};
 use log::{debug, info, warn};
+use openssl::{asn1::Asn1Time, x509::X509};
 use serde_json::{Value, json};
+use std::cmp::Ordering;
 use std::fmt::{Display, Formatter};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -470,6 +472,14 @@ impl Vault {
         Ok(())
     }
 
+    fn cached_rks_client_identity_needs_refresh(cert_pem: &str) -> anyhow::Result<bool> {
+        let cert = X509::from_pem(cert_pem.as_bytes())
+            .with_context(|| "Failed to parse cached rks client certificate")?;
+        let now = Asn1Time::days_from_now(0)?;
+        let ordering = cert.not_after().compare(&now)?;
+        Ok(matches!(ordering, Ordering::Less | Ordering::Equal))
+    }
+
     async fn ensure_rks_client_identity() -> anyhow::Result<()> {
         let folder = &config_ref().tls_config.vault_folder;
         if folder.as_os_str().is_empty() {
@@ -486,7 +496,32 @@ impl Vault {
             .await
             .unwrap_or(false);
         if cert_exists && key_exists {
-            return Ok(());
+            let cert_path = Self::rks_client_cert_path(folder);
+            match tokio::fs::read_to_string(&cert_path).await {
+                Ok(cert_pem) => match Self::cached_rks_client_identity_needs_refresh(&cert_pem) {
+                    Ok(false) => return Ok(()),
+                    Ok(true) => {
+                        info!(
+                            "cached rks xline client identity at {} is expired; reissuing",
+                            cert_path.display()
+                        );
+                    }
+                    Err(err) => {
+                        warn!(
+                            "failed to inspect cached rks xline client identity at {}: {}; reissuing",
+                            cert_path.display(),
+                            err
+                        );
+                    }
+                },
+                Err(err) => {
+                    warn!(
+                        "failed to read cached rks xline client certificate at {}: {}; reissuing",
+                        cert_path.display(),
+                        err
+                    );
+                }
+            }
         }
 
         let keys = extract_keys(&folder.join("keys.json"))
@@ -676,6 +711,8 @@ async fn extract_keys(path: &Path) -> anyhow::Result<Vec<Vec<u8>>> {
 mod tests {
     use super::*;
     use libvault::storage::physical::file::FileBackend;
+    use rcgen::{Certificate, CertificateParams};
+    use time::{Duration, OffsetDateTime};
 
     /// Create a standalone vault with file backend for testing.
     /// No external services (Xline) needed.
@@ -791,5 +828,31 @@ mod tests {
 
         let creds = vault.list_registry_credentials().await.unwrap();
         assert_eq!(creds.len(), 1);
+    }
+
+    fn issue_test_cert(
+        not_before: OffsetDateTime,
+        not_after: OffsetDateTime,
+    ) -> anyhow::Result<String> {
+        let mut params = CertificateParams::new(vec!["rks-node".to_string()]);
+        params.not_before = not_before;
+        params.not_after = not_after;
+        Ok(Certificate::from_params(params)?.serialize_pem()?)
+    }
+
+    #[test]
+    fn cached_rks_client_identity_stays_when_certificate_is_valid() {
+        let now = OffsetDateTime::now_utc();
+        let cert_pem = issue_test_cert(now - Duration::days(1), now + Duration::days(30)).unwrap();
+
+        assert!(!Vault::cached_rks_client_identity_needs_refresh(&cert_pem).unwrap());
+    }
+
+    #[test]
+    fn cached_rks_client_identity_refreshes_when_certificate_is_expired() {
+        let now = OffsetDateTime::now_utc();
+        let cert_pem = issue_test_cert(now - Duration::days(30), now - Duration::days(1)).unwrap();
+
+        assert!(Vault::cached_rks_client_identity_needs_refresh(&cert_pem).unwrap());
     }
 }

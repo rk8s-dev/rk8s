@@ -57,6 +57,7 @@ either = { workspace = true }
 tokio-stream = { workspace = true }
 uuid = { workspace = true }
 lru = { workspace = true }
+openssl = { workspace = true }
 
 [dev-dependencies]
 serial_test = { workspace = true }
