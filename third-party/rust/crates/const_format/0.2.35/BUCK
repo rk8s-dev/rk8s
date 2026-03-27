@@ -4,27 +4,26 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "const_format-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/const_format/const_format-0.2.35.crate"],
     sha256 = "7faa7469a93a566e9ccc1c73fe783b4a65c274c5ace346038dca9c39fe0030ad",
     type = "tar.gz",
     strip_prefix = "const_format-0.2.35",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "const_format-manifest",
-    vendor = ":const_format-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "const_format",
-    srcs = [":const_format-vendor"],
+    srcs = [":vendor"],
     crate = "const_format",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
     features = ["default"],
-    rustc_flags = ["@$(location :const_format-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = ["//third-party/rust/crates/const_format_proc_macros/0.2.34:const_format_proc_macros"],
 )

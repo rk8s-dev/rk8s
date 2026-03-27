@@ -4,26 +4,25 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "hax-lib-macros-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/hax-lib-macros/hax-lib-macros-0.3.5.crate"],
     sha256 = "24ba777a231a58d1bce1d68313fa6b6afcc7966adef23d60f45b8a2b9b688bf1",
     type = "tar.gz",
     strip_prefix = "hax-lib-macros-0.3.5",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "hax-lib-macros-manifest",
-    vendor = ":hax-lib-macros-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "hax-lib-macros",
-    srcs = [":hax-lib-macros-vendor"],
+    srcs = [":vendor"],
     crate = "hax_lib_macros",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
-    rustc_flags = ["@$(location :hax-lib-macros-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     proc_macro = True,
     visibility = ["PUBLIC"],
     deps = [

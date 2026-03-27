@@ -4,26 +4,25 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "anstyle-query-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/anstyle-query/anstyle-query-1.1.5.crate"],
     sha256 = "40c48f72fd53cd289104fc64099abca73db4166ad86ea0b4341abe65af83dadc",
     type = "tar.gz",
     strip_prefix = "anstyle-query-1.1.5",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "anstyle-query-manifest",
-    vendor = ":anstyle-query-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "anstyle-query",
-    srcs = [":anstyle-query-vendor"],
+    srcs = [":vendor"],
     crate = "anstyle_query",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
-    rustc_flags = ["@$(location :anstyle-query-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     os_deps = {
         "windows": ["//third-party/rust/crates/windows-sys/0.61.2:windows-sys"],
     },

@@ -4,25 +4,24 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "r-efi-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/r-efi/r-efi-5.3.0.crate"],
     sha256 = "69cdb34c158ceb288df11e18b4bd39de994f6657d83847bdffdbd7f346754b0f",
     type = "tar.gz",
     strip_prefix = "r-efi-5.3.0",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "r-efi-manifest",
-    vendor = ":r-efi-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "r-efi",
-    srcs = [":r-efi-vendor"],
+    srcs = [":vendor"],
     crate = "r_efi",
     crate_root = "vendor/src/lib.rs",
     edition = "2018",
-    rustc_flags = ["@$(location :r-efi-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
 )

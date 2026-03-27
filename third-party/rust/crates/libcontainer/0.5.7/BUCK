@@ -4,22 +4,21 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "libcontainer-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/libcontainer/libcontainer-0.5.7.crate"],
     sha256 = "a6320ae84435bed00efb3e0a7c2de8a38bba4d619e801d8ab3a8527fcf427709",
     type = "tar.gz",
     strip_prefix = "libcontainer-0.5.7",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "libcontainer-manifest",
-    vendor = ":libcontainer-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "libcontainer",
-    srcs = [":libcontainer-vendor"],
+    srcs = [":vendor"],
     crate = "libcontainer",
     crate_root = "vendor/src/lib.rs",
     edition = "2024",
@@ -30,7 +29,7 @@ rust_library(
         "v1",
         "v2",
     ],
-    rustc_flags = ["@$(location :libcontainer-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/caps/0.5.6:caps",

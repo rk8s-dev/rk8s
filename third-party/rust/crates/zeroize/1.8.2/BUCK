@@ -4,22 +4,21 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "zeroize-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/zeroize/zeroize-1.8.2.crate"],
     sha256 = "b97154e67e32c85465826e8bcc1c59429aaaf107c1e4a9e53c8d8ccd5eff88d0",
     type = "tar.gz",
     strip_prefix = "zeroize-1.8.2",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "zeroize-manifest",
-    vendor = ":zeroize-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "zeroize",
-    srcs = [":zeroize-vendor"],
+    srcs = [":vendor"],
     crate = "zeroize",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
@@ -28,7 +27,7 @@ rust_library(
         "default",
         "zeroize_derive",
     ],
-    rustc_flags = ["@$(location :zeroize-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = ["//third-party/rust/crates/zeroize_derive/1.4.3:zeroize_derive"],
 )

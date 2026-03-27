@@ -4,22 +4,21 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "derive_builder-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/derive_builder/derive_builder-0.20.2.crate"],
     sha256 = "507dfb09ea8b7fa618fcf76e953f4f5e192547945816d5358edffe39f6f94947",
     type = "tar.gz",
     strip_prefix = "derive_builder-0.20.2",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "derive_builder-manifest",
-    vendor = ":derive_builder-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "derive_builder",
-    srcs = [":derive_builder-vendor"],
+    srcs = [":vendor"],
     crate = "derive_builder",
     crate_root = "vendor/src/lib.rs",
     edition = "2018",
@@ -27,7 +26,7 @@ rust_library(
         "default",
         "std",
     ],
-    rustc_flags = ["@$(location :derive_builder-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = ["//third-party/rust/crates/derive_builder_macro/0.20.2:derive_builder_macro"],
 )

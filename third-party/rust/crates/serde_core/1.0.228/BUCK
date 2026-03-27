@@ -4,27 +4,26 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "buildscript_run", "rust_binary", "rust_library")
 
 http_archive(
-    name = "serde_core-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/serde_core/serde_core-1.0.228.crate"],
     sha256 = "41d385c7d4ca58e59fc732af25c3983b67ac852c1a25000afe1175de458b67ad",
     type = "tar.gz",
     strip_prefix = "serde_core-1.0.228",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "serde_core-manifest",
-    vendor = ":serde_core-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "serde_core",
-    srcs = [":serde_core-vendor"],
+    srcs = [":vendor"],
     crate = "serde_core",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
-        "OUT_DIR": "$(location :serde_core-build-script-run[out_dir])",
+        "OUT_DIR": "$(location :build-script-run[out_dir])",
     },
     features = [
         "alloc",
@@ -34,15 +33,15 @@ rust_library(
         "std",
     ],
     rustc_flags = [
-        "@$(location :serde_core-build-script-run[rustc_flags])",
-        "@$(location :serde_core-manifest[env_flags])",
+        "@$(location :build-script-run[rustc_flags])",
+        "@$(location :manifest[env_flags])",
     ],
     visibility = ["PUBLIC"],
 )
 
 rust_binary(
-    name = "serde_core-build-script-build",
-    srcs = [":serde_core-vendor"],
+    name = "build-script-build",
+    srcs = [":vendor"],
     crate = "build_script_build",
     crate_root = "vendor/build.rs",
     edition = "2021",
@@ -53,15 +52,15 @@ rust_binary(
         "result",
         "std",
     ],
-    rustc_flags = ["@$(location :serde_core-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = [],
 )
 
 buildscript_run(
-    name = "serde_core-build-script-run",
+    name = "build-script-run",
     package_name = "serde_core",
-    buildscript_rule = ":serde_core-build-script-build",
-    env_srcs = [":serde_core-manifest[env_dict]"],
+    buildscript_rule = ":build-script-build",
+    env_srcs = [":manifest[env_dict]"],
     features = [
         "alloc",
         "default",
@@ -70,6 +69,6 @@ buildscript_run(
         "std",
     ],
     version = "1.0.228",
-    manifest_dir = ":serde_core-vendor",
+    manifest_dir = ":vendor",
     visibility = ["PUBLIC"],
 )

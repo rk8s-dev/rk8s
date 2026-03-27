@@ -4,22 +4,21 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "axum-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/axum/axum-0.8.8.crate"],
     sha256 = "8b52af3cb4058c895d37317bb27508dccc8e5f2d39454016b297bf4a400597b8",
     type = "tar.gz",
     strip_prefix = "axum-0.8.8",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "axum-manifest",
-    vendor = ":axum-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "axum",
-    srcs = [":axum-vendor"],
+    srcs = [":vendor"],
     crate = "axum",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
@@ -35,7 +34,7 @@ rust_library(
         "tower-log",
         "tracing",
     ],
-    rustc_flags = ["@$(location :axum-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/axum-core/0.5.6:axum-core",

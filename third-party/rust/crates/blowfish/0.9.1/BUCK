@@ -4,27 +4,26 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "blowfish-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/blowfish/blowfish-0.9.1.crate"],
     sha256 = "e412e2cd0f2b2d93e02543ceae7917b3c70331573df19ee046bcbc35e45e87d7",
     type = "tar.gz",
     strip_prefix = "blowfish-0.9.1",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "blowfish-manifest",
-    vendor = ":blowfish-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "blowfish",
-    srcs = [":blowfish-vendor"],
+    srcs = [":vendor"],
     crate = "blowfish",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
     features = ["bcrypt"],
-    rustc_flags = ["@$(location :blowfish-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/byteorder/1.5.0:byteorder",

@@ -4,22 +4,21 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "displaydoc-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/displaydoc/displaydoc-0.2.5.crate"],
     sha256 = "97369cbbc041bc366949bc74d34658d6cda5621039731c6310521892a3a20ae0",
     type = "tar.gz",
     strip_prefix = "displaydoc-0.2.5",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "displaydoc-manifest",
-    vendor = ":displaydoc-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "displaydoc",
-    srcs = [":displaydoc-vendor"],
+    srcs = [":vendor"],
     crate = "displaydoc",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
@@ -27,7 +26,7 @@ rust_library(
         "default",
         "std",
     ],
-    rustc_flags = ["@$(location :displaydoc-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     proc_macro = True,
     visibility = ["PUBLIC"],
     deps = [

@@ -4,26 +4,25 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "addr2line-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/addr2line/addr2line-0.25.1.crate"],
     sha256 = "1b5d307320b3181d6d7954e663bd7c774a838b8220fe0593c86d9fb09f498b4b",
     type = "tar.gz",
     strip_prefix = "addr2line-0.25.1",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "addr2line-manifest",
-    vendor = ":addr2line-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "addr2line",
-    srcs = [":addr2line-vendor"],
+    srcs = [":vendor"],
     crate = "addr2line",
     crate_root = "vendor/src/lib.rs",
     edition = "2018",
-    rustc_flags = ["@$(location :addr2line-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = ["//third-party/rust/crates/gimli/0.32.3:gimli"],
 )

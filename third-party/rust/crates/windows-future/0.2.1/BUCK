@@ -4,27 +4,26 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "windows-future-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/windows-future/windows-future-0.2.1.crate"],
     sha256 = "fc6a41e98427b19fe4b73c550f060b59fa592d7d686537eebf9385621bfbad8e",
     type = "tar.gz",
     strip_prefix = "windows-future-0.2.1",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "windows-future-manifest",
-    vendor = ":windows-future-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "windows-future",
-    srcs = [":windows-future-vendor"],
+    srcs = [":vendor"],
     crate = "windows_future",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
     compatible_with = ["prelude//os/constraints:windows"],
-    rustc_flags = ["@$(location :windows-future-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/windows-core/0.61.2:windows-core",

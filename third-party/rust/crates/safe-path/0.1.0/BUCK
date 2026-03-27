@@ -4,26 +4,25 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "safe-path-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/safe-path/safe-path-0.1.0.crate"],
     sha256 = "980abdd3220aa19b67ca3ea07b173ca36383f18ae48cde696d90c8af39447ffb",
     type = "tar.gz",
     strip_prefix = "safe-path-0.1.0",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "safe-path-manifest",
-    vendor = ":safe-path-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "safe-path",
-    srcs = [":safe-path-vendor"],
+    srcs = [":vendor"],
     crate = "safe_path",
     crate_root = "vendor/src/lib.rs",
     edition = "2018",
-    rustc_flags = ["@$(location :safe-path-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = ["//third-party/rust/crates/libc/0.2.182:libc"],
 )

@@ -15,14 +15,7 @@ use super::information_packet::Content;
 pub struct InChannels(pub(crate) HashMap<NodeId, Arc<Mutex<InChannel>>>);
 
 impl InChannels {
-    /// Perform a blocking receive on the incoming channel from `NodeId`.
-    pub fn blocking_recv_from(&mut self, id: &NodeId) -> Result<Content, RecvErr> {
-        match self.get(id) {
-            Some(channel) => channel.blocking_lock().blocking_recv(),
-            None => Err(RecvErr::NoSuchChannel),
-        }
-    }
-    /// Perform a asynchronous receive on the incoming channel from `NodeId`.
+    /// Perform an asynchronous receive on the incoming channel from `NodeId`.
     pub async fn recv_from(&mut self, id: &NodeId) -> Result<Content, RecvErr> {
         match self.get(id) {
             Some(channel) => channel.lock().await.recv().await,
@@ -55,18 +48,6 @@ impl InChannels {
         }
     }
 
-    /// Calls `blocking_recv` for all the [`InChannel`]s, and applies transformation `f` to
-    /// the return values of the call.
-    pub fn blocking_map<F, T>(&mut self, mut f: F) -> Vec<T>
-    where
-        F: FnMut(Result<Content, RecvErr>) -> T,
-    {
-        self.keys()
-            .into_iter()
-            .map(|id| f(self.blocking_recv_from(&id)))
-            .collect()
-    }
-
     /// Calls `recv` for all the [`InChannel`]s, and applies transformation `f` to
     /// the return values of the call asynchronously.
     pub async fn map<F, T>(&mut self, f: F) -> Vec<T>
@@ -81,17 +62,9 @@ impl InChannels {
     }
 
     /// Close the channel by the given `NodeId` asynchronously, and remove the channel in this map.
-    pub async fn close_async(&mut self, id: &NodeId) {
+    pub async fn close(&mut self, id: &NodeId) {
         if let Some(c) = self.get(id) {
             c.lock().await.close();
-            self.0.remove(id);
-        }
-    }
-
-    /// Close the channel by the given `NodeId`, and remove the channel in this map.
-    pub fn close(&mut self, id: &NodeId) {
-        if let Some(c) = self.get(id) {
-            c.blocking_lock().close();
             self.0.remove(id);
         }
     }
@@ -100,8 +73,11 @@ impl InChannels {
         self.0.insert(node_id, channel);
     }
 
-    pub(crate) fn close_all(&mut self) {
-        self.0.values_mut().for_each(|c| c.blocking_lock().close());
+    pub(crate) async fn close_all(&mut self) {
+        let channels: Vec<_> = self.0.values().cloned().collect();
+        for channel in channels {
+            channel.lock().await.close();
+        }
     }
 
     /// Returns a list of all available sender node IDs.
@@ -130,27 +106,7 @@ pub enum InChannel {
 }
 
 impl InChannel {
-    /// Perform a blocking receive on this channel.
-    fn blocking_recv(&mut self) -> Result<Content, RecvErr> {
-        match self {
-            InChannel::Mpsc(receiver) => {
-                if let Some(content) = receiver.blocking_recv() {
-                    Ok(content)
-                } else {
-                    Err(RecvErr::Closed)
-                }
-            }
-            InChannel::Bcst(receiver) => match receiver.blocking_recv() {
-                Ok(v) => Ok(v),
-                Err(e) => match e {
-                    broadcast::error::RecvError::Closed => Err(RecvErr::Closed),
-                    broadcast::error::RecvError::Lagged(x) => Err(RecvErr::Lagged(x)),
-                },
-            },
-        }
-    }
-
-    /// Perform a asynchronous receive on this channel.
+    /// Perform an asynchronous receive on this channel.
     async fn recv(&mut self) -> Result<Content, RecvErr> {
         match self {
             InChannel::Mpsc(receiver) => {
@@ -190,18 +146,7 @@ pub struct TypedInChannels<T: Send + Sync + 'static>(
 );
 
 impl<T: Send + Sync + 'static> TypedInChannels<T> {
-    /// Perform a blocking receive on the incoming channel from `NodeId`.
-    pub fn blocking_recv_from(&mut self, id: &NodeId) -> Result<Option<Arc<T>>, RecvErr> {
-        match self.get(id) {
-            Some(channel) => {
-                let content: Content = channel.blocking_lock().blocking_recv()?;
-                Ok(content.into_inner())
-            }
-            None => Err(RecvErr::NoSuchChannel),
-        }
-    }
-
-    /// Perform a asynchronous receive on the incoming channel from `NodeId`.
+    /// Perform an asynchronous receive on the incoming channel from `NodeId`.
     pub async fn recv_from(&mut self, id: &NodeId) -> Result<Option<Arc<T>>, RecvErr> {
         match self.get(id) {
             Some(channel) => {
@@ -237,18 +182,6 @@ impl<T: Send + Sync + 'static> TypedInChannels<T> {
         }
     }
 
-    /// Calls `blocking_recv` for all the [`InChannel`]s, and applies transformation `f` to
-    /// the return values of the call.
-    pub fn blocking_map<F, U>(&mut self, mut f: F) -> Vec<U>
-    where
-        F: FnMut(Result<Option<Arc<T>>, RecvErr>) -> U,
-    {
-        self.keys()
-            .into_iter()
-            .map(|id| f(self.blocking_recv_from(&id)))
-            .collect()
-    }
-
     /// Calls `recv` for all the [`InChannel`]s, and applies transformation `f` to
     /// the return values of the call asynchronously.
     pub async fn map<F, U>(&mut self, f: F) -> Vec<U>
@@ -263,17 +196,9 @@ impl<T: Send + Sync + 'static> TypedInChannels<T> {
     }
 
     /// Close the channel by the given `NodeId` asynchronously, and remove the channel in this map.
-    pub async fn close_async(&mut self, id: &NodeId) {
+    pub async fn close(&mut self, id: &NodeId) {
         if let Some(c) = self.get(id) {
             c.lock().await.close();
-            self.0.remove(id);
-        }
-    }
-
-    /// Close the channel by the given `NodeId`, and remove the channel in this map.
-    pub fn close(&mut self, id: &NodeId) {
-        if let Some(c) = self.get(id) {
-            c.blocking_lock().close();
             self.0.remove(id);
         }
     }

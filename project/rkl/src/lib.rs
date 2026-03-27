@@ -1,5 +1,6 @@
 pub mod commands;
 pub mod config;
+pub mod csi;
 pub mod daemon;
 pub mod network;
 mod quic;

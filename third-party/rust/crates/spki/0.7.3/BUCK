@@ -4,22 +4,21 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "spki-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/spki/spki-0.7.3.crate"],
     sha256 = "d91ed6c858b01f942cd56b37a94b3e0a1798290327d1236e4d9cf4eaca44d29d",
     type = "tar.gz",
     strip_prefix = "spki-0.7.3",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "spki-manifest",
-    vendor = ":spki-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "spki",
-    srcs = [":spki-vendor"],
+    srcs = [":vendor"],
     crate = "spki",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
@@ -28,7 +27,7 @@ rust_library(
         "pem",
         "std",
     ],
-    rustc_flags = ["@$(location :spki-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/base64ct/1.8.3:base64ct",

@@ -35,7 +35,7 @@ impl Action for NodeAction {
                 let content: Arc<(Vec<String>, Vec<String>)> =
                     content.unwrap().into_inner().unwrap();
                 let (stdout, _) = (&content.0, &content.1);
-                let theta = stdout.get(0).unwrap().clone();
+                let theta = stdout.first().unwrap().clone();
                 out_channels.broadcast(Content::new(theta)).await
             }
             Output::Err(e) => panic!("{}", e),
@@ -85,8 +85,8 @@ impl Action for RootAction {
     }
 }
 
-#[allow(deprecated)]
-fn main() {
+#[tokio::main]
+async fn main() {
     env_logger::init();
 
     let specific_actions: HashMap<String, Box<dyn Action>> = HashMap::from([
@@ -140,11 +140,7 @@ fn main() {
 
     let root_id = *env_var.get_node_id("root").unwrap();
     dag.set_env(env_var);
-    let runtime = dagrs::tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
-    dag.start_with_runtime(&runtime).unwrap();
+    dag.async_start().await.unwrap();
 
     let outputs = dag.get_outputs();
     let result = outputs.get(&root_id).unwrap().get_out().unwrap();
@@ -153,7 +149,7 @@ fn main() {
     let acc = if cfg!(target_os = "windows") {
         stdout.get(1).unwrap()
     } else {
-        stdout.get(0).unwrap()
+        stdout.first().unwrap()
     };
     assert_eq!("Accuracy: 94.46%", acc);
 

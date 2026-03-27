@@ -104,13 +104,9 @@ Each stage is defined as a task with its dependencies and execution command. The
 
 For more detailed info about this example, please see the [notebook.ipynb](examples/dagrs-sklearn/examples/notebook.ipynb) jupyter notebook file.
 
-## Execution Entry Points
+## Quick Start
 
-Dagrs no longer creates or owns a Tokio runtime internally. Runtime lifecycle is managed by callers.
-
-### Preferred async entry
-
-Use `async_start().await` when already in an async runtime context:
+Dagrs execution is async-only. Runtime lifecycle is managed by callers.
 
 ```rust
 #[tokio::main]
@@ -121,22 +117,29 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
-### Temporary sync adapter (deprecated)
-
-For synchronous callers, use an externally managed runtime and call `start_with_runtime(&runtime)`:
-
-```rust
-let runtime = tokio::runtime::Builder::new_current_thread()
-    .enable_all()
-    .build()
-    .expect("failed to create tokio runtime");
-graph.start_with_runtime(&runtime)?;
-```
-
-`Graph::start()` has been removed.  
-`Graph::start_with_runtime()` is deprecated and planned for removal in the next major version.
+- Execution entry: `Graph::async_start().await`.
+- `Graph::start_with_runtime()` has been removed.
+- Use async channel APIs (`recv_from().await`, `send_to(...).await`, `broadcast(...).await`, `close(...).await`).
 
 ## Changelog
+
+### v0.8.0
+
+#### 🚀 Runtime/API Changes
+
+- **Async-only Execution**: `Graph::async_start()` is the only execution entry point.
+- **Removed Sync Adapter**: `Graph::start_with_runtime(&runtime)` has been removed.
+- **Removed Blocking Channel APIs**:
+  - `InChannels` / `TypedInChannels`: removed `blocking_recv_from`, `blocking_map`.
+  - `OutChannels` / `TypedOutChannels`: removed `blocking_send_to`, `blocking_broadcast`.
+- **Internal Async Cleanup**: runtime internals no longer use blocking channel paths.
+
+#### 💡 Migration
+
+- Replace `start_with_runtime(&runtime)` with `async_start().await`.
+- Replace blocking channel calls with async methods:
+  - `recv_from().await`, `recv_any().await`, `map(...).await`
+  - `send_to(...).await`, `broadcast(...).await`, `close(...).await`
 
 ### v0.7.0
 
@@ -144,14 +147,11 @@ graph.start_with_runtime(&runtime)?;
 
 - **Runtime Decoupling**: Dagrs no longer creates or owns a Tokio runtime internally.
 - **Primary Entry**: `Graph::async_start()` is the recommended execution entry.
-- **Legacy Sync Adapter**: `Graph::start_with_runtime(&runtime)` remains temporarily for compatibility but is deprecated.
 - **Removed API**: `Graph::start()` has been removed.
 
 #### 💡 Migration
 
-- Existing `Graph::start()` callers should migrate to:
-  - `async_start().await` (preferred)
-  - `start_with_runtime(&runtime)` (temporary sync adapter)
+- Existing `Graph::start()` callers should migrate to `async_start().await`.
 
 ### v0.6.0
 

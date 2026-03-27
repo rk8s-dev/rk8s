@@ -4,27 +4,26 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "buildscript_run", "rust_binary", "rust_library")
 
 http_archive(
-    name = "syn-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/syn/syn-1.0.109.crate"],
     sha256 = "72b64191b275b66ffe2469e8af2c1cfe3bafa67b529ead792a6d0160888b4237",
     type = "tar.gz",
     strip_prefix = "syn-1.0.109",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "syn-manifest",
-    vendor = ":syn-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "syn",
-    srcs = [":syn-vendor"],
+    srcs = [":vendor"],
     crate = "syn",
     crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
-        "OUT_DIR": "$(location :syn-build-script-run[out_dir])",
+        "OUT_DIR": "$(location :build-script-run[out_dir])",
     },
     features = [
         "clone-impls",
@@ -39,8 +38,8 @@ rust_library(
         "visit",
     ],
     rustc_flags = [
-        "@$(location :syn-build-script-run[rustc_flags])",
-        "@$(location :syn-manifest[env_flags])",
+        "@$(location :build-script-run[rustc_flags])",
+        "@$(location :manifest[env_flags])",
     ],
     visibility = ["PUBLIC"],
     deps = [
@@ -51,8 +50,8 @@ rust_library(
 )
 
 rust_binary(
-    name = "syn-build-script-build",
-    srcs = [":syn-vendor"],
+    name = "build-script-build",
+    srcs = [":vendor"],
     crate = "build_script_build",
     crate_root = "vendor/build.rs",
     edition = "2018",
@@ -68,15 +67,15 @@ rust_binary(
         "quote",
         "visit",
     ],
-    rustc_flags = ["@$(location :syn-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = [],
 )
 
 buildscript_run(
-    name = "syn-build-script-run",
+    name = "build-script-run",
     package_name = "syn",
-    buildscript_rule = ":syn-build-script-build",
-    env_srcs = [":syn-manifest[env_dict]"],
+    buildscript_rule = ":build-script-build",
+    env_srcs = [":manifest[env_dict]"],
     features = [
         "clone-impls",
         "default",
@@ -90,6 +89,6 @@ buildscript_run(
         "visit",
     ],
     version = "1.0.109",
-    manifest_dir = ":syn-vendor",
+    manifest_dir = ":vendor",
     visibility = ["PUBLIC"],
 )

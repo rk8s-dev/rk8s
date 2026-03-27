@@ -4,22 +4,21 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "yasna-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/yasna/yasna-0.5.2.crate"],
     sha256 = "e17bb3549cc1321ae1296b9cdc2698e2b6cb1992adfa19a8c72e5b7a738f44cd",
     type = "tar.gz",
     strip_prefix = "yasna-0.5.2",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "yasna-manifest",
-    vendor = ":yasna-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "yasna",
-    srcs = [":yasna-vendor"],
+    srcs = [":vendor"],
     crate = "yasna",
     crate_root = "vendor/src/lib.rs",
     edition = "2018",
@@ -28,7 +27,7 @@ rust_library(
         "std",
         "time",
     ],
-    rustc_flags = ["@$(location :yasna-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = ["//third-party/rust/crates/time/0.3.47:time"],
 )

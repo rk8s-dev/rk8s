@@ -46,7 +46,7 @@ utils = { path = "../utils", version = "0.1.0" }
 xlinerpc = { path = "../xlinerpc"}
 
 # QUIC dependencies
-gm-quic = "0.4.0"
+gm-quic = { workspace = true }
 tonic.workspace = true
 
 [dev-dependencies]

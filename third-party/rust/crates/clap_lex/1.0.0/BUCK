@@ -4,25 +4,24 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "clap_lex-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/clap_lex/clap_lex-1.0.0.crate"],
     sha256 = "3a822ea5bc7590f9d40f1ba12c0dc3c2760f3482c6984db1573ad11031420831",
     type = "tar.gz",
     strip_prefix = "clap_lex-1.0.0",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "clap_lex-manifest",
-    vendor = ":clap_lex-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "clap_lex",
-    srcs = [":clap_lex-vendor"],
+    srcs = [":vendor"],
     crate = "clap_lex",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
-    rustc_flags = ["@$(location :clap_lex-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
 )

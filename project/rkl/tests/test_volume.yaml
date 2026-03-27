@@ -1,0 +1,19 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: my-pod
+spec:
+  containers:
+    - name: app
+      image: busybox:latest
+      command:
+        - /bin/sh
+        - -c
+        - "while true; do echo hello >> /data/log.txt; sleep 5; done"
+      volumeMounts:
+        - name: data-vol
+          mountPath: /data
+  volumes:
+    - name: data-vol
+      type: slayerFs
+      capacity_bytes: 1073741824

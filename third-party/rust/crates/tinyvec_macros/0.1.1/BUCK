@@ -4,25 +4,24 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "tinyvec_macros-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/tinyvec_macros/tinyvec_macros-0.1.1.crate"],
     sha256 = "1f3ccbac311fea05f86f61904b462b55fb3df8837a366dfc601a0161d0532f20",
     type = "tar.gz",
     strip_prefix = "tinyvec_macros-0.1.1",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "tinyvec_macros-manifest",
-    vendor = ":tinyvec_macros-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "tinyvec_macros",
-    srcs = [":tinyvec_macros-vendor"],
+    srcs = [":vendor"],
     crate = "tinyvec_macros",
     crate_root = "vendor/src/lib.rs",
     edition = "2018",
-    rustc_flags = ["@$(location :tinyvec_macros-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
 )

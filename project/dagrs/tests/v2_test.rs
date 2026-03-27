@@ -22,8 +22,8 @@ impl Action for CounterAction {
     }
 }
 
-#[test]
-fn test_loop_node() {
+#[tokio::test]
+async fn test_loop_node() {
     let mut graph = Graph::new();
     let mut table = NodeTable::new();
 
@@ -49,13 +49,10 @@ fn test_loop_node() {
     // A -> Loop
     graph.add_edge(id_a, vec![id_loop]);
 
-    let rt = tokio::runtime::Runtime::new().unwrap();
-    rt.block_on(async {
-        match graph.async_start().await {
-            Ok(_) => {}
-            Err(e) => panic!("Graph failed: {:?}", e),
-        }
-    });
+    match graph.async_start().await {
+        Ok(_) => {}
+        Err(e) => panic!("Graph failed: {:?}", e),
+    }
 
     // A runs. Loop runs (iter 0 -> 1, true). Jumps to A.
     // A runs. Loop runs (iter 1 -> 2, true). Jumps to A.
@@ -76,8 +73,8 @@ impl Router for SimpleRouter {
     }
 }
 
-#[test]
-fn test_router_node() {
+#[tokio::test]
+async fn test_router_node() {
     let mut graph = Graph::new();
     let mut table = NodeTable::new();
 
@@ -118,13 +115,10 @@ fn test_router_node() {
     // Router -> B, Router -> C
     graph.add_edge(id_router, vec![id_b, id_c]);
 
-    let rt = tokio::runtime::Runtime::new().unwrap();
-    rt.block_on(async {
-        match graph.async_start().await {
-            Ok(_) => {}
-            Err(e) => panic!("Graph failed: {:?}", e),
-        }
-    });
+    match graph.async_start().await {
+        Ok(_) => {}
+        Err(e) => panic!("Graph failed: {:?}", e),
+    }
 
     assert_eq!(*count_b.lock().unwrap(), 1);
     assert_eq!(*count_c.lock().unwrap(), 0);

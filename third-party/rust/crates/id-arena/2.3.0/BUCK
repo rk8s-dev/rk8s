@@ -4,22 +4,21 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "id-arena-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/id-arena/id-arena-2.3.0.crate"],
     sha256 = "3d3067d79b975e8844ca9eb072e16b31c3c1c36928edf9c6789548c524d0d954",
     type = "tar.gz",
     strip_prefix = "id-arena-2.3.0",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "id-arena-manifest",
-    vendor = ":id-arena-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "id-arena",
-    srcs = [":id-arena-vendor"],
+    srcs = [":vendor"],
     crate = "id_arena",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
@@ -27,6 +26,6 @@ rust_library(
         "default",
         "std",
     ],
-    rustc_flags = ["@$(location :id-arena-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
 )

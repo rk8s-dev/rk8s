@@ -4,31 +4,30 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "buildscript_run", "rust_binary", "rust_library")
 
 http_archive(
-    name = "netavark-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/netavark/netavark-1.17.2.crate"],
     sha256 = "e5765d9668f22ca7a99906c8744d370653e2dd3c0d980edf8781fd48f686291b",
     type = "tar.gz",
     strip_prefix = "netavark-1.17.2",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "netavark-manifest",
-    vendor = ":netavark-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "netavark",
-    srcs = [":netavark-vendor"],
+    srcs = [":vendor"],
     crate = "netavark",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
-        "OUT_DIR": "$(location :netavark-build-script-run[out_dir])",
+        "OUT_DIR": "$(location :build-script-run[out_dir])",
     },
     rustc_flags = [
-        "@$(location :netavark-build-script-run[rustc_flags])",
-        "@$(location :netavark-manifest[env_flags])",
+        "@$(location :build-script-run[rustc_flags])",
+        "@$(location :manifest[env_flags])",
     ],
     visibility = ["PUBLIC"],
     deps = [
@@ -65,12 +64,12 @@ rust_library(
 )
 
 rust_binary(
-    name = "netavark-build-script-build",
-    srcs = [":netavark-vendor"],
+    name = "build-script-build",
+    srcs = [":vendor"],
     crate = "build_script_build",
     crate_root = "vendor/build.rs",
     edition = "2021",
-    rustc_flags = ["@$(location :netavark-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = [],
     deps = [
         "//third-party/rust/crates/chrono/0.4.43:chrono",
@@ -79,11 +78,11 @@ rust_binary(
 )
 
 buildscript_run(
-    name = "netavark-build-script-run",
+    name = "build-script-run",
     package_name = "netavark",
-    buildscript_rule = ":netavark-build-script-build",
-    env_srcs = [":netavark-manifest[env_dict]"],
+    buildscript_rule = ":build-script-build",
+    env_srcs = [":manifest[env_dict]"],
     version = "1.17.2",
-    manifest_dir = ":netavark-vendor",
+    manifest_dir = ":vendor",
     visibility = ["PUBLIC"],
 )

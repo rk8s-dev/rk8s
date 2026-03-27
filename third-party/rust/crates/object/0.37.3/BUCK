@@ -4,27 +4,26 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "buildscript_run", "rust_binary", "rust_library")
 
 http_archive(
-    name = "object-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/object/object-0.37.3.crate"],
     sha256 = "ff76201f031d8863c38aa7f905eca4f53abbfa15f609db4277d44cd8938f33fe",
     type = "tar.gz",
     strip_prefix = "object-0.37.3",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "object-manifest",
-    vendor = ":object-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "object",
-    srcs = [":object-vendor"],
+    srcs = [":vendor"],
     crate = "object",
     crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
-        "OUT_DIR": "$(location :object-build-script-run[out_dir])",
+        "OUT_DIR": "$(location :build-script-run[out_dir])",
     },
     features = [
         "archive",
@@ -37,16 +36,16 @@ rust_library(
         "xcoff",
     ],
     rustc_flags = [
-        "@$(location :object-build-script-run[rustc_flags])",
-        "@$(location :object-manifest[env_flags])",
+        "@$(location :build-script-run[rustc_flags])",
+        "@$(location :manifest[env_flags])",
     ],
     visibility = ["PUBLIC"],
     deps = ["//third-party/rust/crates/memchr/2.8.0:memchr"],
 )
 
 rust_binary(
-    name = "object-build-script-build",
-    srcs = [":object-vendor"],
+    name = "build-script-build",
+    srcs = [":vendor"],
     crate = "build_script_build",
     crate_root = "vendor/build.rs",
     edition = "2018",
@@ -60,15 +59,15 @@ rust_binary(
         "unaligned",
         "xcoff",
     ],
-    rustc_flags = ["@$(location :object-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = [],
 )
 
 buildscript_run(
-    name = "object-build-script-run",
+    name = "build-script-run",
     package_name = "object",
-    buildscript_rule = ":object-build-script-build",
-    env_srcs = [":object-manifest[env_dict]"],
+    buildscript_rule = ":build-script-build",
+    env_srcs = [":manifest[env_dict]"],
     features = [
         "archive",
         "coff",
@@ -80,6 +79,6 @@ buildscript_run(
         "xcoff",
     ],
     version = "0.37.3",
-    manifest_dir = ":object-vendor",
+    manifest_dir = ":vendor",
     visibility = ["PUBLIC"],
 )

@@ -4,31 +4,30 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "buildscript_run", "rust_binary", "rust_library")
 
 http_archive(
-    name = "ahash-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/ahash/ahash-0.7.8.crate"],
     sha256 = "891477e0c6a8957309ee5c45a6368af3ae14bb510732d2684ffa19af310920f9",
     type = "tar.gz",
     strip_prefix = "ahash-0.7.8",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "ahash-manifest",
-    vendor = ":ahash-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "ahash",
-    srcs = [":ahash-vendor"],
+    srcs = [":vendor"],
     crate = "ahash",
     crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
-        "OUT_DIR": "$(location :ahash-build-script-run[out_dir])",
+        "OUT_DIR": "$(location :build-script-run[out_dir])",
     },
     rustc_flags = [
-        "@$(location :ahash-build-script-run[rustc_flags])",
-        "@$(location :ahash-manifest[env_flags])",
+        "@$(location :build-script-run[rustc_flags])",
+        "@$(location :manifest[env_flags])",
     ],
     os_deps = {
         "linux": [
@@ -48,22 +47,22 @@ rust_library(
 )
 
 rust_binary(
-    name = "ahash-build-script-build",
-    srcs = [":ahash-vendor"],
+    name = "build-script-build",
+    srcs = [":vendor"],
     crate = "build_script_build",
     crate_root = "vendor/build.rs",
     edition = "2018",
-    rustc_flags = ["@$(location :ahash-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = [],
     deps = ["//third-party/rust/crates/version_check/0.9.5:version_check"],
 )
 
 buildscript_run(
-    name = "ahash-build-script-run",
+    name = "build-script-run",
     package_name = "ahash",
-    buildscript_rule = ":ahash-build-script-build",
-    env_srcs = [":ahash-manifest[env_dict]"],
+    buildscript_rule = ":build-script-build",
+    env_srcs = [":manifest[env_dict]"],
     version = "0.7.8",
-    manifest_dir = ":ahash-vendor",
+    manifest_dir = ":vendor",
     visibility = ["PUBLIC"],
 )

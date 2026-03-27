@@ -4,26 +4,25 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "seahash-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/seahash/seahash-4.1.0.crate"],
     sha256 = "1c107b6f4780854c8b126e228ea8869f4d7b71260f962fefb57b996b8959ba6b",
     type = "tar.gz",
     strip_prefix = "seahash-4.1.0",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "seahash-manifest",
-    vendor = ":seahash-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "seahash",
-    srcs = [":seahash-vendor"],
+    srcs = [":vendor"],
     crate = "seahash",
     crate_root = "vendor/src/lib.rs",
     edition = "2015",
     features = ["default"],
-    rustc_flags = ["@$(location :seahash-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
 )

@@ -4,22 +4,21 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "chrono-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/chrono/chrono-0.4.43.crate"],
     sha256 = "fac4744fb15ae8337dc853fee7fb3f4e48c0fbaa23d0afe49c447b4fab126118",
     type = "tar.gz",
     strip_prefix = "chrono-0.4.43",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "chrono-manifest",
-    vendor = ":chrono-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "chrono",
-    srcs = [":chrono-vendor"],
+    srcs = [":vendor"],
     crate = "chrono",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
@@ -38,7 +37,7 @@ rust_library(
         "winapi",
         "windows-link",
     ],
-    rustc_flags = ["@$(location :chrono-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     os_deps = {
         "linux": ["//third-party/rust/crates/iana-time-zone/0.1.65:iana-time-zone"],
         "macos": ["//third-party/rust/crates/iana-time-zone/0.1.65:iana-time-zone"],

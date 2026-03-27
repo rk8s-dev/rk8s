@@ -4,22 +4,21 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "base64-simd-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/base64-simd/base64-simd-0.8.0.crate"],
     sha256 = "339abbe78e73178762e23bea9dfd08e697eb3f3301cd4be981c0f78ba5859195",
     type = "tar.gz",
     strip_prefix = "base64-simd-0.8.0",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "base64-simd-manifest",
-    vendor = ":base64-simd-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "base64-simd",
-    srcs = [":base64-simd-vendor"],
+    srcs = [":vendor"],
     crate = "base64_simd",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
@@ -29,7 +28,7 @@ rust_library(
         "detect",
         "std",
     ],
-    rustc_flags = ["@$(location :base64-simd-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/outref/0.5.2:outref",

@@ -2,11 +2,13 @@ use anyhow::Result;
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Seek, SeekFrom};
 use std::{env, fs, net::SocketAddr, path::Path, sync::Arc, time::Duration};
-// use tokio::sync::OnceCell;
 
 use tokio::time;
 
+use slayerfs::ChunkLayout;
+
 use crate::commands::pod;
+use crate::csi::{CsiNodeService, RklCsiIdentity, SlayerFsOperator, handle_csi_request};
 use crate::daemon::status::probe::probe_manager::PROBE_MANAGER;
 use crate::network::receiver::{NetworkConfigMessage, NetworkReceiver};
 use crate::task::TaskRunner;
@@ -19,8 +21,6 @@ use crate::commands::pod::TLSConnectionArgs;
 use crate::quic::client::{Daemon as ClientDaemon, QUICClient};
 use sysinfo::{Disks, System};
 use tracing::{error, info, warn};
-
-// pub static DAEMON_CLIENT: OnceCell<Arc<QUICClient<ClientDaemon>>> = OnceCell::const_new();
 
 fn get_subnet_file_path() -> String {
     if let Ok(path) = env::var("SUBNET_FILE_PATH") {
@@ -58,6 +58,9 @@ fn get_subnet_file_path() -> String {
 
 /// Run worker loop based on environment variables.
 /// This function will keep reconnecting if errors occur.
+///
+/// CSI services are created once here and survive across reconnections,
+/// preventing loss of in-memory mount handles on QUIC reconnect.
 pub async fn run_forever(tls_cfg: TLSConnectionArgs) -> Result<()> {
     //We should give the ipaddr of rks here
     let server_addr: String =
@@ -83,12 +86,30 @@ pub async fn run_forever(tls_cfg: TLSConnectionArgs) -> Result<()> {
     };
 
     let ext_iface = Arc::new(ext_iface);
+
+    // --- CSI Node setup (once, before the reconnect loop) ---
+    let csi_operator = Arc::new(
+        SlayerFsOperator::new(
+            "/var/lib/rkl/slayerfs",
+            "/var/lib/rkl/volumes/.state",
+            ChunkLayout::default(),
+            node.metadata.name.clone(),
+        )
+        .map_err(|e| anyhow::anyhow!("failed to initialise CSI operator: {e}"))?,
+    );
+    csi_operator.recover().await;
+    let csi_node_service = CsiNodeService::new(csi_operator);
+    let csi_identity = RklCsiIdentity;
+    info!("[worker] CSI Node service initialised");
+
     loop {
         if let Err(e) = run_once(
             server_addr,
             node.clone(),
             ext_iface.clone(),
             tls_cfg.clone(),
+            &csi_node_service,
+            &csi_identity,
         )
         .await
         {
@@ -113,11 +134,14 @@ fn load_node_from_yaml(yaml_path: &str) -> Result<Node> {
 /// 3. Start heartbeat loop
 /// 4. Handle CreatePod/DeletePod messages
 /// 5. Handle Network Configuration
+/// 6. Handle CSI requests
 pub async fn run_once(
     server_addr: SocketAddr,
     node: Node,
     ext_iface: Arc<ExternalInterface>,
     tls_cfg: TLSConnectionArgs,
+    csi_node_service: &CsiNodeService,
+    csi_identity: &RklCsiIdentity,
 ) -> Result<()> {
     let subnet_file_path = get_subnet_file_path();
     let link_index = env::var("LINK_INDEX")
@@ -137,9 +161,6 @@ pub async fn run_once(
 
     let client = QUICClient::<ClientDaemon>::connect(server_addr.to_string(), &tls_cfg).await?;
     info!("[worker] connected to RKS at {server_addr}");
-    // DAEMON_CLIENT
-    //     .set(Arc::new(client.clone()))
-    //     .map_err(|_| anyhow::anyhow!("Failed to set DAEMON_CLIENT"))?;
 
     // register to rks by sending RegisterNode(Box<Node>)
     let register_msg = RksMessage::RegisterNode(Box::new(node.clone()));
@@ -175,7 +196,7 @@ pub async fn run_once(
         }
     });
 
-    //Main receive loop: handle CreatePod/DeletePod/Network...
+    // Main receive loop: handle CreatePod/DeletePod/Network/CSI...
     loop {
         match client.accept_uni().await {
             Ok(mut recv) => {
@@ -436,6 +457,23 @@ pub async fn run_once(
                                         .await;
                                 }
                             });
+                        }
+                        Ok(RksMessage::CsiRequest {
+                            id,
+                            message: csi_msg,
+                        }) => {
+                            info!("[worker] received CSI request [{}]: {csi_msg}", id);
+                            let response =
+                                handle_csi_request(csi_node_service, csi_identity, csi_msg).await;
+                            if let Err(e) = client
+                                .send_msg(&RksMessage::CsiResponse {
+                                    id,
+                                    message: response,
+                                })
+                                .await
+                            {
+                                error!("[worker] failed to send CSI response: {e}");
+                            }
                         }
                         Ok(other) => {
                             warn!("[worker] unexpected message: {other:?}");

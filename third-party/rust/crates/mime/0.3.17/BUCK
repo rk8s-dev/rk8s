@@ -4,25 +4,24 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "mime-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/mime/mime-0.3.17.crate"],
     sha256 = "6877bb514081ee2a7ff5ef9de3281f14a4dd4bceac4c09388074a6b5df8a139a",
     type = "tar.gz",
     strip_prefix = "mime-0.3.17",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "mime-manifest",
-    vendor = ":mime-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "mime",
-    srcs = [":mime-vendor"],
+    srcs = [":vendor"],
     crate = "mime",
     crate_root = "vendor/src/lib.rs",
     edition = "2015",
-    rustc_flags = ["@$(location :mime-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
 )

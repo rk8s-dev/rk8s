@@ -4,22 +4,21 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "hickory-resolver-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/hickory-resolver/hickory-resolver-0.25.2.crate"],
     sha256 = "dc62a9a99b0bfb44d2ab95a7208ac952d31060efc16241c87eaf36406fecf87a",
     type = "tar.gz",
     strip_prefix = "hickory-resolver-0.25.2",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "hickory-resolver-manifest",
-    vendor = ":hickory-resolver-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "hickory-resolver",
-    srcs = [":hickory-resolver-vendor"],
+    srcs = [":vendor"],
     crate = "hickory_resolver",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
@@ -29,7 +28,7 @@ rust_library(
         "system-config",
         "tokio",
     ],
-    rustc_flags = ["@$(location :hickory-resolver-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     os_deps = {
         "windows": ["//third-party/rust/crates/ipconfig/0.3.2:ipconfig"],
     },

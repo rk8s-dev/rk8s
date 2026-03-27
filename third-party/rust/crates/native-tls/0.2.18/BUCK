@@ -4,32 +4,31 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "buildscript_run", "rust_binary", "rust_library")
 
 http_archive(
-    name = "native-tls-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/native-tls/native-tls-0.2.18.crate"],
     sha256 = "465500e14ea162429d264d44189adc38b199b62b1c21eea9f69e4b73cb03bbf2",
     type = "tar.gz",
     strip_prefix = "native-tls-0.2.18",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "native-tls-manifest",
-    vendor = ":native-tls-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "native-tls",
-    srcs = [":native-tls-vendor"],
+    srcs = [":vendor"],
     crate = "native_tls",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
-        "OUT_DIR": "$(location :native-tls-build-script-run[out_dir])",
+        "OUT_DIR": "$(location :build-script-run[out_dir])",
     },
     features = ["default"],
     rustc_flags = [
-        "@$(location :native-tls-build-script-run[rustc_flags])",
-        "@$(location :native-tls-manifest[env_flags])",
+        "@$(location :build-script-run[rustc_flags])",
+        "@$(location :manifest[env_flags])",
     ],
     os_deps = {
         "linux": [
@@ -50,26 +49,26 @@ rust_library(
 )
 
 rust_binary(
-    name = "native-tls-build-script-build",
-    srcs = [":native-tls-vendor"],
+    name = "build-script-build",
+    srcs = [":vendor"],
     crate = "build_script_build",
     crate_root = "vendor/build.rs",
     edition = "2021",
     features = ["default"],
-    rustc_flags = ["@$(location :native-tls-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = [],
 )
 
 buildscript_run(
-    name = "native-tls-build-script-run",
+    name = "build-script-run",
     package_name = "native-tls",
-    buildscript_rule = ":native-tls-build-script-build",
+    buildscript_rule = ":build-script-build",
     env_srcs = [
-        "//third-party/rust/crates/openssl-sys/0.9.111:openssl-sys-build-script-main-run[metadata]",
-        ":native-tls-manifest[env_dict]",
+        "//third-party/rust/crates/openssl-sys/0.9.111:build-script-main-run[metadata]",
+        ":manifest[env_dict]",
     ],
     features = ["default"],
     version = "0.2.18",
-    manifest_dir = ":native-tls-vendor",
+    manifest_dir = ":vendor",
     visibility = ["PUBLIC"],
 )

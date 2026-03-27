@@ -4,22 +4,21 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "fastrand-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/fastrand/fastrand-2.3.0.crate"],
     sha256 = "37909eebbb50d72f9059c3b6d82c0463f2ff062c9e95845c43a6c9c0355411be",
     type = "tar.gz",
     strip_prefix = "fastrand-2.3.0",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "fastrand-manifest",
-    vendor = ":fastrand-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "fastrand",
-    srcs = [":fastrand-vendor"],
+    srcs = [":vendor"],
     crate = "fastrand",
     crate_root = "vendor/src/lib.rs",
     edition = "2018",
@@ -28,6 +27,6 @@ rust_library(
         "default",
         "std",
     ],
-    rustc_flags = ["@$(location :fastrand-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
 )

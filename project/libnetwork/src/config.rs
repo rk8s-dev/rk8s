@@ -33,11 +33,21 @@ pub struct NetworkConfig {
     #[serde(rename = "IPv6SubnetLen", default)]
     pub ipv6_subnet_len: u8,
 
+    // Service CIDR configuration for automatic ClusterIP allocation
+    #[serde(rename = "ServiceCIDR", default)]
+    pub service_cidr: Option<Ipv4Network>,
+    #[serde(rename = "ServiceSubnetLen", default = "default_service_subnet_len")]
+    pub service_subnet_len: u8,
+
     // populated after parsing
     #[serde(skip)]
     pub backend_type: String,
     #[serde(rename = "Backend", skip_serializing_if = "Option::is_none")]
     pub backend: Option<JsonValue>,
+}
+
+fn default_service_subnet_len() -> u8 {
+    24
 }
 
 #[derive(Deserialize)]
@@ -189,6 +199,37 @@ pub fn validate_network_config(cfg: &mut NetworkConfig) -> Result<()> {
         }
     }
 
+    // Validate Service CIDR configuration (optional)
+    if let Some(service_cidr) = cfg.service_cidr {
+        let prefix = service_cidr.prefix();
+
+        // Service CIDR must provide at least one usable host address.
+        if prefix >= 31 {
+            anyhow::bail!(
+                "ServiceCIDR {} has no allocatable host addresses (prefix /{} is too narrow)",
+                service_cidr,
+                prefix
+            );
+        }
+
+        // Validate service subnet length
+        if cfg.service_subnet_len > 0 {
+            if cfg.service_subnet_len > 30 {
+                anyhow::bail!("ServiceSubnetLen must be less than /31");
+            }
+            if cfg.service_subnet_len < prefix {
+                anyhow::bail!(
+                    "ServiceSubnetLen (/{}) cannot be broader than ServiceCIDR prefix (/{})",
+                    cfg.service_subnet_len,
+                    prefix
+                );
+            }
+        } else {
+            // Default to /24 per service
+            cfg.service_subnet_len = 24;
+        }
+    }
+
     Ok(())
 }
 
@@ -210,6 +251,8 @@ mod tests {
             ipv6_subnet_max: None,
             subnet_len: 24,
             ipv6_subnet_len: 0,
+            service_cidr: Some("10.96.0.0/12".parse().unwrap()),
+            service_subnet_len: 24,
             backend_type: "".into(),
             backend: None,
         };
@@ -233,6 +276,8 @@ mod tests {
             ipv6_subnet_max: None,
             subnet_len: 0,
             ipv6_subnet_len: 64,
+            service_cidr: None,
+            service_subnet_len: 0,
             backend_type: "".into(),
             backend: None,
         };

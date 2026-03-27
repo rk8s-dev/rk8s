@@ -1,4 +1,5 @@
 use crate::api::xlinestore::XlineStore;
+use crate::csi::VolumeOrchestrator;
 use crate::network::manager::LocalManager;
 use crate::node::lease_sync::LeaseSynchronizer;
 use crate::node::server::QUICServer;
@@ -197,7 +198,10 @@ pub struct Shared {
     pub local_manager: Arc<LocalManager>,
     pub vault: Option<Arc<Vault>>,
     pub node_registry: Arc<NodeRegistry>,
+    pub network_config: Arc<libnetwork::config::NetworkConfig>,
+    pub service_ip_allocator: Option<Arc<crate::network::service_ip::ServiceIpAllocator>>,
     pub log_response_registry: Arc<LogResponseRegistry>,
+    pub volume_orchestrator: Arc<VolumeOrchestrator>,
 }
 
 impl Shared {
@@ -206,13 +210,19 @@ impl Shared {
         local_manager: Arc<LocalManager>,
         vault: Option<Arc<Vault>>,
         node_registry: Arc<NodeRegistry>,
+        network_config: Arc<libnetwork::config::NetworkConfig>,
+        service_ip_allocator: Option<Arc<crate::network::service_ip::ServiceIpAllocator>>,
+        volume_orchestrator: Arc<VolumeOrchestrator>,
     ) -> Self {
         Self {
             xline_store,
             local_manager,
             vault,
             node_registry,
+            network_config,
+            service_ip_allocator,
             log_response_registry: Arc::new(LogResponseRegistry::default()),
+            volume_orchestrator,
         }
     }
 }

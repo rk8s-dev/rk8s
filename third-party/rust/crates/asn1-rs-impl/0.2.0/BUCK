@@ -4,26 +4,25 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "asn1-rs-impl-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/asn1-rs-impl/asn1-rs-impl-0.2.0.crate"],
     sha256 = "7b18050c2cd6fe86c3a76584ef5e0baf286d038cda203eb6223df2cc413565f7",
     type = "tar.gz",
     strip_prefix = "asn1-rs-impl-0.2.0",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "asn1-rs-impl-manifest",
-    vendor = ":asn1-rs-impl-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "asn1-rs-impl",
-    srcs = [":asn1-rs-impl-vendor"],
+    srcs = [":vendor"],
     crate = "asn1_rs_impl",
     crate_root = "vendor/src/lib.rs",
     edition = "2018",
-    rustc_flags = ["@$(location :asn1-rs-impl-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     proc_macro = True,
     visibility = ["PUBLIC"],
     deps = [

@@ -4,36 +4,35 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_binary", "rust_library")
 
 filegroup(
-    name = "rkl-vendor",
+    name = "vendor",
     srcs = glob(["**/**"]),
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "rkl-manifest",
-    vendor = ":rkl-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_binary(
     name = "rkl",
-    srcs = [":rkl-vendor"],
+    srcs = [":vendor"],
     crate = "rkl",
     crate_root = "vendor/src/main.rs",
     edition = "2024",
-    rustc_flags = ["@$(location :rkl-manifest[env_flags])"] + select({
+    rustc_flags = ["@$(location :manifest[env_flags])"] + select({
         "prelude//os/constraints:windows": select({
             "prelude//abi/constraints:gnu": [
-                "@$(location //third-party/rust/crates/windows_x86_64_gnu/0.42.2:windows_x86_64_gnu-build-script-run[rustc_flags])",
-                "@$(location //third-party/rust/crates/windows_x86_64_gnu/0.48.5:windows_x86_64_gnu-build-script-run[rustc_flags])",
-                "@$(location //third-party/rust/crates/windows_x86_64_gnu/0.52.6:windows_x86_64_gnu-build-script-run[rustc_flags])",
-                "@$(location //third-party/rust/crates/windows_x86_64_gnu/0.53.1:windows_x86_64_gnu-build-script-run[rustc_flags])",
-                "@$(location //third-party/rust/crates/winapi-x86_64-pc-windows-gnu/0.4.0:winapi-x86_64-pc-windows-gnu-build-script-run[rustc_flags])",
+                "@$(location //third-party/rust/crates/windows_x86_64_gnu/0.42.2:build-script-run[rustc_flags])",
+                "@$(location //third-party/rust/crates/windows_x86_64_gnu/0.48.5:build-script-run[rustc_flags])",
+                "@$(location //third-party/rust/crates/windows_x86_64_gnu/0.52.6:build-script-run[rustc_flags])",
+                "@$(location //third-party/rust/crates/windows_x86_64_gnu/0.53.1:build-script-run[rustc_flags])",
+                "@$(location //third-party/rust/crates/winapi-x86_64-pc-windows-gnu/0.4.0:build-script-run[rustc_flags])",
             ],
             "DEFAULT": [
-                "@$(location //third-party/rust/crates/windows_x86_64_msvc/0.42.2:windows_x86_64_msvc-build-script-run[rustc_flags])",
-                "@$(location //third-party/rust/crates/windows_x86_64_msvc/0.48.5:windows_x86_64_msvc-build-script-run[rustc_flags])",
-                "@$(location //third-party/rust/crates/windows_x86_64_msvc/0.52.6:windows_x86_64_msvc-build-script-run[rustc_flags])",
-                "@$(location //third-party/rust/crates/windows_x86_64_msvc/0.53.1:windows_x86_64_msvc-build-script-run[rustc_flags])",
+                "@$(location //third-party/rust/crates/windows_x86_64_msvc/0.42.2:build-script-run[rustc_flags])",
+                "@$(location //third-party/rust/crates/windows_x86_64_msvc/0.48.5:build-script-run[rustc_flags])",
+                "@$(location //third-party/rust/crates/windows_x86_64_msvc/0.52.6:build-script-run[rustc_flags])",
+                "@$(location //third-party/rust/crates/windows_x86_64_msvc/0.53.1:build-script-run[rustc_flags])",
             ],
         }),
         "DEFAULT": [],
@@ -42,11 +41,14 @@ rust_binary(
     deps = [
         "//project/common:common",
         "//project/libcni:libcni",
+        "//project/libcsi:libcsi",
         "//project/libfuse-fs:libfuse_fs",
         "//project/libnetwork:libnetwork",
         "//project/libruntime:libruntime",
         "//project/libvault:libvault",
+        "//project/rfuse3:rfuse3",
         "//project/rkforge:rkforge-lib",
+        "//project/slayerfs:slayerfs-lib",
         "//third-party/rust/crates/anyhow/1.0.101:anyhow",
         "//third-party/rust/crates/async-trait/0.1.89:async-trait",
         "//third-party/rust/crates/axum/0.8.8:axum",
@@ -113,20 +115,23 @@ rust_binary(
 
 rust_library(
     name = "rkl-lib",
-    srcs = [":rkl-vendor"],
+    srcs = [":vendor"],
     crate = "rkl",
     crate_root = "vendor/src/lib.rs",
     edition = "2024",
-    rustc_flags = ["@$(location :rkl-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
         "//project/common:common",
         "//project/libcni:libcni",
+        "//project/libcsi:libcsi",
         "//project/libfuse-fs:libfuse_fs",
         "//project/libnetwork:libnetwork",
         "//project/libruntime:libruntime",
         "//project/libvault:libvault",
+        "//project/rfuse3:rfuse3",
         "//project/rkforge:rkforge-lib",
+        "//project/slayerfs:slayerfs-lib",
         "//third-party/rust/crates/anyhow/1.0.101:anyhow",
         "//third-party/rust/crates/async-trait/0.1.89:async-trait",
         "//third-party/rust/crates/axum/0.8.8:axum",

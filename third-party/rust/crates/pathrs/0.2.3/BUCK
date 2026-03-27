@@ -4,32 +4,31 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "buildscript_run", "rust_binary", "rust_library")
 
 http_archive(
-    name = "pathrs-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/pathrs/pathrs-0.2.3.crate"],
     sha256 = "e28a357ed3c82eb2589457e5c756717f544c6f4221ecf3e3d64c14400677c10f",
     type = "tar.gz",
     strip_prefix = "pathrs-0.2.3",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "pathrs-manifest",
-    vendor = ":pathrs-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "pathrs",
-    srcs = [":pathrs-vendor"],
+    srcs = [":vendor"],
     crate = "pathrs",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
-        "OUT_DIR": "$(location :pathrs-build-script-run[out_dir])",
+        "OUT_DIR": "$(location :build-script-run[out_dir])",
     },
     features = ["default"],
     rustc_flags = [
-        "@$(location :pathrs-build-script-run[rustc_flags])",
-        "@$(location :pathrs-manifest[env_flags])",
+        "@$(location :build-script-run[rustc_flags])",
+        "@$(location :manifest[env_flags])",
     ],
     visibility = ["PUBLIC"],
     deps = [
@@ -46,24 +45,24 @@ rust_library(
 )
 
 rust_binary(
-    name = "pathrs-build-script-build",
-    srcs = [":pathrs-vendor"],
+    name = "build-script-build",
+    srcs = [":vendor"],
     crate = "build_script_build",
     crate_root = "vendor/build.rs",
     edition = "2021",
     features = ["default"],
-    rustc_flags = ["@$(location :pathrs-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = [],
     deps = ["//third-party/rust/crates/tempfile/3.25.0:tempfile"],
 )
 
 buildscript_run(
-    name = "pathrs-build-script-run",
+    name = "build-script-run",
     package_name = "pathrs",
-    buildscript_rule = ":pathrs-build-script-build",
-    env_srcs = [":pathrs-manifest[env_dict]"],
+    buildscript_rule = ":build-script-build",
+    env_srcs = [":manifest[env_dict]"],
     features = ["default"],
     version = "0.2.3",
-    manifest_dir = ":pathrs-vendor",
+    manifest_dir = ":vendor",
     visibility = ["PUBLIC"],
 )

@@ -4,26 +4,25 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "derivative-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/derivative/derivative-2.2.0.crate"],
     sha256 = "fcc3dd5e9e9c0b295d6e1e4d811fb6f157d5ffd784b8d202fc62eac8035a770b",
     type = "tar.gz",
     strip_prefix = "derivative-2.2.0",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "derivative-manifest",
-    vendor = ":derivative-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "derivative",
-    srcs = [":derivative-vendor"],
+    srcs = [":vendor"],
     crate = "derivative",
     crate_root = "vendor/src/lib.rs",
     edition = "2015",
-    rustc_flags = ["@$(location :derivative-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     proc_macro = True,
     visibility = ["PUBLIC"],
     deps = [

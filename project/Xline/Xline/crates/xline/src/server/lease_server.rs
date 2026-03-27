@@ -4,8 +4,16 @@ use async_stream::{stream, try_stream};
 use clippy_utilities::NumericCast;
 use curp::members::ClusterInfo;
 use futures::{StreamExt, stream::Stream};
+use http::uri::PathAndQuery;
 use tokio::time;
+<<<<<<< Hzm-5
 use xlinerpc::Status;
+=======
+use tonic::Status;
+use tonic::client::Grpc;
+use tonic::codec::ProstCodec;
+use tonic::transport::{ClientTlsConfig, Endpoint};
+>>>>>>> main
 use tracing::{debug, warn};
 use utils::{
     build_endpoint,
@@ -21,9 +29,9 @@ use crate::{
     metrics,
     router::endpoint::EndPoint as RouterEndpoint,
     rpc::{
-        LeaseClient, LeaseGrantRequest, LeaseGrantResponse, LeaseKeepAliveRequest,
-        LeaseKeepAliveResponse, LeaseLeasesRequest, LeaseLeasesResponse, LeaseRevokeRequest,
-        LeaseRevokeResponse, LeaseTimeToLiveRequest, LeaseTimeToLiveResponse, RequestWrapper,
+        LeaseGrantRequest, LeaseGrantResponse, LeaseKeepAliveRequest, LeaseKeepAliveResponse,
+        LeaseLeasesRequest, LeaseLeasesResponse, LeaseRevokeRequest, LeaseRevokeResponse,
+        LeaseTimeToLiveRequest, LeaseTimeToLiveResponse, RequestWrapper,
     },
     storage::{AuthStore, LeaseStore},
 };
@@ -234,7 +242,6 @@ impl LeaseServer {
             })
             .collect::<Result<_, _>>()?;
         let channel = tonic::transport::Channel::balance_list(endpoints.into_iter());
-        let mut lease_client = LeaseClient::new(channel);
 
         let redirect_stream = stream! {
             loop {
@@ -255,8 +262,14 @@ impl LeaseServer {
 
         };
 
-        let stream = lease_client
-            .lease_keep_alive(redirect_stream)
+        let mut grpc = Grpc::new(channel);
+        let path = PathAndQuery::from_static("/etcdserverpb.Lease/LeaseKeepAlive");
+        let stream = grpc
+            .streaming(
+                tonic::Request::new(redirect_stream),
+                path,
+                ProstCodec::default(),
+            )
             .await?
             .into_inner();
 
@@ -398,8 +411,9 @@ impl LeaseServer {
                     })
                     .collect::<Result<_, _>>()?;
                 let channel = tonic::transport::Channel::balance_list(endpoints.into_iter());
-                let mut lease_client = LeaseClient::new(channel);
-                return lease_client.lease_time_to_live(request).await;
+                let mut grpc = Grpc::new(channel);
+                let path = PathAndQuery::from_static("/etcdserverpb.Lease/LeaseTimeToLive");
+                return grpc.unary(request, path, ProstCodec::default()).await;
             }
         }
     }
@@ -445,9 +459,7 @@ impl Server {
         }
     }
     pub(crate) fn from_arc(lease_server: Arc<LeaseServer>) -> Self {
-        Self {
-            lease_server,
-        }
+        Self { lease_server }
     }
     pub(crate) fn endpoint(self) -> RouterEndpoint<Arc<LeaseServer>> {
         RouterEndpoint::new(self.lease_server)

@@ -4,22 +4,21 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "reqwest-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/reqwest/reqwest-0.12.28.crate"],
     sha256 = "eddd3ca559203180a307f12d114c268abf583f59b03cb906fd0b3ff8646c1147",
     type = "tar.gz",
     strip_prefix = "reqwest-0.12.28",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "reqwest-manifest",
-    vendor = ":reqwest-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "reqwest",
-    srcs = [":reqwest-vendor"],
+    srcs = [":vendor"],
     crate = "reqwest",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
@@ -43,7 +42,7 @@ rust_library(
         "stream",
         "system-proxy",
     ],
-    rustc_flags = ["@$(location :reqwest-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     os_named_deps = {
         "native_tls_crate": {
             "linux": "//third-party/rust/crates/native-tls/0.2.18:native-tls",

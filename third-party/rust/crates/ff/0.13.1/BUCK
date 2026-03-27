@@ -4,22 +4,21 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "ff-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/ff/ff-0.13.1.crate"],
     sha256 = "c0b50bfb653653f9ca9095b427bed08ab8d75a137839d9ad64eb11810d5b6393",
     type = "tar.gz",
     strip_prefix = "ff-0.13.1",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "ff-manifest",
-    vendor = ":ff-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "ff",
-    srcs = [":ff-vendor"],
+    srcs = [":vendor"],
     crate = "ff",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
@@ -28,7 +27,7 @@ rust_library(
         "bits",
         "bitvec",
     ],
-    rustc_flags = ["@$(location :ff-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/bitvec/1.0.1:bitvec",

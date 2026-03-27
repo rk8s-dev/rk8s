@@ -4,22 +4,21 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "aws-config-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/aws-config/aws-config-1.8.14.crate"],
     sha256 = "8a8fc176d53d6fe85017f230405e3255cedb4a02221cb55ed6d76dccbbb099b2",
     type = "tar.gz",
     strip_prefix = "aws-config-1.8.14",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "aws-config-manifest",
-    vendor = ":aws-config-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "aws-config",
-    srcs = [":aws-config-vendor"],
+    srcs = [":vendor"],
     crate = "aws_config",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
@@ -30,7 +29,7 @@ rust_library(
         "rt-tokio",
         "sso",
     ],
-    rustc_flags = ["@$(location :aws-config-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/aws-credential-types/1.2.12:aws-credential-types",

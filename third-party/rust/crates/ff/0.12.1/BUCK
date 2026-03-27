@@ -4,26 +4,25 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "ff-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/ff/ff-0.12.1.crate"],
     sha256 = "d013fc25338cc558c5c2cfbad646908fb23591e2404481826742b651c9af7160",
     type = "tar.gz",
     strip_prefix = "ff-0.12.1",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "ff-manifest",
-    vendor = ":ff-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "ff",
-    srcs = [":ff-vendor"],
+    srcs = [":vendor"],
     crate = "ff",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
-    rustc_flags = ["@$(location :ff-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/rand_core/0.6.4:rand_core",

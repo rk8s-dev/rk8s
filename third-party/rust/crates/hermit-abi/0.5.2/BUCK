@@ -4,26 +4,25 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "hermit-abi-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/hermit-abi/hermit-abi-0.5.2.crate"],
     sha256 = "fc0fef456e4baa96da950455cd02c081ca953b141298e41db3fc7e36b1da849c",
     type = "tar.gz",
     strip_prefix = "hermit-abi-0.5.2",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "hermit-abi-manifest",
-    vendor = ":hermit-abi-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "hermit-abi",
-    srcs = [":hermit-abi-vendor"],
+    srcs = [":vendor"],
     crate = "hermit_abi",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
     features = ["default"],
-    rustc_flags = ["@$(location :hermit-abi-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
 )

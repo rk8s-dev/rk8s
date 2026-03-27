@@ -4,42 +4,41 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "buildscript_run", "rust_binary", "rust_library")
 
 http_archive(
-    name = "httparse-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/httparse/httparse-1.10.1.crate"],
     sha256 = "6dbf3de79e51f3d586ab4cb9d5c3e2c14aa28ed23d180cf89b4df0454a69cc87",
     type = "tar.gz",
     strip_prefix = "httparse-1.10.1",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "httparse-manifest",
-    vendor = ":httparse-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "httparse",
-    srcs = [":httparse-vendor"],
+    srcs = [":vendor"],
     crate = "httparse",
     crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
-        "OUT_DIR": "$(location :httparse-build-script-run[out_dir])",
+        "OUT_DIR": "$(location :build-script-run[out_dir])",
     },
     features = [
         "default",
         "std",
     ],
     rustc_flags = [
-        "@$(location :httparse-build-script-run[rustc_flags])",
-        "@$(location :httparse-manifest[env_flags])",
+        "@$(location :build-script-run[rustc_flags])",
+        "@$(location :manifest[env_flags])",
     ],
     visibility = ["PUBLIC"],
 )
 
 rust_binary(
-    name = "httparse-build-script-build",
-    srcs = [":httparse-vendor"],
+    name = "build-script-build",
+    srcs = [":vendor"],
     crate = "build_script_build",
     crate_root = "vendor/build.rs",
     edition = "2018",
@@ -47,20 +46,20 @@ rust_binary(
         "default",
         "std",
     ],
-    rustc_flags = ["@$(location :httparse-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = [],
 )
 
 buildscript_run(
-    name = "httparse-build-script-run",
+    name = "build-script-run",
     package_name = "httparse",
-    buildscript_rule = ":httparse-build-script-build",
-    env_srcs = [":httparse-manifest[env_dict]"],
+    buildscript_rule = ":build-script-build",
+    env_srcs = [":manifest[env_dict]"],
     features = [
         "default",
         "std",
     ],
     version = "1.10.1",
-    manifest_dir = ":httparse-vendor",
+    manifest_dir = ":vendor",
     visibility = ["PUBLIC"],
 )

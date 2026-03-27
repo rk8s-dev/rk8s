@@ -1,5 +1,5 @@
 use anyhow::{Result, anyhow};
-use common::{ContainerSpec, PodTask};
+use common::{ContainerSpec, PodTask, VolumeSourceType};
 use json::JsonValue;
 use libcontainer::syscall::syscall::create_syscall;
 use liboci_cli::{Create, Delete, Kill, Start};
@@ -7,7 +7,7 @@ use libruntime::cri::config::ContainerConfigBuilder;
 use thiserror::Error;
 // use libruntime::cri::config::get_linux_container_config;
 use libruntime::cri::cri_api::{
-    ContainerConfig, CreateContainerRequest, CreateContainerResponse, PodSandboxConfig,
+    ContainerConfig, CreateContainerRequest, CreateContainerResponse, Mount, PodSandboxConfig,
     PodSandboxMetadata, PortMapping, Protocol, RemovePodSandboxRequest, RemovePodSandboxResponse,
     RunPodSandboxRequest, RunPodSandboxResponse, StartContainerRequest, StartContainerResponse,
     StopPodSandboxRequest, StopPodSandboxResponse,
@@ -312,6 +312,7 @@ impl TaskRunner {
             name: "sandbox".to_string(),
             // FIXME: SHOULD define a const variable image name
             image: "pause:3.9".to_string(),
+            // image: "/home/harry/Documents/rk8s/project/test/bundles/pause".to_string(),
             ports: vec![],
             args: vec![],
             resources: None,
@@ -434,6 +435,59 @@ impl TaskRunner {
             .map_err(|e| anyhow!("Failed to setup pod network via library chain: {e}"))
     }
 
+    /// Resolve container volumeMounts into CRI Mount entries using the pod's volume definitions.
+    fn resolve_volume_mounts(&self, container: &ContainerSpec) -> Vec<Mount> {
+        let volume_mounts = match &container.volume_mounts {
+            Some(vms) if !vms.is_empty() => vms,
+            _ => return vec![],
+        };
+
+        let pod_uid = &self.task.metadata.uid;
+        let mut mounts = Vec::with_capacity(volume_mounts.len());
+
+        for vm in volume_mounts {
+            let vol = match self.task.spec.volumes.iter().find(|v| v.name == vm.name) {
+                Some(v) => v,
+                None => {
+                    error!(
+                        "volumeMount '{}' references unknown volume '{}', skipping",
+                        vm.mount_path, vm.name
+                    );
+                    continue;
+                }
+            };
+
+            let host_path = match &vol.source {
+                VolumeSourceType::SlayerFs { .. } => {
+                    format!("/var/lib/rkl/pods/{}/volumes/{}", pod_uid, vol.name)
+                }
+                VolumeSourceType::HostPath { path } => path.clone(),
+                VolumeSourceType::EmptyDir => {
+                    let path = format!("/var/lib/rkl/pods/{}/emptydir/{}", pod_uid, vol.name);
+                    if let Err(e) = std::fs::create_dir_all(&path) {
+                        error!("failed to create emptyDir path '{}': {}", path, e);
+                    }
+                    path
+                }
+            };
+
+            mounts.push(Mount {
+                container_path: vm.mount_path.clone(),
+                host_path,
+                readonly: vm.read_only.unwrap_or(false),
+                selinux_relabel: false,
+                propagation: 0,
+                uid_mappings: vec![],
+                gid_mappings: vec![],
+                recursive_read_only: false,
+                image: None,
+                image_sub_path: String::new(),
+            });
+        }
+
+        mounts
+    }
+
     pub fn sync_build_create_container_request(
         &mut self,
         pod_sandbox_id: &str,
@@ -481,15 +535,18 @@ impl TaskRunner {
             sync_handle_image_typ(&puller, container)?
         };
 
+        let volume_mounts = self.resolve_volume_mounts(container);
+
         let config = if let Some(ref mut builder) = config_builder {
             builder.container_spec(container.clone())?;
+            builder.mounts(volume_mounts);
             builder.images(bundle_path);
             builder.clone().build()
         } else {
-            ContainerConfigBuilder::default()
-                .container_spec(container.clone())?
-                .clone()
-                .build()
+            let mut b = ContainerConfigBuilder::default();
+            b.container_spec(container.clone())?;
+            b.mounts(volume_mounts);
+            b.build()
         };
 
         Ok(CreateContainerRequest {
@@ -542,15 +599,18 @@ impl TaskRunner {
             handle_image_typ(&puller, container).await?
         };
 
+        let volume_mounts = self.resolve_volume_mounts(container);
+
         let config = if let Some(ref mut builder) = config_builder {
             builder.container_spec(container.clone())?;
+            builder.mounts(volume_mounts);
             builder.images(bundle_path);
             builder.clone().build()
         } else {
-            ContainerConfigBuilder::default()
-                .container_spec(container.clone())?
-                .clone()
-                .build()
+            let mut b = ContainerConfigBuilder::default();
+            b.container_spec(container.clone())?;
+            b.mounts(volume_mounts);
+            b.build()
         };
 
         Ok(CreateContainerRequest {

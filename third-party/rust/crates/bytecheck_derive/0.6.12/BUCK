@@ -4,27 +4,26 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "bytecheck_derive-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/bytecheck_derive/bytecheck_derive-0.6.12.crate"],
     sha256 = "3db406d29fbcd95542e92559bed4d8ad92636d1ca8b3b72ede10b4bcc010e659",
     type = "tar.gz",
     strip_prefix = "bytecheck_derive-0.6.12",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "bytecheck_derive-manifest",
-    vendor = ":bytecheck_derive-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "bytecheck_derive",
-    srcs = [":bytecheck_derive-vendor"],
+    srcs = [":vendor"],
     crate = "bytecheck_derive",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
     features = ["std"],
-    rustc_flags = ["@$(location :bytecheck_derive-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     proc_macro = True,
     visibility = ["PUBLIC"],
     deps = [

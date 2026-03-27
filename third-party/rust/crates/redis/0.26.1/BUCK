@@ -4,22 +4,21 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "redis-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/redis/redis-0.26.1.crate"],
     sha256 = "e902a69d09078829137b4a5d9d082e0490393537badd7c91a3d69d14639e115f",
     type = "tar.gz",
     strip_prefix = "redis-0.26.1",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "redis-manifest",
-    vendor = ":redis-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "redis",
-    srcs = [":redis-vendor"],
+    srcs = [":vendor"],
     crate = "redis",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
@@ -44,7 +43,7 @@ rust_library(
         "tokio-retry",
         "tokio-util",
     ],
-    rustc_flags = ["@$(location :redis-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/arc-swap/1.8.2:arc-swap",

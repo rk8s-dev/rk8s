@@ -50,6 +50,8 @@ dns_config:
 -   `addr`: The address and port where the RKS service listens. `addr` is the only field that you need modify.
 -   `xline_config`: Defines the backend Xline cluster, including endpoints, a prefix key for storing data, and a lease renewal margin.
 -   `network_config`: Specifies the network settings managed by RKS, such as the overall network range (`10.1.0.0/16`), the minimum and maximum subnets to allocate, and the subnet length (`/24`).
+-   `network_config.ServiceCIDR`: Optional Service network for ClusterIP allocation (for example `10.96.0.0/16`).
+-   `network_config.ServiceSubnetLen`: Currently kept for config compatibility/validation only, and does not change current ClusterIP allocation strategy.
 -   `tls_config`: RKS uses QUIC to communicate with RKL, and libvault is used as certificates manager. Set `enable = false` to disable authentication, otherwise set `vault_url` to configurate it. If `keep_dangerous_files` is false, the seal keys will be removed for security. 
 -   `dns_config`: RKS also serves as a dns server, set `Port` to specify its port.
 

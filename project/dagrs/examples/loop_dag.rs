@@ -50,7 +50,7 @@ impl Action for InterAction {
     ) -> Output {
         // Recv a start signal from the IN node.
         let content = in_channels.recv_from(&self.in_id).await.unwrap();
-        in_channels.close_async(&self.in_id).await;
+        in_channels.close(&self.in_id).await;
         log::info!("`Inter` Received start signal from IN node");
 
         let mut times = 0usize;
@@ -70,7 +70,7 @@ impl Action for InterAction {
             times += 1;
             if times >= self.limit {
                 log::info!("`Inter` reached iter limit {}, exit", times);
-                out_channels.close(&self.proc_id);
+                out_channels.close(&self.proc_id).await;
                 break;
             }
         }
@@ -110,8 +110,8 @@ impl Action for ProcAction {
     }
 }
 
-#[allow(deprecated)]
-fn main() {
+#[tokio::main]
+async fn main() {
     unsafe {
         env::set_var("RUST_LOG", "info");
     }
@@ -151,13 +151,8 @@ fn main() {
     graph.add_edge(in_id, vec![inter_id]);
     graph.add_edge(inter_id, vec![proc_id]);
     graph.add_edge(proc_id, vec![inter_id]);
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .expect("failed to create tokio runtime");
-
     // Execute graph
-    match graph.start_with_runtime(&runtime) {
+    match graph.async_start().await {
         Ok(_) => println!("Graph executed successfully"),
         Err(e) => panic!("Graph execution failed: {:?}", e),
     }

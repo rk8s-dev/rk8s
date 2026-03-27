@@ -4,35 +4,34 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "buildscript_run", "rust_binary", "rust_library")
 
 http_archive(
-    name = "hax-lib-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/hax-lib/hax-lib-0.3.5.crate"],
     sha256 = "74d9ba66d1739c68e0219b2b2238b5c4145f491ebf181b9c6ab561a19352ae86",
     type = "tar.gz",
     strip_prefix = "hax-lib-0.3.5",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "hax-lib-manifest",
-    vendor = ":hax-lib-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "hax-lib",
-    srcs = [":hax-lib-vendor"],
+    srcs = [":vendor"],
     crate = "hax_lib",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
-        "OUT_DIR": "$(location :hax-lib-build-script-run[out_dir])",
+        "OUT_DIR": "$(location :build-script-run[out_dir])",
     },
     features = [
         "default",
         "macros",
     ],
     rustc_flags = [
-        "@$(location :hax-lib-build-script-run[rustc_flags])",
-        "@$(location :hax-lib-manifest[env_flags])",
+        "@$(location :build-script-run[rustc_flags])",
+        "@$(location :manifest[env_flags])",
     ],
     visibility = ["PUBLIC"],
     deps = [
@@ -43,8 +42,8 @@ rust_library(
 )
 
 rust_binary(
-    name = "hax-lib-build-script-build",
-    srcs = [":hax-lib-vendor"],
+    name = "build-script-build",
+    srcs = [":vendor"],
     crate = "build_script_build",
     crate_root = "vendor/build.rs",
     edition = "2021",
@@ -52,20 +51,20 @@ rust_binary(
         "default",
         "macros",
     ],
-    rustc_flags = ["@$(location :hax-lib-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = [],
 )
 
 buildscript_run(
-    name = "hax-lib-build-script-run",
+    name = "build-script-run",
     package_name = "hax-lib",
-    buildscript_rule = ":hax-lib-build-script-build",
-    env_srcs = [":hax-lib-manifest[env_dict]"],
+    buildscript_rule = ":build-script-build",
+    env_srcs = [":manifest[env_dict]"],
     features = [
         "default",
         "macros",
     ],
     version = "0.3.5",
-    manifest_dir = ":hax-lib-vendor",
+    manifest_dir = ":vendor",
     visibility = ["PUBLIC"],
 )

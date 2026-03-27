@@ -4,26 +4,25 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "async-stream-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/async-stream/async-stream-0.3.6.crate"],
     sha256 = "0b5a71a6f37880a80d1d7f19efd781e4b5de42c88f0722cc13bcb6cc2cfe8476",
     type = "tar.gz",
     strip_prefix = "async-stream-0.3.6",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "async-stream-manifest",
-    vendor = ":async-stream-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "async-stream",
-    srcs = [":async-stream-vendor"],
+    srcs = [":vendor"],
     crate = "async_stream",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
-    rustc_flags = ["@$(location :async-stream-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/async-stream-impl/0.3.6:async-stream-impl",

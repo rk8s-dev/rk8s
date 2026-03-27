@@ -4,22 +4,21 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "macaddr-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/macaddr/macaddr-1.0.1.crate"],
     sha256 = "baee0bbc17ce759db233beb01648088061bf678383130602a298e6998eedb2d8",
     type = "tar.gz",
     strip_prefix = "macaddr-1.0.1",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "macaddr-manifest",
-    vendor = ":macaddr-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "macaddr",
-    srcs = [":macaddr-vendor"],
+    srcs = [":vendor"],
     crate = "macaddr",
     crate_root = "vendor/src/lib.rs",
     edition = "2018",
@@ -27,6 +26,6 @@ rust_library(
         "default",
         "std",
     ],
-    rustc_flags = ["@$(location :macaddr-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
 )

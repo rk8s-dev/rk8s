@@ -4,51 +4,50 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "buildscript_run", "rust_binary", "rust_library")
 
 http_archive(
-    name = "windows_i686_gnu-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/windows_i686_gnu/windows_i686_gnu-0.53.1.crate"],
     sha256 = "960e6da069d81e09becb0ca57a65220ddff016ff2d6af6a223cf372a506593a3",
     type = "tar.gz",
     strip_prefix = "windows_i686_gnu-0.53.1",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "windows_i686_gnu-manifest",
-    vendor = ":windows_i686_gnu-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "windows_i686_gnu",
-    srcs = [":windows_i686_gnu-vendor"],
+    srcs = [":vendor"],
     crate = "windows_i686_gnu",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
-        "OUT_DIR": "$(location :windows_i686_gnu-build-script-run[out_dir])",
+        "OUT_DIR": "$(location :build-script-run[out_dir])",
     },
     rustc_flags = [
-        "@$(location :windows_i686_gnu-build-script-run[rustc_flags])",
-        "@$(location :windows_i686_gnu-manifest[env_flags])",
+        "@$(location :build-script-run[rustc_flags])",
+        "@$(location :manifest[env_flags])",
     ],
     visibility = ["PUBLIC"],
 )
 
 rust_binary(
-    name = "windows_i686_gnu-build-script-build",
-    srcs = [":windows_i686_gnu-vendor"],
+    name = "build-script-build",
+    srcs = [":vendor"],
     crate = "build_script_build",
     crate_root = "vendor/build.rs",
     edition = "2021",
-    rustc_flags = ["@$(location :windows_i686_gnu-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = [],
 )
 
 buildscript_run(
-    name = "windows_i686_gnu-build-script-run",
+    name = "build-script-run",
     package_name = "windows_i686_gnu",
-    buildscript_rule = ":windows_i686_gnu-build-script-build",
-    env_srcs = [":windows_i686_gnu-manifest[env_dict]"],
+    buildscript_rule = ":build-script-build",
+    env_srcs = [":manifest[env_dict]"],
     version = "0.53.1",
-    manifest_dir = ":windows_i686_gnu-vendor",
+    manifest_dir = ":vendor",
     visibility = ["PUBLIC"],
 )

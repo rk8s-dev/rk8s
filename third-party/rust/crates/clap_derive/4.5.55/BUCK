@@ -4,27 +4,26 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "clap_derive-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/clap_derive/clap_derive-4.5.55.crate"],
     sha256 = "a92793da1a46a5f2a02a6f4c46c6496b28c43638adea8306fcb0caa1634f24e5",
     type = "tar.gz",
     strip_prefix = "clap_derive-4.5.55",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "clap_derive-manifest",
-    vendor = ":clap_derive-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "clap_derive",
-    srcs = [":clap_derive-vendor"],
+    srcs = [":vendor"],
     crate = "clap_derive",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
     features = ["default"],
-    rustc_flags = ["@$(location :clap_derive-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     proc_macro = True,
     visibility = ["PUBLIC"],
     deps = [

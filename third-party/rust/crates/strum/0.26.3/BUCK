@@ -4,25 +4,24 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "strum-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/strum/strum-0.26.3.crate"],
     sha256 = "8fec0f0aef304996cf250b31b5a10dee7980c85da9d759361292b8bca5a18f06",
     type = "tar.gz",
     strip_prefix = "strum-0.26.3",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "strum-manifest",
-    vendor = ":strum-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "strum",
-    srcs = [":strum-vendor"],
+    srcs = [":vendor"],
     crate = "strum",
     crate_root = "vendor/src/lib.rs",
     edition = "2018",
-    rustc_flags = ["@$(location :strum-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
 )

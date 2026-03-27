@@ -115,6 +115,8 @@ impl NetworkReceiver {
                     ipv6_subnet_max: None,
                     subnet_len: 24,
                     ipv6_subnet_len: 64,
+                    service_cidr: None,
+                    service_subnet_len: 24,
                     backend_type: std::env::var("BACKEND_TYPE")
                         .unwrap_or_else(|_| "hostgw".to_string()),
                     backend: None,

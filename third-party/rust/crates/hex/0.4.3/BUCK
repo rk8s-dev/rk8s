@@ -4,22 +4,21 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "hex-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/hex/hex-0.4.3.crate"],
     sha256 = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70",
     type = "tar.gz",
     strip_prefix = "hex-0.4.3",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "hex-manifest",
-    vendor = ":hex-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "hex",
-    srcs = [":hex-vendor"],
+    srcs = [":vendor"],
     crate = "hex",
     crate_root = "vendor/src/lib.rs",
     edition = "2018",
@@ -28,6 +27,6 @@ rust_library(
         "default",
         "std",
     ],
-    rustc_flags = ["@$(location :hex-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
 )

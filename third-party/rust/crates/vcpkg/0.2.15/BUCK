@@ -4,25 +4,24 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "vcpkg-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/vcpkg/vcpkg-0.2.15.crate"],
     sha256 = "accd4ea62f7bb7a82fe23066fb0957d48ef677f6eeb8215f372f52e48bb32426",
     type = "tar.gz",
     strip_prefix = "vcpkg-0.2.15",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "vcpkg-manifest",
-    vendor = ":vcpkg-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "vcpkg",
-    srcs = [":vcpkg-vendor"],
+    srcs = [":vendor"],
     crate = "vcpkg",
     crate_root = "vendor/src/lib.rs",
     edition = "2015",
-    rustc_flags = ["@$(location :vcpkg-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
 )

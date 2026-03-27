@@ -4,25 +4,24 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "multimap-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/multimap/multimap-0.10.1.crate"],
     sha256 = "1d87ecb2933e8aeadb3e3a02b828fed80a7528047e68b4f424523a0981a3a084",
     type = "tar.gz",
     strip_prefix = "multimap-0.10.1",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "multimap-manifest",
-    vendor = ":multimap-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "multimap",
-    srcs = [":multimap-vendor"],
+    srcs = [":vendor"],
     crate = "multimap",
     crate_root = "vendor/src/lib.rs",
     edition = "2015",
-    rustc_flags = ["@$(location :multimap-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
 )

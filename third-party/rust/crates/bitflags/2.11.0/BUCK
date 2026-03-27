@@ -4,22 +4,21 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "bitflags-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/bitflags/bitflags-2.11.0.crate"],
     sha256 = "843867be96c8daad0d758b57df9392b6d8d271134fce549de6ce169ff98a92af",
     type = "tar.gz",
     strip_prefix = "bitflags-2.11.0",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "bitflags-manifest",
-    vendor = ":bitflags-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "bitflags",
-    srcs = [":bitflags-vendor"],
+    srcs = [":vendor"],
     crate = "bitflags",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
@@ -28,7 +27,7 @@ rust_library(
         "serde_core",
         "std",
     ],
-    rustc_flags = ["@$(location :bitflags-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = ["//third-party/rust/crates/serde_core/1.0.228:serde_core"],
 )
