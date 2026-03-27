@@ -4,26 +4,25 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "dashmap-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/dashmap/dashmap-6.1.0.crate"],
     sha256 = "5041cc499144891f3790297212f32a74fb938e5136a14943f338ef9e0ae276cf",
     type = "tar.gz",
     strip_prefix = "dashmap-6.1.0",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "dashmap-manifest",
-    vendor = ":dashmap-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "dashmap",
-    srcs = [":dashmap-vendor"],
+    srcs = [":vendor"],
     crate = "dashmap",
     crate_root = "vendor/src/lib.rs",
     edition = "2018",
-    rustc_flags = ["@$(location :dashmap-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/cfg-if/1.0.4:cfg-if",

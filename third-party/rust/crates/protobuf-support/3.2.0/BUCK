@@ -4,26 +4,25 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "protobuf-support-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/protobuf-support/protobuf-support-3.2.0.crate"],
     sha256 = "a5d4d7b8601c814cfb36bcebb79f0e61e45e1e93640cf778837833bbed05c372",
     type = "tar.gz",
     strip_prefix = "protobuf-support-3.2.0",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "protobuf-support-manifest",
-    vendor = ":protobuf-support-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "protobuf-support",
-    srcs = [":protobuf-support-vendor"],
+    srcs = [":vendor"],
     crate = "protobuf_support",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
-    rustc_flags = ["@$(location :protobuf-support-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = ["//third-party/rust/crates/thiserror/1.0.69:thiserror"],
 )

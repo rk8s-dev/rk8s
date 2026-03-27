@@ -4,31 +4,30 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "buildscript_run", "rust_binary", "rust_library")
 
 http_archive(
-    name = "libcrux-intrinsics-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/libcrux-intrinsics/libcrux-intrinsics-0.0.4.crate"],
     sha256 = "bc9ee7ef66569dd7516454fe26de4e401c0c62073929803486b96744594b9632",
     type = "tar.gz",
     strip_prefix = "libcrux-intrinsics-0.0.4",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "libcrux-intrinsics-manifest",
-    vendor = ":libcrux-intrinsics-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "libcrux-intrinsics",
-    srcs = [":libcrux-intrinsics-vendor"],
+    srcs = [":vendor"],
     crate = "libcrux_intrinsics",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
-        "OUT_DIR": "$(location :libcrux-intrinsics-build-script-run[out_dir])",
+        "OUT_DIR": "$(location :build-script-run[out_dir])",
     },
     rustc_flags = [
-        "@$(location :libcrux-intrinsics-build-script-run[rustc_flags])",
-        "@$(location :libcrux-intrinsics-manifest[env_flags])",
+        "@$(location :build-script-run[rustc_flags])",
+        "@$(location :manifest[env_flags])",
     ],
     visibility = ["PUBLIC"],
     deps = [
@@ -38,21 +37,21 @@ rust_library(
 )
 
 rust_binary(
-    name = "libcrux-intrinsics-build-script-build",
-    srcs = [":libcrux-intrinsics-vendor"],
+    name = "build-script-build",
+    srcs = [":vendor"],
     crate = "build_script_build",
     crate_root = "vendor/build.rs",
     edition = "2021",
-    rustc_flags = ["@$(location :libcrux-intrinsics-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = [],
 )
 
 buildscript_run(
-    name = "libcrux-intrinsics-build-script-run",
+    name = "build-script-run",
     package_name = "libcrux-intrinsics",
-    buildscript_rule = ":libcrux-intrinsics-build-script-build",
-    env_srcs = [":libcrux-intrinsics-manifest[env_dict]"],
+    buildscript_rule = ":build-script-build",
+    env_srcs = [":manifest[env_dict]"],
     version = "0.0.4",
-    manifest_dir = ":libcrux-intrinsics-vendor",
+    manifest_dir = ":vendor",
     visibility = ["PUBLIC"],
 )

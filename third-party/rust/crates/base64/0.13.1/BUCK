@@ -4,22 +4,21 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "base64-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/base64/base64-0.13.1.crate"],
     sha256 = "9e1b586273c5702936fe7b7d6896644d8be71e6314cfe09d3167c95f712589e8",
     type = "tar.gz",
     strip_prefix = "base64-0.13.1",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "base64-manifest",
-    vendor = ":base64-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "base64",
-    srcs = [":base64-vendor"],
+    srcs = [":vendor"],
     crate = "base64",
     crate_root = "vendor/src/lib.rs",
     edition = "2018",
@@ -27,6 +26,6 @@ rust_library(
         "default",
         "std",
     ],
-    rustc_flags = ["@$(location :base64-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
 )

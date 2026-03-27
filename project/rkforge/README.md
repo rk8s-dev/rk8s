@@ -328,19 +328,18 @@ This behavior matches Docker Hub, where official images are stored under the `li
 Login to your distribution server using GitHub OAuth:
 
 ```sh
-# First time login (both URL and client ID required)
-rkforge login https://your-distribution-server.com your-github-oauth-client-id
-
-# Re-login when PAT expires (client ID will be reused from config)
-rkforge login https://your-distribution-server.com
-
-# If only one server is configured, you can omit the URL too
+# Use default auth server (https://libra.tools)
 rkforge login
+
+# Specify auth server explicitly
+rkforge login https://your-auth-server.com
+rkforge login 127.0.0.1:7001
 ```
 
-This will open a browser for GitHub OAuth authentication and store the credentials locally. The client ID is required only for the first login to a server - it will be saved and reused for subsequent logins.
+This opens a browser for OAuth authentication and stores credentials locally.  
+`SERVER` is the authentication service address (Web App), not the registry `--url`.
 
-**Note:** GitHub OAuth requires the distribution server to be configured with `GITHUB_CLIENT_ID` and `GITHUB_CLIENT_SECRET` environment variables. If these are not configured, you must use manual token authentication (debug mode only).
+**Note:** OAuth requires the auth service to be configured with `GITHUB_CLIENT_ID` and `GITHUB_CLIENT_SECRET`.
 
 #### Manual Token Authentication (Debug Mode)
 
@@ -381,17 +380,14 @@ Tokens expire after a configurable period (default: 1 hour). When a token expire
 First, login to your distribution server using GitHub OAuth:
 
 ```sh
-# First time login (both URL and client ID required)
-rkforge login https://your-distribution-server.com your-github-oauth-client-id
-
-# Re-login when PAT expires (client ID will be reused from config)
-rkforge login https://your-distribution-server.com
-
-# If only one server is configured, you can omit the URL too
+# Use default auth server
 rkforge login
+
+# Or specify auth server
+rkforge login https://your-auth-server.com
 ```
 
-This will open a browser for GitHub OAuth authentication and store the credentials locally. The client ID is required only for the first login to a server - it will be saved and reused for subsequent logins. If you have only one server configured, you can omit both URL and client ID for re-login.
+This opens a browser for OAuth authentication and stores credentials locally.
 
 ### List Repositories
 
@@ -501,13 +497,13 @@ Options:
 
 #### Login
 ```sh
-Usage: rkforge login [URL] [CLIENT_ID]
+Usage: rkforge login [OPTIONS] [SERVER]
 
 Arguments:
-  [URL]         URL of the distribution server (optional if only one server is configured)
-  [CLIENT_ID]   GitHub OAuth application client ID (required for first login to this server)
+  [SERVER]  Auth server URL (e.g. https://libra.tools or http://localhost:7001). When omitted, defaults to https://libra.tools
 
 Options:
+      --skip-tls-verify  Skip TLS certificate verification for HTTPS connections
   -h, --help  Print help
 ```
 

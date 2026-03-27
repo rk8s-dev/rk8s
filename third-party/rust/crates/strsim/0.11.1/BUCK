@@ -4,25 +4,24 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "strsim-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/strsim/strsim-0.11.1.crate"],
     sha256 = "7da8b5736845d9f2fcb837ea5d9e2628564b3b043a70948a3f0b778838c5fb4f",
     type = "tar.gz",
     strip_prefix = "strsim-0.11.1",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "strsim-manifest",
-    vendor = ":strsim-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "strsim",
-    srcs = [":strsim-vendor"],
+    srcs = [":vendor"],
     crate = "strsim",
     crate_root = "vendor/src/lib.rs",
     edition = "2015",
-    rustc_flags = ["@$(location :strsim-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
 )

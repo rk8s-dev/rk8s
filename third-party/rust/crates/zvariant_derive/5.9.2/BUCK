@@ -4,27 +4,26 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "zvariant_derive-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/zvariant_derive/zvariant_derive-5.9.2.crate"],
     sha256 = "484d5d975eb7afb52cc6b929c13d3719a20ad650fea4120e6310de3fc55e415c",
     type = "tar.gz",
     strip_prefix = "zvariant_derive-5.9.2",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "zvariant_derive-manifest",
-    vendor = ":zvariant_derive-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "zvariant_derive",
-    srcs = [":zvariant_derive-vendor"],
+    srcs = [":vendor"],
     crate = "zvariant_derive",
     crate_root = "vendor/src/lib.rs",
     edition = "2024",
     features = ["default"],
-    rustc_flags = ["@$(location :zvariant_derive-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     proc_macro = True,
     visibility = ["PUBLIC"],
     deps = [

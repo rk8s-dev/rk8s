@@ -4,22 +4,21 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "sqlx-postgres-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/sqlx-postgres/sqlx-postgres-0.8.6.crate"],
     sha256 = "db58fcd5a53cf07c184b154801ff91347e4c30d17a3562a635ff028ad5deda46",
     type = "tar.gz",
     strip_prefix = "sqlx-postgres-0.8.6",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "sqlx-postgres-manifest",
-    vendor = ":sqlx-postgres-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "sqlx-postgres",
-    srcs = [":sqlx-postgres-vendor"],
+    srcs = [":vendor"],
     crate = "sqlx_postgres",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
@@ -34,7 +33,7 @@ rust_library(
         "time",
         "uuid",
     ],
-    rustc_flags = ["@$(location :sqlx-postgres-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     named_deps = {
         "md5": "//third-party/rust/crates/md-5/0.10.6:md-5",
     },

@@ -4,25 +4,24 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "outref-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/outref/outref-0.5.2.crate"],
     sha256 = "1a80800c0488c3a21695ea981a54918fbb37abf04f4d0720c453632255e2ff0e",
     type = "tar.gz",
     strip_prefix = "outref-0.5.2",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "outref-manifest",
-    vendor = ":outref-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "outref",
-    srcs = [":outref-vendor"],
+    srcs = [":vendor"],
     crate = "outref",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
-    rustc_flags = ["@$(location :outref-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
 )

@@ -4,22 +4,21 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "sysinfo-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/sysinfo/sysinfo-0.30.13.crate"],
     sha256 = "0a5b4ddaee55fb2bea2bf0e5000747e5f5c0de765e5a5ff87f4cd106439f4bb3",
     type = "tar.gz",
     strip_prefix = "sysinfo-0.30.13",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "sysinfo-manifest",
-    vendor = ":sysinfo-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "sysinfo",
-    srcs = [":sysinfo-vendor"],
+    srcs = [":vendor"],
     crate = "sysinfo",
     crate_root = "vendor/src/lib.rs",
     edition = "2018",
@@ -28,7 +27,7 @@ rust_library(
         "multithread",
         "rayon",
     ],
-    rustc_flags = ["@$(location :sysinfo-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     os_deps = {
         "linux": [
             "//third-party/rust/crates/libc/0.2.182:libc",

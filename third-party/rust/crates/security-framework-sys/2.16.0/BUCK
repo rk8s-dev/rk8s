@@ -4,22 +4,21 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "security-framework-sys-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/security-framework-sys/security-framework-sys-2.16.0.crate"],
     sha256 = "321c8673b092a9a42605034a9879d73cb79101ed5fd117bc9a597b89b4e9e61a",
     type = "tar.gz",
     strip_prefix = "security-framework-sys-2.16.0",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "security-framework-sys-manifest",
-    vendor = ":security-framework-sys-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "security-framework-sys",
-    srcs = [":security-framework-sys-vendor"],
+    srcs = [":vendor"],
     crate = "security_framework_sys",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
@@ -30,7 +29,7 @@ rust_library(
         "OSX_10_9",
         "default",
     ],
-    rustc_flags = ["@$(location :security-framework-sys-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/core-foundation-sys/0.8.7:core-foundation-sys",

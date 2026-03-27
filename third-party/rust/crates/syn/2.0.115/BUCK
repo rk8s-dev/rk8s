@@ -4,22 +4,21 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "syn-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/syn/syn-2.0.115.crate"],
     sha256 = "6e614ed320ac28113fa64972c4262d5dbc89deacdfd00c34a3e4cea073243c12",
     type = "tar.gz",
     strip_prefix = "syn-2.0.115",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "syn-manifest",
-    vendor = ":syn-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "syn",
-    srcs = [":syn-vendor"],
+    srcs = [":vendor"],
     crate = "syn",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
@@ -36,7 +35,7 @@ rust_library(
         "visit",
         "visit-mut",
     ],
-    rustc_flags = ["@$(location :syn-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/proc-macro2/1.0.106:proc-macro2",

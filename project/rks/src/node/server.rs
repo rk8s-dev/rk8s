@@ -206,9 +206,7 @@ impl AuthConnection<Verified> {
             info!("fetched message: {msg}");
 
             if is_worker {
-                log_error!(
-                    dispatch_worker(msg, &self.conn, &self.shared.xline_store, &self.shared).await
-                );
+                log_error!(dispatch_worker(msg, &self.conn, &self.shared).await);
                 continue;
             }
 

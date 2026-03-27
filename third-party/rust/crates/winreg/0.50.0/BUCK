@@ -4,27 +4,26 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "winreg-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/winreg/winreg-0.50.0.crate"],
     sha256 = "524e57b2c537c0f9b1e69f1965311ec12182b4122e45035b1508cd24d2adadb1",
     type = "tar.gz",
     strip_prefix = "winreg-0.50.0",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "winreg-manifest",
-    vendor = ":winreg-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "winreg",
-    srcs = [":winreg-vendor"],
+    srcs = [":vendor"],
     crate = "winreg",
     crate_root = "vendor/src/lib.rs",
     edition = "2018",
     compatible_with = ["prelude//os/constraints:windows"],
-    rustc_flags = ["@$(location :winreg-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/cfg-if/1.0.4:cfg-if",

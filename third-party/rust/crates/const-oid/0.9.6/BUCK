@@ -4,25 +4,24 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "const-oid-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/const-oid/const-oid-0.9.6.crate"],
     sha256 = "c2459377285ad874054d797f3ccebf984978aa39129f6eafde5cdc8315b612f8",
     type = "tar.gz",
     strip_prefix = "const-oid-0.9.6",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "const-oid-manifest",
-    vendor = ":const-oid-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "const-oid",
-    srcs = [":const-oid-vendor"],
+    srcs = [":vendor"],
     crate = "const_oid",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
-    rustc_flags = ["@$(location :const-oid-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
 )

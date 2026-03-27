@@ -4,26 +4,25 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "typetag-impl-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/typetag-impl/typetag-impl-0.2.21.crate"],
     sha256 = "27a7a9b72ba121f6f1f6c3632b85604cac41aedb5ddc70accbebb6cac83de846",
     type = "tar.gz",
     strip_prefix = "typetag-impl-0.2.21",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "typetag-impl-manifest",
-    vendor = ":typetag-impl-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "typetag-impl",
-    srcs = [":typetag-impl-vendor"],
+    srcs = [":vendor"],
     crate = "typetag_impl",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
-    rustc_flags = ["@$(location :typetag-impl-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     proc_macro = True,
     visibility = ["PUBLIC"],
     deps = [

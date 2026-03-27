@@ -4,26 +4,25 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "pin-project-internal-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/pin-project-internal/pin-project-internal-1.1.10.crate"],
     sha256 = "6e918e4ff8c4549eb882f14b3a4bc8c8bc93de829416eacf579f1207a8fbf861",
     type = "tar.gz",
     strip_prefix = "pin-project-internal-1.1.10",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "pin-project-internal-manifest",
-    vendor = ":pin-project-internal-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "pin-project-internal",
-    srcs = [":pin-project-internal-vendor"],
+    srcs = [":vendor"],
     crate = "pin_project_internal",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
-    rustc_flags = ["@$(location :pin-project-internal-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     proc_macro = True,
     visibility = ["PUBLIC"],
     deps = [

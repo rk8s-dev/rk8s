@@ -4,22 +4,21 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "p384-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/p384/p384-0.13.1.crate"],
     sha256 = "fe42f1670a52a47d448f14b6a5c61dd78fce51856e68edaa38f7ae3a46b8d6b6",
     type = "tar.gz",
     strip_prefix = "p384-0.13.1",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "p384-manifest",
-    vendor = ":p384-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "p384",
-    srcs = [":p384-vendor"],
+    srcs = [":vendor"],
     crate = "p384",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
@@ -37,7 +36,7 @@ rust_library(
         "sha384",
         "std",
     ],
-    rustc_flags = ["@$(location :p384-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     named_deps = {
         "ecdsa_core": "//third-party/rust/crates/ecdsa/0.16.9:ecdsa",
     },

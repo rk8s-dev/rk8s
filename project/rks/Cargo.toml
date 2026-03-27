@@ -8,6 +8,7 @@ repository = "https://github.com/r2cn-dev/rk8s/tree/main/project/rks"
 
 [dependencies]
 common = { workspace = true }
+libcsi = { workspace = true }
 libcni = { workspace = true }
 libscheduler = { workspace = true }
 libnetwork = { workspace = true }
@@ -56,6 +57,7 @@ reqwest = { workspace = true }
 either = { workspace = true }
 tokio-stream = { workspace = true }
 uuid = { workspace = true }
+dashmap = { workspace = true }
 lru = { workspace = true }
 
 [dev-dependencies]

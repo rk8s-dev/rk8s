@@ -4,31 +4,30 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "buildscript_run", "rust_binary", "rust_library")
 
 http_archive(
-    name = "pulldown-cmark-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/pulldown-cmark/pulldown-cmark-0.13.0.crate"],
     sha256 = "1e8bbe1a966bd2f362681a44f6edce3c2310ac21e4d5067a6e7ec396297a6ea0",
     type = "tar.gz",
     strip_prefix = "pulldown-cmark-0.13.0",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "pulldown-cmark-manifest",
-    vendor = ":pulldown-cmark-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "pulldown-cmark",
-    srcs = [":pulldown-cmark-vendor"],
+    srcs = [":vendor"],
     crate = "pulldown_cmark",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
-        "OUT_DIR": "$(location :pulldown-cmark-build-script-run[out_dir])",
+        "OUT_DIR": "$(location :build-script-run[out_dir])",
     },
     rustc_flags = [
-        "@$(location :pulldown-cmark-build-script-run[rustc_flags])",
-        "@$(location :pulldown-cmark-manifest[env_flags])",
+        "@$(location :build-script-run[rustc_flags])",
+        "@$(location :manifest[env_flags])",
     ],
     visibility = ["PUBLIC"],
     deps = [
@@ -39,21 +38,21 @@ rust_library(
 )
 
 rust_binary(
-    name = "pulldown-cmark-build-script-build",
-    srcs = [":pulldown-cmark-vendor"],
+    name = "build-script-build",
+    srcs = [":vendor"],
     crate = "build_script_build",
     crate_root = "vendor/build.rs",
     edition = "2021",
-    rustc_flags = ["@$(location :pulldown-cmark-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = [],
 )
 
 buildscript_run(
-    name = "pulldown-cmark-build-script-run",
+    name = "build-script-run",
     package_name = "pulldown-cmark",
-    buildscript_rule = ":pulldown-cmark-build-script-build",
-    env_srcs = [":pulldown-cmark-manifest[env_dict]"],
+    buildscript_rule = ":build-script-build",
+    env_srcs = [":manifest[env_dict]"],
     version = "0.13.0",
-    manifest_dir = ":pulldown-cmark-vendor",
+    manifest_dir = ":vendor",
     visibility = ["PUBLIC"],
 )

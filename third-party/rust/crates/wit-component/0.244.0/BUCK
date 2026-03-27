@@ -4,26 +4,25 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "wit-component-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/wit-component/wit-component-0.244.0.crate"],
     sha256 = "9d66ea20e9553b30172b5e831994e35fbde2d165325bec84fc43dbf6f4eb9cb2",
     type = "tar.gz",
     strip_prefix = "wit-component-0.244.0",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "wit-component-manifest",
-    vendor = ":wit-component-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "wit-component",
-    srcs = [":wit-component-vendor"],
+    srcs = [":vendor"],
     crate = "wit_component",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
-    rustc_flags = ["@$(location :wit-component-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/anyhow/1.0.101:anyhow",

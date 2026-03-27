@@ -4,26 +4,25 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "image-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/image/image-0.25.9.crate"],
     sha256 = "e6506c6c10786659413faa717ceebcb8f70731c0a60cbae39795fdf114519c1a",
     type = "tar.gz",
     strip_prefix = "image-0.25.9",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "image-manifest",
-    vendor = ":image-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "image",
-    srcs = [":image-vendor"],
+    srcs = [":vendor"],
     crate = "image",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
-    rustc_flags = ["@$(location :image-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/bytemuck/1.25.0:bytemuck",

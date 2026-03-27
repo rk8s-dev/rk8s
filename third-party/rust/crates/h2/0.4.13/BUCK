@@ -4,26 +4,25 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "h2-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/h2/h2-0.4.13.crate"],
     sha256 = "2f44da3a8150a6703ed5d34e164b875fd14c2cdab9af1252a9a1020bde2bdc54",
     type = "tar.gz",
     strip_prefix = "h2-0.4.13",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "h2-manifest",
-    vendor = ":h2-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "h2",
-    srcs = [":h2-vendor"],
+    srcs = [":vendor"],
     crate = "h2",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
-    rustc_flags = ["@$(location :h2-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/atomic-waker/1.1.2:atomic-waker",

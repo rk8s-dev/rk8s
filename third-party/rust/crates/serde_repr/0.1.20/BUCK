@@ -4,26 +4,25 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "serde_repr-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/serde_repr/serde_repr-0.1.20.crate"],
     sha256 = "175ee3e80ae9982737ca543e96133087cbd9a485eecc3bc4de9c1a37b47ea59c",
     type = "tar.gz",
     strip_prefix = "serde_repr-0.1.20",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "serde_repr-manifest",
-    vendor = ":serde_repr-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "serde_repr",
-    srcs = [":serde_repr-vendor"],
+    srcs = [":vendor"],
     crate = "serde_repr",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
-    rustc_flags = ["@$(location :serde_repr-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     proc_macro = True,
     visibility = ["PUBLIC"],
     deps = [

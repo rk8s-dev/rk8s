@@ -4,27 +4,26 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "russh-cryptovec-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/russh-cryptovec/russh-cryptovec-0.52.0.crate"],
     sha256 = "4fb0ed583ff0f6b4aa44c7867dd7108df01b30571ee9423e250b4cc939f8c6cf",
     type = "tar.gz",
     strip_prefix = "russh-cryptovec-0.52.0",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "russh-cryptovec-manifest",
-    vendor = ":russh-cryptovec-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "russh-cryptovec",
-    srcs = [":russh-cryptovec-vendor"],
+    srcs = [":vendor"],
     crate = "russh_cryptovec",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
     features = ["ssh-encoding"],
-    rustc_flags = ["@$(location :russh-cryptovec-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     os_deps = {
         "linux": ["//third-party/rust/crates/nix/0.29.0:nix"],
         "macos": ["//third-party/rust/crates/nix/0.29.0:nix"],

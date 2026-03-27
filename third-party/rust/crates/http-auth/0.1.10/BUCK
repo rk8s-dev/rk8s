@@ -4,26 +4,25 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "http-auth-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/http-auth/http-auth-0.1.10.crate"],
     sha256 = "150fa4a9462ef926824cf4519c84ed652ca8f4fbae34cb8af045b5cbcaf98822",
     type = "tar.gz",
     strip_prefix = "http-auth-0.1.10",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "http-auth-manifest",
-    vendor = ":http-auth-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "http-auth",
-    srcs = [":http-auth-vendor"],
+    srcs = [":vendor"],
     crate = "http_auth",
     crate_root = "vendor/src/lib.rs",
     edition = "2018",
-    rustc_flags = ["@$(location :http-auth-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = ["//third-party/rust/crates/memchr/2.8.0:memchr"],
 )

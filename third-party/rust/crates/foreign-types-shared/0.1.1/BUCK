@@ -4,25 +4,24 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "foreign-types-shared-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/foreign-types-shared/foreign-types-shared-0.1.1.crate"],
     sha256 = "00b0228411908ca8685dba7fc2cdd70ec9990a6e753e89b6ac91a84c40fbaf4b",
     type = "tar.gz",
     strip_prefix = "foreign-types-shared-0.1.1",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "foreign-types-shared-manifest",
-    vendor = ":foreign-types-shared-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "foreign-types-shared",
-    srcs = [":foreign-types-shared-vendor"],
+    srcs = [":vendor"],
     crate = "foreign_types_shared",
     crate_root = "vendor/src/lib.rs",
     edition = "2015",
-    rustc_flags = ["@$(location :foreign-types-shared-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
 )

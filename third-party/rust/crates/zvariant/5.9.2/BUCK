@@ -4,22 +4,21 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "zvariant-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/zvariant/zvariant-5.9.2.crate"],
     sha256 = "68b64ef4f40c7951337ddc7023dd03528a57a3ce3408ee9da5e948bd29b232c4",
     type = "tar.gz",
     strip_prefix = "zvariant-5.9.2",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "zvariant-manifest",
-    vendor = ":zvariant-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "zvariant",
-    srcs = [":zvariant-vendor"],
+    srcs = [":vendor"],
     crate = "zvariant",
     crate_root = "vendor/src/lib.rs",
     edition = "2024",
@@ -27,7 +26,7 @@ rust_library(
         "default",
         "enumflags2",
     ],
-    rustc_flags = ["@$(location :zvariant-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/endi/1.1.1:endi",

@@ -4,22 +4,21 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "hyper-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/hyper/hyper-0.14.32.crate"],
     sha256 = "41dfc780fdec9373c01bae43289ea34c972e40ee3c9f6b3c8801a35f35586ce7",
     type = "tar.gz",
     strip_prefix = "hyper-0.14.32",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "hyper-manifest",
-    vendor = ":hyper-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "hyper",
-    srcs = [":hyper-vendor"],
+    srcs = [":vendor"],
     crate = "hyper",
     crate_root = "vendor/src/lib.rs",
     edition = "2018",
@@ -35,7 +34,7 @@ rust_library(
         "stream",
         "tcp",
     ],
-    rustc_flags = ["@$(location :hyper-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/bytes/1.11.1:bytes",

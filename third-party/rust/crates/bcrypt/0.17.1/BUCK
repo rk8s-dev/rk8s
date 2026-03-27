@@ -4,22 +4,21 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "bcrypt-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/bcrypt/bcrypt-0.17.1.crate"],
     sha256 = "abaf6da45c74385272ddf00e1ac074c7d8a6c1a1dda376902bd6a427522a8b2c",
     type = "tar.gz",
     strip_prefix = "bcrypt-0.17.1",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "bcrypt-manifest",
-    vendor = ":bcrypt-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "bcrypt",
-    srcs = [":bcrypt-vendor"],
+    srcs = [":vendor"],
     crate = "bcrypt",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
@@ -29,7 +28,7 @@ rust_library(
         "std",
         "zeroize",
     ],
-    rustc_flags = ["@$(location :bcrypt-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/base64/0.22.1:base64",

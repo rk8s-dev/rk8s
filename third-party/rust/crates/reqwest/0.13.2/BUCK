@@ -4,22 +4,21 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "reqwest-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/reqwest/reqwest-0.13.2.crate"],
     sha256 = "ab3f43e3283ab1488b624b44b0e988d0acea0b3214e694730a055cb6b2efa801",
     type = "tar.gz",
     strip_prefix = "reqwest-0.13.2",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "reqwest-manifest",
-    vendor = ":reqwest-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "reqwest",
-    srcs = [":reqwest-vendor"],
+    srcs = [":vendor"],
     crate = "reqwest",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
@@ -35,7 +34,7 @@ rust_library(
         "stream",
         "system-proxy",
     ],
-    rustc_flags = ["@$(location :reqwest-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     os_deps = {
         "linux": [
             "//third-party/rust/crates/encoding_rs/0.8.35:encoding_rs",

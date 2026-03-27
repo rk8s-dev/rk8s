@@ -4,25 +4,24 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "colorchoice-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/colorchoice/colorchoice-1.0.4.crate"],
     sha256 = "b05b61dc5112cbb17e4b6cd61790d9845d13888356391624cbe7e41efeac1e75",
     type = "tar.gz",
     strip_prefix = "colorchoice-1.0.4",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "colorchoice-manifest",
-    vendor = ":colorchoice-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "colorchoice",
-    srcs = [":colorchoice-vendor"],
+    srcs = [":vendor"],
     crate = "colorchoice",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
-    rustc_flags = ["@$(location :colorchoice-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
 )

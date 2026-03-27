@@ -4,42 +4,41 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "buildscript_run", "rust_binary", "rust_library")
 
 http_archive(
-    name = "valuable-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/valuable/valuable-0.1.1.crate"],
     sha256 = "ba73ea9cf16a25df0c8caa16c51acb937d5712a8429db78a3ee29d5dcacd3a65",
     type = "tar.gz",
     strip_prefix = "valuable-0.1.1",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "valuable-manifest",
-    vendor = ":valuable-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "valuable",
-    srcs = [":valuable-vendor"],
+    srcs = [":vendor"],
     crate = "valuable",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
-        "OUT_DIR": "$(location :valuable-build-script-run[out_dir])",
+        "OUT_DIR": "$(location :build-script-run[out_dir])",
     },
     features = [
         "alloc",
         "std",
     ],
     rustc_flags = [
-        "@$(location :valuable-build-script-run[rustc_flags])",
-        "@$(location :valuable-manifest[env_flags])",
+        "@$(location :build-script-run[rustc_flags])",
+        "@$(location :manifest[env_flags])",
     ],
     visibility = ["PUBLIC"],
 )
 
 rust_binary(
-    name = "valuable-build-script-build",
-    srcs = [":valuable-vendor"],
+    name = "build-script-build",
+    srcs = [":vendor"],
     crate = "build_script_build",
     crate_root = "vendor/build.rs",
     edition = "2021",
@@ -47,20 +46,20 @@ rust_binary(
         "alloc",
         "std",
     ],
-    rustc_flags = ["@$(location :valuable-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = [],
 )
 
 buildscript_run(
-    name = "valuable-build-script-run",
+    name = "build-script-run",
     package_name = "valuable",
-    buildscript_rule = ":valuable-build-script-build",
-    env_srcs = [":valuable-manifest[env_dict]"],
+    buildscript_rule = ":build-script-build",
+    env_srcs = [":manifest[env_dict]"],
     features = [
         "alloc",
         "std",
     ],
     version = "0.1.1",
-    manifest_dir = ":valuable-vendor",
+    manifest_dir = ":vendor",
     visibility = ["PUBLIC"],
 )

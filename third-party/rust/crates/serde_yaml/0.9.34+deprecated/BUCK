@@ -4,26 +4,25 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "serde_yaml-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/serde_yaml/serde_yaml-0.9.34+deprecated.crate"],
     sha256 = "6a8b1a1a2ebf674015cc02edccce75287f1a0130d394307b36743c2f5d504b47",
     type = "tar.gz",
     strip_prefix = "serde_yaml-0.9.34+deprecated",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "serde_yaml-manifest",
-    vendor = ":serde_yaml-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "serde_yaml",
-    srcs = [":serde_yaml-vendor"],
+    srcs = [":vendor"],
     crate = "serde_yaml",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
-    rustc_flags = ["@$(location :serde_yaml-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/indexmap/2.13.0:indexmap",

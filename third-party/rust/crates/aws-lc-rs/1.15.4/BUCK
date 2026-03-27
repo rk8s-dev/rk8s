@@ -4,27 +4,26 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "buildscript_run", "rust_binary", "rust_library")
 
 http_archive(
-    name = "aws-lc-rs-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/aws-lc-rs/aws-lc-rs-1.15.4.crate"],
     sha256 = "7b7b6141e96a8c160799cc2d5adecd5cbbe5054cb8c7c4af53da0f83bb7ad256",
     type = "tar.gz",
     strip_prefix = "aws-lc-rs-1.15.4",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "aws-lc-rs-manifest",
-    vendor = ":aws-lc-rs-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "aws-lc-rs",
-    srcs = [":aws-lc-rs-vendor"],
+    srcs = [":vendor"],
     crate = "aws_lc_rs",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
-        "OUT_DIR": "$(location :aws-lc-rs-build-script-run[out_dir])",
+        "OUT_DIR": "$(location :build-script-run[out_dir])",
     },
     features = [
         "alloc",
@@ -35,8 +34,8 @@ rust_library(
         "ring-sig-verify",
     ],
     rustc_flags = [
-        "@$(location :aws-lc-rs-build-script-run[rustc_flags])",
-        "@$(location :aws-lc-rs-manifest[env_flags])",
+        "@$(location :build-script-run[rustc_flags])",
+        "@$(location :manifest[env_flags])",
     ],
     visibility = ["PUBLIC"],
     deps = [
@@ -47,8 +46,8 @@ rust_library(
 )
 
 rust_binary(
-    name = "aws-lc-rs-build-script-build",
-    srcs = [":aws-lc-rs-vendor"],
+    name = "build-script-build",
+    srcs = [":vendor"],
     crate = "build_script_build",
     crate_root = "vendor/build.rs",
     edition = "2021",
@@ -60,17 +59,17 @@ rust_binary(
         "ring-io",
         "ring-sig-verify",
     ],
-    rustc_flags = ["@$(location :aws-lc-rs-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = [],
 )
 
 buildscript_run(
-    name = "aws-lc-rs-build-script-run",
+    name = "build-script-run",
     package_name = "aws-lc-rs",
-    buildscript_rule = ":aws-lc-rs-build-script-build",
+    buildscript_rule = ":build-script-build",
     env_srcs = [
-        "//third-party/rust/crates/aws-lc-sys/0.37.1:aws-lc-sys-build-script-main-run[metadata]",
-        ":aws-lc-rs-manifest[env_dict]",
+        "//third-party/rust/crates/aws-lc-sys/0.37.1:build-script-main-run[metadata]",
+        ":manifest[env_dict]",
     ],
     features = [
         "alloc",
@@ -81,6 +80,6 @@ buildscript_run(
         "ring-sig-verify",
     ],
     version = "1.15.4",
-    manifest_dir = ":aws-lc-rs-vendor",
+    manifest_dir = ":vendor",
     visibility = ["PUBLIC"],
 )

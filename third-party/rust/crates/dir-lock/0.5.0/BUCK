@@ -4,26 +4,25 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "dir-lock-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/dir-lock/dir-lock-0.5.0.crate"],
     sha256 = "df6e616b67e0e0057a0952ef9991d66300044b897b879ef6fa89851495065b35",
     type = "tar.gz",
     strip_prefix = "dir-lock-0.5.0",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "dir-lock-manifest",
-    vendor = ":dir-lock-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "dir-lock",
-    srcs = [":dir-lock-vendor"],
+    srcs = [":vendor"],
     crate = "dir_lock",
     crate_root = "vendor/src/lib.rs",
     edition = "2024",
-    rustc_flags = ["@$(location :dir-lock-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/sysinfo/0.35.2:sysinfo",

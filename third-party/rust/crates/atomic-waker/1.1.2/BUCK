@@ -4,25 +4,24 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "atomic-waker-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/atomic-waker/atomic-waker-1.1.2.crate"],
     sha256 = "1505bd5d3d116872e7271a6d4e16d81d0c8570876c8de68093a09ac269d8aac0",
     type = "tar.gz",
     strip_prefix = "atomic-waker-1.1.2",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "atomic-waker-manifest",
-    vendor = ":atomic-waker-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "atomic-waker",
-    srcs = [":atomic-waker-vendor"],
+    srcs = [":vendor"],
     crate = "atomic_waker",
     crate_root = "vendor/src/lib.rs",
     edition = "2018",
-    rustc_flags = ["@$(location :atomic-waker-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
 )

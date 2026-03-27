@@ -4,26 +4,25 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "base16ct-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/base16ct/base16ct-0.1.1.crate"],
     sha256 = "349a06037c7bf932dd7e7d1f653678b2038b9ad46a74102f1fc7bd7872678cce",
     type = "tar.gz",
     strip_prefix = "base16ct-0.1.1",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "base16ct-manifest",
-    vendor = ":base16ct-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "base16ct",
-    srcs = [":base16ct-vendor"],
+    srcs = [":vendor"],
     crate = "base16ct",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
     features = ["alloc"],
-    rustc_flags = ["@$(location :base16ct-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
 )

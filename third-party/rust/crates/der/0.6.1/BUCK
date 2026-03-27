@@ -4,22 +4,21 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "der-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/der/der-0.6.1.crate"],
     sha256 = "f1a467a65c5e759bce6e65eaf91cc29f466cdc57cb65777bd646872a8a1fd4de",
     type = "tar.gz",
     strip_prefix = "der-0.6.1",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "der-manifest",
-    vendor = ":der-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "der",
-    srcs = [":der-vendor"],
+    srcs = [":vendor"],
     crate = "der",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
@@ -29,7 +28,7 @@ rust_library(
         "oid",
         "zeroize",
     ],
-    rustc_flags = ["@$(location :der-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/const-oid/0.9.6:const-oid",

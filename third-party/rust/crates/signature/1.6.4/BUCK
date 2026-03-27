@@ -4,22 +4,21 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "signature-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/signature/signature-1.6.4.crate"],
     sha256 = "74233d3b3b2f6d4b006dc19dee745e73e2a6bfb6f93607cd3b02bd5b00797d7c",
     type = "tar.gz",
     strip_prefix = "signature-1.6.4",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "signature-manifest",
-    vendor = ":signature-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "signature",
-    srcs = [":signature-vendor"],
+    srcs = [":vendor"],
     crate = "signature",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
@@ -31,7 +30,7 @@ rust_library(
         "rand_core",
         "std",
     ],
-    rustc_flags = ["@$(location :signature-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/digest/0.10.7:digest",

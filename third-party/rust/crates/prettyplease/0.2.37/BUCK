@@ -4,31 +4,30 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "buildscript_run", "rust_binary", "rust_library")
 
 http_archive(
-    name = "prettyplease-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/prettyplease/prettyplease-0.2.37.crate"],
     sha256 = "479ca8adacdd7ce8f1fb39ce9ecccbfe93a3f1344b3d0d97f20bc0196208f62b",
     type = "tar.gz",
     strip_prefix = "prettyplease-0.2.37",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "prettyplease-manifest",
-    vendor = ":prettyplease-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "prettyplease",
-    srcs = [":prettyplease-vendor"],
+    srcs = [":vendor"],
     crate = "prettyplease",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
-        "OUT_DIR": "$(location :prettyplease-build-script-run[out_dir])",
+        "OUT_DIR": "$(location :build-script-run[out_dir])",
     },
     rustc_flags = [
-        "@$(location :prettyplease-build-script-run[rustc_flags])",
-        "@$(location :prettyplease-manifest[env_flags])",
+        "@$(location :build-script-run[rustc_flags])",
+        "@$(location :manifest[env_flags])",
     ],
     visibility = ["PUBLIC"],
     deps = [
@@ -38,21 +37,21 @@ rust_library(
 )
 
 rust_binary(
-    name = "prettyplease-build-script-build",
-    srcs = [":prettyplease-vendor"],
+    name = "build-script-build",
+    srcs = [":vendor"],
     crate = "build_script_build",
     crate_root = "vendor/build.rs",
     edition = "2021",
-    rustc_flags = ["@$(location :prettyplease-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = [],
 )
 
 buildscript_run(
-    name = "prettyplease-build-script-run",
+    name = "build-script-run",
     package_name = "prettyplease",
-    buildscript_rule = ":prettyplease-build-script-build",
-    env_srcs = [":prettyplease-manifest[env_dict]"],
+    buildscript_rule = ":build-script-build",
+    env_srcs = [":manifest[env_dict]"],
     version = "0.2.37",
-    manifest_dir = ":prettyplease-vendor",
+    manifest_dir = ":vendor",
     visibility = ["PUBLIC"],
 )

@@ -4,26 +4,26 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 filegroup(
-    name = "common-vendor",
+    name = "vendor",
     srcs = glob(["**/**"]),
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "common-manifest",
-    vendor = ":common-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "common",
-    srcs = [":common-vendor"],
+    srcs = [":vendor"],
     crate = "common",
     crate_root = "vendor/src/lib.rs",
     edition = "2024",
-    rustc_flags = ["@$(location :common-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
         "//project/libcni:libcni",
+        "//project/libcsi:libcsi",
         "//project/libvault:libvault",
         "//third-party/rust/crates/anyhow/1.0.101:anyhow",
         "//third-party/rust/crates/async-trait/0.1.89:async-trait",

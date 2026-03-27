@@ -4,26 +4,25 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "dirs-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/dirs/dirs-6.0.0.crate"],
     sha256 = "c3e8aa94d75141228480295a7d0e7feb620b1a5ad9f12bc40be62411e38cce4e",
     type = "tar.gz",
     strip_prefix = "dirs-6.0.0",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "dirs-manifest",
-    vendor = ":dirs-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "dirs",
-    srcs = [":dirs-vendor"],
+    srcs = [":vendor"],
     crate = "dirs",
     crate_root = "vendor/src/lib.rs",
     edition = "2015",
-    rustc_flags = ["@$(location :dirs-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = ["//third-party/rust/crates/dirs-sys/0.5.0:dirs-sys"],
 )

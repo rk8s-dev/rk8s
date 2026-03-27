@@ -4,22 +4,21 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "md5-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/md5/md5-0.7.0.crate"],
     sha256 = "490cc448043f947bae3cbee9c203358d62dbee0db12107a74be5c30ccfd09771",
     type = "tar.gz",
     strip_prefix = "md5-0.7.0",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "md5-manifest",
-    vendor = ":md5-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "md5",
-    srcs = [":md5-vendor"],
+    srcs = [":vendor"],
     crate = "md5",
     crate_root = "vendor/src/lib.rs",
     edition = "2015",
@@ -27,6 +26,6 @@ rust_library(
         "default",
         "std",
     ],
-    rustc_flags = ["@$(location :md5-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
 )

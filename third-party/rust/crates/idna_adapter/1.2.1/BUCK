@@ -4,27 +4,26 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "idna_adapter-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/idna_adapter/idna_adapter-1.2.1.crate"],
     sha256 = "3acae9609540aa318d1bc588455225fb2085b9ed0c4f6bd0d9d5bcd86f1a0344",
     type = "tar.gz",
     strip_prefix = "idna_adapter-1.2.1",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "idna_adapter-manifest",
-    vendor = ":idna_adapter-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "idna_adapter",
-    srcs = [":idna_adapter-vendor"],
+    srcs = [":vendor"],
     crate = "idna_adapter",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
     features = ["compiled_data"],
-    rustc_flags = ["@$(location :idna_adapter-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/icu_normalizer/2.1.1:icu_normalizer",

@@ -4,22 +4,21 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "gimli-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/gimli/gimli-0.32.3.crate"],
     sha256 = "e629b9b98ef3dd8afe6ca2bd0f89306cec16d43d907889945bc5d6687f2f13c7",
     type = "tar.gz",
     strip_prefix = "gimli-0.32.3",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "gimli-manifest",
-    vendor = ":gimli-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "gimli",
-    srcs = [":gimli-vendor"],
+    srcs = [":vendor"],
     crate = "gimli",
     crate_root = "vendor/src/lib.rs",
     edition = "2018",
@@ -27,6 +26,6 @@ rust_library(
         "read",
         "read-core",
     ],
-    rustc_flags = ["@$(location :gimli-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
 )

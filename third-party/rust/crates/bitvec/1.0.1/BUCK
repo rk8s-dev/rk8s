@@ -4,27 +4,26 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "bitvec-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/bitvec/bitvec-1.0.1.crate"],
     sha256 = "1bc2832c24239b0141d5674bb9174f9d68a8b5b3f2753311927c172ca46f7e9c",
     type = "tar.gz",
     strip_prefix = "bitvec-1.0.1",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "bitvec-manifest",
-    vendor = ":bitvec-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "bitvec",
-    srcs = [":bitvec-vendor"],
+    srcs = [":vendor"],
     crate = "bitvec",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
     features = ["alloc"],
-    rustc_flags = ["@$(location :bitvec-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/funty/2.0.0:funty",

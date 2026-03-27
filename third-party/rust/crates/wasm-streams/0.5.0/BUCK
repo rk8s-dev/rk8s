@@ -4,26 +4,25 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "wasm-streams-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/wasm-streams/wasm-streams-0.5.0.crate"],
     sha256 = "9d1ec4f6517c9e11ae630e200b2b65d193279042e28edd4a2cda233e46670bbb",
     type = "tar.gz",
     strip_prefix = "wasm-streams-0.5.0",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "wasm-streams-manifest",
-    vendor = ":wasm-streams-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "wasm-streams",
-    srcs = [":wasm-streams-vendor"],
+    srcs = [":vendor"],
     crate = "wasm_streams",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
-    rustc_flags = ["@$(location :wasm-streams-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/futures-util/0.3.31:futures-util",

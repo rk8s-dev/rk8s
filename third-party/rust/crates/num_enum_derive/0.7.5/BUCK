@@ -4,22 +4,21 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "num_enum_derive-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/num_enum_derive/num_enum_derive-0.7.5.crate"],
     sha256 = "ff32365de1b6743cb203b710788263c44a03de03802daf96092f2da4fe6ba4d7",
     type = "tar.gz",
     strip_prefix = "num_enum_derive-0.7.5",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "num_enum_derive-manifest",
-    vendor = ":num_enum_derive-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "num_enum_derive",
-    srcs = [":num_enum_derive-vendor"],
+    srcs = [":vendor"],
     crate = "num_enum_derive",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
@@ -27,7 +26,7 @@ rust_library(
         "proc-macro-crate",
         "std",
     ],
-    rustc_flags = ["@$(location :num_enum_derive-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     proc_macro = True,
     visibility = ["PUBLIC"],
     deps = [

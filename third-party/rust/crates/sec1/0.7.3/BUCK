@@ -4,22 +4,21 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "sec1-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/sec1/sec1-0.7.3.crate"],
     sha256 = "d3e97a565f76233a6003f9f5c54be1d9c5bdfa3eccfb189469f11ec4901c47dc",
     type = "tar.gz",
     strip_prefix = "sec1-0.7.3",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "sec1-manifest",
-    vendor = ":sec1-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "sec1",
-    srcs = [":sec1-vendor"],
+    srcs = [":vendor"],
     crate = "sec1",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
@@ -35,7 +34,7 @@ rust_library(
         "subtle",
         "zeroize",
     ],
-    rustc_flags = ["@$(location :sec1-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/base16ct/0.2.0:base16ct",

@@ -4,26 +4,25 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "minimal-lexical-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/minimal-lexical/minimal-lexical-0.2.1.crate"],
     sha256 = "68354c5c6bd36d73ff3feceb05efa59b6acb7626617f4962be322a825e61f79a",
     type = "tar.gz",
     strip_prefix = "minimal-lexical-0.2.1",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "minimal-lexical-manifest",
-    vendor = ":minimal-lexical-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "minimal-lexical",
-    srcs = [":minimal-lexical-vendor"],
+    srcs = [":vendor"],
     crate = "minimal_lexical",
     crate_root = "vendor/src/lib.rs",
     edition = "2018",
     features = ["std"],
-    rustc_flags = ["@$(location :minimal-lexical-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
 )

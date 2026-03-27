@@ -4,26 +4,25 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "tracing-appender-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/tracing-appender/tracing-appender-0.2.4.crate"],
     sha256 = "786d480bce6247ab75f005b14ae1624ad978d3029d9113f0a22fa1ac773faeaf",
     type = "tar.gz",
     strip_prefix = "tracing-appender-0.2.4",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "tracing-appender-manifest",
-    vendor = ":tracing-appender-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "tracing-appender",
-    srcs = [":tracing-appender-vendor"],
+    srcs = [":vendor"],
     crate = "tracing_appender",
     crate_root = "vendor/src/lib.rs",
     edition = "2018",
-    rustc_flags = ["@$(location :tracing-appender-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/crossbeam-channel/0.5.15:crossbeam-channel",

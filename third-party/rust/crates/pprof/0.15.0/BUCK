@@ -4,27 +4,26 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "buildscript_run", "rust_binary", "rust_library")
 
 http_archive(
-    name = "pprof-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/pprof/pprof-0.15.0.crate"],
     sha256 = "38a01da47675efa7673b032bf8efd8214f1917d89685e07e395ab125ea42b187",
     type = "tar.gz",
     strip_prefix = "pprof-0.15.0",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "pprof-manifest",
-    vendor = ":pprof-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "pprof",
-    srcs = [":pprof-vendor"],
+    srcs = [":vendor"],
     crate = "pprof",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
-        "OUT_DIR": "$(location :pprof-build-script-run[out_dir])",
+        "OUT_DIR": "$(location :build-script-run[out_dir])",
     },
     features = [
         "cpp",
@@ -34,8 +33,8 @@ rust_library(
         "inferno",
     ],
     rustc_flags = [
-        "@$(location :pprof-build-script-run[rustc_flags])",
-        "@$(location :pprof-manifest[env_flags])",
+        "@$(location :build-script-run[rustc_flags])",
+        "@$(location :manifest[env_flags])",
     ],
     visibility = ["PUBLIC"],
     deps = [
@@ -58,8 +57,8 @@ rust_library(
 )
 
 rust_binary(
-    name = "pprof-build-script-build",
-    srcs = [":pprof-vendor"],
+    name = "build-script-build",
+    srcs = [":vendor"],
     crate = "build_script_build",
     crate_root = "vendor/build.rs",
     edition = "2021",
@@ -70,15 +69,15 @@ rust_binary(
         "flamegraph",
         "inferno",
     ],
-    rustc_flags = ["@$(location :pprof-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = [],
 )
 
 buildscript_run(
-    name = "pprof-build-script-run",
+    name = "build-script-run",
     package_name = "pprof",
-    buildscript_rule = ":pprof-build-script-build",
-    env_srcs = [":pprof-manifest[env_dict]"],
+    buildscript_rule = ":build-script-build",
+    env_srcs = [":manifest[env_dict]"],
     features = [
         "cpp",
         "criterion",
@@ -87,6 +86,6 @@ buildscript_run(
         "inferno",
     ],
     version = "0.15.0",
-    manifest_dir = ":pprof-vendor",
+    manifest_dir = ":vendor",
     visibility = ["PUBLIC"],
 )

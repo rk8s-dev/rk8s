@@ -4,27 +4,26 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "itertools-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/itertools/itertools-0.12.1.crate"],
     sha256 = "ba291022dbbd398a455acf126c1e341954079855bc60dfdda641363bd6922569",
     type = "tar.gz",
     strip_prefix = "itertools-0.12.1",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "itertools-manifest",
-    vendor = ":itertools-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "itertools",
-    srcs = [":itertools-vendor"],
+    srcs = [":vendor"],
     crate = "itertools",
     crate_root = "vendor/src/lib.rs",
     edition = "2018",
     features = ["use_alloc"],
-    rustc_flags = ["@$(location :itertools-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = ["//third-party/rust/crates/either/1.15.0:either"],
 )

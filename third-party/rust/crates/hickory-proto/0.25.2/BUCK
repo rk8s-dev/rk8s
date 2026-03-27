@@ -4,22 +4,21 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "hickory-proto-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/hickory-proto/hickory-proto-0.25.2.crate"],
     sha256 = "f8a6fe56c0038198998a6f217ca4e7ef3a5e51f46163bd6dd60b5c71ca6c6502",
     type = "tar.gz",
     strip_prefix = "hickory-proto-0.25.2",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "hickory-proto-manifest",
-    vendor = ":hickory-proto-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "hickory-proto",
-    srcs = [":hickory-proto-vendor"],
+    srcs = [":vendor"],
     crate = "hickory_proto",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
@@ -31,7 +30,7 @@ rust_library(
         "text-parsing",
         "tokio",
     ],
-    rustc_flags = ["@$(location :hickory-proto-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/async-trait/0.1.89:async-trait",

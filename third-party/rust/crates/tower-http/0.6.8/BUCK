@@ -4,22 +4,21 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "tower-http-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/tower-http/tower-http-0.6.8.crate"],
     sha256 = "d4e6559d53cc268e5031cd8429d05415bc4cb4aefc4aa5d6cc35fbf5b924a1f8",
     type = "tar.gz",
     strip_prefix = "tower-http-0.6.8",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "tower-http-manifest",
-    vendor = ":tower-http-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "tower-http",
-    srcs = [":tower-http-vendor"],
+    srcs = [":vendor"],
     crate = "tower_http",
     crate_root = "vendor/src/lib.rs",
     edition = "2018",
@@ -32,7 +31,7 @@ rust_library(
         "trace",
         "tracing",
     ],
-    rustc_flags = ["@$(location :tower-http-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/bitflags/2.11.0:bitflags",

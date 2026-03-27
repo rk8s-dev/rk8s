@@ -4,22 +4,21 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "stretto-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/stretto/stretto-0.8.4.crate"],
     sha256 = "70a313e115c2cd9a88d99d60386bc88641c853d468b2c3bc454c294f385fc084",
     type = "tar.gz",
     strip_prefix = "stretto-0.8.4",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "stretto-manifest",
-    vendor = ":stretto-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "stretto",
-    srcs = [":stretto-vendor"],
+    srcs = [":vendor"],
     crate = "stretto",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
@@ -28,7 +27,7 @@ rust_library(
         "default",
         "sync",
     ],
-    rustc_flags = ["@$(location :stretto-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/atomic/0.6.1:atomic",

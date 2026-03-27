@@ -4,27 +4,26 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "petgraph-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/petgraph/petgraph-0.8.3.crate"],
     sha256 = "8701b58ea97060d5e5b155d383a69952a60943f0e6dfe30b04c287beb0b27455",
     type = "tar.gz",
     strip_prefix = "petgraph-0.8.3",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "petgraph-manifest",
-    vendor = ":petgraph-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "petgraph",
-    srcs = [":petgraph-vendor"],
+    srcs = [":vendor"],
     crate = "petgraph",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
     features = ["std"],
-    rustc_flags = ["@$(location :petgraph-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/fixedbitset/0.5.7:fixedbitset",

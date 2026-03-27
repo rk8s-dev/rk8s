@@ -4,22 +4,21 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "aws-smithy-runtime-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/aws-smithy-runtime/aws-smithy-runtime-1.10.1.crate"],
     sha256 = "8fd3dfc18c1ce097cf81fced7192731e63809829c6cbf933c1ec47452d08e1aa",
     type = "tar.gz",
     strip_prefix = "aws-smithy-runtime-1.10.1",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "aws-smithy-runtime-manifest",
-    vendor = ":aws-smithy-runtime-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "aws-smithy-runtime",
-    srcs = [":aws-smithy-runtime-vendor"],
+    srcs = [":vendor"],
     crate = "aws_smithy_runtime",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
@@ -30,7 +29,7 @@ rust_library(
         "rt-tokio",
         "tls-rustls",
     ],
-    rustc_flags = ["@$(location :aws-smithy-runtime-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     named_deps = {
         "http_02x": "//third-party/rust/crates/http/0.2.12:http",
         "http_1x": "//third-party/rust/crates/http/1.4.0:http",
