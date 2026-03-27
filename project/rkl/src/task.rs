@@ -79,13 +79,16 @@ impl RkforgeImagePuller {
         if creds.is_empty() {
             return None;
         }
+        let insecure_registries = rkforge::config::auth::AuthConfig::load()
+            .map(|cfg| cfg.insecure_registries)
+            .unwrap_or_default();
         let entries = creds
             .into_iter()
             .map(|c| rkforge::config::auth::AuthEntry::new(c.pat, c.registry))
             .collect();
         Some(rkforge::config::auth::AuthConfig {
             entries,
-            insecure_registries: vec![],
+            insecure_registries,
         })
     }
 }

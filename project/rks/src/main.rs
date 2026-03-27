@@ -144,11 +144,8 @@ async fn prepare_xline_options(cfg: &Config) -> anyhow::Result<(XlineOptions, Op
         return Ok((option, vault));
     }
 
-    let folder = &cfg.tls_config.vault_folder;
-    let root_cert = tokio::fs::read_to_string(folder.join("root.pem")).await?;
-    let vault = Arc::new(Vault::migrate().await?);
-    let resp = vault.issue_rks_cert().await?;
-    option = option.with_tls(&root_cert, &resp.certificate, &resp.private_key)?;
+    let vault = Arc::new(Vault::open().await?);
+    option = Vault::xline_options_for_rks().await?;
 
     Ok((option, Some(vault)))
 }
@@ -426,7 +423,22 @@ async fn register_controllers(
 /// Best-effort notification to the running rks daemon to refresh and push
 /// registry credentials to all connected workers.
 async fn notify_credential_refresh() {
-    match reqwest::Client::new()
+    let client = match reqwest::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(1))
+        .timeout(std::time::Duration::from_secs(2))
+        .build()
+    {
+        Ok(client) => client,
+        Err(_) => {
+            println!(
+                "Note: rks daemon not running or unreachable. \
+                 Workers will receive credentials at next registration."
+            );
+            return;
+        }
+    };
+
+    match client
         .post("http://127.0.0.1:6789/registry/refresh")
         .send()
         .await

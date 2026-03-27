@@ -187,7 +187,11 @@ fn parse_server_url(s: &str) -> anyhow::Result<String> {
     if s.contains("://") {
         return Ok(s.trim_end_matches('/').to_string());
     }
-    let host_part = s.split(':').next().unwrap_or(s);
+    let host_part = if let Some(rest) = s.strip_prefix('[') {
+        rest.split(']').next().unwrap_or(s)
+    } else {
+        s.split(':').next().unwrap_or(s)
+    };
     let scheme = if is_private_ip(host_part) {
         "http"
     } else {
@@ -263,4 +267,22 @@ pub async fn do_login(
 
     println!("Logged in as {} successfully!", res.username);
     Ok((registry, res.token, res.username))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_server_url;
+
+    #[test]
+    fn parse_server_url_uses_http_for_private_ipv6() {
+        assert_eq!(parse_server_url("[::1]:7001").unwrap(), "http://[::1]:7001");
+    }
+
+    #[test]
+    fn parse_server_url_preserves_explicit_scheme() {
+        assert_eq!(
+            parse_server_url("https://example.com:7001").unwrap(),
+            "https://example.com:7001"
+        );
+    }
 }

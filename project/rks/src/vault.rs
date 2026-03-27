@@ -16,7 +16,7 @@ use libvault::storage::xline::{XlineBackend, XlineOptions};
 use log::{debug, info, warn};
 use serde_json::{Value, json};
 use std::fmt::{Display, Formatter};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 #[derive(Clone, Copy)]
@@ -40,6 +40,9 @@ pub struct Vault {
     vault: RustyVault,
     root_token: String,
 }
+
+const RKS_CLIENT_CERT_FILE: &str = "rks-client.pem";
+const RKS_CLIENT_KEY_FILE: &str = "rks-client.key";
 
 impl Vault {
     pub fn new(backend: Arc<dyn Backend>) -> anyhow::Result<Self> {
@@ -348,8 +351,13 @@ impl Vault {
                 let pat = data
                     .get("pat")
                     .and_then(|v| v.as_str())
-                    .unwrap_or_default()
-                    .to_string();
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .map(String::from);
+                let Some(pat) = pat else {
+                    warn!("registry credential at '{path}' is missing a non-empty pat");
+                    return Ok(None);
+                };
                 let registry = data
                     .get("registry")
                     .and_then(|v| v.as_str())
@@ -444,11 +452,152 @@ impl Vault {
         Ok(vault)
     }
 
+    fn rks_client_cert_path(folder: &Path) -> PathBuf {
+        folder.join(RKS_CLIENT_CERT_FILE)
+    }
+
+    fn rks_client_key_path(folder: &Path) -> PathBuf {
+        folder.join(RKS_CLIENT_KEY_FILE)
+    }
+
+    async fn write_rks_client_identity(
+        folder: &Path,
+        certificate: &str,
+        private_key: &str,
+    ) -> anyhow::Result<()> {
+        tokio::fs::write(Self::rks_client_cert_path(folder), certificate).await?;
+        tokio::fs::write(Self::rks_client_key_path(folder), private_key).await?;
+        Ok(())
+    }
+
+    async fn ensure_rks_client_identity() -> anyhow::Result<()> {
+        let folder = &config_ref().tls_config.vault_folder;
+        if folder.as_os_str().is_empty() {
+            anyhow::bail!(
+                "vault_folder is empty in config. \
+                 Set tls_config.vault_folder and run `rks gen certs` first."
+            );
+        }
+
+        let cert_exists = tokio::fs::try_exists(Self::rks_client_cert_path(folder))
+            .await
+            .unwrap_or(false);
+        let key_exists = tokio::fs::try_exists(Self::rks_client_key_path(folder))
+            .await
+            .unwrap_or(false);
+        if cert_exists && key_exists {
+            return Ok(());
+        }
+
+        let keys = extract_keys(&folder.join("keys.json"))
+            .await
+            .with_context(|| {
+                format!(
+                    "Cannot read {}/keys.json. Run `rks gen certs <config>` first.",
+                    folder.display()
+                )
+            })?;
+        let keys_ref = keys.iter().map(|e| e.as_slice()).collect::<Vec<_>>();
+
+        let mut vault = Vault::with_file_backend()?;
+        vault
+            .vault
+            .unseal(&keys_ref)
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to unseal file backend: {e}"))?;
+
+        vault.root_token = tokio::fs::read_to_string(folder.join("root_token.txt"))
+            .await
+            .with_context(|| "Failed to read root_token.txt")?;
+
+        let resp = vault.issue_rks_cert().await?;
+        Self::write_rks_client_identity(folder, &resp.certificate, &resp.private_key).await?;
+        info!("stored rks xline client identity at {}", folder.display());
+        Ok(())
+    }
+
+    pub async fn xline_options_for_rks() -> anyhow::Result<XlineOptions> {
+        let folder = &config_ref().tls_config.vault_folder;
+        if folder.as_os_str().is_empty() {
+            anyhow::bail!(
+                "vault_folder is empty in config. \
+                 Set tls_config.vault_folder and run `rks gen certs` first."
+            );
+        }
+
+        let root_cert = tokio::fs::read_to_string(folder.join("root.pem"))
+            .await
+            .with_context(|| "Failed to read root.pem")?;
+        let certificate = tokio::fs::read_to_string(Self::rks_client_cert_path(folder))
+            .await
+            .with_context(|| format!("Failed to read {}", RKS_CLIENT_CERT_FILE))?;
+        let private_key = tokio::fs::read_to_string(Self::rks_client_key_path(folder))
+            .await
+            .with_context(|| format!("Failed to read {}", RKS_CLIENT_KEY_FILE))?;
+
+        let cfg = config_ref();
+        let mut xline_options = XlineOptions::new(cfg.xline_config.endpoints.clone());
+        xline_options = xline_options.with_tls(&root_cert, &certificate, &private_key)?;
+        Ok(xline_options)
+    }
+
+    pub async fn open_xline_backend() -> anyhow::Result<Self> {
+        let folder = &config_ref().tls_config.vault_folder;
+        if folder.as_os_str().is_empty() {
+            anyhow::bail!(
+                "vault_folder is empty in config. \
+                 Set tls_config.vault_folder and run `rks gen certs` first."
+            );
+        }
+
+        let keys = extract_keys(&folder.join("keys.json"))
+            .await
+            .with_context(|| {
+                format!(
+                    "Cannot read {}/keys.json. Run `rks gen certs <config>` first.",
+                    folder.display()
+                )
+            })?;
+        let keys_ref = keys.iter().map(|e| e.as_slice()).collect::<Vec<_>>();
+
+        let xline_backend = Arc::new(XlineBackend::with_options(
+            Self::xline_options_for_rks().await?,
+        ));
+        let mut vault = Vault::new(xline_backend)?;
+        let inited = vault
+            .vault
+            .inited()
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to query xline-backed vault state: {e}"))?;
+        if !inited {
+            anyhow::bail!("xline-backed vault is not initialized");
+        }
+
+        vault
+            .vault
+            .unseal(&keys_ref)
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to unseal xline backend: {e}"))?;
+
+        let root_token = tokio::fs::read_to_string(folder.join("root_token.txt"))
+            .await
+            .with_context(|| "Failed to read root_token.txt")?;
+        vault.root_token = root_token;
+
+        info!("opened vault with xline backend");
+        Ok(vault)
+    }
+
     /// Open vault: tries Xline migration when TLS is enabled,
     /// falls back to file backend otherwise.
     pub async fn open() -> anyhow::Result<Self> {
         if config_ref().tls_config.enable {
-            Self::migrate().await
+            Self::ensure_rks_client_identity().await?;
+            match Self::open_xline_backend().await {
+                Ok(vault) => Ok(vault),
+                Err(err) if err.to_string().contains("not initialized") => Self::migrate().await,
+                Err(err) => Err(err),
+            }
         } else {
             Self::open_file_backend().await
         }
@@ -463,30 +612,22 @@ impl Vault {
         let keys_ref = keys.iter().map(|e| e.as_slice()).collect::<Vec<_>>();
 
         if !config_ref().tls_config.keep_dangerous_files {
-            tokio::fs::remove_file(folder.join("keys.json")).await?;
+            warn!(
+                "keeping keys.json despite keep_dangerous_files=false because \
+                 reopening the xline-backed vault still requires the unseal keys"
+            );
         }
 
-        info!("migration stage1: generate certificates for vault");
+        info!("migration stage1: prepare file backend and client identity");
         let mut vault = Vault::with_file_backend()?;
 
         vault.vault.unseal(&keys_ref).await?;
 
-        let root_cert = tokio::fs::read_to_string(folder.join("root.pem")).await?;
         let root_token = tokio::fs::read_to_string(folder.join("root_token.txt")).await?;
         vault.root_token = root_token.clone();
 
-        let (alt_names, ip_sans) = local_alt_names_and_ip_sans();
-        let req = IssueCertificateRequest {
-            common_name: "rks-cluster".to_string().into(),
-            alt_names,
-            ip_sans,
-            ttl: "180d".to_string().into(),
-        };
-
-        let resp = vault.issue_cert(CertRole::Rks, &req).await?;
-        let cfg = config_ref();
-        let mut xline_options = XlineOptions::new(cfg.xline_config.endpoints.clone());
-        xline_options = xline_options.with_tls(&root_cert, &resp.certificate, &resp.private_key)?;
+        Self::ensure_rks_client_identity().await?;
+        let xline_options = Self::xline_options_for_rks().await?;
 
         info!("migration stage2: connect to xline backend and do migration");
         let xline_backend = Arc::new(XlineBackend::with_options(xline_options));
