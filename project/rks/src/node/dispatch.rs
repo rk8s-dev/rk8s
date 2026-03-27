@@ -89,19 +89,21 @@ pub async fn dispatch_worker(
             );
             let credentials = match shared.vault.as_ref() {
                 Some(vault) => match vault.list_registry_credentials().await {
-                    Ok(creds) => creds,
+                    Ok(creds) => Some(creds),
                     Err(e) => {
                         error!(
                             target: "rks::node::worker_dispatch",
-                            "failed to list registry credentials: {e}"
+                            "failed to list registry credentials: {e}; skipping credential update"
                         );
-                        vec![]
+                        None
                     }
                 },
-                None => vec![],
+                None => Some(vec![]),
             };
-            conn.send_msg(&RksMessage::SetRegistryCredentials(credentials))
-                .await?;
+            if let Some(credentials) = credentials {
+                conn.send_msg(&RksMessage::SetRegistryCredentials(credentials))
+                    .await?;
+            }
         }
         _ => warn!(
             target: "rks::node::worker_dispatch",

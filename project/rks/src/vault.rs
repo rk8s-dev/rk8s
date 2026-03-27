@@ -330,11 +330,16 @@ impl Vault {
         let mut credentials = Vec::with_capacity(keys.len());
         for key in keys {
             let registry = key.trim_end_matches('/');
-            match self.get_registry_credential(registry).await {
-                Ok(Some(cred)) => credentials.push(cred),
-                Ok(None) => warn!("registry key '{registry}' listed but not readable"),
-                Err(e) => warn!("failed to read registry credential for '{registry}': {e}"),
-            }
+            let cred = self
+                .get_registry_credential(registry)
+                .await
+                .with_context(|| format!("failed to read registry credential for '{registry}'"))?;
+            let Some(cred) = cred else {
+                anyhow::bail!(
+                    "registry key '{registry}' listed in vault but did not resolve to a valid credential"
+                );
+            };
+            credentials.push(cred);
         }
         Ok(credentials)
     }
@@ -368,10 +373,7 @@ impl Vault {
                 Ok(Some(RegistryCredential { registry, pat }))
             }
             Ok(None) => Ok(None),
-            Err(e) => {
-                warn!("failed to read registry credential at '{path}': {e}");
-                Ok(None)
-            }
+            Err(e) => anyhow::bail!("failed to read registry credential at '{path}': {e}"),
         }
     }
 
@@ -716,6 +718,7 @@ async fn extract_keys(path: &Path) -> anyhow::Result<Vec<Vec<u8>>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use libvault::modules::ResponseExt;
     use libvault::storage::physical::file::FileBackend;
     use rcgen::{Certificate, CertificateParams};
     use time::{Duration, OffsetDateTime};
@@ -834,6 +837,59 @@ mod tests {
 
         let creds = vault.list_registry_credentials().await.unwrap();
         assert_eq!(creds.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_get_registry_credential_surfaces_backend_read_errors() {
+        let (mut vault, _dir) = setup_test_vault().await.unwrap();
+
+        vault
+            .store_registry_credential("libra.tools", "token")
+            .await
+            .unwrap();
+
+        vault.root_token = "bad-token".to_string();
+
+        let err = vault
+            .get_registry_credential("libra.tools")
+            .await
+            .unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("failed to read registry credential at 'secret/registry/libra.tools'"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_list_registry_credentials_fails_on_invalid_listed_entry() {
+        let (vault, _dir) = setup_test_vault().await.unwrap();
+
+        vault
+            .store_registry_credential("libra.tools", "token")
+            .await
+            .unwrap();
+
+        vault
+            .vault
+            .write(
+                Some(vault.root_token.as_str()),
+                "secret/registry/bad.registry",
+                serde_json::json!({
+                    "registry": "bad.registry",
+                })
+                .to_map()
+                .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        let err = vault.list_registry_credentials().await.unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("registry key 'bad.registry' listed in vault but did not resolve to a valid credential"),
+            "unexpected error: {err}"
+        );
     }
 
     fn issue_test_cert(

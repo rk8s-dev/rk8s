@@ -116,21 +116,29 @@ impl<'a> NodeRegister<'a> {
             }
         }
 
-        // Always push registry credentials (even empty) so reconnecting
-        // workers clear stale credentials from a previous session.
+        // Push credentials when we have an authoritative snapshot. If vault
+        // is not configured, send an empty list to clear stale worker state.
+        // If vault read fails, skip the update so we do not overwrite a valid
+        // in-memory cache with an accidental empty snapshot.
         let initial_registry_credentials = match self.shared.vault.as_ref() {
             Some(vault) => match vault.list_registry_credentials().await {
-                Ok(creds) => creds,
+                Ok(creds) => Some(creds),
                 Err(e) => {
-                    log::warn!("Failed to load registry credentials for {}: {}", node_id, e);
-                    Vec::new()
+                    log::warn!(
+                        "Failed to load registry credentials for {}: {}; skipping credential sync",
+                        node_id,
+                        e
+                    );
+                    None
                 }
             },
-            None => Vec::new(),
+            None => Some(Vec::new()),
         };
-        let msg = RksMessage::SetRegistryCredentials(initial_registry_credentials);
-        if let Err(e) = msg_tx.try_send(msg) {
-            log::warn!("Failed to send registry credentials to {}: {}", node_id, e);
+        if let Some(initial_registry_credentials) = initial_registry_credentials {
+            let msg = RksMessage::SetRegistryCredentials(initial_registry_credentials);
+            if let Err(e) = msg_tx.try_send(msg) {
+                log::warn!("Failed to send registry credentials to {}: {}", node_id, e);
+            }
         }
 
         self.conn.send_msg(&RksMessage::Ack).await?;
