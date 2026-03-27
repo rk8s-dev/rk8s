@@ -2,8 +2,7 @@ use std::sync::Arc;
 
 use async_stream::stream;
 use clippy_utilities::OverflowArithmetic;
-use tonic::Status;
-use tonic::transport::{Channel, ClientTlsConfig, Endpoint};
+use xlinerpc::Status;
 use tracing::debug;
 use utils::build_endpoint;
 use xlineapi::{
@@ -48,12 +47,13 @@ impl LockServer {
         auth_store: Arc<AuthStore>,
         id_gen: Arc<IdGenerator>,
         addrs: &[String],
-        client_tls_config: Option<&ClientTlsConfig>,
+        _client_tls_config: Option<()>, // Not used with gm-quic
     ) -> Self {
         let addrs = addrs
             .iter()
             .map(|addr| {
-                build_endpoint(addr, client_tls_config)
+                // Build endpoint without TLS config since we're using gm-quic
+                Endpoint::from_shared(addr.to_string())
                     .unwrap_or_else(|_e| panic!("invalid address: {addr}"))
             })
             .collect();
@@ -209,8 +209,8 @@ impl LockServer {
     /// lease associate with the owner expires.
     async fn lock(
         &self,
-        request: tonic::Request<LockRequest>,
-    ) -> Result<tonic::Response<LockResponse>, Status> {
+        request: xlinerpc::Request<LockRequest>,
+    ) -> Result<xlinerpc::Response<LockResponse>, Status> {
         debug!("Receive LockRequest {:?}", request);
         let auth_info = self.auth_store.try_get_auth_info_from_request(&request)?;
         let lock_req = request.into_inner();
@@ -275,7 +275,7 @@ impl LockServer {
             header,
             key: key.into_bytes(),
         };
-        Ok(tonic::Response::new(res))
+        Ok(xlinerpc::Response::from_data(res))
     }
 
     /// Unlock takes a key returned by Lock and releases the hold on lock. The
@@ -283,12 +283,12 @@ impl LockServer {
     /// ownership of the lock.
     async fn unlock(
         &self,
-        request: tonic::Request<UnlockRequest>,
-    ) -> Result<tonic::Response<UnlockResponse>, Status> {
+        request: xlinerpc::Request<UnlockRequest>,
+    ) -> Result<xlinerpc::Response<UnlockResponse>, Status> {
         debug!("Receive UnlockRequest {:?}", request);
         let auth_info = self.auth_store.try_get_auth_info_from_request(&request)?;
         let header = self.delete_key(&request.get_ref().key, auth_info).await?;
-        Ok(tonic::Response::new(UnlockResponse { header }))
+        Ok(xlinerpc::Response::from_data(UnlockResponse { header }))
     }
 }
 
@@ -305,13 +305,13 @@ impl Server {
         RouterEndpoint::new(self.lock_server)
             .add_unary_fn(
                 "/lock",
-                move |this: Arc<LockServer>, request: tonic::Request<LockRequest>| async move {
+                move |this: Arc<LockServer>, request: xlinerpc::Request<LockRequest>| async move {
                     this.lock(request).await
                 },
             )
             .add_unary_fn(
                 "/unlock",
-                move |this: Arc<LockServer>, request: tonic::Request<UnlockRequest>| async move {
+                move |this: Arc<LockServer>, request: xlinerpc::Request<UnlockRequest>| async move {
                     this.unlock(request).await
                 },
             )

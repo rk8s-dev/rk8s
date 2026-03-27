@@ -8,9 +8,8 @@ use curp::{
     },
 };
 use itertools::Itertools;
-use tonic::{Request, Response, Status};
-// TODO: use our own status type
-// use xlinerpc::status::Status;
+use xlinerpc::{Request, Response, Status};
+
 use utils::timestamp;
 use xlineapi::{
     Member, MemberAddRequest, MemberAddResponse, MemberListRequest, MemberListResponse,
@@ -77,7 +76,7 @@ impl ClusterServer {
             member: members.iter().find(|m| m.id == node_id).cloned(),
             members,
         };
-        Ok(Response::new(resp))
+        Ok(Response::from_data(resp))
     }
 
     pub(crate) async fn member_remove(

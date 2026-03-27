@@ -76,7 +76,7 @@ utils = { path = "../utils" }
 uuid = { version = "1.10.0", features = ["v4"] }
 x509-certificate = "0.23.1"
 xlineapi = { path = "../xlineapi" }
-xlinerpc = { path = "../xlinerpc", features = ["tonic-compat"] }
+xlinerpc = { path = "../xlinerpc" }
 
 [dev-dependencies]
 etcd-client = { version = "0.14.0", features = ["tls"] }

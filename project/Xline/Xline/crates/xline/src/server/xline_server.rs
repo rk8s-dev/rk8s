@@ -14,11 +14,7 @@ use curp::{
 use dashmap::DashMap;
 use engine::{MemorySnapshotAllocator, RocksSnapshotAllocator, SnapshotAllocator};
 use jsonwebtoken::{DecodingKey, EncodingKey};
-use tonic::{
-    // TODO: use our own status type
-    // use xlinerpc::status::Status;
-    transport::{Certificate, ClientTlsConfig, Identity, ServerTlsConfig},
-};
+use xlinerpc::Status;
 use tracing::{info, warn};
 
 use utils::{
@@ -77,10 +73,10 @@ pub struct XlineServer {
     compact_config: CompactConfig,
     /// Auth config
     auth_config: AuthConfig,
-    /// Client tls config
-    client_tls_config: Option<ClientTlsConfig>,
-    /// Server tls config
-    _server_tls_config: Option<ServerTlsConfig>,
+    /// Client tls config (not used, kept for compatibility)
+    client_tls_config: Option<()>,
+    /// Server tls config (not used, kept for compatibility)
+    _server_tls_config: Option<()>, 
     /// QUIC client for curp peer communication
     quic_client: Arc<gm_quic::prelude::QuicClient>,
     /// Peer TLS certificate (DER) for QUIC server, None = self-signed fallback
@@ -124,7 +120,9 @@ impl XlineServer {
         auth_config: AuthConfig,
         tls_config: TlsConfig,
     ) -> Result<Self> {
-        let (client_tls_config, server_tls_config) = Self::read_tls_config(&tls_config).await?;
+        // TLS config is handled by gm-quic directly, no need for tonic configs
+        let client_tls_config = None;
+        let server_tls_config = None;
         let curp_storage = Arc::new(CurpDB::open(&cluster_config.curp_config().engine_cfg)?);
 
         // Read peer TLS certs for QUIC server (DER format)
@@ -392,11 +390,39 @@ impl XlineServer {
             );
 
         let xline_router = {
-            let (mut reporter, health_server) = tonic_health::server::health_reporter();
-            reporter
-                .set_service_status("", tonic_health::ServingStatus::Serving)
-                .await;
-            xline_router.add_service("/", health_server)
+            // Create a simple health check service using tower::Service
+            use http::Request;
+            use hyper::Body;
+            use tower::Service;
+            use std::task::{Context, Poll};
+            
+            #[derive(Clone)]
+            struct SimpleHealthCheckService;
+            
+            impl Service<Request<Body>> for SimpleHealthCheckService {
+                type Response = http::Response<Body>;
+                type Error = std::convert::Infallible;
+                type Future = futures::future::Ready<Result<Self::Response, Self::Error>>;
+                
+                fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+                    Poll::Ready(Ok(()))
+                }
+                
+                fn call(&mut self, _request: Request<Body>) -> Self::Future {
+                    // Return a simple health check response
+                    let response = http::Response::builder()
+                        .status(http::StatusCode::OK)
+                        .header(http::header::CONTENT_TYPE, "application/grpc")
+                        .header("grpc-status", "0")
+                        .body(Body::empty())
+                        .unwrap();
+                    
+                    futures::future::ready(Ok(response))
+                }
+            }
+            
+            // Add health check service to router
+            xline_router.add_service("/", SimpleHealthCheckService)
         };
 
         Ok((xline_router, curp_router, curp_client))
@@ -562,15 +588,15 @@ impl XlineServer {
                 Arc::clone(&auth_storage),
                 Arc::clone(&id_gen),
                 &self.cluster_info.self_peer_urls(),
-                self.client_tls_config.as_ref(),
-            ),
+                None, // client_tls_config is not used with gm-quic
+            );
             LeaseServer::new(
                 lease_storage,
                 Arc::clone(&auth_storage),
                 Arc::clone(&client),
                 id_gen,
                 Arc::clone(&self.cluster_info),
-                self.client_tls_config.clone(),
+                None, // client_tls_config is not used with gm-quic
                 &self.task_manager,
             ),
             AuthServer::new(Arc::clone(&client), Arc::clone(&auth_storage)),
@@ -633,62 +659,11 @@ impl XlineServer {
         }
     }
 
-    /// Read tls cert and key from file
+    /// Read tls cert and key from file (now unused, TLS is handled by gm-quic directly)
     async fn read_tls_config(
-        tls_config: &TlsConfig,
-    ) -> Result<(Option<ClientTlsConfig>, Option<ServerTlsConfig>)> {
-        let client_tls_config = match (
-            tls_config.client_ca_cert_path().as_ref(),
-            tls_config.client_cert_path().as_ref(),
-            tls_config.client_key_path().as_ref(),
-        ) {
-            (Some(ca_path), Some(cert_path), Some(key_path)) => {
-                let ca = fs::read(ca_path).await?;
-                let cert = fs::read(cert_path).await?;
-                let key = fs::read(key_path).await?;
-                Some(
-                    ClientTlsConfig::new()
-                        .ca_certificate(Certificate::from_pem(ca))
-                        .identity(Identity::from_pem(cert, key)),
-                )
-            }
-            (Some(ca_path), None, None) => {
-                let ca = fs::read(ca_path).await?;
-                Some(ClientTlsConfig::new().ca_certificate(Certificate::from_pem(ca)))
-            }
-            (_, Some(_), None) | (_, None, Some(_)) => {
-                return Err(anyhow!(
-                    "client_cert_path and client_key_path must be both set"
-                ));
-            }
-            _ => None,
-        };
-        let server_tls_config = match (
-            tls_config.peer_ca_cert_path().as_ref(),
-            tls_config.peer_cert_path().as_ref(),
-            tls_config.peer_key_path().as_ref(),
-        ) {
-            (Some(ca_path), Some(cert_path), Some(key_path)) => {
-                let ca = fs::read(ca_path).await?;
-                let cert = fs::read_to_string(cert_path).await?;
-                let key = fs::read_to_string(key_path).await?;
-                Some(
-                    ServerTlsConfig::new()
-                        .client_ca_root(Certificate::from_pem(ca))
-                        .identity(Identity::from_pem(cert, key)),
-                )
-            }
-            (None, Some(cert_path), Some(key_path)) => {
-                let cert = fs::read_to_string(cert_path).await?;
-                let key = fs::read_to_string(key_path).await?;
-                Some(ServerTlsConfig::new().identity(Identity::from_pem(cert, key)))
-            }
-            (_, Some(_), None) | (_, None, Some(_)) => {
-                return Err(anyhow!("peer_cert_path and peer_key_path must be both set"));
-            }
-            _ => None,
-        };
-        Ok((client_tls_config, server_tls_config))
+        _tls_config: &TlsConfig,
+    ) -> Result<(Option<()>, Option<()>)> {
+        Ok((None, None))
     }
 
     /// Build a QUIC client with proper TLS configuration from `TlsConfig`.

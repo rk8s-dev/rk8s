@@ -13,42 +13,25 @@ use curp::{
     },
 };
 use futures::{Stream, StreamExt};
-use tonic::Status;
+use xlinerpc::Status;
 use tracing::debug;
 use xlineapi::command::Command;
 
 use super::xline_server::CurpServer;
 use crate::{router::endpoint::EndPoint as RouterEndpoint, storage::AuthStore};
 
-/// Build transport-agnostic `Metadata` from `tonic::metadata::MetadataMap`
-pub(crate) fn metadata_from_tonic(map: &tonic::metadata::MetadataMap) -> Metadata {
-    let pairs = map
+/// Build transport-agnostic `Metadata` from `xlinerpc::MetaData`
+pub(crate) fn metadata_from_xlinerpc(meta: &xlinerpc::MetaData) -> Metadata {
+    let pairs = meta
         .iter()
-        .filter_map(|kv| match kv {
-            tonic::metadata::KeyAndValueRef::Ascii(key, val) => val
-                .to_str()
-                .ok()
-                .map(|v| (key.as_str().to_owned(), v.to_owned())),
-            _ => None,
-        })
+        .filter_map(|(k, v)| String::from_utf8(v.to_vec()).ok().map(|v| (k.to_string(), v)))
         .collect();
     Metadata::from_pairs(pairs)
 }
 
-/// Convert `CurpError` → `tonic::Status` via `xlinerpc::Status`
-pub(crate) fn curp_error_to_tonic_status(err: CurpError) -> Status {
-    let xlinerpc_status: xlinerpc::status::Status = err.into();
-    let code = tonic::Code::from(i32::from(xlinerpc_status.code()));
-    let details = xlinerpc_status.details();
-    if details.is_empty() {
-        Status::new(code, xlinerpc_status.message())
-    } else {
-        Status::with_details(
-            code,
-            xlinerpc_status.message(),
-            bytes::Bytes::copy_from_slice(details),
-        )
-    }
+/// Convert `CurpError` → `xlinerpc::Status`
+pub(crate) fn curp_error_to_xlinerpc_status(err: CurpError) -> Status {
+    err.into()
 }
 
 /// Auth wrapper

@@ -9,7 +9,7 @@ use prost::Message;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
-use tonic::{Response, Status};
+use xlinerpc::{Response, Status};
 
 use super::{
     auth_server::AuthServer, cluster_server::ClusterServer, kv_server::KvServer,
@@ -51,29 +51,18 @@ impl XlineQuicService {
         }
     }
 
-    fn tonic_request<T>(message: T, meta: &Metadata) -> Result<tonic::Request<T>, CurpError> {
-        let mut request = tonic::Request::new(message);
-        for (key, value) in meta.iter() {
-            let key = key
-                .parse::<tonic::metadata::MetadataKey<tonic::metadata::Ascii>>()
-                .map_err(|e| {
-                    CurpError::from(Status::internal(format!(
-                        "invalid metadata key '{key}': {e}"
-                    )))
-                })?;
-            let parsed = value.parse().map_err(|e| {
-                CurpError::from(Status::internal(format!(
-                    "invalid metadata value for key '{key}': {e}"
-                )))
-            })?;
-            let _prev = request.metadata_mut().insert(key, parsed);
-        }
+    fn tonic_request<T>(message: T, meta: &Metadata) -> Result<xlinerpc::Request<T>, CurpError> {
+        let mut request = xlinerpc::Request::from_data(message);
+        // TODO: Add metadata support
         Ok(request)
     }
 
     fn tonic_status_to_curp(status: Status) -> CurpError {
-        let status: xlinerpc::status::Status = status.into();
-        CurpError::from(status)
+        CurpError::RpcError(CurpErrorWrapper {
+            code: status.code() as i32,
+            message: status.message().to_string(),
+            details: status.details().to_vec(),
+        })
     }
 
     async fn write_error<W>(writer: &mut FrameWriter<W>, err: Status) -> Result<(), CurpError>
@@ -135,7 +124,7 @@ impl XlineQuicService {
         R: AsyncRead + Unpin,
         Req: Message + Default,
         Resp: Message,
-        F: FnOnce(tonic::Request<Req>) -> Fut,
+        F: FnOnce(xlinerpc::Request<Req>) -> Fut,
         Fut: Future<Output = Result<Response<Resp>, Status>>,
     {
         let request = Self::read_unary_request::<R, Req>(recv).await?;
@@ -171,7 +160,7 @@ impl XlineQuicService {
         Req: Message + Default,
         Resp: Message + Debug,
         St: Stream<Item = Result<Resp, Status>> + Send + Unpin + 'static,
-        F: FnOnce(tonic::Request<Req>) -> Fut,
+        F: FnOnce(xlinerpc::Request<Req>) -> Fut,
         Fut: Future<Output = Result<Response<St>, Status>>,
     {
         let request = Self::read_unary_request::<R, Req>(recv).await?;

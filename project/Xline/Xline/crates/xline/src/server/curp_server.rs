@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use crate::{
     router::endpoint::EndPoint as RouterEndpoint,
-    server::auth_wrapper::{curp_error_to_tonic_status, metadata_from_tonic},
+    server::auth_wrapper::{curp_error_to_xlinerpc_status, metadata_from_xlinerpc},
 };
 use curp::rpc::{
     CurpError, CurpService, FetchClusterRequest, FetchReadStateRequest, LeaseKeepAliveMsg,
@@ -32,23 +32,23 @@ where
         RouterEndpoint::new(self.server)
             .add_server_streaming_fn(
                 "/ProposeStream",
-                move |this: Arc<T>, request: tonic::Request<ProposeRequest>| async move {
-                    let req = request.get_ref().clone();
-                    let meta = metadata_from_tonic(request.metadata());
+                move |this: Arc<T>, request: xlinerpc::Request<ProposeRequest>| async move {
+                    let req = request.data().clone();
+                    let meta = metadata_from_xlinerpc(request.meta());
                     let stream = CurpService::propose_stream(&*this, req, meta)
                         .await
-                        .map_err(curp_error_to_tonic_status)?;
-                    let mapped = stream.map(|r| r.map_err(curp_error_to_tonic_status));
-                    Ok(tonic::Response::new(Box::pin(mapped)))
+                        .map_err(curp_error_to_xlinerpc_status)?;
+                    let mapped = stream.map(|r| r.map_err(curp_error_to_xlinerpc_status));
+                    Ok(xlinerpc::Response::from_data(Box::pin(mapped)))
                 },
             )
             .add_unary_fn(
                 "/Record",
-                move |this: Arc<T>, request: tonic::Request<RecordRequest>| async move {
-                    let meta = metadata_from_tonic(request.metadata());
-                    Ok(tonic::Response::new(
+                move |this: Arc<T>, request: xlinerpc::Request<RecordRequest>| async move {
+                    let meta = metadata_from_xlinerpc(request.meta());
+                    Ok(xlinerpc::Response::from_data(
                         CurpService::record(&*this, request.into_inner(), meta)
-                            .map_err(curp_error_to_tonic_status)?,
+                            .map_err(curp_error_to_xlinerpc_status)?,
                     ))
                 },
             )

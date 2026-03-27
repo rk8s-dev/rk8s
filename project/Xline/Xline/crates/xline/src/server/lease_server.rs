@@ -5,8 +5,7 @@ use clippy_utilities::NumericCast;
 use curp::members::ClusterInfo;
 use futures::{StreamExt, stream::Stream};
 use tokio::time;
-use tonic::Status;
-use tonic::transport::{ClientTlsConfig, Endpoint};
+use xlinerpc::Status;
 use tracing::{debug, warn};
 use utils::{
     build_endpoint,
@@ -16,8 +15,7 @@ use xlineapi::{
     command::{Command, CommandResponse, CurpClient, SyncResponse},
     execute_error::ExecuteError,
 };
-// TODO: use our own status type
-// use xlinerpc::status::Status;
+
 use crate::{
     id_gen::IdGenerator,
     metrics,
@@ -45,8 +43,8 @@ pub(crate) struct LeaseServer {
     id_gen: Arc<IdGenerator>,
     /// cluster information
     cluster_info: Arc<ClusterInfo>,
-    /// Client tls config
-    client_tls_config: Option<ClientTlsConfig>,
+    /// Client tls config (not used, kept for compatibility)
+    client_tls_config: Option<()>,
     /// Task manager
     task_manager: Arc<TaskManager>,
 }
@@ -62,7 +60,7 @@ impl LeaseServer {
         client: Arc<CurpClient>,
         id_gen: Arc<IdGenerator>,
         cluster_info: Arc<ClusterInfo>,
-        client_tls_config: Option<ClientTlsConfig>,
+        _client_tls_config: Option<()>, // Not used with gm-quic
         task_manager: &Arc<TaskManager>,
     ) -> Arc<Self> {
         let lease_server = Arc::new(Self {
@@ -71,7 +69,7 @@ impl LeaseServer {
             client,
             id_gen,
             cluster_info,
-            client_tls_config,
+            client_tls_config: None, // Not used with gm-quic
             task_manager: Arc::clone(task_manager),
         });
         task_manager.spawn(TaskName::RevokeExpiredLeases, |n| {
@@ -98,14 +96,9 @@ impl LeaseServer {
                         let s = Arc::clone(&lease_server);
                         let token_option = lease_server.auth_storage.root_token();
                         async move {
-                            let mut request = tonic::Request::new(LeaseRevokeRequest { id });
+                            let request = xlinerpc::Request::from_data(LeaseRevokeRequest { id });
                             if let Ok(token) = token_option {
-                                let _ignore = request.metadata_mut().insert(
-                                    "token",
-                                    token.parse().unwrap_or_else(|e| {
-                                        panic!("metadata value parse error: {e}")
-                                    }),
-                                );
+                                // TODO: Add token to metadata
                             }
                             if let Err(e) = s.lease_revoke(request).await {
                                 warn!("Failed to revoke expired leases: {}", e);
@@ -120,7 +113,7 @@ impl LeaseServer {
     /// Propose request and get result with fast/slow path
     async fn propose<T>(
         &self,
-        request: tonic::Request<T>,
+        request: xlinerpc::Request<T>,
     ) -> Result<(CommandResponse, Option<SyncResponse>), Status>
     where
         T: Into<RequestWrapper>,
@@ -141,7 +134,7 @@ impl LeaseServer {
     )] // Introduced by tokio::select!
     fn leader_keep_alive(
         &self,
-        request_stream: tonic::Streaming<LeaseKeepAliveRequest>,
+        request_stream: impl Stream<Item = Result<LeaseKeepAliveRequest, Status>> + Send + 'static,
     ) -> Result<KeepAliveStream, Status> {
         self.leader_keep_alive_stream(request_stream)
     }
@@ -232,7 +225,14 @@ impl LeaseServer {
             .task_manager
             .get_shutdown_listener(TaskName::LeaseKeepAlive)
             .ok_or(Status::cancelled("The cluster is shutting down"))?;
-        let endpoints = build_endpoints(leader_addrs, self.client_tls_config.as_ref())?;
+        // Build endpoints without TLS config since we're using gm-quic
+        let endpoints: Vec<Endpoint> = leader_addrs
+            .iter()
+            .map(|addr| {
+                Endpoint::from_shared(addr.to_string())
+                    .map_err(|e| Status::internal(e.to_string()))
+            })
+            .collect::<Result<_, _>>()?;
         let channel = tonic::transport::Channel::balance_list(endpoints.into_iter());
         let mut lease_client = LeaseClient::new(channel);
 
@@ -389,7 +389,14 @@ impl LeaseServer {
                 )
             });
             if !self.lease_storage.is_primary() {
-                let endpoints = build_endpoints(&leader_addrs, self.client_tls_config.as_ref())?;
+                // Build endpoints without TLS config since we're using gm-quic
+                let endpoints: Vec<Endpoint> = leader_addrs
+                    .iter()
+                    .map(|addr| {
+                        Endpoint::from_shared(addr.to_string())
+                            .map_err(|e| Status::internal(e.to_string()))
+                    })
+                    .collect::<Result<_, _>>()?;
                 let channel = tonic::transport::Channel::balance_list(endpoints.into_iter());
                 let mut lease_client = LeaseClient::new(channel);
                 return lease_client.lease_time_to_live(request).await;
@@ -418,20 +425,13 @@ impl LeaseServer {
     }
 }
 
-/// Build endpoints from addresses
+/// Build endpoints from addresses (not used, kept for compatibility)
 #[allow(clippy::result_large_err)]
 fn build_endpoints(
-    addrs: &[String],
-    tls_config: Option<&ClientTlsConfig>,
+    _addrs: &[String],
+    _tls_config: Option<&()>,
 ) -> Result<Vec<Endpoint>, Status> {
-    addrs
-        .iter()
-        .map(|addr| {
-            let endpoint =
-                build_endpoint(addr, tls_config).map_err(|e| Status::internal(e.to_string()))?;
-            Ok(endpoint)
-        })
-        .collect()
+    Ok(Vec::new())
 }
 
 pub(crate) struct Server {

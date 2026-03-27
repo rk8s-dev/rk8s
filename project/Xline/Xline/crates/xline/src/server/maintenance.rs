@@ -173,11 +173,11 @@ impl MaintenanceServer {
 
     async fn hash_kv(
         &self,
-        request: tonic::Request<HashKvRequest>,
-    ) -> Result<tonic::Response<HashKvResponse>, Status> {
+        request: xlinerpc::Request<HashKvRequest>,
+    ) -> Result<xlinerpc::Response<HashKvResponse>, Status> {
         let revision = request.get_ref().revision;
         let (hash, compact_revision, _hash_revision) = self.kv_store.hash_kv(revision)?;
-        Ok(tonic::Response::new(HashKvResponse {
+        Ok(xlinerpc::Response::from_data(HashKvResponse {
             header: Some(self.header_gen.gen_header()),
             hash,
             compact_revision,
@@ -199,11 +199,11 @@ impl MaintenanceServer {
 
     async fn move_leader(
         &self,
-        request: tonic::Request<MoveLeaderRequest>,
-    ) -> Result<tonic::Response<MoveLeaderResponse>, Status> {
+        request: xlinerpc::Request<MoveLeaderRequest>,
+    ) -> Result<xlinerpc::Response<MoveLeaderResponse>, Status> {
         let node_id = request.into_inner().target_id;
         self.client.move_leader(node_id).await?;
-        Ok(tonic::Response::new(MoveLeaderResponse {
+        Ok(xlinerpc::Response::from_data(MoveLeaderResponse {
             header: Some(self.header_gen.gen_header()),
         }))
     }

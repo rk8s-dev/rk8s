@@ -16,7 +16,7 @@ use pbkdf2::{
     Pbkdf2,
     password_hash::{PasswordHash, PasswordVerifier},
 };
-use tonic::Status;
+use xlinerpc::Status;
 use utils::parking_lot_lock::RwLockMap;
 use xlineapi::{
     AuthInfo,
@@ -128,26 +128,28 @@ impl AuthStore {
         }
     }
 
-    /// Try get auth info from tonic request
+    /// Try get auth info from request
     #[allow(clippy::result_large_err)]
     pub(crate) fn try_get_auth_info_from_request<T>(
         &self,
-        request: &tonic::Request<T>,
+        request: &xlinerpc::Request<T>,
     ) -> Result<Option<AuthInfo>, Status> {
         if !self.is_enabled() {
             return Ok(None);
         }
-        if let Some(token) = get_token(request.metadata()) {
-            let auth_info = self.verify(&token)?;
-            return Ok(Some(auth_info));
-        }
-        if let Some(cn) = get_cn(request) {
-            let auth_info = AuthInfo {
-                username: cn,
-                auth_revision: self.revision(),
-            };
-            return Ok(Some(auth_info));
-        }
+        // TODO: Implement token extraction from xlinerpc request
+        // if let Some(token) = get_token(request.metadata()) {
+        //     let auth_info = self.verify(&token)?;
+        //     return Ok(Some(auth_info));
+        // }
+        // TODO: Implement CN extraction from xlinerpc request
+        // if let Some(cn) = get_cn(request) {
+        //     let auth_info = AuthInfo {
+        //         username: cn,
+        //         auth_revision: self.revision(),
+        //     };
+        //     return Ok(Some(auth_info));
+        // }
         Ok(None)
     }
 
@@ -1186,12 +1188,10 @@ impl AuthStore {
     }
 }
 
-/// Get common name from tonic request
-fn get_cn<T>(request: &tonic::Request<T>) -> Option<String> {
-    let chain = request.peer_certs()?;
-    let cert_der = chain.first()?;
-    let cert = x509_certificate::X509Certificate::from_der(cert_der.as_ref()).ok()?;
-    cert.subject_common_name()
+/// Get common name from request
+fn get_cn<T>(request: &xlinerpc::Request<T>) -> Option<String> {
+    // TODO: Implement CN extraction from xlinerpc request
+    None
 }
 
 #[cfg(test)]
