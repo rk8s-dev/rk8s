@@ -62,7 +62,12 @@ fn grpc_frame_decode<M: Message + Default>(buf: &[u8]) -> Result<(M, usize), Sta
     if buf.len() < GRPC_HEADER_SIZE {
         return Err(Status::internal("gRPC frame header too short"));
     }
-    let _compressed = buf[0] != 0;
+    let compressed = buf[0] != 0;
+    if compressed {
+        return Err(Status::internal(
+            "compressed gRPC frames are not supported (compression flag set)",
+        ));
+    }
     let len = u32::from_be_bytes([buf[1], buf[2], buf[3], buf[4]]) as usize;
     let total = GRPC_HEADER_SIZE + len;
     if buf.len() < total {
