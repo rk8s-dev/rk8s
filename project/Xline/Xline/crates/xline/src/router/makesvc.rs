@@ -265,12 +265,22 @@ where
                 }
             };
 
+            // Wrap response in gRPC frame
+            // gRPC frame format: [flags (1 byte)] [length (4 bytes)] [data]
+            let mut framed_response = Vec::with_capacity(1 + 4 + response_bytes.len());
+            // Write flags (0 for uncompressed)
+            framed_response.push(0);
+            // Write length (big-endian)
+            framed_response.extend_from_slice(&u32::to_be_bytes(response_bytes.len() as u32));
+            // Write data
+            framed_response.extend_from_slice(&response_bytes);
+
             // Create HTTP response
             let response = http::Response::builder()
                 .status(http::StatusCode::OK)
                 .header(http::header::CONTENT_TYPE, "application/grpc")
                 .header("grpc-status", "0") // gRPC OK status code
-                .body(http_body::Full::from(Bytes::from(response_bytes)))
+                .body(http_body::Full::from(Bytes::from(framed_response)))
                 .unwrap();
 
             Ok(response)

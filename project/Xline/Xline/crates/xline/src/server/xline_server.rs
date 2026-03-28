@@ -397,6 +397,21 @@ impl XlineServer {
             use std::task::{Context, Poll};
             
             #[derive(Clone)]
+            // gRPC HealthCheckResponse message definition
+            #[derive(prost::Message)]
+            struct HealthCheckResponse {
+                #[prost(enumeration = "ServingStatus", tag = "1")]
+                status: i32,
+            }
+            
+            #[derive(prost::Enumeration)]
+            enum ServingStatus {
+                Unknown = 0,
+                Serving = 1,
+                NotServing = 2,
+                ServiceUnknown = 3,
+            }
+            
             struct SimpleHealthCheckService;
             
             impl Service<Request<Body>> for SimpleHealthCheckService {
@@ -409,12 +424,27 @@ impl XlineServer {
                 }
                 
                 fn call(&mut self, _request: Request<Body>) -> Self::Future {
-                    // Return a simple health check response
+                    // Create HealthCheckResponse with SERVING status
+                    let health_response = HealthCheckResponse {
+                        status: ServingStatus::Serving as i32,
+                    };
+                    
+                    // Encode the response
+                    let mut response_bytes = Vec::new();
+                    health_response.encode(&mut response_bytes).unwrap();
+                    
+                    // Wrap in gRPC frame: [flags (1 byte)] [length (4 bytes)] [data]
+                    let mut framed_response = Vec::with_capacity(1 + 4 + response_bytes.len());
+                    framed_response.push(0); // 0 for uncompressed
+                    framed_response.extend_from_slice(&u32::to_be_bytes(response_bytes.len() as u32));
+                    framed_response.extend_from_slice(&response_bytes);
+                    
+                    // Return health check response
                     let response = http::Response::builder()
                         .status(http::StatusCode::OK)
                         .header(http::header::CONTENT_TYPE, "application/grpc")
                         .header("grpc-status", "0")
-                        .body(Body::empty())
+                        .body(Body::from(framed_response))
                         .unwrap();
                     
                     futures::future::ready(Ok(response))

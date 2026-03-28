@@ -99,6 +99,7 @@ where
                 move |this: Arc<T>, request: tonic::Request<FetchClusterRequest>| async move {
                     Ok(tonic::Response::new(
                         CurpService::fetch_cluster(&*this, request.into_inner())
+                            .await
                             .map_err(curp_error_to_tonic_status)?,
                     ))
                 },
@@ -108,6 +109,7 @@ where
                 move |this: Arc<T>, request: tonic::Request<FetchReadStateRequest>| async move {
                     Ok(tonic::Response::new(
                         CurpService::fetch_read_state(&*this, request.into_inner())
+                            .await
                             .map_err(curp_error_to_tonic_status)?,
                     ))
                 },

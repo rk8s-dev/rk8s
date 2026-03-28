@@ -6,14 +6,7 @@ use curp::members::ClusterInfo;
 use futures::{StreamExt, stream::Stream};
 use http::uri::PathAndQuery;
 use tokio::time;
-<<<<<<< Hzm-5
 use xlinerpc::Status;
-=======
-use tonic::Status;
-use tonic::client::Grpc;
-use tonic::codec::ProstCodec;
-use tonic::transport::{ClientTlsConfig, Endpoint};
->>>>>>> main
 use tracing::{debug, warn};
 use utils::{
     build_endpoint,
@@ -104,9 +97,9 @@ impl LeaseServer {
                         let s = Arc::clone(&lease_server);
                         let token_option = lease_server.auth_storage.root_token();
                         async move {
-                            let request = xlinerpc::Request::from_data(LeaseRevokeRequest { id });
+                            let mut request = xlinerpc::Request::from_data(LeaseRevokeRequest { id });
                             if let Ok(token) = token_option {
-                                // TODO: Add token to metadata
+                                request.meta_mut().insert("token", token);
                             }
                             if let Err(e) = s.lease_revoke(request).await {
                                 warn!("Failed to revoke expired leases: {}", e);
