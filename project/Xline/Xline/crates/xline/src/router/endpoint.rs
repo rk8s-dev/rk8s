@@ -84,13 +84,15 @@ where
         OutputScheme: Clone + Default + Message + Send + 'static,
         RspStream: Stream<Item = Result<OutputScheme, Status>> + Send + 'static,
         F: FnMut(T, XlineRequest<InputScheme>) -> Fut + Clone + Send + Sync + 'static,
-        Fut: Future<Output = Result<XlineResponse<RspStream>, Status>> + Send + 'static,
+        Fut: Future<Output = Result<RspStream, Status>> + Send + 'static,
     {
         let state = self.state.clone();
         let handler_service = service_fn(move |request: XlineRequest<InputScheme>| {
             let mut handler = handler.clone();
             let state = state.clone();
-            async move { handler(state.clone(), request).await }
+            async move {
+                handler(state.clone(), request).await.map(XlineResponse::from_data)
+            }
         });
 
         self.router = self.router.route_service(
@@ -112,13 +114,15 @@ where
         OutputScheme: Clone + Default + Message + Send + 'static,
         RspStream: Stream<Item = Result<OutputScheme, Status>> + Send + 'static,
         F: FnMut(T, XlineRequest<InputScheme>) -> Fut + Clone + Send + Sync + 'static,
-        Fut: Future<Output = Result<XlineResponse<RspStream>, Status>> + Send + 'static,
+        Fut: Future<Output = Result<RspStream, Status>> + Send + 'static,
     {
         let state = self.state.clone();
         let handler_service = service_fn(move |request: XlineRequest<InputScheme>| {
             let mut handler = handler.clone();
             let state = state.clone();
-            async move { handler(state.clone(), request).await }
+            async move {
+                handler(state.clone(), request).await.map(XlineResponse::from_data)
+            }
         });
 
         self.router = self.router.route_service(

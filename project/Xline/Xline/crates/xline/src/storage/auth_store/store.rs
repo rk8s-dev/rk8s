@@ -142,14 +142,14 @@ impl AuthStore {
             let auth_info = self.verify(&token)?;
             return Ok(Some(auth_info));
         }
-        // TODO: Implement CN extraction from xlinerpc request
-        // if let Some(cn) = get_cn(request) {
-        //     let auth_info = AuthInfo {
-        //         username: cn,
-        //         auth_revision: self.revision(),
-        //     };
-        //     return Ok(Some(auth_info));
-        // }
+        // Extract CN from client certificate if present
+        if let Some(cn) = get_cn(request) {
+            let auth_info = AuthInfo {
+                username: cn,
+                auth_revision: self.revision(),
+            };
+            return Ok(Some(auth_info));
+        }
         Ok(None)
     }
 
@@ -1190,8 +1190,10 @@ impl AuthStore {
 
 /// Get common name from request
 fn get_cn<T>(request: &xlinerpc::Request<T>) -> Option<String> {
-    // TODO: Implement CN extraction from xlinerpc request
-    None
+    // Extract CN from metadata if present
+    // This assumes that the server has already extracted the CN from the client certificate
+    // and added it to the metadata during request processing
+    request.meta().get_str("x-client-cert-cn").and_then(|res| res.ok().map(String::from))
 }
 
 #[cfg(test)]
