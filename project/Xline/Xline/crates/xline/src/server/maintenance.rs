@@ -175,7 +175,7 @@ impl MaintenanceServer {
         &self,
         request: xlinerpc::Request<HashKvRequest>,
     ) -> Result<xlinerpc::Response<HashKvResponse>, Status> {
-        let revision = request.get_ref().revision;
+        let revision = request.data().revision;
         let (hash, compact_revision, _hash_revision) = self.kv_store.hash_kv(revision)?;
         Ok(xlinerpc::Response::from_data(HashKvResponse {
             header: Some(self.header_gen.gen_header()),

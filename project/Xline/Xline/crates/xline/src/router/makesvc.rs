@@ -551,65 +551,26 @@ where
                 }
             }
 
-            // Parse multiple frames from the buffer
+            // Parse multiple gRPC frames from the buffer
             let mut pos = 0;
             while pos < buffer.len() {
-                // Each frame starts with a 4-byte metadata length
-                if pos + 4 > buffer.len() {
-                    return Err(Status::internal("Incomplete frame: missing metadata length"));
-                }
-                
-                // Read metadata length to determine frame boundaries
-                let meta_len = u32::from_be_bytes([
-                    buffer[pos],
-                    buffer[pos + 1],
-                    buffer[pos + 2],
-                    buffer[pos + 3]
-                ]) as usize;
-                pos += 4;
-                
-                // Calculate total frame size
-                // Minimum frame size is metadata (meta_len) + at least 1 byte of protobuf data
-                if pos + meta_len + 1 > buffer.len() {
-                    return Err(Status::internal("Incomplete frame: insufficient data"));
-                }
-                
-                // Extract full frame (including the 4-byte meta_len we already read)
-                let frame_start = pos - 4;
-                let frame_end = pos + meta_len + 1;
-                
-                // Find the actual end of the frame by looking for the next frame's metadata length
-                // This is necessary because protobuf data can be variable length
-                let mut next_frame_pos = frame_end;
-                while next_frame_pos + 4 <= buffer.len() {
-                    let next_meta_len = u32::from_be_bytes([
-                        buffer[next_frame_pos],
-                        buffer[next_frame_pos + 1],
-                        buffer[next_frame_pos + 2],
-                        buffer[next_frame_pos + 3]
-                    ]) as usize;
-                    
-                    // Check if this looks like a valid frame start
-                    if next_frame_pos + 4 + next_meta_len + 1 <= buffer.len() {
-                        break;
+                // Extract current frame
+                let frame_data = match decode_grpc_frame(&buffer[pos..]) {
+                    Ok(data) => data,
+                    Err(e) => {
+                        return Err(Status::internal(format!("Failed to decode gRPC frame: {}", e)));
                     }
-                    next_frame_pos += 1;
-                }
-                
-                // If we didn't find a next frame, this is the last frame
-                let actual_frame_end = if next_frame_pos + 4 <= buffer.len() {
-                    next_frame_pos
-                } else {
-                    buffer.len()
                 };
                 
-                // Decode the frame
-                let frame = &buffer[frame_start..actual_frame_end];
-                let xline_request = XlineRequest::<Input>::decode_from_slice(frame)
-                    .map_err(|e| Status::internal(format!("Failed to decode request frame: {}", e)))?;
+                // Calculate frame size (1-byte flag + 4-byte length + data length)
+                let frame_size = 1 + 4 + frame_data.len();
+                
+                // Decode xline request from frame data
+                let xline_request = XlineRequest::<Input>::decode_from_slice(frame_data)
+                    .map_err(|e| Status::internal(format!("Failed to decode request: {}", e)))?;
                 
                 all_requests.push(xline_request);
-                pos = actual_frame_end;
+                pos += frame_size;
             }
 
             // For client streaming, we need to decide how to handle multiple requests

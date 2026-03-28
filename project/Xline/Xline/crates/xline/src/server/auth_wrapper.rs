@@ -298,9 +298,9 @@ impl Protocol for AuthWrapper {
         let meta = metadata_from_xlinerpc(&xlinerpc::MetaData::new());
         let stream = CurpService::propose_stream(&self.curp_server, req, meta)
             .await
-            .map_err(curp_error_to_xlinerpc_status)?
-        let mapped = stream.map(|r| r.map_err(curp_error_to_tonic_status));
-        Ok(tonic::Response::new(Box::pin(mapped)))
+            .map_err(curp_error_to_xlinerpc_status)?;
+        let mapped = stream.map(|r| r.map_err(curp_error_to_xlinerpc_status));
+        Ok(xlinerpc::Response::new(Box::pin(mapped)))
     }
 
     async fn record(

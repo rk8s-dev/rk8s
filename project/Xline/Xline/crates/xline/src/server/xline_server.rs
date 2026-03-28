@@ -654,7 +654,7 @@ impl XlineServer {
                 Arc::clone(&auth_storage),
                 Arc::clone(&id_gen),
                 &self.cluster_info.self_peer_urls(),
-                client_tls_config.clone(),
+                self.client_tls_config.clone(),
             ),
             LeaseServer::new(
                 lease_storage,
@@ -662,7 +662,7 @@ impl XlineServer {
                 Arc::clone(&client),
                 id_gen,
                 Arc::clone(&self.cluster_info),
-                client_tls_config,
+                self.client_tls_config,
                 &self.task_manager,
             ),
             AuthServer::new(Arc::clone(&client), Arc::clone(&auth_storage)),
