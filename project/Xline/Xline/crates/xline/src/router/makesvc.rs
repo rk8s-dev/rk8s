@@ -61,6 +61,7 @@ where
     #[pin]
     inner: S,
     encoding_buffer: Vec<u8>,
+    stream_ended: bool,
 }
 
 impl<S, M> GrpcStreamingBody<S, M>
@@ -72,6 +73,7 @@ where
         Self {
             inner: stream,
             encoding_buffer: Vec::new(),
+            stream_ended: false,
         }
     }
 }
@@ -119,6 +121,7 @@ where
                 }
                 Poll::Ready(None) => {
                     // Stream completed, send trailers
+                    this.stream_ended = true;
                     let mut trailers = http::HeaderMap::new();
                     trailers.insert("grpc-status", http::HeaderValue::from_static("0"));
                     return Poll::Ready(Some(Ok(http_body::Frame::trailers(trailers))));
@@ -131,7 +134,7 @@ where
     }
 
     fn is_end_stream(&self) -> bool {
-        self.encoding_buffer.is_empty()
+        self.stream_ended && self.encoding_buffer.is_empty()
     }
 
     fn size_hint(&self) -> SizeHint {

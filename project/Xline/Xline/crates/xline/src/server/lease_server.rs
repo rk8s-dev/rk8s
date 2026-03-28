@@ -6,6 +6,7 @@ use curp::members::ClusterInfo;
 use futures::{StreamExt, stream::Stream};
 use http::uri::PathAndQuery;
 use tokio::time;
+use tonic::transport::{ClientTlsConfig, Endpoint};
 use xlinerpc::Status;
 use tracing::{debug, warn};
 use utils::{
@@ -44,8 +45,8 @@ pub(crate) struct LeaseServer {
     id_gen: Arc<IdGenerator>,
     /// cluster information
     cluster_info: Arc<ClusterInfo>,
-    /// Client tls config (not used, kept for compatibility)
-    client_tls_config: Option<()>,
+    /// Client tls config
+    client_tls_config: Option<ClientTlsConfig>,
     /// Task manager
     task_manager: Arc<TaskManager>,
 }
@@ -61,7 +62,7 @@ impl LeaseServer {
         client: Arc<CurpClient>,
         id_gen: Arc<IdGenerator>,
         cluster_info: Arc<ClusterInfo>,
-        _client_tls_config: Option<()>, // Not used with gm-quic
+        client_tls_config: Option<ClientTlsConfig>,
         task_manager: &Arc<TaskManager>,
     ) -> Arc<Self> {
         let lease_server = Arc::new(Self {
@@ -70,7 +71,7 @@ impl LeaseServer {
             client,
             id_gen,
             cluster_info,
-            client_tls_config: None, // Not used with gm-quic
+            client_tls_config,
             task_manager: Arc::clone(task_manager),
         });
         task_manager.spawn(TaskName::RevokeExpiredLeases, |n| {
@@ -226,14 +227,14 @@ impl LeaseServer {
             .task_manager
             .get_shutdown_listener(TaskName::LeaseKeepAlive)
             .ok_or(Status::cancelled("The cluster is shutting down"))?;
-        // Build endpoints without TLS config since we're using gm-quic
+        // Build endpoints with TLS config if provided
         let endpoints: Vec<Endpoint> = leader_addrs
             .iter()
             .map(|addr| {
-                Endpoint::from_shared(addr.to_string())
+                build_endpoint(addr, self.client_tls_config.as_ref())
                     .map_err(|e| Status::internal(e.to_string()))
             })
-            .collect::<Result<_, _>>()?;
+            .collect::<Result<_, _>>()?
         let channel = tonic::transport::Channel::balance_list(endpoints.into_iter());
 
         let redirect_stream = stream! {

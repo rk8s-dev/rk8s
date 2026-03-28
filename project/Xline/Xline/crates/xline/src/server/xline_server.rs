@@ -120,8 +120,30 @@ impl XlineServer {
         auth_config: AuthConfig,
         tls_config: TlsConfig,
     ) -> Result<Self> {
-        // TLS config is handled by gm-quic directly, no need for tonic configs
-        let client_tls_config = None;
+        // Create client TLS config if TLS is enabled
+        let client_tls_config = if tls_config.client_cert_path().is_some() || tls_config.client_ca_cert_path().is_some() {
+            let mut tls = tonic::transport::ClientTlsConfig::new();
+            
+            // Add client CA cert if provided
+            if let Some(ca_path) = tls_config.client_ca_cert_path() {
+                if let Ok(ca_cert) = tokio::fs::read(ca_path).await {
+                    tls = tls.ca_certificate(tonic::transport::Certificate::from_pem(&ca_cert));
+                }
+            }
+            
+            // Add client cert and key if provided
+            if let (Some(cert_path), Some(key_path)) = (tls_config.client_cert_path(), tls_config.client_key_path()) {
+                if let (Ok(cert), Ok(key)) = (tokio::fs::read(cert_path).await, tokio::fs::read(key_path).await) {
+                    if let Ok(identity) = tonic::transport::Identity::from_pem(&cert, &key) {
+                        tls = tls.identity(identity);
+                    }
+                }
+            }
+            
+            Some(tls)
+        } else {
+            None
+        };
         let server_tls_config = None;
         let curp_storage = Arc::new(CurpDB::open(&cluster_config.curp_config().engine_cfg)?);
 
@@ -632,7 +654,7 @@ impl XlineServer {
                 Arc::clone(&auth_storage),
                 Arc::clone(&id_gen),
                 &self.cluster_info.self_peer_urls(),
-                None, // client_tls_config is not used with gm-quic
+                client_tls_config.clone(),
             ),
             LeaseServer::new(
                 lease_storage,
@@ -640,7 +662,7 @@ impl XlineServer {
                 Arc::clone(&client),
                 id_gen,
                 Arc::clone(&self.cluster_info),
-                None, // client_tls_config is not used with gm-quic
+                client_tls_config,
                 &self.task_manager,
             ),
             AuthServer::new(Arc::clone(&client), Arc::clone(&auth_storage)),
