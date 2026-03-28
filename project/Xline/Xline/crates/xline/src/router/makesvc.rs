@@ -100,10 +100,19 @@ where
             // Get the next item from the stream
             match this.inner.poll_next_unpin(cx) {
                 Poll::Ready(Some(Ok(item))) => {
-                    // Encode the item into the buffer
-                    if let Err(e) = item.encode(this.encoding_buffer) {
+                    // Encode the item into a temporary buffer first
+                    let mut message_buffer = Vec::new();
+                    if let Err(e) = item.encode(&mut message_buffer) {
                         return Poll::Ready(Some(Err(Status::internal(format!("Failed to encode item: {}", e)))));
                     }
+                    
+                    // Add gRPC frame header: [flags (1 byte)] [length (4 bytes)] [data]
+                    // Flags: 0 for uncompressed
+                    this.encoding_buffer.push(0);
+                    // Length: big-endian
+                    this.encoding_buffer.extend_from_slice(&u32::to_be_bytes(message_buffer.len() as u32));
+                    // Data
+                    this.encoding_buffer.extend_from_slice(&message_buffer);
                 }
                 Poll::Ready(Some(Err(e))) => {
                     return Poll::Ready(Some(Err(Status::internal(format!("Stream error: {}", e)))));

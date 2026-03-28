@@ -438,7 +438,7 @@ impl Server {
         RouterEndpoint::new(self.watch_server).add_streaming_fn(
             "/Watch",
             move |this: Arc<WatchServer>,
-                  request: xlinerpc::Request<impl Stream<Item = Result<WatchRequest, Status>> + Send + 'static>| async move {
+                  request: xlinerpc::Request<Box<dyn Stream<Item = Result<WatchRequest, Status>> + Send + 'static>>| async move {
                 this.watch(request).await
             },
         )

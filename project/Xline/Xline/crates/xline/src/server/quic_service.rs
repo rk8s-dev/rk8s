@@ -310,7 +310,7 @@ impl QuicServiceExt for XlineQuicService {
                         send,
                         recv,
                         meta,
-                        |req: tonic::Request<AuthenticateRequest>| async move {
+                        |req: xlinerpc::Request<AuthenticateRequest>| async move {
                             this.auth.authenticate(req).await
                         },
                     )
@@ -321,7 +321,7 @@ impl QuicServiceExt for XlineQuicService {
                         send,
                         recv,
                         meta,
-                        |req: tonic::Request<LeaseRevokeRequest>| async move {
+                        |req: xlinerpc::Request<LeaseRevokeRequest>| async move {
                             this.lease.lease_revoke(req).await
                         },
                     )
@@ -335,7 +335,7 @@ impl QuicServiceExt for XlineQuicService {
                         send,
                         recv,
                         meta,
-                        |req: tonic::Request<LeaseTimeToLiveRequest>| async move {
+                        |req: xlinerpc::Request<LeaseTimeToLiveRequest>| async move {
                             this.lease.lease_time_to_live(req).await
                         },
                     )
@@ -349,7 +349,7 @@ impl QuicServiceExt for XlineQuicService {
                         send,
                         recv,
                         meta,
-                        |req: tonic::Request<SnapshotRequest>| async move {
+                        |req: xlinerpc::Request<SnapshotRequest>| async move {
                             this.maintenance.snapshot(req).await
                         },
                     )
@@ -360,7 +360,7 @@ impl QuicServiceExt for XlineQuicService {
                         send,
                         recv,
                         meta,
-                        |req: tonic::Request<AlarmRequest>| async move {
+                        |req: xlinerpc::Request<AlarmRequest>| async move {
                             this.maintenance.alarm(req).await
                         },
                     )
@@ -377,7 +377,7 @@ impl QuicServiceExt for XlineQuicService {
                         send,
                         recv,
                         meta,
-                        |req: tonic::Request<MemberAddRequest>| async move {
+                        |req: xlinerpc::Request<MemberAddRequest>| async move {
                             this.cluster.member_add(req).await
                         },
                     )
@@ -388,7 +388,7 @@ impl QuicServiceExt for XlineQuicService {
                         send,
                         recv,
                         meta,
-                        |req: tonic::Request<MemberRemoveRequest>| async move {
+                        |req: xlinerpc::Request<MemberRemoveRequest>| async move {
                             this.cluster.member_remove(req).await
                         },
                     )
@@ -399,7 +399,7 @@ impl QuicServiceExt for XlineQuicService {
                         send,
                         recv,
                         meta,
-                        |req: tonic::Request<MemberPromoteRequest>| async move {
+                        |req: xlinerpc::Request<MemberPromoteRequest>| async move {
                             this.cluster.member_promote(req).await
                         },
                     )
@@ -410,7 +410,7 @@ impl QuicServiceExt for XlineQuicService {
                         send,
                         recv,
                         meta,
-                        |req: tonic::Request<MemberUpdateRequest>| async move {
+                        |req: xlinerpc::Request<MemberUpdateRequest>| async move {
                             this.cluster.member_update(req).await
                         },
                     )
@@ -421,7 +421,7 @@ impl QuicServiceExt for XlineQuicService {
                         send,
                         recv,
                         meta,
-                        |req: tonic::Request<MemberListRequest>| async move {
+                        |req: xlinerpc::Request<MemberListRequest>| async move {
                             this.cluster.member_list(req).await
                         },
                     )
@@ -432,7 +432,7 @@ impl QuicServiceExt for XlineQuicService {
                         send,
                         recv,
                         meta,
-                        |req: tonic::Request<CompactionRequest>| async move {
+                        |req: xlinerpc::Request<CompactionRequest>| async move {
                             this.kv.compact(req).await
                         },
                     )
