@@ -234,7 +234,7 @@ impl LeaseServer {
                 build_endpoint(addr, self.client_tls_config.as_ref())
                     .map_err(|e| Status::internal(e.to_string()))
             })
-            .collect::<Result<_, _>>()?
+            .collect::<Result<_, _>>()?;
         let channel = tonic::transport::Channel::balance_list(endpoints.into_iter());
 
         let redirect_stream = stream! {

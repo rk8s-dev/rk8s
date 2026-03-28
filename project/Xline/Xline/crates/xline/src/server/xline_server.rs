@@ -74,7 +74,7 @@ pub struct XlineServer {
     /// Auth config
     auth_config: AuthConfig,
     /// Client tls config (not used, kept for compatibility)
-    client_tls_config: Option<()>,
+    client_tls_config: Option<tonic::transport::ClientTlsConfig>,
     /// Server tls config (not used, kept for compatibility)
     _server_tls_config: Option<()>, 
     /// QUIC client for curp peer communication

@@ -478,7 +478,7 @@ impl Server {
             )
             .add_client_streaming_fn(
                 "/LeaseKeepAlive",
-                move |this: Arc<AuthWrapper>, request: xlinerpc::Request<impl Stream<Item = Result<LeaseKeepAliveMsg, Status>> + Send + 'static>| async move {
+                move |this: Arc<AuthWrapper>, request: xlinerpc::Request<Box<dyn Stream<Item = Result<LeaseKeepAliveMsg, Status>> + Send + Unpin + 'static>>| async move {
                     Protocol::lease_keep_alive(&*this, request).await
                 },
             )
