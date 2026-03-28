@@ -450,6 +450,30 @@ impl Default for LockTtlConfig {
     }
 }
 
+fn default_light_enabled() -> bool {
+    true
+}
+
+fn default_light_threshold() -> usize {
+    3
+}
+
+fn default_heavy_enabled() -> bool {
+    true
+}
+
+fn default_heavy_fragment_threshold() -> f64 {
+    0.3
+}
+
+fn default_heavy_slice_threshold() -> usize {
+    50
+}
+
+fn default_heavy_force_fragment_threshold() -> f64 {
+    0.5
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct CompactConfig {
     /// Minimum slice count to trigger compaction (JuiceFS: 5)
@@ -469,6 +493,25 @@ pub struct CompactConfig {
     /// Dynamic lock TTL configuration
     #[serde(default)]
     pub lock_ttl: LockTtlConfig,
+
+    /// Enable light compaction
+    #[serde(default = "default_light_enabled")]
+    pub light_enabled: bool,
+    /// Minimum slice count to trigger light compaction
+    #[serde(default = "default_light_threshold")]
+    pub light_threshold: usize,
+    /// Enable heavy compaction (data rewrite and defragmentation)
+    #[serde(default = "default_heavy_enabled")]
+    pub heavy_enabled: bool,
+    /// Fragmentation threshold to trigger heavy compaction
+    #[serde(default = "default_heavy_fragment_threshold")]
+    pub heavy_fragment_threshold: f64,
+    /// Slice count threshold to trigger heavy compaction
+    #[serde(default = "default_heavy_slice_threshold")]
+    pub heavy_slice_threshold: usize,
+    /// Force heavy compact if fragmentation is extremely high after light
+    #[serde(default = "default_heavy_force_fragment_threshold")]
+    pub heavy_force_fragment_threshold: f64,
 }
 
 impl Default for CompactConfig {
@@ -482,6 +525,12 @@ impl Default for CompactConfig {
             max_chunks_per_run: 1000,
             max_concurrent_tasks: 4,
             lock_ttl: LockTtlConfig::default(),
+            light_enabled: default_light_enabled(),
+            light_threshold: default_light_threshold(),
+            heavy_enabled: default_heavy_enabled(),
+            heavy_fragment_threshold: default_heavy_fragment_threshold(),
+            heavy_slice_threshold: default_heavy_slice_threshold(),
+            heavy_force_fragment_threshold: default_heavy_force_fragment_threshold(),
         }
     }
 }

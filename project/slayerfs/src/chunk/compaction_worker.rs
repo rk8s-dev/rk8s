@@ -294,7 +294,7 @@ where
 
                     info!(chunk_id, "Acquired sync compact lock, blocking writes");
 
-                    let result = compactor.compact_chunk(chunk_id).await;
+                    let result = compactor.compact_sequential(chunk_id).await;
                     if let Some(ref mut guard) = lock_guard {
                         guard.unlock().await;
                     }
@@ -303,18 +303,24 @@ where
                         Ok(CompactResult::Skipped) => {
                             debug!(chunk_id, "Sync compaction skipped");
                         }
-                        Ok(_) => {
-                            info!(chunk_id, "Sync compaction completed successfully");
+                        Ok(CompactResult::Light { removed }) => {
+                            info!(chunk_id, removed, "Sync light compaction completed");
+                        }
+                        Ok(CompactResult::Heavy { .. }) => {
+                            info!(chunk_id, "Sync heavy compaction completed");
                         }
                         Err(e) => {
                             warn!(chunk_id, error = %e, "Sync compaction failed");
                         }
                     }
                 } else {
-                    match compactor.compact_chunk(chunk_id).await {
+                    match compactor.compact_sequential(chunk_id).await {
                         Ok(CompactResult::Skipped) => {}
-                        Ok(_) => {
-                            debug!(chunk_id, "Async compaction completed");
+                        Ok(CompactResult::Light { removed }) => {
+                            debug!(chunk_id, removed, "Async light compaction completed");
+                        }
+                        Ok(CompactResult::Heavy { .. }) => {
+                            debug!(chunk_id, "Async heavy compaction completed");
                         }
                         Err(e) => {
                             warn!(chunk_id, error = %e, "Async compaction failed");

@@ -108,51 +108,58 @@ where
         Ok((true, is_sync))
     }
 
-    /// Try to compact a chunk.  Runs light first; if fragmentation is still
-    /// above threshold after light, falls through to heavy.
+    /// Try to compact a chunk with sequential light-then-heavy strategy.
+    pub async fn compact_sequential(&self, chunk_id: u64) -> Result<CompactResult, CompactorError> {
+        let (count, _, frag) = self.analyze_chunk(chunk_id).await?;
+        if count <= 1 {
+            return Ok(CompactResult::Skipped);
+        }
+
+        // Determine if heavy compaction might be needed
+        let mut needs_heavy = self.config.heavy_enabled
+            && (frag >= self.config.heavy_fragment_threshold
+                || count >= self.config.heavy_slice_threshold);
+
+        let mut light_removed = 0usize;
+        if self.config.light_enabled && count >= self.config.light_threshold {
+            let removed = self.compact_light(chunk_id).await?;
+
+            if let Some(n) = removed {
+                light_removed = n;
+
+                // Re-analyze
+                if n > 0 {
+                    let (count_after, _, frag_after) = self.analyze_chunk(chunk_id).await?;
+                    needs_heavy = self.config.heavy_enabled
+                        && (frag_after >= self.config.heavy_fragment_threshold
+                            || count_after >= self.config.heavy_slice_threshold);
+                    // if remaining slices are extremely fragmented, force heavy
+                    if frag_after >= self.config.heavy_force_fragment_threshold {
+                        needs_heavy = true;
+                    }
+                    // If light removed all redundancy, skip heavy
+                    if count_after <= 1 {
+                        needs_heavy = false;
+                    }
+                }
+            }
+        }
+        if needs_heavy {
+            let new_slice_id = self.compact_heavy(chunk_id).await?;
+            return Ok(CompactResult::Heavy { new_slice_id });
+        }
+        if light_removed > 0 {
+            return Ok(CompactResult::Light {
+                removed: light_removed,
+            });
+        }
+
+        Ok(CompactResult::Skipped)
+    }
+
+    // Wrapper, TODO:
     pub async fn compact_chunk(&self, chunk_id: u64) -> Result<CompactResult, CompactorError> {
-        let slices = self.meta_store.get_slices(chunk_id).await?;
-
-        if slices.len() <= 1 {
-            return Ok(CompactResult::Skipped);
-        }
-
-        let frag = SliceDesc::calculate_fragmentation(&slices);
-        if frag < self.config.min_fragment_ratio {
-            return Ok(CompactResult::Skipped);
-        }
-
-        let light_removed = match self.compact_light_inner(&slices, chunk_id).await? {
-            Some(removed) if removed > 0 => removed,
-            _ => 0,
-        };
-
-        let slices_after_light = self.meta_store.get_slices(chunk_id).await?;
-        if slices_after_light.len() <= 1 {
-            return if light_removed > 0 {
-                Ok(CompactResult::Light {
-                    removed: light_removed,
-                })
-            } else {
-                Ok(CompactResult::Skipped)
-            };
-        }
-
-        let frag_after_light = SliceDesc::calculate_fragmentation(&slices_after_light);
-        if frag_after_light < self.config.min_fragment_ratio {
-            return if light_removed > 0 {
-                Ok(CompactResult::Light {
-                    removed: light_removed,
-                })
-            } else {
-                Ok(CompactResult::Skipped)
-            };
-        }
-
-        let new_slice_id = self
-            .compact_heavy_inner(&slices_after_light, chunk_id)
-            .await?;
-        Ok(CompactResult::Heavy { new_slice_id })
+        self.compact_sequential(chunk_id).await
     }
 
     /// Scan all chunks and compact those exceeding the configured thresholds.
