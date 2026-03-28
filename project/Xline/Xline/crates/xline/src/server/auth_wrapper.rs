@@ -295,19 +295,19 @@ impl Protocol for AuthWrapper {
             command.set_auth_info(auth_info);
             req.command = command.encode();
         }
-        let meta = metadata_from_xlinerpc(&xlinerpc::MetaData::new());
+        let meta = metadata_from_xlinerpc(request.meta());
         let stream = CurpService::propose_stream(&self.curp_server, req, meta)
             .await
             .map_err(curp_error_to_xlinerpc_status)?;
         let mapped = stream.map(|r| r.map_err(curp_error_to_xlinerpc_status));
-        Ok(xlinerpc::Response::new(Box::pin(mapped)))
+        Ok(xlinerpc::Response::from_data(Box::pin(mapped)))
     }
 
     async fn record(
         &self,
         request: xlinerpc::Request<RecordRequest>,
     ) -> Result<xlinerpc::Response<RecordResponse>, Status> {
-        let meta = metadata_from_xlinerpc(&xlinerpc::MetaData::new());
+        let meta = metadata_from_xlinerpc(request.meta());
         Ok(xlinerpc::Response::from_data(
             CurpService::record(self, request.into_inner(), meta)
                 .map_err(curp_error_to_xlinerpc_status)?,
@@ -318,7 +318,7 @@ impl Protocol for AuthWrapper {
         &self,
         request: xlinerpc::Request<ReadIndexRequest>,
     ) -> Result<xlinerpc::Response<ReadIndexResponse>, Status> {
-        let meta = metadata_from_xlinerpc(&xlinerpc::MetaData::new());
+        let meta = metadata_from_xlinerpc(request.meta());
         Ok(xlinerpc::Response::from_data(
             CurpService::read_index(self, meta).map_err(curp_error_to_xlinerpc_status)?,
         ))
@@ -328,7 +328,7 @@ impl Protocol for AuthWrapper {
         &self,
         request: xlinerpc::Request<ShutdownRequest>,
     ) -> Result<xlinerpc::Response<ShutdownResponse>, Status> {
-        let meta = metadata_from_xlinerpc(&xlinerpc::MetaData::new());
+        let meta = metadata_from_xlinerpc(request.meta());
         Ok(xlinerpc::Response::from_data(
             CurpService::shutdown(self, request.into_inner(), meta)
                 .await
@@ -340,7 +340,7 @@ impl Protocol for AuthWrapper {
         &self,
         request: xlinerpc::Request<ProposeConfChangeRequest>,
     ) -> Result<xlinerpc::Response<ProposeConfChangeResponse>, Status> {
-        let meta = metadata_from_xlinerpc(&xlinerpc::MetaData::new());
+        let meta = metadata_from_xlinerpc(request.meta());
         Ok(xlinerpc::Response::from_data(
             CurpService::propose_conf_change(self, request.into_inner(), meta)
                 .await
@@ -352,7 +352,7 @@ impl Protocol for AuthWrapper {
         &self,
         request: xlinerpc::Request<PublishRequest>,
     ) -> Result<xlinerpc::Response<PublishResponse>, Status> {
-        let meta = metadata_from_xlinerpc(&xlinerpc::MetaData::new());
+        let meta = metadata_from_xlinerpc(request.meta());
         Ok(xlinerpc::Response::from_data(
             CurpService::publish(self, request.into_inner(), meta)
                 .map_err(curp_error_to_xlinerpc_status)?,

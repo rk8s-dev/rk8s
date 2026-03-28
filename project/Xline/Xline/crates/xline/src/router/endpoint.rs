@@ -140,7 +140,7 @@ where
         handler: F,
     ) -> Self
     where
-        InputScheme: Clone + Default + Message + Send + 'static,
+        InputScheme: Send + 'static,
         OutputScheme: Clone + Default + Message + Send + 'static,
         F: FnMut(T, XlineRequest<InputScheme>) -> Fut + Clone + Send + Sync + 'static,
         Fut: Future<Output = Result<XlineResponse<OutputScheme>, Status>> + Send + 'static,
