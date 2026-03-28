@@ -74,7 +74,7 @@ pub struct XlineServer {
     /// Auth config
     auth_config: AuthConfig,
     /// Client tls config (not used, kept for compatibility)
-    client_tls_config: Option<tonic::transport::ClientTlsConfig>,
+    client_tls_config: Option<()>,
     /// Server tls config (not used, kept for compatibility)
     _server_tls_config: Option<()>, 
     /// QUIC client for curp peer communication
@@ -120,30 +120,8 @@ impl XlineServer {
         auth_config: AuthConfig,
         tls_config: TlsConfig,
     ) -> Result<Self> {
-        // Create client TLS config if TLS is enabled
-        let client_tls_config = if tls_config.client_cert_path().is_some() || tls_config.client_ca_cert_path().is_some() {
-            let mut tls = tonic::transport::ClientTlsConfig::new();
-            
-            // Add client CA cert if provided
-            if let Some(ca_path) = tls_config.client_ca_cert_path() {
-                if let Ok(ca_cert) = tokio::fs::read(ca_path).await {
-                    tls = tls.ca_certificate(tonic::transport::Certificate::from_pem(&ca_cert));
-                }
-            }
-            
-            // Add client cert and key if provided
-            if let (Some(cert_path), Some(key_path)) = (tls_config.client_cert_path(), tls_config.client_key_path()) {
-                if let (Ok(cert), Ok(key)) = (tokio::fs::read(cert_path).await, tokio::fs::read(key_path).await) {
-                    if let Ok(identity) = tonic::transport::Identity::from_pem(&cert, &key) {
-                        tls = tls.identity(identity);
-                    }
-                }
-            }
-            
-            Some(tls)
-        } else {
-            None
-        };
+        // Client TLS config is not used anymore, kept for compatibility
+        let client_tls_config = None;
         let server_tls_config = None;
         let curp_storage = Arc::new(CurpDB::open(&cluster_config.curp_config().engine_cfg)?);
 

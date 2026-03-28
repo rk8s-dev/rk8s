@@ -2,17 +2,9 @@ use std::sync::Arc;
 
 use async_stream::stream;
 use clippy_utilities::OverflowArithmetic;
-<<<<<<< Hzm-5
 use xlinerpc::Status;
-=======
-use http::uri::PathAndQuery;
-use tonic::Status;
-use tonic::client::Grpc;
-use tonic::codec::ProstCodec;
-use tonic::transport::{Channel, ClientTlsConfig, Endpoint};
->>>>>>> main
+use curp::rpc::QuicChannel;
 use tracing::debug;
-use utils::build_endpoint;
 use xlineapi::{
     AuthInfo, EventType,
     command::{Command, CommandResponse, CurpClient, KeyRange, SyncResponse},
@@ -45,7 +37,7 @@ pub(super) struct LockServer {
     /// Id Generator
     id_gen: Arc<IdGenerator>,
     /// Server addresses
-    addrs: Vec<Endpoint>,
+    addrs: Vec<String>,
 }
 
 impl LockServer {
@@ -55,16 +47,9 @@ impl LockServer {
         auth_store: Arc<AuthStore>,
         id_gen: Arc<IdGenerator>,
         addrs: &[String],
-        client_tls_config: Option<ClientTlsConfig>,
+        _client_tls_config: Option<()>,
     ) -> Self {
-        let addrs = addrs
-            .iter()
-            .map(|addr| {
-                // Build endpoint with TLS config if provided
-                build_endpoint(addr, client_tls_config.as_ref())
-                    .unwrap_or_else(|e| panic!("invalid address: {addr}, error: {e}"))
-            })
-            .collect();
+        let addrs = addrs.to_vec();
         Self {
             client,
             auth_store,
@@ -140,9 +125,6 @@ impl LockServer {
         auth_info: Option<&AuthInfo>,
     ) -> Result<(), Status> {
         let rev = my_rev.overflow_sub(1);
-        let channel = Channel::balance_list(self.addrs.clone().into_iter());
-        let mut grpc = Grpc::new(channel);
-        let path = PathAndQuery::from_static("/etcdserverpb.Watch/Watch");
         loop {
             let range_end = KeyRange::get_prefix(&pfx);
             #[allow(clippy::as_conversions)] // this cast is always safe
@@ -161,32 +143,10 @@ impl LockServer {
                 Some(kv) => kv.key.clone(),
                 None => return Ok(()),
             };
-            let request_stream = stream! {
-                yield WatchRequest {
-                    request_union: Some(RequestUnion::CreateRequest(WatchCreateRequest {
-                        key: last_key,
-                        ..Default::default()
-                    })),
-                };
-            };
-            let mut response_stream: tonic::Streaming<crate::rpc::WatchResponse> = grpc
-                .streaming(
-                    tonic::Request::new(request_stream),
-                    path.clone(),
-                    ProstCodec::default(),
-                )
-                .await?
-                .into_inner();
-            while let Some(watch_res) = response_stream.message().await? {
-                #[allow(clippy::as_conversions)] // this cast is always safe
-                if watch_res
-                    .events
-                    .iter()
-                    .any(|e| e.r#type == EventType::Delete as i32)
-                {
-                    break;
-                }
-            }
+            
+            // For now, we'll just poll periodically instead of using streaming
+            // TODO: Implement proper watch with QUIC
+            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
         }
     }
 

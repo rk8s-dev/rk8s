@@ -200,24 +200,24 @@ impl AuthServer {
 
     pub(crate) async fn role_list(
         &self,
-        request: tonic::Request<AuthRoleListRequest>,
-    ) -> Result<tonic::Response<AuthRoleListResponse>, Status> {
+        request: xlinerpc::Request<AuthRoleListRequest>,
+    ) -> Result<xlinerpc::Response<AuthRoleListResponse>, Status> {
         debug!("Receive AuthRoleListRequest {:?}", request);
         self.handle_req(request).await
     }
 
     pub(crate) async fn role_delete(
         &self,
-        request: tonic::Request<AuthRoleDeleteRequest>,
-    ) -> Result<tonic::Response<AuthRoleDeleteResponse>, Status> {
+        request: xlinerpc::Request<AuthRoleDeleteRequest>,
+    ) -> Result<xlinerpc::Response<AuthRoleDeleteResponse>, Status> {
         debug!("Receive AuthRoleDeleteRequest {:?}", request);
         self.handle_req(request).await
     }
 
     pub(crate) async fn role_grant_permission(
         &self,
-        request: tonic::Request<AuthRoleGrantPermissionRequest>,
-    ) -> Result<tonic::Response<AuthRoleGrantPermissionResponse>, Status> {
+        request: xlinerpc::Request<AuthRoleGrantPermissionRequest>,
+    ) -> Result<xlinerpc::Response<AuthRoleGrantPermissionResponse>, Status> {
         debug!(
             "Receive AuthRoleGrantPermissionRequest {}",
             request.get_ref()
@@ -226,10 +226,10 @@ impl AuthServer {
         self.handle_req(request).await
     }
 
-    async fn role_revoke_permission(
+    pub(crate) async fn role_revoke_permission(
         &self,
-        request: tonic::Request<AuthRoleRevokePermissionRequest>,
-    ) -> Result<tonic::Response<AuthRoleRevokePermissionResponse>, Status> {
+        request: xlinerpc::Request<AuthRoleRevokePermissionRequest>,
+    ) -> Result<xlinerpc::Response<AuthRoleRevokePermissionResponse>, Status> {
         debug!(
             "Receive AuthRoleRevokePermissionRequest {}",
             request.get_ref()

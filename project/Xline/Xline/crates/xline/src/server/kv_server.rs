@@ -150,8 +150,8 @@ impl KvServer {
     #[instrument(skip_all)]
     async fn range(
         &self,
-        request: tonic::Request<RangeRequest>,
-    ) -> Result<tonic::Response<RangeResponse>, Status> {
+        request: xlinerpc::Request<RangeRequest>,
+    ) -> Result<xlinerpc::Response<RangeResponse>, Status> {
         let range_req = request.get_ref();
         range_req.validation()?;
         debug!("Receive grpc request: {}", range_req);
@@ -169,7 +169,7 @@ impl KvServer {
         };
 
         if let Response::ResponseRange(response) = res {
-            Ok(tonic::Response::new(response))
+            Ok(xlinerpc::Response::from_data(response))
         } else {
             unreachable!("Receive wrong response {res:?} for RangeRequest");
         }
@@ -182,15 +182,15 @@ impl KvServer {
     #[instrument(skip_all)]
     async fn put(
         &self,
-        request: tonic::Request<PutRequest>,
-    ) -> Result<tonic::Response<PutResponse>, Status> {
+        request: xlinerpc::Request<PutRequest>,
+    ) -> Result<xlinerpc::Response<PutResponse>, Status> {
         let put_req: &PutRequest = request.get_ref();
         put_req.validation()?;
         debug!("Receive grpc request: {:?}", put_req);
         let auth_info = self.auth_storage.try_get_auth_info_from_request(&request)?;
         let res = self.propose(request.into_inner(), auth_info).await?;
         if let Response::ResponsePut(response) = res {
-            Ok(tonic::Response::new(response))
+            Ok(xlinerpc::Response::from_data(response))
         } else {
             unreachable!("Receive wrong response {res:?} for PutRequest");
         }
@@ -290,7 +290,7 @@ impl KvServer {
 mod test {
     use super::*;
     use crate::rpc::{Request, RequestOp};
-    use tonic::Code;
+    use xlinerpc::Code;
     #[test]
     fn txn_check() {
         let txn_req = TxnRequest {

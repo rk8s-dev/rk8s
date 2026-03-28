@@ -7,7 +7,7 @@ use curp::{cmd::CommandExecutor as _, members::ClusterInfo, server::RawCurp};
 use engine::SnapshotApi;
 use futures::stream::Stream;
 use sha2::{Digest, Sha256};
-use tonic::Status;
+use xlinerpc::Status;
 use tracing::{debug, error};
 use xlineapi::{
     RequestWrapper,
@@ -87,7 +87,7 @@ impl MaintenanceServer {
     /// Propose request and get result with fast/slow path
     async fn propose<T>(
         &self,
-        request: tonic::Request<T>,
+        request: xlinerpc::Request<T>,
     ) -> Result<(CommandResponse, Option<SyncResponse>), Status>
     where
         T: Into<RequestWrapper> + Debug,
@@ -101,8 +101,8 @@ impl MaintenanceServer {
 
     pub(crate) async fn alarm(
         &self,
-        request: tonic::Request<AlarmRequest>,
-    ) -> Result<tonic::Response<AlarmResponse>, Status> {
+        request: xlinerpc::Request<AlarmRequest>,
+    ) -> Result<xlinerpc::Response<AlarmResponse>, Status> {
         let (res, sync_res) = self.propose(request).await?;
         let mut res: AlarmResponse = res.into_inner().into();
         if let Some(sync_res) = sync_res {
@@ -112,13 +112,13 @@ impl MaintenanceServer {
                 header.revision = revision;
             }
         }
-        Ok(tonic::Response::new(res))
+        Ok(xlinerpc::Response::from_data(res))
     }
 
     pub(crate) async fn status(
         &self,
-        _request: tonic::Request<StatusRequest>,
-    ) -> Result<tonic::Response<StatusResponse>, Status> {
+        _request: xlinerpc::Request<StatusRequest>,
+    ) -> Result<xlinerpc::Response<StatusResponse>, Status> {
         let is_learner = self.cluster_info.self_member().is_learner;
         let (leader, term, _) = self.raw_curp.leader();
         let commit_index = self.raw_curp.commit_index();
@@ -149,13 +149,13 @@ impl MaintenanceServer {
             db_size_in_use: size.numeric_cast(),
             is_learner,
         };
-        Ok(tonic::Response::new(response))
+        Ok(xlinerpc::Response::from_data(response))
     }
 
     async fn defragment(
         &self,
-        _request: tonic::Request<DefragmentRequest>,
-    ) -> Result<tonic::Response<DefragmentResponse>, Status> {
+        _request: xlinerpc::Request<DefragmentRequest>,
+    ) -> Result<xlinerpc::Response<DefragmentResponse>, Status> {
         Err(Status::unimplemented(
             "defragment is unimplemented".to_owned(),
         ))
@@ -163,9 +163,9 @@ impl MaintenanceServer {
 
     async fn hash(
         &self,
-        _request: tonic::Request<HashRequest>,
-    ) -> Result<tonic::Response<HashResponse>, Status> {
-        Ok(tonic::Response::new(HashResponse {
+        _request: xlinerpc::Request<HashRequest>,
+    ) -> Result<xlinerpc::Response<HashResponse>, Status> {
+        Ok(xlinerpc::Response::from_data(HashResponse {
             header: Some(self.header_gen.gen_header()),
             hash: self.db.hash()?,
         }))
@@ -187,14 +187,14 @@ impl MaintenanceServer {
 
     pub(crate) async fn snapshot(
         &self,
-        _request: tonic::Request<SnapshotRequest>,
+        _request: xlinerpc::Request<SnapshotRequest>,
     ) -> Result<
-        tonic::Response<Pin<Box<dyn Stream<Item = Result<SnapshotResponse, Status>> + Send>>>,
+        xlinerpc::Response<Pin<Box<dyn Stream<Item = Result<SnapshotResponse, Status>> + Send>>>,
         Status,
     > {
         let stream = snapshot_stream(self.header_gen.as_ref(), self.db.as_ref())?;
 
-        Ok(tonic::Response::new(Box::pin(stream)))
+        Ok(xlinerpc::Response::from_data(Box::pin(stream)))
     }
 
     async fn move_leader(
@@ -210,8 +210,8 @@ impl MaintenanceServer {
 
     async fn downgrade(
         &self,
-        _request: tonic::Request<DowngradeRequest>,
-    ) -> Result<tonic::Response<DowngradeResponse>, Status> {
+        _request: xlinerpc::Request<DowngradeRequest>,
+    ) -> Result<xlinerpc::Response<DowngradeResponse>, Status> {
         Err(Status::unimplemented(
             "downgrade is unimplemented".to_owned(),
         ))
