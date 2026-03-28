@@ -99,7 +99,6 @@ where
                 move |this: Arc<T>, request: xlinerpc::Request<FetchClusterRequest>| async move {
                     Ok(xlinerpc::Response::from_data(
                         CurpService::fetch_cluster(&*this, request.into_inner())
-                            .await
                             .map_err(curp_error_to_xlinerpc_status)?,
                     ))
                 },
@@ -109,7 +108,6 @@ where
                 move |this: Arc<T>, request: xlinerpc::Request<FetchReadStateRequest>| async move {
                     Ok(xlinerpc::Response::from_data(
                         CurpService::fetch_read_state(&*this, request.into_inner())
-                            .await
                             .map_err(curp_error_to_xlinerpc_status)?,
                     ))
                 },

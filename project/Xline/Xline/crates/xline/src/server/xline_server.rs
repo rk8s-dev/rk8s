@@ -452,7 +452,7 @@ impl XlineServer {
             }
             
             // Add health check service to router
-            xline_router.add_service("/", SimpleHealthCheckService)
+            xline_router.add_service("/grpc.health.v1.Health/Check", SimpleHealthCheckService)
         };
 
         Ok((xline_router, curp_router, curp_client))

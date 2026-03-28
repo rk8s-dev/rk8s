@@ -51,28 +51,6 @@ fn create_error_response(status: Status) -> http::Response<http_body::Full<Bytes
         .unwrap()
 }
 
-/// Create an HTTP response for a gRPC error with streaming body
-fn create_streaming_error_response<Output, RspStream>(status: Status) -> http::Response<GrpcStreamingBody<RspStream, Output>>
-where
-    RspStream: Stream<Item = Result<Output, Status>> + Send + 'static,
-    Output: Message + Default + Send + 'static + Clone,
-{
-    let status_code = status.code();
-    let status_message = status.message().to_string();
-    
-    // Create an empty stream since we have no data to send
-    let empty_stream = tokio_stream::empty::<Result<Output, Status>>();
-    let body = GrpcStreamingBody::new(empty_stream);
-    
-    http::Response::builder()
-        .status(http::StatusCode::OK) // gRPC errors still use 200 OK at HTTP level
-        .header(http::header::CONTENT_TYPE, "application/grpc")
-        .header("grpc-status", status_code.to_string())
-        .header("grpc-message", status_message)
-        .body(body)
-        .unwrap()
-}
-
 /// Custom body for gRPC streaming responses that encodes items incrementally
 #[pin_project::pin_project]
 pub(crate) struct GrpcStreamingBody<S, M>
@@ -254,7 +232,7 @@ where
                 Ok(bytes) => bytes,
                 Err(e) => {
                     let status = Status::internal(format!("Failed to read body: {}", e));
-                    return Ok(create_streaming_error_response::<Output, RspStream>(status));
+                    return Ok(create_error_response(status));
                 }
             };
 
@@ -264,12 +242,12 @@ where
                     Ok(req) => req,
                     Err(e) => {
                         let status = Status::internal(format!("Failed to decode request: {}", e));
-                        return Ok(create_streaming_error_response::<Output, RspStream>(status));
+                        return Ok(create_error_response(status));
                     }
                 },
                 Err(e) => {
                     let status = Status::internal(format!("Failed to decode gRPC frame: {}", e));
-                    return Ok(create_streaming_error_response::<Output, RspStream>(status));
+                    return Ok(create_error_response(status));
                 }
             };
 
@@ -277,7 +255,7 @@ where
             let xline_response = match method.call(xline_request).await {
                 Ok(resp) => resp,
                 Err(status) => {
-                    return Ok(create_streaming_error_response::<Output, RspStream>(status));
+                    return Ok(create_error_response(status));
                 }
             };
 
