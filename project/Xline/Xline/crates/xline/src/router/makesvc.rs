@@ -51,6 +51,28 @@ fn create_error_response(status: Status) -> http::Response<http_body::Full<Bytes
         .unwrap()
 }
 
+/// Create an HTTP response for a gRPC error with streaming body
+fn create_streaming_error_response<Output, RspStream>(status: Status) -> http::Response<GrpcStreamingBody<RspStream, Output>>
+where
+    RspStream: Stream<Item = Result<Output, Status>> + Send + 'static,
+    Output: Message + Default + Send + 'static + Clone,
+{
+    let status_code = status.code();
+    let status_message = status.message().to_string();
+    
+    // Create an empty stream since we have no data to send
+    let empty_stream = tokio_stream::empty::<Result<Output, Status>>();
+    let body = GrpcStreamingBody::new(empty_stream);
+    
+    http::Response::builder()
+        .status(http::StatusCode::OK) // gRPC errors still use 200 OK at HTTP level
+        .header(http::header::CONTENT_TYPE, "application/grpc")
+        .header("grpc-status", status_code.to_string())
+        .header("grpc-message", status_message)
+        .body(body)
+        .unwrap()
+}
+
 /// Custom body for gRPC streaming responses that encodes items incrementally
 #[pin_project::pin_project]
 pub(crate) struct GrpcStreamingBody<S, M>
@@ -84,17 +106,17 @@ where
     type Data = Bytes;
     type Error = Status;
 
-    fn poll_data(
+    fn poll_frame(
         self: Pin<&mut Self>,
         cx: &mut Context<'_>,
-    ) -> Poll<Option<Result<Self::Data, Self::Error>>> {
+    ) -> Poll<Option<Result<http_body::Frame<Self::Data>, Self::Error>>> {
         let mut this = self.project();
 
         loop {
-            // If we have buffered data, send it
+            // If we have buffered data, send it as a data frame
             if !this.encoding_buffer.is_empty() {
                 let data = Bytes::from(this.encoding_buffer.drain(..).collect());
-                return Poll::Ready(Some(Ok(data)));
+                return Poll::Ready(Some(Ok(http_body::Frame::data(data))));
             }
 
             // Get the next item from the stream
@@ -118,7 +140,10 @@ where
                     return Poll::Ready(Some(Err(Status::internal(format!("Stream error: {}", e)))));
                 }
                 Poll::Ready(None) => {
-                    return Poll::Ready(None); // Stream completed
+                    // Stream completed, send trailers
+                    let mut trailers = http::HeaderMap::new();
+                    trailers.insert("grpc-status", http::HeaderValue::from_static("0"));
+                    return Poll::Ready(Some(Ok(http_body::Frame::trailers(trailers))));
                 }
                 Poll::Pending => {
                     return Poll::Pending; // Wait for more data
@@ -127,22 +152,13 @@ where
         }
     }
 
-    fn poll_trailers(
-        self: Pin<&mut Self>,
-        _cx: &mut Context<'_>,
-    ) -> Poll<Result<Option<http::HeaderMap>, Self::Error>> {
-        // Send gRPC trailers
-        let mut trailers = http::HeaderMap::new();
-        trailers.insert("grpc-status", http::HeaderValue::from_static("0"));
-        Poll::Ready(Ok(Some(trailers)))
-    }
-
     fn is_end_stream(&self) -> bool {
         self.encoding_buffer.is_empty()
     }
 
     fn size_hint(&self) -> SizeHint {
-        SizeHint::default() // We don't know the size in advance for streaming
+        // We don't know the size in advance
+        SizeHint::default()
     }
 }
 
@@ -238,7 +254,7 @@ where
                 Ok(bytes) => bytes,
                 Err(e) => {
                     let status = Status::internal(format!("Failed to read body: {}", e));
-                    return Ok(create_error_response(status));
+                    return Ok(create_streaming_error_response::<Output, RspStream>(status));
                 }
             };
 
@@ -248,12 +264,12 @@ where
                     Ok(req) => req,
                     Err(e) => {
                         let status = Status::internal(format!("Failed to decode request: {}", e));
-                        return Ok(create_error_response(status));
+                        return Ok(create_streaming_error_response::<Output, RspStream>(status));
                     }
                 },
                 Err(e) => {
                     let status = Status::internal(format!("Failed to decode gRPC frame: {}", e));
-                    return Ok(create_error_response(status));
+                    return Ok(create_streaming_error_response::<Output, RspStream>(status));
                 }
             };
 
@@ -261,7 +277,7 @@ where
             let xline_response = match method.call(xline_request).await {
                 Ok(resp) => resp,
                 Err(status) => {
-                    return Ok(create_error_response(status));
+                    return Ok(create_streaming_error_response::<Output, RspStream>(status));
                 }
             };
 
@@ -633,12 +649,22 @@ where
             let response_bytes = xline_response.encode_to_vec()
                 .map_err(|e| Status::internal(format!("Failed to encode response: {}", e)))?;
 
+            // Wrap response in gRPC frame
+            // gRPC frame format: [flags (1 byte)] [length (4 bytes)] [data]
+            let mut framed_response = Vec::with_capacity(1 + 4 + response_bytes.len());
+            // Write flags (0 for uncompressed)
+            framed_response.push(0);
+            // Write length (big-endian)
+            framed_response.extend_from_slice(&u32::to_be_bytes(response_bytes.len() as u32));
+            // Write data
+            framed_response.extend_from_slice(&response_bytes);
+
             // Create HTTP response
             let response = http::Response::builder()
                 .status(http::StatusCode::OK)
                 .header(http::header::CONTENT_TYPE, "application/grpc")
                 .header("grpc-status", "0") // gRPC OK status code
-                .body(http_body::Full::from(Bytes::from(response_bytes)))
+                .body(http_body::Full::from(Bytes::from(framed_response)))
                 .unwrap();
 
             Ok(response)

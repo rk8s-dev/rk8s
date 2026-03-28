@@ -203,15 +203,15 @@ impl KvServer {
     #[instrument(skip_all)]
     async fn delete_range(
         &self,
-        request: tonic::Request<DeleteRangeRequest>,
-    ) -> Result<tonic::Response<DeleteRangeResponse>, Status> {
-        let delete_range_req = request.get_ref();
+        request: xlinerpc::Request<DeleteRangeRequest>,
+    ) -> Result<xlinerpc::Response<DeleteRangeResponse>, Status> {
+        let delete_range_req = request.data();
         delete_range_req.validation()?;
         debug!("Receive grpc request: {:?}", delete_range_req);
         let auth_info = self.auth_storage.try_get_auth_info_from_request(&request)?;
         let res = self.propose(request.into_inner(), auth_info).await?;
         if let Response::ResponseDeleteRange(response) = res {
-            Ok(tonic::Response::new(response))
+            Ok(xlinerpc::Response::from_data(response))
         } else {
             unreachable!("Receive wrong response {res:?} for DeleteRangeRequest");
         }
@@ -225,9 +225,9 @@ impl KvServer {
     #[instrument(skip_all)]
     async fn txn(
         &self,
-        request: tonic::Request<TxnRequest>,
-    ) -> Result<tonic::Response<TxnResponse>, Status> {
-        let txn_req = request.get_ref();
+        request: xlinerpc::Request<TxnRequest>,
+    ) -> Result<xlinerpc::Response<TxnResponse>, Status> {
+        let txn_req = request.data();
         txn_req.validation()?;
         debug!("Receive grpc request: {}", txn_req);
         txn_req.check_revision(
@@ -237,7 +237,7 @@ impl KvServer {
         let auth_info = self.auth_storage.try_get_auth_info_from_request(&request)?;
         let res = self.propose(request.into_inner(), auth_info).await?;
         if let Response::ResponseTxn(response) = res {
-            Ok(tonic::Response::new(response))
+            Ok(xlinerpc::Response::from_data(response))
         } else {
             unreachable!("Receive wrong response {res:?} for TxnRequest");
         }
@@ -249,12 +249,12 @@ impl KvServer {
     #[instrument(skip_all)]
     pub(crate) async fn compact(
         &self,
-        request: tonic::Request<CompactionRequest>,
-    ) -> Result<tonic::Response<CompactionResponse>, Status> {
+        request: xlinerpc::Request<CompactionRequest>,
+    ) -> Result<xlinerpc::Response<CompactionResponse>, Status> {
         debug!("Receive CompactionRequest {:?}", request);
         let compacted_revision = self.kv_storage.compacted_revision();
         let current_revision = self.kv_storage.revision();
-        let req = request.get_ref();
+        let req = request.data();
         req.check_revision(compacted_revision, current_revision)?;
         let auth_info = self.auth_storage.try_get_auth_info_from_request(&request)?;
         let physical = req.physical;
@@ -279,7 +279,7 @@ impl KvServer {
         }
 
         if let ResponseWrapper::CompactionResponse(response) = resp {
-            Ok(tonic::Response::new(response))
+            Ok(xlinerpc::Response::from_data(response))
         } else {
             panic!("Receive wrong response {resp:?} for CompactionRequest");
         }
@@ -448,31 +448,31 @@ impl Server {
         RouterEndpoint::new(self.kvserver)
             .add_unary_fn(
                 "/Range",
-                move |this: Arc<KvServer>, request: tonic::Request<RangeRequest>| async move {
+                move |this: Arc<KvServer>, request: xlinerpc::Request<RangeRequest>| async move {
                     this.range(request).await
                 },
             )
             .add_unary_fn(
                 "/Put",
-                move |this: Arc<KvServer>, request: tonic::Request<PutRequest>| async move {
+                move |this: Arc<KvServer>, request: xlinerpc::Request<PutRequest>| async move {
                     this.put(request).await
                 },
             )
             .add_unary_fn(
                 "/DeleteRange",
-                move |this: Arc<KvServer>, request: tonic::Request<DeleteRangeRequest>| async move {
+                move |this: Arc<KvServer>, request: xlinerpc::Request<DeleteRangeRequest>| async move {
                     this.delete_range(request).await
                 },
             )
             .add_unary_fn(
                 "/Txn",
-                move |this: Arc<KvServer>, request: tonic::Request<TxnRequest>| async move {
+                move |this: Arc<KvServer>, request: xlinerpc::Request<TxnRequest>| async move {
                     this.txn(request).await
                 },
             )
             .add_unary_fn(
                 "/Compact",
-                move |this: Arc<KvServer>, request: tonic::Request<CompactionRequest>| async move {
+                move |this: Arc<KvServer>, request: xlinerpc::Request<CompactionRequest>| async move {
                     this.compact(request).await
                 },
             )

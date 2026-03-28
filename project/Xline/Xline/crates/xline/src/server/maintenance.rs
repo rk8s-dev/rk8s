@@ -291,49 +291,49 @@ impl Server {
         RouterEndpoint::new(self.server)
             .add_unary_fn(
                 "/Alarm",
-                move |this: Arc<MaintenanceServer>, request: tonic::Request<AlarmRequest>| async move {
+                move |this: Arc<MaintenanceServer>, request: xlinerpc::Request<AlarmRequest>| async move {
                     this.alarm(request).await
                 },
             )
             .add_unary_fn(
                 "/Status",
-                move |this: Arc<MaintenanceServer>, request: tonic::Request<StatusRequest>| async move {
+                move |this: Arc<MaintenanceServer>, request: xlinerpc::Request<StatusRequest>| async move {
                     this.status(request).await
                 },
             )
             .add_unary_fn(
                 "/Defragment",
-                move |this: Arc<MaintenanceServer>, request: tonic::Request<DefragmentRequest>| async move {
+                move |this: Arc<MaintenanceServer>, request: xlinerpc::Request<DefragmentRequest>| async move {
                     this.defragment(request).await
                 },
             )
             .add_unary_fn(
                 "/Hash",
-                move |this: Arc<MaintenanceServer>, request: tonic::Request<HashRequest>| async move {
+                move |this: Arc<MaintenanceServer>, request: xlinerpc::Request<HashRequest>| async move {
                     this.hash(request).await
                 },
             )
             .add_unary_fn(
                 "/HashKV",
-                move |this: Arc<MaintenanceServer>, request: tonic::Request<HashKvRequest>| async move {
+                move |this: Arc<MaintenanceServer>, request: xlinerpc::Request<HashKvRequest>| async move {
                     this.hash_kv(request).await
                 }
             )
             .add_server_streaming_fn(
                 "/Snapshot",
-                move |this: Arc<MaintenanceServer>, request: tonic::Request<SnapshotRequest>| async move {
+                move |this: Arc<MaintenanceServer>, request: xlinerpc::Request<SnapshotRequest>| async move {
                     this.snapshot(request).await
                 },
             )
             .add_unary_fn(
                 "/MoveLeader",
-                move |this: Arc<MaintenanceServer>, request: tonic::Request<MoveLeaderRequest>| async move {
+                move |this: Arc<MaintenanceServer>, request: xlinerpc::Request<MoveLeaderRequest>| async move {
                     this.move_leader(request).await
                 },
             )
             .add_unary_fn(
                 "/Downgrade",
-                move |this: Arc<MaintenanceServer>, request: tonic::Request<DowngradeRequest>| async move {
+                move |this: Arc<MaintenanceServer>, request: xlinerpc::Request<DowngradeRequest>| async move {
                     this.downgrade(request).await
                 },
             )

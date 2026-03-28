@@ -55,14 +55,14 @@ impl LockServer {
         auth_store: Arc<AuthStore>,
         id_gen: Arc<IdGenerator>,
         addrs: &[String],
-        _client_tls_config: Option<()>, // Not used with gm-quic
+        client_tls_config: Option<ClientTlsConfig>,
     ) -> Self {
         let addrs = addrs
             .iter()
             .map(|addr| {
-                // Build endpoint without TLS config since we're using gm-quic
-                Endpoint::from_shared(addr.to_string())
-                    .unwrap_or_else(|_e| panic!("invalid address: {addr}"))
+                // Build endpoint with TLS config if provided
+                build_endpoint(addr, client_tls_config.as_ref())
+                    .unwrap_or_else(|e| panic!("invalid address: {addr}, error: {e}"))
             })
             .collect();
         Self {

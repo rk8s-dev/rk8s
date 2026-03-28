@@ -458,31 +458,31 @@ impl Server {
         RouterEndpoint::new(self.lease_server)
             .add_unary_fn(
                 "/LeaseGrant",
-                move |this: Arc<LeaseServer>, request: tonic::Request<LeaseGrantRequest>| async move {
+                move |this: Arc<LeaseServer>, request: xlinerpc::Request<LeaseGrantRequest>| async move {
                     this.lease_grant(request).await
                 },
             )
             .add_unary_fn(
                 "/LeaseRevoke",
-                move |this: Arc<LeaseServer>, request: tonic::Request<LeaseRevokeRequest>| async move {
+                move |this: Arc<LeaseServer>, request: xlinerpc::Request<LeaseRevokeRequest>| async move {
                     this.lease_revoke(request).await
                 },
             )
             .add_streaming_fn(
                 "/LeaseKeepAlive",
-                move |this: Arc<LeaseServer>, request: tonic::Request<tonic::Streaming<LeaseKeepAliveRequest>>| async move {
+                move |this: Arc<LeaseServer>, request: xlinerpc::Request<Box<dyn Stream<Item = Result<LeaseKeepAliveRequest, xlinerpc::Status>> + Send + Unpin + 'static>>| async move {
                     this.lease_keep_alive(request).await
                 },
             )
             .add_unary_fn(
                 "/LeaseTimeToLive",
-                move |this: Arc<LeaseServer>, request: tonic::Request<LeaseTimeToLiveRequest>| async move {
+                move |this: Arc<LeaseServer>, request: xlinerpc::Request<LeaseTimeToLiveRequest>| async move {
                     this.lease_time_to_live(request).await
                 },
             )
             .add_unary_fn(
                 "/LeaseLeases",
-                move |this: Arc<LeaseServer>, request: tonic::Request<LeaseLeasesRequest>| async move {
+                move |this: Arc<LeaseServer>, request: xlinerpc::Request<LeaseLeasesRequest>| async move {
                     this.lease_leases(request).await
                 },
             )
