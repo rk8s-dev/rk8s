@@ -116,6 +116,40 @@ impl<'a> NodeRegister<'a> {
             }
         }
 
+        // Push credentials when we have an authoritative snapshot. If vault
+        // is not configured, send an empty list to clear stale worker state.
+        // If vault read fails, skip the update so we do not overwrite a valid
+        // in-memory cache with an accidental empty snapshot.
+        let initial_registry_credentials = match self.shared.vault.as_ref() {
+            Some(vault) => match vault.list_registry_credentials().await {
+                Ok(creds) => Some(creds),
+                Err(e) => {
+                    log::warn!(
+                        "Failed to load registry credentials for {}: {}; skipping credential sync",
+                        node_id,
+                        e
+                    );
+                    None
+                }
+            },
+            None => Some(Vec::new()),
+        };
+        if let Some(initial_registry_credentials) = initial_registry_credentials {
+            if !initial_registry_credentials.is_empty()
+                && !crate::protocol::config::config_ref().tls_config.enable
+            {
+                log::warn!(
+                    "Sending {} registry credential(s) to {node_id} over non-TLS QUIC; \
+                     enable TLS in production to protect secrets in transit",
+                    initial_registry_credentials.len(),
+                );
+            }
+            let msg = RksMessage::SetRegistryCredentials(initial_registry_credentials);
+            if let Err(e) = msg_tx.try_send(msg) {
+                log::warn!("Failed to send registry credentials to {}: {}", node_id, e);
+            }
+        }
+
         self.conn.send_msg(&RksMessage::Ack).await?;
 
         let conn = self.conn.clone();

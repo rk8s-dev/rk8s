@@ -48,21 +48,11 @@ impl Acl {
     pub fn check_permission(&self, uid: u32, gids: &[u32], flag: AclFlags) -> bool {
         for entry in &self.entries {
             match &entry.subject {
-                AclSubject::User(u) if *u == uid => {
-                    if entry.flags.contains(flag) {
-                        return true;
-                    }
+                AclSubject::User(u) if *u == uid && entry.flags.contains(flag) => return true,
+                AclSubject::Group(g) if gids.contains(g) && entry.flags.contains(flag) => {
+                    return true;
                 }
-                AclSubject::Group(g) if gids.contains(g) => {
-                    if entry.flags.contains(flag) {
-                        return true;
-                    }
-                }
-                AclSubject::Other => {
-                    if entry.flags.contains(flag) {
-                        return true;
-                    }
-                }
+                AclSubject::Other if entry.flags.contains(flag) => return true,
                 _ => {}
             }
         }

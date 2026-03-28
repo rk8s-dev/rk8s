@@ -82,6 +82,29 @@ pub async fn dispatch_worker(
             let log_key = format!("{}/{}", namespace, pod_name);
             shared.log_response_registry.send(&log_key, msg).await;
         }
+        RksMessage::GetRegistryCredentials => {
+            info!(
+                target: "rks::node::worker_dispatch",
+                "GetRegistryCredentials received"
+            );
+            let credentials = match shared.vault.as_ref() {
+                Some(vault) => match vault.list_registry_credentials().await {
+                    Ok(creds) => Some(creds),
+                    Err(e) => {
+                        error!(
+                            target: "rks::node::worker_dispatch",
+                            "failed to list registry credentials: {e}; skipping credential update"
+                        );
+                        None
+                    }
+                },
+                None => Some(vec![]),
+            };
+            if let Some(credentials) = credentials {
+                conn.send_msg(&RksMessage::SetRegistryCredentials(credentials))
+                    .await?;
+            }
+        }
         _ => warn!(
             target: "rks::node::worker_dispatch",
             "unknown or unexpected message from worker"

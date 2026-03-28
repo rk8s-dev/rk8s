@@ -1,5 +1,5 @@
 use anyhow::{Result, anyhow};
-use common::{ContainerSpec, PodTask, VolumeSourceType};
+use common::{ContainerSpec, PodTask, RegistryCredential, VolumeSourceType};
 use json::JsonValue;
 use libcontainer::syscall::syscall::create_syscall;
 use liboci_cli::{Create, Delete, Kill, Start};
@@ -71,13 +71,66 @@ fn check_pause_alive(pid: i32) -> Result<(), PauseDeadError> {
 
 struct RkforgeImagePuller {}
 
+fn merge_auth_config_with_registry_credentials(
+    mut auth_config: rkforge::config::auth::AuthConfig,
+    creds: Vec<RegistryCredential>,
+) -> rkforge::config::auth::AuthConfig {
+    for cred in creds {
+        let entry = rkforge::config::auth::AuthEntry::new(cred.pat, cred.registry);
+        auth_config
+            .entries
+            .retain(|existing| existing.url != entry.url);
+        auth_config.entries.push(entry);
+    }
+    auth_config
+}
+
+impl RkforgeImagePuller {
+    /// Build an [rkforge::config::auth::AuthConfig] by overlaying rks-provided
+    /// credentials on top of the local rkforge config.
+    fn build_auth_config(&self) -> Option<rkforge::config::auth::AuthConfig> {
+        let creds = crate::config::get_all_registry_credentials();
+        if creds.is_empty() {
+            return None;
+        }
+        let local_auth_config = match rkforge::config::auth::AuthConfig::load() {
+            Ok(config) => config,
+            Err(err) => {
+                debug!(
+                    "failed to load local rkforge auth config while merging rks credentials: {err}"
+                );
+                rkforge::config::auth::AuthConfig::default()
+            }
+        };
+        Some(merge_auth_config_with_registry_credentials(
+            local_auth_config,
+            creds,
+        ))
+    }
+}
+
 #[async_trait::async_trait]
 impl ImagePuller for RkforgeImagePuller {
     async fn pull_or_get_image(&self, image_ref: &str) -> Result<(PathBuf, Vec<PathBuf>)> {
+        if let Some(auth_config) = self.build_auth_config() {
+            return rkforge::pull::pull_or_get_image_with_config(
+                image_ref,
+                None::<&str>,
+                &auth_config,
+            )
+            .await;
+        }
         rkforge::pull::pull_or_get_image(image_ref, None::<&str>).await
     }
 
     fn sync_pull_or_get_image(&self, image_ref: &str) -> Result<(PathBuf, Vec<PathBuf>)> {
+        if let Some(auth_config) = self.build_auth_config() {
+            return rkforge::pull::sync_pull_or_get_image_with_config(
+                image_ref,
+                None::<&str>,
+                &auth_config,
+            );
+        }
         rkforge::pull::sync_pull_or_get_image(image_ref, None::<&str>)
     }
 }
@@ -1142,3 +1195,64 @@ impl TaskRunner {
 //         assert_eq!(res.memory_limit_in_bytes, 30 * 1024 * 1024);
 //     }
 // }
+
+#[cfg(test)]
+mod tests {
+    use super::merge_auth_config_with_registry_credentials;
+    use common::RegistryCredential;
+    use rkforge::config::auth::{AuthConfig, AuthEntry};
+
+    #[test]
+    fn merge_auth_config_preserves_unmanaged_local_entries() {
+        let local = AuthConfig {
+            entries: vec![
+                AuthEntry::new("local-token", "local.registry"),
+                AuthEntry::new("other-token", "other.registry"),
+            ],
+            insecure_registries: vec!["insecure.local:5000".to_string()],
+        };
+
+        let merged = merge_auth_config_with_registry_credentials(
+            local,
+            vec![RegistryCredential {
+                registry: "central.registry".to_string(),
+                pat: "central-token".to_string(),
+            }],
+        );
+
+        assert_eq!(merged.entries.len(), 3);
+        assert!(
+            merged
+                .entries
+                .iter()
+                .any(|entry| entry.url == "local.registry" && entry.pat == "local-token")
+        );
+        assert!(
+            merged
+                .entries
+                .iter()
+                .any(|entry| entry.url == "central.registry" && entry.pat == "central-token")
+        );
+        assert_eq!(merged.insecure_registries, vec!["insecure.local:5000"]);
+    }
+
+    #[test]
+    fn merge_auth_config_prefers_central_entry_on_registry_conflict() {
+        let local = AuthConfig {
+            entries: vec![AuthEntry::new("local-token", "shared.registry")],
+            insecure_registries: Vec::new(),
+        };
+
+        let merged = merge_auth_config_with_registry_credentials(
+            local,
+            vec![RegistryCredential {
+                registry: "shared.registry".to_string(),
+                pat: "central-token".to_string(),
+            }],
+        );
+
+        assert_eq!(merged.entries.len(), 1);
+        assert_eq!(merged.entries[0].url, "shared.registry");
+        assert_eq!(merged.entries[0].pat, "central-token");
+    }
+}

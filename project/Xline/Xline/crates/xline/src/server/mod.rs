@@ -17,7 +17,7 @@ mod lock_server;
 /// Xline maintenance client
 mod maintenance;
 /// Xline QUIC direct-RPC bridge
-mod quic_service;
+pub(crate) mod quic_service;
 /// Xline watch server
 mod watch_server;
 /// Xline server
