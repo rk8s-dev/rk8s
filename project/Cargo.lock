@@ -7736,6 +7736,7 @@ dependencies = [
  "reqwest 0.12.28",
  "rtnetlink",
  "rustls 0.23.36",
+ "rustls-pemfile",
  "serde",
  "serde_json",
  "serde_yaml",
@@ -7748,6 +7749,7 @@ dependencies = [
  "tokio-util",
  "tonic 0.14.4",
  "uuid",
+ "x509-parser",
 ]
 
 [[package]]

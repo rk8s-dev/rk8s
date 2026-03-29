@@ -5,6 +5,7 @@ mod controllers;
 mod csi;
 mod dns;
 mod internal;
+mod login;
 mod network;
 mod node;
 mod protocol;
@@ -53,6 +54,27 @@ async fn main() -> anyhow::Result<()> {
             handle_start_command().await?;
         }
         Commands::Gen { sub } => sub.handle().await?,
+        Commands::Login {
+            config,
+            server,
+            skip_tls_verify,
+        } => {
+            load_config(config.to_str().unwrap())?;
+            let vault = Vault::open().await?;
+            let (registry, pat, _username) = login::do_login(server, *skip_tls_verify).await?;
+            vault.store_registry_credential(&registry, &pat).await?;
+            println!("Stored credential for registry: {registry}");
+            notify_credential_refresh().await;
+        }
+        Commands::Logout { config, registry } => {
+            load_config(config.to_str().unwrap())?;
+            let vault = Vault::open().await?;
+            let registry = login::normalize_registry_host(registry)?;
+            vault.delete_registry_credential(&registry).await?;
+            println!("Removed credentials for registry: {registry}");
+            notify_credential_refresh().await;
+        }
+        Commands::Config { sub } => sub.handle().await?,
     }
 
     Ok(())
@@ -101,13 +123,13 @@ async fn handle_start_command() -> anyhow::Result<()> {
         xline_store.clone(),
         local_manager,
         vault.clone(),
-        node_registry,
+        node_registry.clone(),
         network_config,
         service_ip_allocator,
         volume_orchestrator,
     ));
 
-    internal::start_internal_server(vault.clone()).await?;
+    internal::start_internal_server(vault.clone(), node_registry).await?;
     RksNode::new(cfg.addr.clone(), shared).run().await
 }
 
@@ -115,14 +137,25 @@ async fn prepare_xline_options(cfg: &Config) -> anyhow::Result<(XlineOptions, Op
     let mut option = XlineOptions::new(cfg.xline_config.endpoints.clone());
 
     if !cfg.tls_config.enable {
-        return Ok((option, None));
+        // Non-TLS: try file-backend vault for credential features
+        let vault = match Vault::open_file_backend().await {
+            Ok(v) => {
+                info!("opened file-backend vault for credential storage");
+                Some(Arc::new(v))
+            }
+            Err(e) => {
+                info!(
+                    "file-backend vault not available ({}), credential features disabled",
+                    e
+                );
+                None
+            }
+        };
+        return Ok((option, vault));
     }
 
-    let folder = &cfg.tls_config.vault_folder;
-    let root_cert = tokio::fs::read_to_string(folder.join("root.pem")).await?;
-    let vault = Arc::new(Vault::migrate().await?);
-    let resp = vault.issue_rks_cert().await?;
-    option = option.with_tls(&root_cert, &resp.certificate, &resp.private_key)?;
+    let vault = Arc::new(Vault::open().await?);
+    option = Vault::xline_options_for_rks().await?;
 
     Ok((option, Some(vault)))
 }
@@ -395,4 +428,40 @@ async fn register_controllers(
         .register(Arc::new(RwLock::new(nft)), workers)
         .await?;
     Ok(())
+}
+
+/// Best-effort notification to the running rks daemon to refresh and push
+/// registry credentials to all connected workers.
+async fn notify_credential_refresh() {
+    let client = match reqwest::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(1))
+        .timeout(std::time::Duration::from_secs(2))
+        .build()
+    {
+        Ok(client) => client,
+        Err(_) => {
+            println!(
+                "Note: rks daemon not running or unreachable. \
+                 Workers will receive credentials at next registration."
+            );
+            return;
+        }
+    };
+
+    match client
+        .post("http://127.0.0.1:6789/registry/refresh")
+        .send()
+        .await
+    {
+        Ok(resp) if resp.status().is_success() => {
+            let body = resp.text().await.unwrap_or_default();
+            println!("{body}");
+        }
+        _ => {
+            println!(
+                "Note: rks daemon not running or unreachable. \
+                 Workers will receive credentials at next registration."
+            );
+        }
+    }
 }

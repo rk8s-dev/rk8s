@@ -59,6 +59,8 @@ tokio-stream = { workspace = true }
 uuid = { workspace = true }
 dashmap = { workspace = true }
 lru = { workspace = true }
+rustls-pemfile = { workspace = true }
+x509-parser = { workspace = true }
 
 [dev-dependencies]
 serial_test = { workspace = true }

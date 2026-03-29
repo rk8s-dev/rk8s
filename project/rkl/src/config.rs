@@ -9,7 +9,8 @@
 //! - `RKL_USE_LIBFUSE`: set to `1` to use libfuse overlay backend, `0` for Linux native.
 //!   Defaults to `0` (native). Both modes require root privileges.
 
-use std::sync::LazyLock;
+use common::RegistryCredential;
+use std::sync::{LazyLock, RwLock};
 
 /// Global overlay configuration for RKL container rootfs.
 pub struct OverlayConfig {
@@ -29,3 +30,22 @@ pub static OVERLAY_CONFIG: LazyLock<OverlayConfig> = LazyLock::new(|| OverlayCon
         .map(|v| v == "1")
         .unwrap_or(false),
 });
+
+/// Registry credentials received from rks at node registration.
+/// Used by `RkforgeImagePuller` to authenticate against OCI registries.
+static REGISTRY_CREDENTIALS: RwLock<Vec<RegistryCredential>> = RwLock::new(Vec::new());
+
+/// Replace the stored registry credentials with a new set received from rks.
+pub fn set_registry_credentials(creds: Vec<RegistryCredential>) {
+    if let Ok(mut store) = REGISTRY_CREDENTIALS.write() {
+        *store = creds;
+    }
+}
+
+/// Return a snapshot of all stored credentials.
+pub fn get_all_registry_credentials() -> Vec<RegistryCredential> {
+    REGISTRY_CREDENTIALS
+        .read()
+        .map(|store| store.clone())
+        .unwrap_or_default()
+}

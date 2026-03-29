@@ -930,6 +930,9 @@ pub enum RksMessage {
         status: PodStatus,
     },
 
+    // Registry credential operations
+    GetRegistryCredentials,
+
     // Log operations
     GetPodLogs {
         pod_name: String,
@@ -971,6 +974,9 @@ pub enum RksMessage {
     // (Podname, Podip)
     SetPodip((String, String)),
     Certificate(IssueCertificateResponse),
+
+    // Registry credential responses
+    SetRegistryCredentials(Vec<RegistryCredential>),
 
     // Log responses
     PodLogsChunk {
@@ -1067,6 +1073,7 @@ impl std::fmt::Debug for RksMessage {
             Self::UpdateNftablesRules(rules) => {
                 write!(f, "RksMessage::UpdateNftablesRules (len={})", rules.len())
             }
+            Self::GetRegistryCredentials => f.write_str("RksMessage::GetRegistryCredentials"),
             Self::CsiRequest { id, message } => {
                 write!(f, "RksMessage::CsiRequest(id={}, {:?})", id, message)
             }
@@ -1125,6 +1132,13 @@ impl std::fmt::Debug for RksMessage {
                 "RksMessage::SetDns {{ ip: {}, dns_port: {} }}",
                 ip, dns_port,
             ),
+            Self::SetRegistryCredentials(creds) => {
+                write!(
+                    f,
+                    "RksMessage::SetRegistryCredentials {{ count: {} }}",
+                    creds.len()
+                )
+            }
             Self::Certificate(_) => f.write_str("RksMessage::Certificate"),
             Self::GetPodLogs {
                 pod_name,
@@ -1253,6 +1267,7 @@ impl Display for RksMessage {
                 "Update status for pod '{}' in namespace '{}'",
                 pod_name, pod_namespace
             ),
+            Self::GetRegistryCredentials => f.write_str("Get registry credentials from rks"),
             Self::CsiRequest { id, message } => write!(f, "CSI request [{}]: {}", id, message),
             Self::CsiResponse { id, message } => write!(f, "CSI response [{}]: {}", id, message),
 
@@ -1365,6 +1380,9 @@ impl Display for RksMessage {
             Self::SetPodip((pod_name, pod_ip)) => {
                 write!(f, "Set pod '{}' IP address to {}", pod_name, pod_ip)
             }
+            Self::SetRegistryCredentials(creds) => {
+                write!(f, "Set {} registry credential(s)", creds.len())
+            }
             Self::Certificate(_) => f.write_str("Certificate response received"),
             Self::GetPodLogs {
                 pod_name,
@@ -1417,6 +1435,14 @@ impl Display for RksMessage {
             }
         }
     }
+}
+
+/// A registry credential entry used for OCI image pull authentication.
+/// Stored centrally by rks (via libvault KV) and distributed to rkl workers.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RegistryCredential {
+    pub registry: String,
+    pub pat: String,
 }
 
 /// Deployment revision information for rollback history
