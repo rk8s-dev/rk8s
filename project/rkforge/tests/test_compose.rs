@@ -1,11 +1,9 @@
 use std::net::IpAddr;
 use std::net::Ipv4Addr;
-use std::process::Command;
-use std::str::FromStr;
+
 use trust_dns_resolver::Resolver;
 use trust_dns_resolver::config::*;
 
-use nix::unistd::pause;
 use serial_test::serial;
 
 use rkforge::commands::compose::{ComposeCommand, DownArgs, PsArgs, UpArgs, compose_execute};
