@@ -127,7 +127,6 @@ pub struct ContainerRunner {
     volumes: Option<Vec<String>>,
     requested_devices: Vec<DeviceRequest>,
     ip: Option<IpAddr>,
-
     compose_assigned_ip: Option<IpAddr>,
     /// Persistent overlay rootfs mount (None when disabled)
     rootfs_mount: Option<RootfsMount>,

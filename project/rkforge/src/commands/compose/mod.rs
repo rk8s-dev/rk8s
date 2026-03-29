@@ -2,6 +2,7 @@ use std::{
     collections::{HashMap, VecDeque},
     env::{self},
     fs::{self, File},
+    net::IpAddr,
     path::{Path, PathBuf},
     vec,
 };
@@ -322,12 +323,19 @@ impl ComposeManager {
                             e
                         )
                     })?;
-                runner.set_compose_assigned_ip(std::net::IpAddr::V4(allocated_ip));
+                let ip = IpAddr::V4(allocated_ip);
+                runner.set_compose_assigned_ip(ip);
 
                 runner.add_mounts(mounts);
                 runner.add_mounts(configs_mounts);
                 create_resolv_conf()?;
                 add_resolv_conf(&mut runner);
+
+                let container_id = runner.id();
+                let opts = self
+                    .network_manager
+                    .create_network_opts(container_id.clone(), ip)?;
+
                 match runner.run() {
                     std::result::Result::Ok(_) => {
                         self.containers.push(runner.get_container_state()?);
@@ -355,9 +363,10 @@ impl ComposeManager {
                         return Err(err);
                     }
                 };
-                self.network_manager
-                    .after_container_started(&runner)
-                    .map_err(|e| anyhow!("network setup failed: {e}"))?;
+
+                // setup
+                let pid = runner.get_container_state()?.pid.unwrap();
+                NetworkManager::setup_network(&opts, pid, container_id)?;
             }
         }
         // return the compose application's state

@@ -233,147 +233,140 @@ impl NetworkManager {
         Ok(())
     }
 
-    pub(crate) fn after_container_started(&self, runner: &ContainerRunner) -> Result<()> {
-        let container_id = runner.id();
-        if runner
-            .ip()
-            .unwrap_or(IpAddr::V4(Ipv4Addr::UNSPECIFIED))
-            .is_ipv4()
-        {
-            let alias = vec![runner.id()];
-            let mut networks = HashMap::new();
-            let mut network_info = HashMap::new();
-            for (network_name, _) in self.map.clone() {
-                let network_se = match self.network_service.get(&network_name) {
-                    Some(network) => network,
-                    None => continue,
-                };
-                for (_container, container_spec) in network_se {
-                    let Some(container_name) = container_spec.container_name.as_ref() else {
-                        continue;
-                    };
-                    if *container_name == container_id {
-                        let container_ip = self
-                            .get_container_ip(&container_id, &network_name)
-                            .map(IpAddr::V4)
-                            .ok_or_else(|| {
-                                anyhow!(
-                                    "[container {}] No allocated IP for network {}",
-                                    container_id,
-                                    network_name
-                                )
-                            })?;
-                        let (gateway, subnet_net) = self
-                            .network_subnets
-                            .get(&network_name)
-                            .map(|s| {
-                                (
-                                    s.gateway,
-                                    IpNet::new(IpAddr::V4(s.subnet.network()), s.subnet.prefix())
-                                        .unwrap(),
-                                )
-                            })
-                            .ok_or_else(|| anyhow!("No subnet for network {}", network_name))?;
-                        let network_opts = PerNetworkOptions {
-                            aliases: Some(alias.clone()),
-                            interface_name: self
-                                .network_interface
-                                .get(&network_name)
-                                .unwrap_or(&"vethcni0".to_string())
-                                .clone(),
-                            static_ips: Some(vec![container_ip]),
-                            static_mac: None,
-                            options: None,
-                        };
-                        let network_interface = Some(
-                            self.network_interface
-                                .get(&network_name)
-                                .unwrap_or(&"vethcni0".to_string())
-                                .clone(),
-                        );
-                        let network = Network {
-                            dns_enabled: true,
-                            driver: "bridge".to_string(),
-                            id: network_name.clone(),
-                            internal: false,
-                            ipv6_enabled: false,
-                            name: network_name.clone(),
-                            network_interface,
-                            options: None,
-                            ipam_options: None,
-                            subnets: Some(vec![Subnet {
-                                gateway: Some(IpAddr::V4(gateway)),
-                                lease_range: None,
-                                subnet: subnet_net,
-                            }]),
-                            routes: None,
-                            network_dns_servers: Some(vec![]),
-                        };
-
-                        networks.insert(network_name.clone(), network_opts);
-                        network_info.insert(network_name, network);
-                        break;
-                    }
-                }
-            }
-            let opts = NetworkOptions {
-                container_id: runner.id(),
-                container_name: runner.id(),
-                container_hostname: None,
-                networks,
-                network_info,
-                port_mappings: None,
-                dns_servers: None,
-            };
-
-            let pid = runner
-                .get_container_state()?
-                .pid
-                .ok_or_else(|| anyhow!("[container {}] PID not found", runner.id()))?;
-            let netns_path = format!("/proc/{pid}/ns/net");
-            if !Path::new(&netns_path).exists() {
-                return Err(anyhow!(
-                    "[container {}] netns path not found: {netns_path}",
-                    runner.id()
-                ));
-            }
-            let netns_path_clone = netns_path.clone();
-            let setup = Setup::new(netns_path);
-            let json_path = create_tmp_netavark_json(&opts, &runner.id())?;
-            let config_dir = default_netavark_config_dir();
-            fs::create_dir_all(PathBuf::from(&config_dir))?;
-            setup
-                .exec(
-                    Some(json_path),
-                    Some(config_dir),
-                    None,
-                    default_aardvark_bin()?,
-                    None,
-                    false,
-                )
-                .map_err(|e| anyhow!("[container {}] netavark setup failed: {e}", runner.id()))?;
-
-            // Create bind mount backup of network namespace
-            let bind_mount_name = format!("rkforge-{}", runner.id());
-            match bind_mount_netns(&netns_path_clone, &bind_mount_name) {
-                Ok(bind_path) => {
-                    debug!(
-                        "Created bind mount backup at {:?} for container {}",
-                        bind_path,
-                        runner.id()
-                    );
-                }
-                Err(e) => {
-                    warn!(
-                        "Failed to create bind mount backup for container {}: {}",
-                        runner.id(),
-                        e
-                    );
-                    // Continue anyway, as bind mount is just a backup
-                }
-            }
-        } else {
+    pub(crate) fn create_network_opts(
+        &self,
+        container_id: String,
+        ip: IpAddr,
+    ) -> Result<NetworkOptions> {
+        if !ip.is_ipv4() {
             return Err(anyhow!("Unsupported ipv6 type"));
+        }
+        let alias = vec![container_id.clone()];
+        let mut networks = HashMap::new();
+        let mut network_info = HashMap::new();
+        for (network_name, _) in self.map.clone() {
+            let network_se = match self.network_service.get(&network_name) {
+                Some(network) => network,
+                None => continue,
+            };
+            for (_container, container_spec) in network_se {
+                let Some(container_name) = container_spec.container_name.as_ref() else {
+                    continue;
+                };
+                if *container_name == container_id {
+                    let container_ip = self
+                        .get_container_ip(&container_id, &network_name)
+                        .map(IpAddr::V4)
+                        .ok_or_else(|| {
+                            anyhow!(
+                                "[container {}] No allocated IP for network {}",
+                                container_id,
+                                network_name
+                            )
+                        })?;
+                    let (gateway, subnet_net) = self
+                        .network_subnets
+                        .get(&network_name)
+                        .map(|s| {
+                            (
+                                s.gateway,
+                                IpNet::new(IpAddr::V4(s.subnet.network()), s.subnet.prefix())
+                                    .unwrap(),
+                            )
+                        })
+                        .ok_or_else(|| anyhow!("No subnet for network {}", network_name))?;
+                    let network_opts = PerNetworkOptions {
+                        aliases: Some(alias.clone()),
+                        interface_name: self
+                            .network_interface
+                            .get(&network_name)
+                            .unwrap_or(&"vethcni0".to_string())
+                            .clone(),
+                        static_ips: Some(vec![container_ip]),
+                        static_mac: None,
+                        options: None,
+                    };
+                    let network_interface = Some(
+                        self.network_interface
+                            .get(&network_name)
+                            .unwrap_or(&"vethcni0".to_string())
+                            .clone(),
+                    );
+                    let network = Network {
+                        dns_enabled: true,
+                        driver: "bridge".to_string(),
+                        id: network_name.clone(),
+                        internal: false,
+                        ipv6_enabled: false,
+                        name: network_name.clone(),
+                        network_interface,
+                        options: None,
+                        ipam_options: None,
+                        subnets: Some(vec![Subnet {
+                            gateway: Some(IpAddr::V4(gateway)),
+                            lease_range: None,
+                            subnet: subnet_net,
+                        }]),
+                        routes: None,
+                        network_dns_servers: Some(vec![]),
+                    };
+
+                    networks.insert(network_name.clone(), network_opts);
+                    network_info.insert(network_name, network);
+                    break;
+                }
+            }
+        }
+        let opts = NetworkOptions {
+            container_id: container_id.clone(),
+            container_name: container_id.clone(),
+            container_hostname: None,
+            networks,
+            network_info,
+            port_mappings: None,
+            dns_servers: None,
+        };
+        Ok(opts)
+    }
+    pub fn setup_network(opts: &NetworkOptions, pid: i32, container_id: String) -> Result<()> {
+        let netns_path = format!("/proc/{pid}/ns/net");
+        if !Path::new(&netns_path).exists() {
+            return Err(anyhow!(
+                "[container {}] netns path not found: {netns_path}",
+                container_id
+            ));
+        }
+        let netns_path_clone = netns_path.clone();
+        let setup = Setup::new(netns_path);
+        let json_path = create_tmp_netavark_json(&opts, &container_id)?;
+        let config_dir = default_netavark_config_dir();
+        fs::create_dir_all(PathBuf::from(&config_dir))?;
+        setup
+            .exec(
+                Some(json_path),
+                Some(config_dir),
+                None,
+                default_aardvark_bin()?,
+                None,
+                false,
+            )
+            .map_err(|e| anyhow!("[container {}] netavark setup failed: {e}", &container_id))?;
+
+        // Create bind mount backup of network namespace
+        let bind_mount_name = format!("rkforge-{}", &container_id);
+        match bind_mount_netns(&netns_path_clone, &bind_mount_name) {
+            Ok(bind_path) => {
+                debug!(
+                    "Created bind mount backup at {:?} for container {}",
+                    bind_path, &container_id
+                );
+            }
+            Err(e) => {
+                warn!(
+                    "Failed to create bind mount backup for container {}: {}",
+                    &container_id, e
+                );
+            }
         }
 
         Ok(())
@@ -415,7 +408,6 @@ impl NetworkManager {
                 "Failed to clean up bind mount backup for container {}: {}",
                 id, e
             );
-            // Continue anyway
         }
 
         Ok(())
