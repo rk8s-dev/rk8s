@@ -61,11 +61,7 @@ impl XlineQuicService {
     }
 
     fn xline_status_to_curp(status: Status) -> CurpError {
-        CurpError::RpcError(CurpErrorWrapper {
-            code: status.code() as i32,
-            message: status.message().to_string(),
-            details: status.details().to_vec(),
-        })
+        CurpError::from(status)
     }
 
     async fn write_error<W>(writer: &mut FrameWriter<W>, err: Status) -> Result<(), CurpError>

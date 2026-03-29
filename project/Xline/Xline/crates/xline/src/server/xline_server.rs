@@ -399,7 +399,7 @@ impl XlineServer {
         let xline_router = {
             // Create a simple health check service using tower::Service
             use http::Request;
-            use hyper::Body;
+            use axum::body::Body;
             use tower::Service;
             use std::task::{Context, Poll};
             
@@ -662,7 +662,7 @@ impl XlineServer {
                 Arc::clone(&client),
                 id_gen,
                 Arc::clone(&self.cluster_info),
-                self.client_tls_config,
+                self.client_tls_config.clone(),
                 &self.task_manager,
             ),
             AuthServer::new(Arc::clone(&client), Arc::clone(&auth_storage)),

@@ -446,6 +446,107 @@ impl QuicChannel {
         result.map_err(|_| CurpError::RpcTransport(()))?
     }
 
+    /// Perform a bidirectional streaming RPC call
+    pub async fn bidirectional_streaming_call<Req, Resp>(
+        &self,
+        method: MethodId,
+        stream: Pin<Box<dyn Stream<Item = Req> + Send>>,
+        meta: Vec<(String, String)>,
+        timeout: Duration,
+    ) -> Result<Pin<Box<dyn Stream<Item = Result<Resp, CurpError>> + Send>>, CurpError>
+    where
+        Req: Message + 'static,
+        Resp: Message + Default + Send + Unpin + 'static,
+    {
+        use futures::StreamExt;
+        use tokio::sync::oneshot;
+
+        let conn = self.get_connection().await?;
+
+        // These are set once the send task is spawned inside the timeout
+        // block, and read in the unconditional cleanup that follows.
+        let cancel_tx: Arc<std::sync::Mutex<Option<oneshot::Sender<()>>>> =
+            Arc::new(std::sync::Mutex::new(None));
+        let send_handle: Arc<std::sync::Mutex<Option<tokio::task::JoinHandle<()>>>> =
+            Arc::new(std::sync::Mutex::new(None));
+
+        let cancel_tx_inner = Arc::clone(&cancel_tx);
+        let send_handle_inner = Arc::clone(&send_handle);
+
+        let (result, conn) = tokio::time::timeout(timeout, async move {
+            let (recv_stream, send_stream) = Self::open_bi_stream(&conn).await?;
+
+            let mut writer = FrameWriter::new(send_stream);
+
+            // Write request header
+            writer.write_request_header(method, &meta).await?;
+
+            // Spawn a task to write all request messages concurrently.
+            let (tx, mut cancel_rx) = oneshot::channel::<()>();
+            let handle = tokio::spawn(async move {
+                let mut stream = stream;
+                loop {
+                    tokio::select! {
+                        biased;
+                        _ = &mut cancel_rx => break,
+                        item = stream.next() => {
+                            match item {
+                                Some(req) => {
+                                    let req_bytes = req.encode_to_vec();
+                                    if writer.write_frame(&Frame::Data(req_bytes)).await.is_err() {
+                                        break;
+                                    }
+                                }
+                                None => break,
+                            }
+                        }
+                    }
+                }
+                // Graceful shutdown: write END frame and close the stream
+                let _ = writer.write_frame(&Frame::End).await;
+                let _ = writer.flush().await;
+                let mut send_stream: StreamWriter = writer.into_inner();
+                let _ = send_stream.shutdown().await;
+            });
+
+            // Store handles so the outer cleanup can always reach them.
+            *cancel_tx_inner.lock().unwrap_or_else(|e| e.into_inner()) = Some(tx);
+            *send_handle_inner.lock().unwrap_or_else(|e| e.into_inner()) = Some(handle);
+
+            // Return stream that reads responses
+            let reader = FrameReader::new_server_streaming(recv_stream);
+            Ok((Box::pin(ServerStreamingResponse::<Resp>::new(reader, conn)), conn))
+        })
+        .await
+        .map_err(|_| CurpError::RpcTransport(()))?
+        .map_err(|e| {
+            // Cleanup on error
+            let taken_cancel = cancel_tx.lock().unwrap_or_else(|e| e.into_inner()).take();
+            let taken_handle = send_handle.lock().unwrap_or_else(|e| e.into_inner()).take();
+            if let Some(handle) = taken_handle {
+                if let Some(tx) = taken_cancel {
+                    let _ = tx.send(());
+                }
+                // Pin the handle so we retain ownership across the select.
+                tokio::pin!(handle);
+                tokio::select! {
+                    _ = &mut handle => {}
+                    _ = tokio::time::sleep(SEND_TASK_GRACE_PERIOD) => {
+                        handle.abort();
+                        let _ = (&mut handle).await;
+                    }
+                }
+            }
+
+            e
+        })?;
+
+        // Don't cleanup here - the stream needs to keep the connection alive
+        // Cleanup will happen when the stream is dropped
+
+        Ok(result)
+    }
+
     /// Connect to a single address (for discovery)
     pub async fn connect_single(addr: &str, client: Arc<QuicClient>) -> Result<Self, CurpError> {
         let channel = Self::new(client);

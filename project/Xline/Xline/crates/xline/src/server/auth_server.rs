@@ -118,7 +118,7 @@ impl AuthServer {
         &self,
         mut request: xlinerpc::Request<AuthUserAddRequest>,
     ) -> Result<xlinerpc::Response<AuthUserAddResponse>, Status> {
-        let user_add_req = request.get_mut();
+        let user_add_req = request.data_mut();
         debug!("Receive AuthUserAddRequest {}", user_add_req);
         user_add_req.validation()?;
         let hashed_password = hash_password(user_add_req.password.as_bytes())
@@ -157,7 +157,7 @@ impl AuthServer {
         mut request: xlinerpc::Request<AuthUserChangePasswordRequest>,
     ) -> Result<xlinerpc::Response<AuthUserChangePasswordResponse>, Status> {
         debug!("Receive AuthUserChangePasswordRequest {:?}", request);
-        let user_change_password_req = request.get_mut();
+        let user_change_password_req = request.data_mut();
         let hashed_password = hash_password(user_change_password_req.password.as_bytes())
             .map_err(|err| Status::internal(format!("Failed to hash password: {err}")))?;
         user_change_password_req.hashed_password = hashed_password;
@@ -186,7 +186,7 @@ impl AuthServer {
         request: xlinerpc::Request<AuthRoleAddRequest>,
     ) -> Result<xlinerpc::Response<AuthRoleAddResponse>, Status> {
         debug!("Receive AuthRoleAddRequest {:?}", request);
-        request.data().validation()?
+        request.data().validation()?;
         self.handle_req(request).await
     }
 
@@ -222,7 +222,7 @@ impl AuthServer {
             "Receive AuthRoleGrantPermissionRequest {}",
             request.data()
         );
-        request.data().validation()?
+        request.data().validation()?;
         self.handle_req(request).await
     }
 

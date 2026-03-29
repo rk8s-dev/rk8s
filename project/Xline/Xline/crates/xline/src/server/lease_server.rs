@@ -248,9 +248,9 @@ impl LeaseServer {
 
         };
 
-        // Use client streaming call with QUIC
-        let response = channel
-            .client_streaming_call(
+        // Use bidirectional streaming call with QUIC
+        let response_stream = channel
+            .bidirectional_streaming_call(
                 MethodId::from_static("/etcdserverpb.Lease/LeaseKeepAlive"),
                 Box::pin(redirect_stream),
                 vec![],
@@ -259,11 +259,13 @@ impl LeaseServer {
             .await
             .map_err(|e| Status::internal(e.to_string()))?;
 
-        // For now, just return an empty stream as a placeholder
-        // TODO: Implement proper client streaming with QUIC
-        let empty_stream = stream! {}
+        // Convert CurpError to Status
+        let mapped_stream = response_stream.map(|result| match result {
+            Ok(resp) => Ok(resp),
+            Err(e) => Err(Status::internal(e.to_string())),
+        });
 
-        Ok(Box::pin(empty_stream))
+        Ok(Box::pin(mapped_stream))
     }
 
     /// Start a lease keep-alive stream from an arbitrary request stream source.
@@ -360,6 +362,10 @@ impl LeaseServer {
         request: Request<LeaseTimeToLiveRequest>,
     ) -> Result<Response<LeaseTimeToLiveResponse>, Status> {
         debug!("Receive LeaseTimeToLiveRequest {:?}", request);
+        
+        // Extract metadata from request
+        let metadata = crate::server::auth_wrapper::metadata_from_xlinerpc(request.meta());
+        
         loop {
             if self.lease_storage.is_primary() {
                 let time_to_live_req = request.into_inner();
@@ -401,7 +407,7 @@ impl LeaseServer {
                     .unary_call(
                         MethodId::from_static("/etcdserverpb.Lease/LeaseTimeToLive"),
                         request.into_inner(),
-                        vec![],
+                        metadata.to_pairs(),
                         Duration::from_secs(5),
                     )
                     .await
@@ -433,14 +439,7 @@ impl LeaseServer {
     }
 }
 
-/// Build endpoints from addresses (not used, kept for compatibility)
-#[allow(clippy::result_large_err)]
-fn build_endpoints(
-    _addrs: &[String],
-    _tls_config: Option<&()>,
-) -> Result<Vec<Endpoint>, Status> {
-    Ok(Vec::new())
-}
+
 
 pub(crate) struct Server {
     lease_server: Arc<LeaseServer>,
