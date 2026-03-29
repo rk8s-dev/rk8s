@@ -59,7 +59,7 @@ impl AuthServer {
         T: Into<RequestWrapper>,
     {
         let auth_info = self.auth_store.try_get_auth_info_from_request(&request)?;
-        let request = request.into_inner().into();
+        let request = request.data().clone().into();
         let cmd = Command::new_with_auth_info(request, auth_info);
         let res = self.client.propose(&cmd, None, false).await??;
         Ok(res)

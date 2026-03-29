@@ -93,7 +93,7 @@ impl MaintenanceServer {
         T: Into<RequestWrapper> + Debug,
     {
         let auth_info = self.auth_store.try_get_auth_info_from_request(&request)?;
-        let request = request.into_inner().into();
+        let request = request.data().clone().into();
         let cmd = Command::new_with_auth_info(request, auth_info);
         let res = self.client.propose(&cmd, None, false).await??;
         Ok(res)
@@ -201,7 +201,7 @@ impl MaintenanceServer {
         &self,
         request: xlinerpc::Request<MoveLeaderRequest>,
     ) -> Result<xlinerpc::Response<MoveLeaderResponse>, Status> {
-        let node_id = request.into_inner().target_id;
+        let node_id = request.data().target_id;
         self.client.move_leader(node_id).await?;
         Ok(xlinerpc::Response::from_data(MoveLeaderResponse {
             header: Some(self.header_gen.gen_header()),

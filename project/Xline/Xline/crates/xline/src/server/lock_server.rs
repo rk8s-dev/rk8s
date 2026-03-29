@@ -189,7 +189,7 @@ impl LockServer {
     ) -> Result<xlinerpc::Response<LockResponse>, Status> {
         debug!("Receive LockRequest {:?}", request);
         let auth_info = self.auth_store.try_get_auth_info_from_request(&request)?;
-        let lock_req = request.into_inner();
+        let lock_req = request.data();
         let lease_id = if lock_req.lease == 0 {
             self.lease_grant(auth_info.clone()).await?
         } else {

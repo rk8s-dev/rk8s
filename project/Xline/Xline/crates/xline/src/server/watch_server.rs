@@ -153,11 +153,11 @@ impl WatchServer {
     /// last compaction revision.
     async fn watch(
         &self,
-        request: xlinerpc::Request<impl Stream<Item = Result<WatchRequest, Status>> + Send + Unpin + 'static>,
+        request: xlinerpc::Request<Box<dyn Stream<Item = Result<WatchRequest, Status>> + Send + Unpin + 'static>>,
     ) -> Result<xlinerpc::Response<ReceiverStream<Result<WatchResponse, Status>>>, Status> {
         debug!("Receive Watch Connection {:?}", request);
         Ok(xlinerpc::Response::from_data(
-            self.watch_stream(request.into_inner()),
+            self.watch_stream(request.data().clone()),
         ))
     }
 }

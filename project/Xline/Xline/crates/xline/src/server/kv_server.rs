@@ -162,10 +162,10 @@ impl KvServer {
         let auth_info = self.auth_storage.try_get_auth_info_from_request(&request)?;
         let is_serializable = range_req.serializable;
         let res = if is_serializable {
-            let cmd = Command::new_with_auth_info(request.into_inner().into(), auth_info);
+            let cmd = Command::new_with_auth_info(request.data().clone().into(), auth_info);
             self.do_serializable(&cmd)?
         } else {
-            self.propose(request.into_inner(), auth_info).await?
+            self.propose(request.data().clone(), auth_info).await?
         };
 
         if let Response::ResponseRange(response) = res {
@@ -188,7 +188,7 @@ impl KvServer {
         put_req.validation()?;
         debug!("Receive grpc request: {:?}", put_req);
         let auth_info = self.auth_storage.try_get_auth_info_from_request(&request)?;
-        let res = self.propose(request.into_inner(), auth_info).await?;
+        let res = self.propose(request.data().clone(), auth_info).await?
         if let Response::ResponsePut(response) = res {
             Ok(xlinerpc::Response::from_data(response))
         } else {
@@ -209,7 +209,7 @@ impl KvServer {
         delete_range_req.validation()?;
         debug!("Receive grpc request: {:?}", delete_range_req);
         let auth_info = self.auth_storage.try_get_auth_info_from_request(&request)?;
-        let res = self.propose(request.into_inner(), auth_info).await?;
+        let res = self.propose(request.data().clone(), auth_info).await?
         if let Response::ResponseDeleteRange(response) = res {
             Ok(xlinerpc::Response::from_data(response))
         } else {
@@ -235,7 +235,7 @@ impl KvServer {
             self.kv_storage.revision(),
         )?;
         let auth_info = self.auth_storage.try_get_auth_info_from_request(&request)?;
-        let res = self.propose(request.into_inner(), auth_info).await?;
+        let res = self.propose(request.data().clone(), auth_info).await?
         if let Response::ResponseTxn(response) = res {
             Ok(xlinerpc::Response::from_data(response))
         } else {
@@ -258,7 +258,7 @@ impl KvServer {
         req.check_revision(compacted_revision, current_revision)?;
         let auth_info = self.auth_storage.try_get_auth_info_from_request(&request)?;
         let physical = req.physical;
-        let request = RequestWrapper::from(request.into_inner());
+        let request = RequestWrapper::from(request.data().clone());
         let cmd = Command::new_with_auth_info(request, auth_info);
         let compact_id = self.next_compact_id.fetch_add(1, Ordering::Relaxed);
         let compact_physical_fut = if physical {

@@ -473,7 +473,7 @@ impl QuicChannel {
         let cancel_tx_inner = Arc::clone(&cancel_tx);
         let send_handle_inner = Arc::clone(&send_handle);
 
-        let (result, conn) = tokio::time::timeout(timeout, async move {
+        let result = tokio::time::timeout(timeout, async move {
             let (recv_stream, send_stream) = Self::open_bi_stream(&conn).await?;
 
             let mut writer = FrameWriter::new(send_stream);
@@ -515,7 +515,7 @@ impl QuicChannel {
 
             // Return stream that reads responses
             let reader = FrameReader::new_server_streaming(recv_stream);
-            Ok((Box::pin(ServerStreamingResponse::<Resp>::new(reader, conn)), conn))
+            Ok(Box::pin(ServerStreamingResponse::<Resp>::new(reader, conn)))
         })
         .await
         .map_err(|_| CurpError::RpcTransport(()))?

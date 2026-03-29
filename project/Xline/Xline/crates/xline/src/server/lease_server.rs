@@ -119,7 +119,7 @@ impl LeaseServer {
         T: Into<RequestWrapper>,
     {
         let auth_info = self.auth_storage.try_get_auth_info_from_request(&request)?;
-        let request = request.into_inner().into();
+        let request = request.data().clone().into();
         let cmd = Command::new_with_auth_info(request, auth_info);
         let res = self.client.propose(&cmd, None, false).await??;
         Ok(res)
@@ -352,7 +352,7 @@ impl LeaseServer {
         Status,
     > {
         debug!("Receive LeaseKeepAliveRequest {:?}", request);
-        let stream = self.lease_keep_alive_stream(request.into_inner()).await?;
+        let stream = self.lease_keep_alive_stream(request.data().clone()).await?;
         Ok(Response::from_data(stream))
     }
 
@@ -368,7 +368,7 @@ impl LeaseServer {
         
         loop {
             if self.lease_storage.is_primary() {
-                let time_to_live_req = request.into_inner();
+                let time_to_live_req = request.data();
 
                 self.lease_storage.wait_synced(time_to_live_req.id).await;
 
@@ -406,7 +406,7 @@ impl LeaseServer {
                 let response = channel
                     .unary_call(
                         MethodId::from_static("/etcdserverpb.Lease/LeaseTimeToLive"),
-                        request.into_inner(),
+                        request.data().clone(),
                         metadata.to_pairs(),
                         Duration::from_secs(5),
                     )
