@@ -253,68 +253,68 @@ impl NetworkManager {
                 let Some(container_name) = container_spec.container_name.as_ref() else {
                     continue;
                 };
-                if *container_name == container_id {
-                    let container_ip = self
-                        .get_container_ip(&container_id, &network_name)
-                        .map(IpAddr::V4)
-                        .ok_or_else(|| {
-                            anyhow!(
-                                "[container {}] No allocated IP for network {}",
-                                container_id,
-                                network_name
-                            )
-                        })?;
-                    let (gateway, subnet_net) = self
-                        .network_subnets
-                        .get(&network_name)
-                        .map(|s| {
-                            (
-                                s.gateway,
-                                IpNet::new(IpAddr::V4(s.subnet.network()), s.subnet.prefix())
-                                    .unwrap(),
-                            )
-                        })
-                        .ok_or_else(|| anyhow!("No subnet for network {}", network_name))?;
-                    let network_opts = PerNetworkOptions {
-                        aliases: Some(alias.clone()),
-                        interface_name: self
-                            .network_interface
-                            .get(&network_name)
-                            .unwrap_or(&"vethcni0".to_string())
-                            .clone(),
-                        static_ips: Some(vec![container_ip]),
-                        static_mac: None,
-                        options: None,
-                    };
-                    let network_interface = Some(
-                        self.network_interface
-                            .get(&network_name)
-                            .unwrap_or(&"vethcni0".to_string())
-                            .clone(),
-                    );
-                    let network = Network {
-                        dns_enabled: true,
-                        driver: "bridge".to_string(),
-                        id: network_name.clone(),
-                        internal: false,
-                        ipv6_enabled: false,
-                        name: network_name.clone(),
-                        network_interface,
-                        options: None,
-                        ipam_options: None,
-                        subnets: Some(vec![Subnet {
-                            gateway: Some(IpAddr::V4(gateway)),
-                            lease_range: None,
-                            subnet: subnet_net,
-                        }]),
-                        routes: None,
-                        network_dns_servers: Some(vec![]),
-                    };
-
-                    networks.insert(network_name.clone(), network_opts);
-                    network_info.insert(network_name, network);
-                    break;
+                if *container_name != container_id {
+                    continue;
                 }
+                let container_ip = self
+                    .get_container_ip(&container_id, &network_name)
+                    .map(IpAddr::V4)
+                    .ok_or_else(|| {
+                        anyhow!(
+                            "[container {}] No allocated IP for network {}",
+                            container_id,
+                            network_name
+                        )
+                    })?;
+                let (gateway, subnet_net) = self
+                    .network_subnets
+                    .get(&network_name)
+                    .map(|s| {
+                        (
+                            s.gateway,
+                            IpNet::new(IpAddr::V4(s.subnet.network()), s.subnet.prefix()).unwrap(),
+                        )
+                    })
+                    .ok_or_else(|| anyhow!("No subnet for network {}", network_name))?;
+                let network_opts = PerNetworkOptions {
+                    aliases: Some(alias.clone()),
+                    interface_name: self
+                        .network_interface
+                        .get(&network_name)
+                        .unwrap_or(&"vethcni0".to_string())
+                        .clone(),
+                    static_ips: Some(vec![container_ip]),
+                    static_mac: None,
+                    options: None,
+                };
+                let network_interface = Some(
+                    self.network_interface
+                        .get(&network_name)
+                        .unwrap_or(&"vethcni0".to_string())
+                        .clone(),
+                );
+                let network = Network {
+                    dns_enabled: true,
+                    driver: "bridge".to_string(),
+                    id: network_name.clone(),
+                    internal: false,
+                    ipv6_enabled: false,
+                    name: network_name.clone(),
+                    network_interface,
+                    options: None,
+                    ipam_options: None,
+                    subnets: Some(vec![Subnet {
+                        gateway: Some(IpAddr::V4(gateway)),
+                        lease_range: None,
+                        subnet: subnet_net,
+                    }]),
+                    routes: None,
+                    network_dns_servers: Some(vec![]),
+                };
+
+                networks.insert(network_name.clone(), network_opts);
+                network_info.insert(network_name, network);
+                break;
             }
         }
         let opts = NetworkOptions {
@@ -328,6 +328,7 @@ impl NetworkManager {
         };
         Ok(opts)
     }
+
     pub fn setup_network(opts: &NetworkOptions, pid: i32, container_id: String) -> Result<()> {
         let netns_path = format!("/proc/{pid}/ns/net");
         if !Path::new(&netns_path).exists() {
@@ -414,14 +415,11 @@ impl NetworkManager {
     }
 }
 
-// in the future , add dns server
-/// create resolv.conf file
-/// save base resolv.conf file
-pub fn create_resolv_conf() -> Result<()> {
-    // todo perfect future
-    // need add file instead hover
-    // and used the
-    let contect = "search rkl.internal\nnameserver 172.17.0.1\n";
+pub fn create_resolv_conf(name_servers: Vec<IpAddr>) -> Result<()> {
+    let mut contect = "search rkl.internal\n".to_string();
+    for name_server in name_servers {
+        contect.push_str(&format!("namesever {name_server}\n"));
+    }
     let mut resolv_path = std::env::temp_dir();
     resolv_path.push("rkl-netavark");
     resolv_path.push("resolv.conf");

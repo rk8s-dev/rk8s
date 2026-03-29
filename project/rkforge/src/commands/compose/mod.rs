@@ -328,13 +328,18 @@ impl ComposeManager {
 
                 runner.add_mounts(mounts);
                 runner.add_mounts(configs_mounts);
-                create_resolv_conf()?;
-                add_resolv_conf(&mut runner);
 
+                // write container resolv.con, make sure container can parse the container url.
+                // but need to deal the issue : Add rather than overwrite
+                // add add local machine this func
                 let container_id = runner.id();
                 let opts = self
                     .network_manager
                     .create_network_opts(container_id.clone(), ip)?;
+                if let Some(ips) = opts.clone().dns_servers {
+                    create_resolv_conf(ips)?;
+                    add_resolv_conf(&mut runner);
+                }
 
                 match runner.run() {
                     std::result::Result::Ok(_) => {
