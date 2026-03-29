@@ -241,8 +241,8 @@ where
 
             // Decode gRPC frame first
             let xline_request = match decode_grpc_frame(&body_bytes) {
-                Ok(frame_data) => match XlineRequest::<Input>::decode_from_slice(&frame_data) {
-                    Ok(req) => req,
+                Ok(frame_data) => match Input::decode_from_slice(&frame_data) {
+                    Ok(input) => XlineRequest::from_data(input),
                     Err(e) => {
                         let status = Status::internal(format!("Failed to decode request: {}", e));
                         return Ok(create_error_response(status));
@@ -263,7 +263,7 @@ where
             };
 
             // Encode response
-            let response_bytes = match xline_response.encode_to_vec() {
+            let response_bytes = match xline_response.data().encode_to_vec() {
                 Ok(bytes) => bytes,
                 Err(e) => {
                     let status = Status::internal(format!("Failed to encode response: {}", e));
@@ -356,8 +356,8 @@ where
 
             // Decode gRPC frame first
             let xline_request = match decode_grpc_frame(&body_bytes) {
-                Ok(frame_data) => match XlineRequest::<Input>::decode_from_slice(&frame_data) {
-                    Ok(req) => req,
+                Ok(frame_data) => match Input::decode_from_slice(&frame_data) {
+                    Ok(input) => XlineRequest::from_data(input),
                     Err(e) => {
                         let status = Status::internal(format!("Failed to decode request: {}", e));
                         return Ok(create_error_response(status));
@@ -451,8 +451,8 @@ where
 
             // Decode gRPC frame first
             let xline_request = match decode_grpc_frame(&body_bytes) {
-                Ok(frame_data) => match XlineRequest::<Input>::decode_from_slice(&frame_data) {
-                    Ok(req) => req,
+                Ok(frame_data) => match Input::decode_from_slice(&frame_data) {
+                    Ok(input) => XlineRequest::from_data(input),
                     Err(e) => {
                         let status = Status::internal(format!("Failed to decode request: {}", e));
                         return Ok(create_error_response(status));
@@ -563,9 +563,10 @@ where
                 // Calculate frame size (1-byte flag + 4-byte length + data length)
                 let frame_size = 1 + 4 + frame_data.len();
                 
-                // Decode xline request from frame data
-                let xline_request = XlineRequest::<Input>::decode_from_slice(frame_data)
+                // Decode input from frame data
+                let input = Input::decode_from_slice(frame_data)
                     .map_err(|e| Status::internal(format!("Failed to decode request: {}", e)))?;
+                let xline_request = XlineRequest::from_data(input);
                 
                 all_requests.push(xline_request);
                 pos += frame_size;
@@ -586,7 +587,7 @@ where
             })?;
 
             // Encode response
-            let response_bytes = xline_response.encode_to_vec()
+            let response_bytes = xline_response.data().encode_to_vec()
                 .map_err(|e| Status::internal(format!("Failed to encode response: {}", e)))?;
 
             // Wrap response in gRPC frame

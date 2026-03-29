@@ -132,7 +132,7 @@ impl XlineQuicService {
         match f(Self::xline_request(request, &meta)?).await {
             Ok(response) => {
                 writer
-                    .write_frame(&Frame::Data(response.into_inner().encode_to_vec()))
+                    .write_frame(&Frame::Data(response.data().encode_to_vec()))
                     .await?;
                 writer
                     .write_frame(&Frame::Status {
@@ -167,7 +167,7 @@ impl XlineQuicService {
 
         match f(Self::xline_request(request, &meta)?).await {
             Ok(response) => {
-                let mut stream = response.into_inner();
+                let mut stream = response.data().clone();
                 while let Some(item) = stream.next().await {
                     match item {
                         Ok(message) => {
