@@ -188,7 +188,7 @@ impl KvServer {
         put_req.validation()?;
         debug!("Receive grpc request: {:?}", put_req);
         let auth_info = self.auth_storage.try_get_auth_info_from_request(&request)?;
-        let res = self.propose(request.data().clone(), auth_info).await?
+        let res = self.propose(request.data().clone(), auth_info).await?;
         if let Response::ResponsePut(response) = res {
             Ok(xlinerpc::Response::from_data(response))
         } else {
@@ -209,7 +209,7 @@ impl KvServer {
         delete_range_req.validation()?;
         debug!("Receive grpc request: {:?}", delete_range_req);
         let auth_info = self.auth_storage.try_get_auth_info_from_request(&request)?;
-        let res = self.propose(request.data().clone(), auth_info).await?
+        let res = self.propose(request.data().clone(), auth_info).await?;
         if let Response::ResponseDeleteRange(response) = res {
             Ok(xlinerpc::Response::from_data(response))
         } else {
@@ -235,7 +235,7 @@ impl KvServer {
             self.kv_storage.revision(),
         )?;
         let auth_info = self.auth_storage.try_get_auth_info_from_request(&request)?;
-        let res = self.propose(request.data().clone(), auth_info).await?
+        let res = self.propose(request.data().clone(), auth_info).await?;
         if let Response::ResponseTxn(response) = res {
             Ok(xlinerpc::Response::from_data(response))
         } else {

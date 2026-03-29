@@ -309,7 +309,7 @@ impl Protocol for AuthWrapper {
     ) -> Result<xlinerpc::Response<RecordResponse>, Status> {
         let meta = metadata_from_xlinerpc(request.meta());
         Ok(xlinerpc::Response::from_data(
-            CurpService::record(self, request.into_inner(), meta)
+            CurpService::record(self, request.data().clone(), meta)
                 .map_err(curp_error_to_xlinerpc_status)?,
         ))
     }
@@ -330,7 +330,7 @@ impl Protocol for AuthWrapper {
     ) -> Result<xlinerpc::Response<ShutdownResponse>, Status> {
         let meta = metadata_from_xlinerpc(request.meta());
         Ok(xlinerpc::Response::from_data(
-            CurpService::shutdown(self, request.into_inner(), meta)
+            CurpService::shutdown(self, request.data().clone(), meta)
                 .await
                 .map_err(curp_error_to_xlinerpc_status)?,
         ))
@@ -342,7 +342,7 @@ impl Protocol for AuthWrapper {
     ) -> Result<xlinerpc::Response<ProposeConfChangeResponse>, Status> {
         let meta = metadata_from_xlinerpc(request.meta());
         Ok(xlinerpc::Response::from_data(
-            CurpService::propose_conf_change(self, request.into_inner(), meta)
+            CurpService::propose_conf_change(self, request.data().clone(), meta)
                 .await
                 .map_err(curp_error_to_xlinerpc_status)?,
         ))
@@ -354,7 +354,7 @@ impl Protocol for AuthWrapper {
     ) -> Result<xlinerpc::Response<PublishResponse>, Status> {
         let meta = metadata_from_xlinerpc(request.meta());
         Ok(xlinerpc::Response::from_data(
-            CurpService::publish(self, request.into_inner(), meta)
+            CurpService::publish(self, request.data().clone(), meta)
                 .map_err(curp_error_to_xlinerpc_status)?,
         ))
     }
@@ -364,7 +364,7 @@ impl Protocol for AuthWrapper {
         request: xlinerpc::Request<FetchClusterRequest>,
     ) -> Result<xlinerpc::Response<FetchClusterResponse>, Status> {
         Ok(xlinerpc::Response::from_data(
-            CurpService::fetch_cluster(self, request.into_inner())
+            CurpService::fetch_cluster(self, request.data().clone())
                 .map_err(curp_error_to_xlinerpc_status)?,
         ))
     }
@@ -374,7 +374,7 @@ impl Protocol for AuthWrapper {
         request: xlinerpc::Request<FetchReadStateRequest>,
     ) -> Result<xlinerpc::Response<FetchReadStateResponse>, Status> {
         Ok(xlinerpc::Response::from_data(
-            CurpService::fetch_read_state(self, request.into_inner())
+            CurpService::fetch_read_state(self, request.data().clone())
                 .map_err(curp_error_to_xlinerpc_status)?,
         ))
     }
@@ -384,7 +384,7 @@ impl Protocol for AuthWrapper {
         request: xlinerpc::Request<MoveLeaderRequest>,
     ) -> Result<xlinerpc::Response<MoveLeaderResponse>, Status> {
         Ok(xlinerpc::Response::from_data(
-            CurpService::move_leader(self, request.into_inner())
+            CurpService::move_leader(self, request.data().clone())
                 .await
                 .map_err(curp_error_to_xlinerpc_status)?,
         ))
@@ -394,7 +394,7 @@ impl Protocol for AuthWrapper {
         &self,
         request: xlinerpc::Request<impl Stream<Item = Result<LeaseKeepAliveMsg, Status>> + Send + 'static>,
     ) -> Result<xlinerpc::Response<LeaseKeepAliveMsg>, Status> {
-        let stream = request.into_inner();
+        let stream = request.data().clone();
         let curp_stream: Box<
             dyn Stream<Item = Result<LeaseKeepAliveMsg, CurpError>> + Send + Unpin,
         > = Box::new(stream.map(|r| r.map_err(CurpError::from)));

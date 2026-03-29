@@ -378,7 +378,7 @@ where
             };
 
             // Create streaming response body that encodes items incrementally
-            let stream = xline_response.into_inner();
+            let stream = xline_response.data().clone();
             let body = GrpcStreamingBody::<RspStream, Output>::new(stream);
 
             // Create HTTP response with streaming body
@@ -473,7 +473,7 @@ where
             };
 
             // Create streaming response body that encodes items incrementally
-            let stream = xline_response.into_inner();
+            let stream = xline_response.data().clone();
             let body = GrpcStreamingBody::<RspStream, Output>::new(stream);
 
             // Create HTTP response with streaming body

@@ -49,7 +49,7 @@ where
                 move |this: Arc<T>, request: xlinerpc::Request<RecordRequest>| async move {
                     let meta = metadata_from_xlinerpc(request.meta());
                     Ok(xlinerpc::Response::from_data(
-                        CurpService::record(&*this, request.into_inner(), meta)
+                        CurpService::record(&*this, request.data().clone(), meta)
                             .map_err(curp_error_to_xlinerpc_status)?,
                     ))
                 },
@@ -69,7 +69,7 @@ where
                 move |this: Arc<T>, request: xlinerpc::Request<ProposeConfChangeRequest>| async move {
                     let meta = metadata_from_xlinerpc(request.meta());
                     Ok(xlinerpc::Response::from_data(
-                        CurpService::propose_conf_change(&*this, request.into_inner(), meta)
+                        CurpService::propose_conf_change(&*this, request.data().clone(), meta)
                             .await
                             .map_err(curp_error_to_xlinerpc_status)?,
                     ))
@@ -80,7 +80,7 @@ where
                 move |this: Arc<T>, request: xlinerpc::Request<PublishRequest>| async move {
                     let meta = metadata_from_xlinerpc(request.meta());
                     Ok(xlinerpc::Response::from_data(
-                        CurpService::publish(&*this, request.into_inner(), meta)
+                        CurpService::publish(&*this, request.data().clone(), meta)
                             .map_err(curp_error_to_xlinerpc_status)?,
                     ))
                 }
@@ -90,7 +90,7 @@ where
                 move |this: Arc<T>, request: xlinerpc::Request<ShutdownRequest>| async move {
                     let meta = metadata_from_xlinerpc(request.meta());
                     Ok(xlinerpc::Response::from_data(
-                        CurpService::shutdown(&*this, request.into_inner(), meta)
+                        CurpService::shutdown(&*this, request.data().clone(), meta)
                             .await
                             .map_err(curp_error_to_xlinerpc_status)?,
                     ))
@@ -100,7 +100,7 @@ where
                 "/FetchCluster",
                 move |this: Arc<T>, request: xlinerpc::Request<FetchClusterRequest>| async move {
                     Ok(xlinerpc::Response::from_data(
-                        CurpService::fetch_cluster(&*this, request.into_inner())
+                        CurpService::fetch_cluster(&*this, request.data().clone())
                             .map_err(curp_error_to_xlinerpc_status)?,
                     ))
                 },
@@ -109,7 +109,7 @@ where
                 "/FetchReadState",
                 move |this: Arc<T>, request: xlinerpc::Request<FetchReadStateRequest>| async move {
                     Ok(xlinerpc::Response::from_data(
-                        CurpService::fetch_read_state(&*this, request.into_inner())
+                        CurpService::fetch_read_state(&*this, request.data().clone())
                             .map_err(curp_error_to_xlinerpc_status)?,
                     ))
                 },
@@ -118,7 +118,7 @@ where
                 "/MoveLeader",
                 move |this: Arc<T>, request: xlinerpc::Request<MoveLeaderRequest>| async move {
                     Ok(xlinerpc::Response::from_data(
-                        CurpService::move_leader(&*this, request.into_inner())
+                        CurpService::move_leader(&*this, request.data().clone())
                             .await
                             .map_err(curp_error_to_xlinerpc_status)?
                     ))
@@ -127,7 +127,7 @@ where
             .add_client_streaming_fn(
                 "/LeaseKeepAlive",
                 move |this: Arc<T>, request: xlinerpc::Request<Box<dyn Stream<Item = Result<LeaseKeepAliveMsg, xlinerpc::Status>> + Send + Unpin + 'static>>| async move {
-                    let stream = request.into_inner();
+                    let stream = request.data().clone();
                     let curp_stream: Box<
                         dyn Stream<Item = Result<LeaseKeepAliveMsg, CurpError>> + Send + Unpin,
                     > = Box::new(stream.map(|r| r.map_err(CurpError::from)));
