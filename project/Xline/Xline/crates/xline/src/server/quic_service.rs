@@ -51,7 +51,7 @@ impl XlineQuicService {
         }
     }
 
-    fn tonic_request<T>(message: T, meta: &Metadata) -> Result<xlinerpc::Request<T>, CurpError> {
+    fn xline_request<T>(message: T, meta: &Metadata) -> Result<xlinerpc::Request<T>, CurpError> {
         let mut request = xlinerpc::Request::from_data(message);
         // Propagate metadata from QUIC request
         for (key, value) in meta.iter() {
@@ -60,7 +60,7 @@ impl XlineQuicService {
         Ok(request)
     }
 
-    fn tonic_status_to_curp(status: Status) -> CurpError {
+    fn xline_status_to_curp(status: Status) -> CurpError {
         CurpError::RpcError(CurpErrorWrapper {
             code: status.code() as i32,
             message: status.message().to_string(),
@@ -73,7 +73,7 @@ impl XlineQuicService {
         W: AsyncWrite + Unpin,
     {
         let wrapper = CurpErrorWrapper {
-            err: Some(Self::tonic_status_to_curp(err)),
+            err: Some(Self::xline_status_to_curp(err)),
         };
         writer
             .write_frame(&Frame::Status {
@@ -133,7 +133,7 @@ impl XlineQuicService {
         let request = Self::read_unary_request::<R, Req>(recv).await?;
         let mut writer = FrameWriter::new(send);
 
-        match f(Self::tonic_request(request, &meta)?).await {
+        match f(Self::xline_request(request, &meta)?).await {
             Ok(response) => {
                 writer
                     .write_frame(&Frame::Data(response.into_inner().encode_to_vec()))
@@ -169,7 +169,7 @@ impl XlineQuicService {
         let request = Self::read_unary_request::<R, Req>(recv).await?;
         let mut writer = FrameWriter::new(send);
 
-        match f(Self::tonic_request(request, &meta)?).await {
+        match f(Self::xline_request(request, &meta)?).await {
             Ok(response) => {
                 let mut stream = response.into_inner();
                 while let Some(item) = stream.next().await {
@@ -285,7 +285,7 @@ impl XlineQuicService {
             .lease
             .lease_keep_alive_stream(Self::spawn_request_pump::<R, LeaseKeepAliveRequest>(recv))
             .await
-            .map_err(Self::tonic_status_to_curp)?;
+            .map_err(Self::xline_status_to_curp)?;
         Self::write_stream(send, stream).await
     }
 }

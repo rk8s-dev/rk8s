@@ -263,7 +263,7 @@ impl LockServer {
     ) -> Result<xlinerpc::Response<UnlockResponse>, Status> {
         debug!("Receive UnlockRequest {:?}", request);
         let auth_info = self.auth_store.try_get_auth_info_from_request(&request)?;
-        let header = self.delete_key(&request.get_ref().key, auth_info).await?;
+        let header = self.delete_key(&request.data().key, auth_info).await?;
         Ok(xlinerpc::Response::from_data(UnlockResponse { header }))
     }
 }
@@ -280,13 +280,13 @@ impl Server {
     pub(crate) fn endpoint(self) -> RouterEndpoint<Arc<LockServer>> {
         RouterEndpoint::new(self.lock_server)
             .add_unary_fn(
-                "/lock",
+                "/Lock",
                 move |this: Arc<LockServer>, request: xlinerpc::Request<LockRequest>| async move {
                     this.lock(request).await
                 },
             )
             .add_unary_fn(
-                "/unlock",
+                "/Unlock",
                 move |this: Arc<LockServer>, request: xlinerpc::Request<UnlockRequest>| async move {
                     this.unlock(request).await
                 },

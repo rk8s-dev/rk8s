@@ -546,9 +546,7 @@ where
             // Read all bytes from the body
             while let Some(chunk) = body_bytes.data_ref() {
                 buffer.extend_from_slice(chunk);
-                if let Err(e) = body_bytes.advance(chunk.len()) {
-                    return Err(Status::internal(format!("Failed to advance body: {}", e)));
-                }
+                body_bytes.advance(chunk.len());
             }
 
             // Parse multiple gRPC frames from the buffer

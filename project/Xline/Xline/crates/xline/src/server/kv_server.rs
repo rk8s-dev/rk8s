@@ -152,7 +152,7 @@ impl KvServer {
         &self,
         request: xlinerpc::Request<RangeRequest>,
     ) -> Result<xlinerpc::Response<RangeResponse>, Status> {
-        let range_req = request.get_ref();
+        let range_req = request.data();
         range_req.validation()?;
         debug!("Receive grpc request: {}", range_req);
         range_req.check_revision(
@@ -184,7 +184,7 @@ impl KvServer {
         &self,
         request: xlinerpc::Request<PutRequest>,
     ) -> Result<xlinerpc::Response<PutResponse>, Status> {
-        let put_req: &PutRequest = request.get_ref();
+        let put_req: &PutRequest = request.data();
         put_req.validation()?;
         debug!("Receive grpc request: {:?}", put_req);
         let auth_info = self.auth_storage.try_get_auth_info_from_request(&request)?;

@@ -186,7 +186,7 @@ impl AuthServer {
         request: xlinerpc::Request<AuthRoleAddRequest>,
     ) -> Result<xlinerpc::Response<AuthRoleAddResponse>, Status> {
         debug!("Receive AuthRoleAddRequest {:?}", request);
-        request.get_ref().validation()?;
+        request.data().validation()?
         self.handle_req(request).await
     }
 
@@ -220,9 +220,9 @@ impl AuthServer {
     ) -> Result<xlinerpc::Response<AuthRoleGrantPermissionResponse>, Status> {
         debug!(
             "Receive AuthRoleGrantPermissionRequest {}",
-            request.get_ref()
+            request.data()
         );
-        request.get_ref().validation()?;
+        request.data().validation()?
         self.handle_req(request).await
     }
 
@@ -232,7 +232,7 @@ impl AuthServer {
     ) -> Result<xlinerpc::Response<AuthRoleRevokePermissionResponse>, Status> {
         debug!(
             "Receive AuthRoleRevokePermissionRequest {}",
-            request.get_ref()
+            request.data()
         );
         self.handle_req(request).await
     }
