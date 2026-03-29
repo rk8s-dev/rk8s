@@ -233,7 +233,7 @@ impl NetworkManager {
         Ok(())
     }
 
-    pub(crate) fn after_container_started(&self, runner: ContainerRunner) -> Result<()> {
+    pub(crate) fn after_container_started(&self, runner: &ContainerRunner) -> Result<()> {
         let container_id = runner.id();
         if runner
             .ip()
@@ -427,6 +427,8 @@ impl NetworkManager {
 /// save base resolv.conf file
 pub fn create_resolv_conf() -> Result<()> {
     // todo perfect future
+    // need add file instead hover
+    // and used the
     let contect = "search rkl.internal\nnameserver 172.17.0.1\n";
     let mut resolv_path = std::env::temp_dir();
     resolv_path.push("rkl-netavark");
@@ -565,4 +567,60 @@ fn default_aardvark_bin() -> Result<OsString> {
     }
 
     Err(anyhow!("aardvark-dns not found"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::commands::compose::spec::{ComposeSpec, NetworkSpec, ServiceSpec};
+    use ipnetwork::Ipv4Network;
+    use std::collections::HashMap;
+
+    fn create_test_spec(
+        services: HashMap<String, ServiceSpec>,
+        networks: Option<HashMap<String, NetworkSpec>>,
+    ) -> ComposeSpec {
+        ComposeSpec {
+            name: Some("test-project".to_string()),
+            services,
+            volumes: None,
+            configs: None,
+            networks,
+            secrets: None,
+        }
+    }
+
+    #[test]
+    fn test_next_container_ip_in_subnet() {
+        let subnet = Ipv4Network::new(Ipv4Addr::new(192, 168, 1, 0), 24).unwrap();
+        let gateway = Ipv4Addr::new(192, 168, 1, 1);
+
+        let ip = next_container_ip_in_subnet(&subnet, gateway, None);
+        assert_eq!(ip, Some(Ipv4Addr::new(192, 168, 1, 2)));
+        let ip = next_container_ip_in_subnet(&subnet, gateway, Some(Ipv4Addr::new(192, 168, 1, 2)));
+        assert_eq!(ip, Some(Ipv4Addr::new(192, 168, 1, 3)));
+
+        // when ip exhausted, return None
+        let last = Ipv4Addr::new(192, 168, 1, 254);
+        let ip = next_container_ip_in_subnet(&subnet, gateway, Some(last));
+        assert_eq!(ip, None);
+    }
+
+    #[test]
+    fn test_network_intersects() {
+        let net1 = Ipv4Network::new(Ipv4Addr::new(192, 168, 1, 0), 24).unwrap();
+        let net2 = Ipv4Network::new(Ipv4Addr::new(192, 168, 2, 0), 24).unwrap();
+        let net3 = Ipv4Network::new(Ipv4Addr::new(192, 168, 1, 128), 25).unwrap();
+
+        assert!(!network_intersects(&net1, &net2));
+        assert!(network_intersects(&net1, &net3));
+        assert!(network_intersects(&net3, &net1));
+    }
+
+    // #[test]
+    // fn test_clean_up_idempotent() {
+    //     let result =
+    //         NetworkManager::clean_up("/proc/123/ns/net".to_string(), "nonexistent".to_string());
+    //     assert!(result.is_ok());
+    // }
 }

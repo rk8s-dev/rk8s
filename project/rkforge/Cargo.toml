@@ -74,6 +74,6 @@ hickory-resolver = { workspace = true }
 hickory-client = { workspace = true }
 ipnet = "2.11.0"
 netavark = "1.17.1"
-
+trust-dns-resolver = "0.23.2"
 [dev-dependencies]
 qlean = { workspace = true }

@@ -356,7 +356,7 @@ impl ComposeManager {
                     }
                 };
                 self.network_manager
-                    .after_container_started(runner)
+                    .after_container_started(&runner)
                     .map_err(|e| anyhow!("network setup failed: {e}"))?;
             }
         }
