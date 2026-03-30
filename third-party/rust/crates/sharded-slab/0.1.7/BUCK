@@ -4,26 +4,25 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "sharded-slab-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/sharded-slab/sharded-slab-0.1.7.crate"],
     sha256 = "f40ca3c46823713e0d4209592e8d6e826aa57e928f09752619fc696c499637f6",
     type = "tar.gz",
     strip_prefix = "sharded-slab-0.1.7",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "sharded-slab-manifest",
-    vendor = ":sharded-slab-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "sharded-slab",
-    srcs = [":sharded-slab-vendor"],
+    srcs = [":vendor"],
     crate = "sharded_slab",
     crate_root = "vendor/src/lib.rs",
     edition = "2018",
-    rustc_flags = ["@$(location :sharded-slab-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = ["//third-party/rust/crates/lazy_static/1.5.0:lazy_static"],
 )

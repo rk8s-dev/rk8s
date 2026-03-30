@@ -4,26 +4,25 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "hkdf-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/hkdf/hkdf-0.12.4.crate"],
     sha256 = "7b5f8eb2ad728638ea2c7d47a21db23b7b58a72ed6a38256b8a1849f15fbbdf7",
     type = "tar.gz",
     strip_prefix = "hkdf-0.12.4",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "hkdf-manifest",
-    vendor = ":hkdf-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "hkdf",
-    srcs = [":hkdf-vendor"],
+    srcs = [":vendor"],
     crate = "hkdf",
     crate_root = "vendor/src/lib.rs",
     edition = "2018",
-    rustc_flags = ["@$(location :hkdf-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = ["//third-party/rust/crates/hmac/0.12.1:hmac"],
 )

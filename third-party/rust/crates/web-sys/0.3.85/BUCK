@@ -4,22 +4,21 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "web-sys-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/web-sys/web-sys-0.3.85.crate"],
     sha256 = "312e32e551d92129218ea9a2452120f4aabc03529ef03e4d0d82fb2780608598",
     type = "tar.gz",
     strip_prefix = "web-sys-0.3.85",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "web-sys-manifest",
-    vendor = ":web-sys-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "web-sys",
-    srcs = [":web-sys-vendor"],
+    srcs = [":vendor"],
     crate = "web_sys",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
@@ -76,7 +75,7 @@ rust_library(
         "default",
         "std",
     ],
-    rustc_flags = ["@$(location :web-sys-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/js-sys/0.3.85:js-sys",

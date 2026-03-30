@@ -4,22 +4,21 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "prefix-trie-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/prefix-trie/prefix-trie-0.7.0.crate"],
     sha256 = "85cf4c7c25f1dd66c76b451e9041a8cfce26e4ca754934fa7aed8d5a59a01d20",
     type = "tar.gz",
     strip_prefix = "prefix-trie-0.7.0",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "prefix-trie-manifest",
-    vendor = ":prefix-trie-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "prefix-trie",
-    srcs = [":prefix-trie-vendor"],
+    srcs = [":vendor"],
     crate = "prefix_trie",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
@@ -27,7 +26,7 @@ rust_library(
         "default",
         "ipnet",
     ],
-    rustc_flags = ["@$(location :prefix-trie-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/ipnet/2.11.0:ipnet",

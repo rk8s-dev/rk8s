@@ -4,22 +4,21 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "windows-sys-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/windows-sys/windows-sys-0.61.2.crate"],
     sha256 = "ae137229bcbd6cdf0f7b80a31df61766145077ddf49416a728b02cb3921ff3fc",
     type = "tar.gz",
     strip_prefix = "windows-sys-0.61.2",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "windows-sys-manifest",
-    vendor = ":windows-sys-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "windows-sys",
-    srcs = [":windows-sys-vendor"],
+    srcs = [":vendor"],
     crate = "windows_sys",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
@@ -64,7 +63,7 @@ rust_library(
         "Win32_UI_Shell",
         "default",
     ],
-    rustc_flags = ["@$(location :windows-sys-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = ["//third-party/rust/crates/windows-link/0.2.1:windows-link"],
 )

@@ -4,22 +4,21 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "spin-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/spin/spin-0.9.8.crate"],
     sha256 = "6980e8d7511241f8acf4aebddbb1ff938df5eebe98691418c4468d0b72a96a67",
     type = "tar.gz",
     strip_prefix = "spin-0.9.8",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "spin-manifest",
-    vendor = ":spin-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "spin",
-    srcs = [":spin-vendor"],
+    srcs = [":vendor"],
     crate = "spin",
     crate_root = "vendor/src/lib.rs",
     edition = "2015",
@@ -34,7 +33,7 @@ rust_library(
         "rwlock",
         "spin_mutex",
     ],
-    rustc_flags = ["@$(location :spin-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     named_deps = {
         "lock_api_crate": "//third-party/rust/crates/lock_api/0.4.14:lock_api",
     },

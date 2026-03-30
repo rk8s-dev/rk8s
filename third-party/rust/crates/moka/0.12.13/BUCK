@@ -4,22 +4,21 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "moka-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/moka/moka-0.12.13.crate"],
     sha256 = "b4ac832c50ced444ef6be0767a008b02c106a909ba79d1d830501e94b96f6b7e",
     type = "tar.gz",
     strip_prefix = "moka-0.12.13",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "moka-manifest",
-    vendor = ":moka-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "moka",
-    srcs = [":moka-vendor"],
+    srcs = [":vendor"],
     crate = "moka",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
@@ -31,7 +30,7 @@ rust_library(
         "futures-util",
         "sync",
     ],
-    rustc_flags = ["@$(location :moka-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/async-lock/3.4.2:async-lock",

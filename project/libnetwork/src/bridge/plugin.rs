@@ -707,7 +707,7 @@ pub async fn cmd_del(config: BridgeNetConf, inputs: Inputs) -> Result<SuccessRep
 
 pub async fn setup_bridge_nftable(br_name: String) -> anyhow::Result<()> {
     // Use nftables AST to create rules (idempotent): ensure `filter` table and
-    // `FORWARD` chain exist, then add two ACCEPT rules between external iface
+    // `FORWARD` chain exist, then add ACCEPT rules between external iface
     // and the bridge. Rules are tagged with a comment for cleanup.
 
     let ext_iface = lookup_ext_iface(
@@ -722,24 +722,48 @@ pub async fn setup_bridge_nftable(br_name: String) -> anyhow::Result<()> {
     )
     .await?;
 
-    // Get current ruleset
-    let current = tokio::task::spawn_blocking(nft_helper::get_current_ruleset)
-        .await
-        .map_err(|e| anyhow::anyhow!("failed to run nft helper task: {e}"))??;
+    // Read only the filter table to avoid parsing unrelated nft objects.
+    let current = tokio::task::spawn_blocking(|| {
+        nft_helper::get_current_ruleset_with_args(
+            None::<&String>,
+            ["list", "table", "ip", "filter"],
+        )
+    })
+    .await
+    .map_err(|e| anyhow::anyhow!("failed to run nft helper task: {e}"))?;
+
+    let current = match current {
+        Ok(ruleset) => Some(ruleset),
+        Err(e) => {
+            let msg = e.to_string();
+            if msg.contains("No such file or directory") || msg.contains("No such file") {
+                debug!("filter table not found yet, will create table/chain: {msg}");
+                None
+            } else {
+                return Err(anyhow::anyhow!(
+                    "failed to read filter table nftables rules: {e}"
+                ));
+            }
+        }
+    };
 
     // Check for existing table/chain
-    let table_exists = current.objects.iter().any(|obj| match obj {
-        NfObject::ListObject(NfListObject::Table(t)) => {
-            t.name == "filter" && t.family == NfFamily::IP
-        }
-        _ => false,
+    let table_exists = current.as_ref().is_some_and(|ruleset| {
+        ruleset.objects.iter().any(|obj| match obj {
+            NfObject::ListObject(NfListObject::Table(t)) => {
+                t.name == "filter" && t.family == NfFamily::IP
+            }
+            _ => false,
+        })
     });
 
-    let chain_exists = current.objects.iter().any(|obj| match obj {
-        NfObject::ListObject(NfListObject::Chain(c)) => {
-            c.table == "filter" && c.family == NfFamily::IP && c.name == "FORWARD"
-        }
-        _ => false,
+    let chain_exists = current.as_ref().is_some_and(|ruleset| {
+        ruleset.objects.iter().any(|obj| match obj {
+            NfObject::ListObject(NfListObject::Chain(c)) => {
+                c.table == "filter" && c.family == NfFamily::IP && c.name == "FORWARD"
+            }
+            _ => false,
+        })
     });
 
     let mut objects: Vec<NfObject> = Vec::new();
@@ -796,23 +820,25 @@ pub async fn setup_bridge_nftable(br_name: String) -> anyhow::Result<()> {
 
     // Ensure a clean base: delete any existing rules with our comment, then re-add
     let mut delete_objects: Vec<NfObject> = Vec::new();
-    for obj in current.objects.iter() {
-        if let NfObject::ListObject(listobj) = obj
-            && let NfListObject::Rule(r) = listobj
-            && let Some(comment) = &r.comment
-            && comment == "libbridge-forward-accept"
-        {
-            let del_rule = Rule {
-                family: r.family,
-                table: r.table.clone(),
-                chain: r.chain.clone(),
-                handle: r.handle,
-                expr: r.expr.clone(),
-                ..Default::default()
-            };
-            delete_objects.push(NfObject::CmdObject(NfCmd::Delete(NfListObject::Rule(
-                del_rule,
-            ))));
+    if let Some(ruleset) = &current {
+        for obj in ruleset.objects.iter() {
+            if let NfObject::ListObject(listobj) = obj
+                && let NfListObject::Rule(r) = listobj
+                && let Some(comment) = &r.comment
+                && comment == "libbridge-forward-accept"
+            {
+                let del_rule = Rule {
+                    family: r.family,
+                    table: r.table.clone(),
+                    chain: r.chain.clone(),
+                    handle: r.handle,
+                    expr: r.expr.clone(),
+                    ..Default::default()
+                };
+                delete_objects.push(NfObject::CmdObject(NfCmd::Delete(NfListObject::Rule(
+                    del_rule,
+                ))));
+            }
         }
     }
 
@@ -873,12 +899,28 @@ pub async fn setup_bridge_nftable(br_name: String) -> anyhow::Result<()> {
 }
 
 pub async fn cleanup_bridge_nftable() -> anyhow::Result<()> {
-    // Find and delete rules we previously added (identified by comment)
-    let current = tokio::task::spawn_blocking(nft_helper::get_current_ruleset)
-        .await
-        .map_err(|e| anyhow::anyhow!("failed to run nft helper task: {e}"))??;
+    // Read only filter table and delete rules previously added by this plugin.
+    let current = tokio::task::spawn_blocking(|| {
+        nft_helper::get_current_ruleset_with_args(
+            None::<&String>,
+            ["list", "table", "ip", "filter"],
+        )
+    })
+    .await
+    .map_err(|e| anyhow::anyhow!("failed to run nft helper task: {e}"))?;
 
-    let nft = current;
+    let nft = match current {
+        Ok(ruleset) => ruleset,
+        Err(e) => {
+            let msg = e.to_string();
+            if msg.contains("No such file or directory") || msg.contains("No such file") {
+                return Ok(());
+            }
+            return Err(anyhow::anyhow!(
+                "failed to read filter table nftables rules: {e}"
+            ));
+        }
+    };
 
     let mut delete_objects: Vec<NfObject> = Vec::new();
 

@@ -821,6 +821,7 @@ mod tests {
                 tolerations: vec![],
                 affinity: None,
                 restart_policy,
+                volumes: vec![],
             },
             status: PodStatus::default(),
         }

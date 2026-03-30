@@ -46,7 +46,7 @@ utils = { path = "../utils", version = "0.1.0" }
 xlinerpc = { path = "../xlinerpc"}
 
 # QUIC dependencies
-gm-quic = "0.4.0"
+gm-quic = { workspace = true }
 tonic.workspace = true
 
 [dev-dependencies]
@@ -56,6 +56,7 @@ itertools = { workspace = true }
 mockall = { workspace = true }
 once_cell = "1.17.0"
 rcgen = "0.13"
+rustls = { workspace = true }
 serial_test = "3"
 tempfile = { workspace = true }
 test-macros = { path = "../test-macros" }

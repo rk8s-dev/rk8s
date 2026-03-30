@@ -4,31 +4,30 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "buildscript_run", "rust_binary", "rust_library")
 
 http_archive(
-    name = "system-configuration-sys-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/system-configuration-sys/system-configuration-sys-0.6.0.crate"],
     sha256 = "8e1d1b10ced5ca923a1fcb8d03e96b8d3268065d724548c0211415ff6ac6bac4",
     type = "tar.gz",
     strip_prefix = "system-configuration-sys-0.6.0",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "system-configuration-sys-manifest",
-    vendor = ":system-configuration-sys-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "system-configuration-sys",
-    srcs = [":system-configuration-sys-vendor"],
+    srcs = [":vendor"],
     crate = "system_configuration_sys",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
-        "OUT_DIR": "$(location :system-configuration-sys-build-script-run[out_dir])",
+        "OUT_DIR": "$(location :build-script-run[out_dir])",
     },
     rustc_flags = [
-        "@$(location :system-configuration-sys-build-script-run[rustc_flags])",
-        "@$(location :system-configuration-sys-manifest[env_flags])",
+        "@$(location :build-script-run[rustc_flags])",
+        "@$(location :manifest[env_flags])",
     ],
     visibility = ["PUBLIC"],
     deps = [
@@ -38,21 +37,21 @@ rust_library(
 )
 
 rust_binary(
-    name = "system-configuration-sys-build-script-build",
-    srcs = [":system-configuration-sys-vendor"],
+    name = "build-script-build",
+    srcs = [":vendor"],
     crate = "build_script_build",
     crate_root = "vendor/build.rs",
     edition = "2021",
-    rustc_flags = ["@$(location :system-configuration-sys-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = [],
 )
 
 buildscript_run(
-    name = "system-configuration-sys-build-script-run",
+    name = "build-script-run",
     package_name = "system-configuration-sys",
-    buildscript_rule = ":system-configuration-sys-build-script-build",
-    env_srcs = [":system-configuration-sys-manifest[env_dict]"],
+    buildscript_rule = ":build-script-build",
+    env_srcs = [":manifest[env_dict]"],
     version = "0.6.0",
-    manifest_dir = ":system-configuration-sys-vendor",
+    manifest_dir = ":vendor",
     visibility = ["PUBLIC"],
 )

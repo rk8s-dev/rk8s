@@ -4,25 +4,24 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "foldhash-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/foldhash/foldhash-0.1.5.crate"],
     sha256 = "d9c4f5dac5e15c24eb999c26181a6ca40b39fe946cbe4c263c7209467bc83af2",
     type = "tar.gz",
     strip_prefix = "foldhash-0.1.5",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "foldhash-manifest",
-    vendor = ":foldhash-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "foldhash",
-    srcs = [":foldhash-vendor"],
+    srcs = [":vendor"],
     crate = "foldhash",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
-    rustc_flags = ["@$(location :foldhash-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
 )

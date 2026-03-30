@@ -4,26 +4,25 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "jobserver-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/jobserver/jobserver-0.1.34.crate"],
     sha256 = "9afb3de4395d6b3e67a780b6de64b51c978ecf11cb9a462c66be7d4ca9039d33",
     type = "tar.gz",
     strip_prefix = "jobserver-0.1.34",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "jobserver-manifest",
-    vendor = ":jobserver-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "jobserver",
-    srcs = [":jobserver-vendor"],
+    srcs = [":vendor"],
     crate = "jobserver",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
-    rustc_flags = ["@$(location :jobserver-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     os_deps = {
         "linux": ["//third-party/rust/crates/libc/0.2.182:libc"],
         "macos": ["//third-party/rust/crates/libc/0.2.182:libc"],

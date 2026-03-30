@@ -290,7 +290,7 @@ impl SandboxStore {
                 .with_context(|| format!("failed to parse sandbox record {}", path.display()))?;
             values.push(record.info);
         }
-        values.sort_by(|a, b| a.created_at.cmp(&b.created_at));
+        values.sort_by_key(|a| a.created_at);
         Ok(values)
     }
 

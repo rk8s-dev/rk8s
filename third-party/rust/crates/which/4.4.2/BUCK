@@ -4,26 +4,25 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "which-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/which/which-4.4.2.crate"],
     sha256 = "87ba24419a2078cd2b0f2ede2691b6c66d8e47836da3b6db8265ebad47afbfc7",
     type = "tar.gz",
     strip_prefix = "which-4.4.2",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "which-manifest",
-    vendor = ":which-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "which",
-    srcs = [":which-vendor"],
+    srcs = [":vendor"],
     crate = "which",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
-    rustc_flags = ["@$(location :which-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     os_deps = {
         "linux": ["//third-party/rust/crates/home/0.5.12:home"],
         "macos": ["//third-party/rust/crates/home/0.5.12:home"],

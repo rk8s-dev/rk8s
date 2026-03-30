@@ -4,26 +4,25 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "dirs-sys-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/dirs-sys/dirs-sys-0.5.0.crate"],
     sha256 = "e01a3366d27ee9890022452ee61b2b63a67e6f13f58900b651ff5665f0bb1fab",
     type = "tar.gz",
     strip_prefix = "dirs-sys-0.5.0",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "dirs-sys-manifest",
-    vendor = ":dirs-sys-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "dirs-sys",
-    srcs = [":dirs-sys-vendor"],
+    srcs = [":vendor"],
     crate = "dirs_sys",
     crate_root = "vendor/src/lib.rs",
     edition = "2015",
-    rustc_flags = ["@$(location :dirs-sys-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     os_deps = {
         "linux": ["//third-party/rust/crates/libc/0.2.182:libc"],
         "macos": ["//third-party/rust/crates/libc/0.2.182:libc"],

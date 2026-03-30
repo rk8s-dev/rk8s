@@ -4,22 +4,21 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "tokio-rustls-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/tokio-rustls/tokio-rustls-0.24.1.crate"],
     sha256 = "c28327cf380ac148141087fbfb9de9d7bd4e84ab5d2c28fbc911d753de8a7081",
     type = "tar.gz",
     strip_prefix = "tokio-rustls-0.24.1",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "tokio-rustls-manifest",
-    vendor = ":tokio-rustls-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "tokio-rustls",
-    srcs = [":tokio-rustls-vendor"],
+    srcs = [":vendor"],
     crate = "tokio_rustls",
     crate_root = "vendor/src/lib.rs",
     edition = "2018",
@@ -27,7 +26,7 @@ rust_library(
         "logging",
         "tls12",
     ],
-    rustc_flags = ["@$(location :tokio-rustls-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/rustls/0.21.12:rustls",

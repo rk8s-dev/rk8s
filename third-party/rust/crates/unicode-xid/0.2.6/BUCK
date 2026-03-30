@@ -4,26 +4,25 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "unicode-xid-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/unicode-xid/unicode-xid-0.2.6.crate"],
     sha256 = "ebc1c04c71510c7f702b52b7c350734c9ff1295c464a03335b00bb84fc54f853",
     type = "tar.gz",
     strip_prefix = "unicode-xid-0.2.6",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "unicode-xid-manifest",
-    vendor = ":unicode-xid-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "unicode-xid",
-    srcs = [":unicode-xid-vendor"],
+    srcs = [":vendor"],
     crate = "unicode_xid",
     crate_root = "vendor/src/lib.rs",
     edition = "2015",
     features = ["default"],
-    rustc_flags = ["@$(location :unicode-xid-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
 )

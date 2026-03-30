@@ -261,6 +261,146 @@ async fn test_endpoints_created_for_matching_pod() -> Result<()> {
 
 #[tokio::test]
 #[serial]
+async fn test_endpoints_created_for_matching_pod_nodeport() -> Result<()> {
+    let store = get_store().await;
+    if store.is_none() {
+        return Ok(());
+    }
+    let store = store.unwrap();
+    clean_store(&store).await?;
+
+    // Create NodePort Service with matchLabels app=demo, service port 80.
+    let mut match_labels = HashMap::new();
+    match_labels.insert("app".to_string(), "demo".to_string());
+    let selector = LabelSelector {
+        match_labels,
+        match_expressions: vec![],
+    };
+    let mut svc = service_with_selector_and_port("svc-demo-nodeport", Some(selector), 80, None);
+    svc.spec.service_type = "NodePort".to_string();
+    svc.spec.ports[0].node_port = Some(30080);
+    svc.spec.cluster_ip = Some("10.96.9.9".to_string());
+    let svc_yaml = serde_yaml::to_string(&svc)?;
+    store
+        .insert_service_yaml(&svc.metadata.name, &svc_yaml)
+        .await?;
+
+    // Start controller after service exists, so it bootstraps caches.
+    let _mgr = setup_endpoint_controller(store.clone()).await?;
+
+    // Create matching pod with IP.
+    let mut labels = HashMap::new();
+    labels.insert("app".to_string(), "demo".to_string());
+    let pod = pod_with_ip_and_labels("pod-nodeport-1", "10.0.0.9", labels);
+    let pod_yaml = serde_yaml::to_string(&pod)?;
+    store.insert_pod_yaml(&pod.metadata.name, &pod_yaml).await?;
+
+    // Endpoint controller should still publish endpoint address and service port.
+    wait_for_endpoints_ip_and_port(
+        &store,
+        "svc-demo-nodeport",
+        "10.0.0.9",
+        80,
+        Duration::from_secs(5),
+    )
+    .await?;
+
+    clean_store(&store).await?;
+    Ok(())
+}
+
+#[tokio::test]
+#[serial]
+async fn test_endpoints_created_for_multiple_services() -> Result<()> {
+    let store = get_store().await;
+    if store.is_none() {
+        return Ok(());
+    }
+    let store = store.unwrap();
+    clean_store(&store).await?;
+
+    // Create Service 1 with matchLabels app=demo-1 and distinct cluster_ip
+    let mut match_labels1 = HashMap::new();
+    match_labels1.insert("app".to_string(), "demo-1".to_string());
+    let selector1 = LabelSelector {
+        match_labels: match_labels1,
+        match_expressions: vec![],
+    };
+    let mut svc1 = service_with_selector_and_port("svc-demo-1", Some(selector1), 80, None);
+    // Overwrite the default 10.96.0.1 to avoid IP collision
+    svc1.spec.cluster_ip = Some("10.96.1.1".to_string());
+    let svc1_yaml = serde_yaml::to_string(&svc1)?;
+    store
+        .insert_service_yaml(&svc1.metadata.name, &svc1_yaml)
+        .await?;
+
+    // Create Service 2 with matchLabels app=demo-2 and distinct cluster_ip
+    let mut match_labels2 = HashMap::new();
+    match_labels2.insert("app".to_string(), "demo-2".to_string());
+    let selector2 = LabelSelector {
+        match_labels: match_labels2,
+        match_expressions: vec![],
+    };
+    let mut svc2 = service_with_selector_and_port("svc-demo-2", Some(selector2), 80, None);
+    // Overwrite the default 10.96.0.1
+    svc2.spec.cluster_ip = Some("10.96.2.2".to_string());
+    let svc2_yaml = serde_yaml::to_string(&svc2)?;
+    store
+        .insert_service_yaml(&svc2.metadata.name, &svc2_yaml)
+        .await?;
+
+    // Start controller after services exist, so it bootstraps caches
+    let _mgr = setup_endpoint_controller(store.clone()).await?;
+
+    // Create two matching pods for Service 1
+    let mut labels1 = HashMap::new();
+    labels1.insert("app".to_string(), "demo-1".to_string());
+    let pod1 = pod_with_ip_and_labels("pod-1-1", "10.0.1.1", labels1.clone());
+    store
+        .insert_pod_yaml(&pod1.metadata.name, &serde_yaml::to_string(&pod1)?)
+        .await?;
+
+    let pod2 = pod_with_ip_and_labels("pod-1-2", "10.0.1.2", labels1);
+    store
+        .insert_pod_yaml(&pod2.metadata.name, &serde_yaml::to_string(&pod2)?)
+        .await?;
+
+    // Create two matching pods for Service 2
+    let mut labels2 = HashMap::new();
+    labels2.insert("app".to_string(), "demo-2".to_string());
+    let pod3 = pod_with_ip_and_labels("pod-2-1", "10.0.2.1", labels2.clone());
+    store
+        .insert_pod_yaml(&pod3.metadata.name, &serde_yaml::to_string(&pod3)?)
+        .await?;
+
+    let pod4 = pod_with_ip_and_labels("pod-2-2", "10.0.2.2", labels2);
+    store
+        .insert_pod_yaml(&pod4.metadata.name, &serde_yaml::to_string(&pod4)?)
+        .await?;
+
+    // Expect endpoints to be created properly for both services with correct IPs
+    wait_for_endpoints_ips(
+        &store,
+        "svc-demo-1",
+        &["10.0.1.1", "10.0.1.2"],
+        Duration::from_secs(5),
+    )
+    .await?;
+
+    wait_for_endpoints_ips(
+        &store,
+        "svc-demo-2",
+        &["10.0.2.1", "10.0.2.2"],
+        Duration::from_secs(5),
+    )
+    .await?;
+
+    clean_store(&store).await?;
+    Ok(())
+}
+
+#[tokio::test]
+#[serial]
 async fn test_empty_selector_matches_all_pods() -> Result<()> {
     let store = get_store().await;
     if store.is_none() {

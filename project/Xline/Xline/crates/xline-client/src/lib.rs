@@ -162,16 +162,12 @@ use std::{fmt::Debug, sync::Arc};
 
 use curp::{
     client::ClientBuilder as CurpClientBuilder,
-    rpc::{FetchClusterRequest, FetchClusterResponse},
+    rpc::{FetchClusterRequest, FetchClusterResponse, MethodId},
 };
-use http::uri::PathAndQuery;
-use tonic::{
-    client::Grpc,
-    codec::ProstCodec,
-    transport::{Channel as TonicChannel, ClientTlsConfig},
-};
+use rustls;
+use tonic::transport::ClientTlsConfig;
 use utils::config::ClientConfig;
-use xlineapi::command::{Command, CurpClient};
+use xlineapi::command::CurpClient;
 
 use crate::{
     clients::{
@@ -192,6 +188,7 @@ pub use transport::Streaming;
 
 /// Error definitions for `xline-client`.
 pub mod error;
+mod h3_pool;
 mod transport;
 
 /// Perform a FetchCluster unary RPC via tonic's low-level Grpc client.
@@ -244,16 +241,13 @@ impl Client {
             .into_iter()
             .map(|addr| addr.as_ref().to_owned())
             .collect();
-        let discovery_channel =
-            Self::build_discovery_channel(addrs.clone(), options.tls_config.as_ref()).await?;
-        let peer_addrs = Self::discover_peer_addrs(discovery_channel).await?;
         let quic_client = Arc::new(Self::build_quic_client(&options)?);
         let channel = Self::build_channel(
-            peer_addrs.clone(),
+            addrs.clone(),
             Arc::clone(&quic_client),
-            *options.client_config.propose_timeout(),
+            *options.client_config().propose_timeout(),
         );
-
+        let peer_addrs = Self::discover_peer_addrs(&channel).await?;
         // Use discover_from to connect via QUIC and discover cluster topology
         // Use is_raw_curp=true so state refresh uses peer URLs (not client URLs)
         let curp_client = Arc::new(
@@ -261,11 +255,11 @@ impl Client {
                 .quic_transport(quic_client)
                 .discover_from(peer_addrs)
                 .await?
-                .build::<Command>()?,
+                .build::<xlineapi::command::Command>()?,
         ) as Arc<CurpClient>;
         let id_gen = Arc::new(lease_gen::LeaseIdGenerator::new());
 
-        let token = match options.user {
+        let token = match options.user() {
             Some((username, password)) => {
                 let mut tmp_auth = AuthClient::new(Arc::clone(&curp_client), channel.clone(), None);
                 let resp = tmp_auth
@@ -342,45 +336,21 @@ impl Client {
         Ok(gm_quic::prelude::QuicClient::builder()
             .with_root_certificates(root_store)
             .without_cert()
+            .with_alpns(["h3"])
             .build())
     }
 
-    /// Build a discovery channel over client endpoints.
-    async fn build_discovery_channel(
-        addrs: Vec<String>,
-        tls_config: Option<&ClientTlsConfig>,
-    ) -> Result<TonicChannel, XlineClientBuildError> {
-        let (channel, tx) = TonicChannel::balance_channel(64);
-
-        for addr in addrs {
-            let endpoint = utils::build_endpoint(&addr, tls_config)?;
-            tx.send(tower::discover::Change::Insert(addr, endpoint))
-                .await
-                .unwrap_or_else(|_| unreachable!("The channel will not closed"));
-        }
-
-        Ok(channel)
-    }
-
     /// Fetch peer URLs from the public client endpoints before switching to QUIC.
-    async fn discover_peer_addrs(
-        channel: TonicChannel,
-    ) -> Result<Vec<String>, XlineClientBuildError> {
-        let path = PathAndQuery::from_static("/commandpb.Protocol/FetchCluster");
-        let request = tonic::Request::new(FetchClusterRequest::default());
-        let response = Grpc::new(channel)
-            .unary(
-                request,
-                path,
-                ProstCodec::<FetchClusterRequest, FetchClusterResponse>::default(),
-            )
+    async fn discover_peer_addrs(channel: &Channel) -> Result<Vec<String>, XlineClientBuildError> {
+        let request = FetchClusterRequest::default();
+        let response = channel
+            .unary::<FetchClusterRequest, FetchClusterResponse>(MethodId::FetchCluster, request)
             .await?;
 
         let addrs = response
-            .into_inner()
             .members
             .into_iter()
-            .flat_map(|member| member.peer_urls)
+            .flat_map(|member| member.peer_urls.into_iter())
             .collect();
         Ok(addrs)
     }

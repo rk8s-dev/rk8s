@@ -4,42 +4,41 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "buildscript_run", "rust_binary", "rust_library")
 
 http_archive(
-    name = "crossbeam-utils-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/crossbeam-utils/crossbeam-utils-0.8.21.crate"],
     sha256 = "d0a5c400df2834b80a4c3327b3aad3a4c4cd4de0629063962b03235697506a28",
     type = "tar.gz",
     strip_prefix = "crossbeam-utils-0.8.21",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "crossbeam-utils-manifest",
-    vendor = ":crossbeam-utils-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "crossbeam-utils",
-    srcs = [":crossbeam-utils-vendor"],
+    srcs = [":vendor"],
     crate = "crossbeam_utils",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
-        "OUT_DIR": "$(location :crossbeam-utils-build-script-run[out_dir])",
+        "OUT_DIR": "$(location :build-script-run[out_dir])",
     },
     features = [
         "default",
         "std",
     ],
     rustc_flags = [
-        "@$(location :crossbeam-utils-build-script-run[rustc_flags])",
-        "@$(location :crossbeam-utils-manifest[env_flags])",
+        "@$(location :build-script-run[rustc_flags])",
+        "@$(location :manifest[env_flags])",
     ],
     visibility = ["PUBLIC"],
 )
 
 rust_binary(
-    name = "crossbeam-utils-build-script-build",
-    srcs = [":crossbeam-utils-vendor"],
+    name = "build-script-build",
+    srcs = [":vendor"],
     crate = "build_script_build",
     crate_root = "vendor/build.rs",
     edition = "2021",
@@ -47,20 +46,20 @@ rust_binary(
         "default",
         "std",
     ],
-    rustc_flags = ["@$(location :crossbeam-utils-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = [],
 )
 
 buildscript_run(
-    name = "crossbeam-utils-build-script-run",
+    name = "build-script-run",
     package_name = "crossbeam-utils",
-    buildscript_rule = ":crossbeam-utils-build-script-build",
-    env_srcs = [":crossbeam-utils-manifest[env_dict]"],
+    buildscript_rule = ":build-script-build",
+    env_srcs = [":manifest[env_dict]"],
     features = [
         "default",
         "std",
     ],
     version = "0.8.21",
-    manifest_dir = ":crossbeam-utils-vendor",
+    manifest_dir = ":vendor",
     visibility = ["PUBLIC"],
 )

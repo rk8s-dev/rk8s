@@ -3,6 +3,7 @@
 use crate::envelope::Envelope;
 
 /// Marker type that distinguishes a request envelope from a response envelope.
+#[derive(Debug)]
 pub struct RequestKind;
 
 /// Generic RPC request wrapper.

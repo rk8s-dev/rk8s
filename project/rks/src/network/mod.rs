@@ -4,4 +4,5 @@ pub mod init;
 pub mod lease;
 pub mod manager;
 pub mod registry;
+pub mod service_ip;
 pub mod subnet;

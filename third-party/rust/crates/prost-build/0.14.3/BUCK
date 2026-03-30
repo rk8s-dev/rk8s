@@ -4,22 +4,21 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "prost-build-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/prost-build/prost-build-0.14.3.crate"],
     sha256 = "343d3bd7056eda839b03204e68deff7d1b13aba7af2b2fd16890697274262ee7",
     type = "tar.gz",
     strip_prefix = "prost-build-0.14.3",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "prost-build-manifest",
-    vendor = ":prost-build-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "prost-build",
-    srcs = [":prost-build-vendor"],
+    srcs = [":vendor"],
     crate = "prost_build",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
@@ -28,7 +27,7 @@ rust_library(
         "default",
         "format",
     ],
-    rustc_flags = ["@$(location :prost-build-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/heck/0.5.0:heck",

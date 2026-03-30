@@ -17,11 +17,11 @@ mod lock_server;
 /// Xline maintenance client
 mod maintenance;
 /// Xline QUIC direct-RPC bridge
-mod quic_service;
+pub(crate) mod quic_service;
 /// Xline watch server
 mod watch_server;
 /// Xline server
 mod xline_server;
 
+pub(crate) use self::maintenance::MAINTENANCE_SNAPSHOT_CHUNK_SIZE;
 pub use self::xline_server::XlineServer;
-pub(crate) use self::{auth_server::get_token, maintenance::MAINTENANCE_SNAPSHOT_CHUNK_SIZE};

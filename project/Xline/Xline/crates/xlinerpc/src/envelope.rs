@@ -7,8 +7,6 @@
 
 use std::marker::PhantomData;
 
-use prost::Message;
-
 use crate::{
     MetaData,
     codec::{BinaryCodec, Codec, DecodeError, EncodeError},
@@ -19,7 +17,7 @@ use crate::{
 /// Use the type aliases [`crate::Request`] and [`crate::Response`] rather than
 /// this type directly.
 #[derive(Debug, Clone, PartialEq)]
-pub struct Envelope<T: Message, Kind> {
+pub struct Envelope<T, Kind> {
     /// The protobuf payload
     data: T,
     /// Binary metadata (headers, auth tokens, status info, …)
@@ -28,7 +26,7 @@ pub struct Envelope<T: Message, Kind> {
     _kind: PhantomData<Kind>,
 }
 
-impl<T: Message, Kind> Envelope<T, Kind> {
+impl<T, Kind> Envelope<T, Kind> {
     /// Create a new envelope with data and metadata
     #[must_use]
     #[inline]
@@ -58,9 +56,22 @@ impl<T: Message, Kind> Envelope<T, Kind> {
         &self.data
     }
 
+    /// Tonic-compatible accessor for payload reference.
+    #[must_use]
+    #[inline]
+    pub fn get_ref(&self) -> &T {
+        &self.data
+    }
+
     /// Get a mutable reference to the payload
     #[inline]
     pub fn data_mut(&mut self) -> &mut T {
+        &mut self.data
+    }
+
+    /// Tonic-compatible accessor for mutable payload reference.
+    #[inline]
+    pub fn get_mut(&mut self) -> &mut T {
         &mut self.data
     }
 
@@ -71,9 +82,22 @@ impl<T: Message, Kind> Envelope<T, Kind> {
         &self.meta
     }
 
+    /// Tonic-compatible accessor for metadata.
+    #[must_use]
+    #[inline]
+    pub fn metadata(&self) -> &MetaData {
+        &self.meta
+    }
+
     /// Get a mutable reference to the metadata
     #[inline]
     pub fn meta_mut(&mut self) -> &mut MetaData {
+        &mut self.meta
+    }
+
+    /// Tonic-compatible mutable accessor for metadata.
+    #[inline]
+    pub fn metadata_mut(&mut self) -> &mut MetaData {
         &mut self.meta
     }
 
@@ -84,12 +108,22 @@ impl<T: Message, Kind> Envelope<T, Kind> {
         (self.data, self.meta)
     }
 
+    /// Tonic-compatible payload extractor.
+    #[must_use]
+    #[inline]
+    pub fn into_inner(self) -> T {
+        self.data
+    }
+
     /// Encode to bytes using the default [`BinaryCodec`]
     ///
     /// # Errors
     /// Returns error if encoding fails
     #[inline]
-    pub fn encode_to_vec(&self) -> Result<Vec<u8>, EncodeError> {
+    pub fn encode_to_vec(&self) -> Result<Vec<u8>, EncodeError>
+    where
+        T: prost::Message,
+    {
         self.encode_with(&BinaryCodec)
     }
 
@@ -97,7 +131,10 @@ impl<T: Message, Kind> Envelope<T, Kind> {
     ///
     /// # Errors
     /// Returns error if encoding fails
-    pub fn encode_with<C: Codec>(&self, codec: &C) -> Result<Vec<u8>, EncodeError> {
+    pub fn encode_with<C: Codec>(&self, codec: &C) -> Result<Vec<u8>, EncodeError>
+    where
+        T: prost::Message,
+    {
         codec.encode(&self.data, &self.meta)
     }
 
@@ -108,7 +145,7 @@ impl<T: Message, Kind> Envelope<T, Kind> {
     #[inline]
     pub fn decode_from_slice(bytes: &[u8]) -> Result<Self, DecodeError>
     where
-        T: Default,
+        T: prost::Message + Default,
     {
         Self::decode_with(bytes, &BinaryCodec)
     }
@@ -119,7 +156,7 @@ impl<T: Message, Kind> Envelope<T, Kind> {
     /// Returns error if decoding fails
     pub fn decode_with<C: Codec>(bytes: &[u8], codec: &C) -> Result<Self, DecodeError>
     where
-        T: Default,
+        T: prost::Message + Default,
     {
         let (data, meta) = codec.decode(bytes)?;
         Ok(Self {

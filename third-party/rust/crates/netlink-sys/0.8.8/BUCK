@@ -4,22 +4,21 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "netlink-sys-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/netlink-sys/netlink-sys-0.8.8.crate"],
     sha256 = "cd6c30ed10fa69cc491d491b85cc971f6bdeb8e7367b7cde2ee6cc878d583fae",
     type = "tar.gz",
     strip_prefix = "netlink-sys-0.8.8",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "netlink-sys-manifest",
-    vendor = ":netlink-sys-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "netlink-sys",
-    srcs = [":netlink-sys-vendor"],
+    srcs = [":vendor"],
     crate = "netlink_sys",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
@@ -29,7 +28,7 @@ rust_library(
         "tokio",
         "tokio_socket",
     ],
-    rustc_flags = ["@$(location :netlink-sys-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/bytes/1.11.1:bytes",

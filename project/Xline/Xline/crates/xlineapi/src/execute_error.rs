@@ -314,18 +314,6 @@ impl From<ExecuteError> for Status {
     }
 }
 
-/// Bridge conversion: ExecuteError → tonic::Status (via xlinerpc::Status)
-///
-/// This exists because xline server code returns `Result<_, tonic::Status>` and uses `?`
-/// on `ExecuteError`. Will be removed when xline server migrates away from tonic.
-impl From<ExecuteError> for tonic::Status {
-    #[inline]
-    fn from(err: ExecuteError) -> Self {
-        let xlinerpc_status: Status = err.into();
-        xlinerpc_status.into()
-    }
-}
-
 #[cfg(test)]
 mod test {
     use strum::IntoEnumIterator;

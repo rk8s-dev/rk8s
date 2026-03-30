@@ -4,22 +4,21 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "tracing-core-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/tracing-core/tracing-core-0.1.36.crate"],
     sha256 = "db97caf9d906fbde555dd62fa95ddba9eecfd14cb388e4f491a66d74cd5fb79a",
     type = "tar.gz",
     strip_prefix = "tracing-core-0.1.36",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "tracing-core-manifest",
-    vendor = ":tracing-core-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "tracing-core",
-    srcs = [":tracing-core-vendor"],
+    srcs = [":vendor"],
     crate = "tracing_core",
     crate_root = "vendor/src/lib.rs",
     edition = "2018",
@@ -28,7 +27,7 @@ rust_library(
         "once_cell",
         "std",
     ],
-    rustc_flags = ["@$(location :tracing-core-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/once_cell/1.21.3:once_cell",

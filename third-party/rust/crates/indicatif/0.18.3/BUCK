@@ -4,22 +4,21 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "indicatif-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/indicatif/indicatif-0.18.3.crate"],
     sha256 = "9375e112e4b463ec1b1c6c011953545c65a30164fbab5b581df32b3abf0dcb88",
     type = "tar.gz",
     strip_prefix = "indicatif-0.18.3",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "indicatif-manifest",
-    vendor = ":indicatif-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "indicatif",
-    srcs = [":indicatif-vendor"],
+    srcs = [":vendor"],
     crate = "indicatif",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
@@ -27,7 +26,7 @@ rust_library(
         "default",
         "unicode-width",
     ],
-    rustc_flags = ["@$(location :indicatif-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/console/0.16.2:console",

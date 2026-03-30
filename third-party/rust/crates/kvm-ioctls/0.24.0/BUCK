@@ -4,31 +4,30 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "buildscript_run", "rust_binary", "rust_library")
 
 http_archive(
-    name = "kvm-ioctls-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/kvm-ioctls/kvm-ioctls-0.24.0.crate"],
     sha256 = "333f77a20344a448f3f70664918135fddeb804e938f28a99d685bd92926e0b19",
     type = "tar.gz",
     strip_prefix = "kvm-ioctls-0.24.0",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "kvm-ioctls-manifest",
-    vendor = ":kvm-ioctls-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "kvm-ioctls",
-    srcs = [":kvm-ioctls-vendor"],
+    srcs = [":vendor"],
     crate = "kvm_ioctls",
     crate_root = "vendor/src/lib.rs",
     edition = "2024",
     env = {
-        "OUT_DIR": "$(location :kvm-ioctls-build-script-run[out_dir])",
+        "OUT_DIR": "$(location :build-script-run[out_dir])",
     },
     rustc_flags = [
-        "@$(location :kvm-ioctls-build-script-run[rustc_flags])",
-        "@$(location :kvm-ioctls-manifest[env_flags])",
+        "@$(location :build-script-run[rustc_flags])",
+        "@$(location :manifest[env_flags])",
     ],
     visibility = ["PUBLIC"],
     deps = [
@@ -40,21 +39,21 @@ rust_library(
 )
 
 rust_binary(
-    name = "kvm-ioctls-build-script-build",
-    srcs = [":kvm-ioctls-vendor"],
+    name = "build-script-build",
+    srcs = [":vendor"],
     crate = "build_script_build",
     crate_root = "vendor/build.rs",
     edition = "2024",
-    rustc_flags = ["@$(location :kvm-ioctls-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = [],
 )
 
 buildscript_run(
-    name = "kvm-ioctls-build-script-run",
+    name = "build-script-run",
     package_name = "kvm-ioctls",
-    buildscript_rule = ":kvm-ioctls-build-script-build",
-    env_srcs = [":kvm-ioctls-manifest[env_dict]"],
+    buildscript_rule = ":build-script-build",
+    env_srcs = [":manifest[env_dict]"],
     version = "0.24.0",
-    manifest_dir = ":kvm-ioctls-vendor",
+    manifest_dir = ":vendor",
     visibility = ["PUBLIC"],
 )

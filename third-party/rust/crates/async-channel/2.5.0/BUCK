@@ -4,22 +4,21 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "async-channel-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/async-channel/async-channel-2.5.0.crate"],
     sha256 = "924ed96dd52d1b75e9c1a3e6275715fd320f5f9439fb5a4a11fa51f4221158d2",
     type = "tar.gz",
     strip_prefix = "async-channel-2.5.0",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "async-channel-manifest",
-    vendor = ":async-channel-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "async-channel",
-    srcs = [":async-channel-vendor"],
+    srcs = [":vendor"],
     crate = "async_channel",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
@@ -27,7 +26,7 @@ rust_library(
         "default",
         "std",
     ],
-    rustc_flags = ["@$(location :async-channel-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/concurrent-queue/2.5.0:concurrent-queue",

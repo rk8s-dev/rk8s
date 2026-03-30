@@ -4,22 +4,21 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "darling-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/darling/darling-0.20.11.crate"],
     sha256 = "fc7f46116c46ff9ab3eb1597a45688b6715c6e628b5c133e288e709a29bcb4ee",
     type = "tar.gz",
     strip_prefix = "darling-0.20.11",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "darling-manifest",
-    vendor = ":darling-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "darling",
-    srcs = [":darling-vendor"],
+    srcs = [":vendor"],
     crate = "darling",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
@@ -27,7 +26,7 @@ rust_library(
         "default",
         "suggestions",
     ],
-    rustc_flags = ["@$(location :darling-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/darling_core/0.20.11:darling_core",

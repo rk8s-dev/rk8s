@@ -4,26 +4,25 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "proc-macro-crate-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/proc-macro-crate/proc-macro-crate-3.4.0.crate"],
     sha256 = "219cb19e96be00ab2e37d6e299658a0cfa83e52429179969b0f0121b4ac46983",
     type = "tar.gz",
     strip_prefix = "proc-macro-crate-3.4.0",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "proc-macro-crate-manifest",
-    vendor = ":proc-macro-crate-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "proc-macro-crate",
-    srcs = [":proc-macro-crate-vendor"],
+    srcs = [":vendor"],
     crate = "proc_macro_crate",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
-    rustc_flags = ["@$(location :proc-macro-crate-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = ["//third-party/rust/crates/toml_edit/0.23.10+spec-1.0.0:toml_edit"],
 )

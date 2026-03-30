@@ -1,7 +1,7 @@
 use lazy_static::lazy_static;
 use libcontainer::oci_spec::runtime::{
     Capability, LinuxBuilder, LinuxCapabilities, LinuxNamespaceBuilder, LinuxNamespaceType,
-    ProcessBuilder, Spec,
+    MountBuilder, ProcessBuilder, Spec,
 };
 
 use crate::cri::cri_api::ContainerConfig;
@@ -119,6 +119,33 @@ impl OCISpecGenerator {
 
         let linux = linux_builder.build()?;
         self.inner_spec.set_linux(Some(linux));
+
+        // Convert CRI mounts to OCI mounts
+        if !self.container_config.mounts.is_empty() {
+            let mut oci_mounts = self.inner_spec.mounts().clone().unwrap_or_default();
+            for m in &self.container_config.mounts {
+                let mut opts = vec![
+                    if m.readonly { "ro" } else { "rw" }.to_string(),
+                    "rbind".to_string(),
+                ];
+                if m.propagation != 0 {
+                    opts.push("rprivate".to_string());
+                }
+                let mount_type = if m.host_path.starts_with('/') {
+                    "bind"
+                } else {
+                    "none"
+                };
+                let oci_mount = MountBuilder::default()
+                    .typ(mount_type)
+                    .destination(&m.container_path)
+                    .source(&m.host_path)
+                    .options(opts)
+                    .build()?;
+                oci_mounts.push(oci_mount);
+            }
+            self.inner_spec.set_mounts(Some(oci_mounts));
+        }
 
         Ok(self.inner_spec)
     }

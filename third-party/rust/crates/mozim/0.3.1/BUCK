@@ -4,22 +4,21 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "mozim-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/mozim/mozim-0.3.1.crate"],
     sha256 = "f0437e58b082a444d57ee1e67eff5f5b98e4c3c64063bffc447ac9ae29a5ca3a",
     type = "tar.gz",
     strip_prefix = "mozim-0.3.1",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "mozim-manifest",
-    vendor = ":mozim-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "mozim",
-    srcs = [":mozim-vendor"],
+    srcs = [":vendor"],
     crate = "mozim",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
@@ -27,7 +26,7 @@ rust_library(
         "default",
         "netlink",
     ],
-    rustc_flags = ["@$(location :mozim-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/etherparse/0.19.0:etherparse",

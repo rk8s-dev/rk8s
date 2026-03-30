@@ -283,28 +283,6 @@ impl fmt::Display for Status {
 
 impl Error for Status {}
 
-// Conversion from/to tonic::Status (only available with tonic-compat feature)
-#[cfg(feature = "tonic-compat")]
-impl From<tonic::Status> for Status {
-    fn from(s: tonic::Status) -> Self {
-        let code = Code::from_i32(s.code() as i32);
-        let details = bytes::Bytes::copy_from_slice(s.details());
-        Status::with_details(code, s.message(), details)
-    }
-}
-
-#[cfg(feature = "tonic-compat")]
-impl From<Status> for tonic::Status {
-    fn from(s: Status) -> Self {
-        let code = tonic::Code::from(s.code as i32);
-        if s.details.is_empty() {
-            tonic::Status::new(code, s.message)
-        } else {
-            tonic::Status::with_details(code, s.message, s.details)
-        }
-    }
-}
-
 // Conversion from std::io::Error
 impl From<std::io::Error> for Status {
     fn from(err: std::io::Error) -> Self {

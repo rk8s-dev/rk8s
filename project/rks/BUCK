@@ -41,6 +41,7 @@ rust_binary(
     deps = [
         "//project/common:common",
         "//project/libcni:libcni",
+        "//project/libcsi:libcsi",
         "//project/libnetwork:libnetwork",
         "//project/libscheduler:libscheduler",
         "//project/libvault:libvault",
@@ -52,6 +53,7 @@ rust_binary(
         "//third-party/rust/crates/chrono/0.4.43:chrono",
         "//third-party/rust/crates/clap/4.5.58:clap",
         "//third-party/rust/crates/context/3.0.0:context",
+        "//third-party/rust/crates/dashmap/6.1.0:dashmap",
         "//third-party/rust/crates/dotenvy/0.15.7:dotenvy",
         "//third-party/rust/crates/either/1.15.0:either",
         "//third-party/rust/crates/env_logger/0.11.9:env_logger",
@@ -77,6 +79,7 @@ rust_binary(
         "//third-party/rust/crates/regex/1.12.3:regex",
         "//third-party/rust/crates/reqwest/0.12.28:reqwest",
         "//third-party/rust/crates/rtnetlink/0.18.1:rtnetlink",
+        "//third-party/rust/crates/rustls-pemfile/2.2.0:rustls-pemfile",
         "//third-party/rust/crates/rustls/0.23.36:rustls",
         "//third-party/rust/crates/serde/1.0.228:serde",
         "//third-party/rust/crates/serde_json/1.0.149:serde_json",
@@ -89,6 +92,7 @@ rust_binary(
         "//third-party/rust/crates/tokio/1.49.0:tokio",
         "//third-party/rust/crates/tonic/0.14.4:tonic",
         "//third-party/rust/crates/uuid/1.21.0:uuid",
+        "//third-party/rust/crates/x509-parser/0.18.1:x509-parser",
         ":rks-lib",
     ],
 )
@@ -104,6 +108,7 @@ rust_library(
     deps = [
         "//project/common:common",
         "//project/libcni:libcni",
+        "//project/libcsi:libcsi",
         "//project/libnetwork:libnetwork",
         "//project/libscheduler:libscheduler",
         "//project/libvault:libvault",
@@ -115,6 +120,7 @@ rust_library(
         "//third-party/rust/crates/chrono/0.4.43:chrono",
         "//third-party/rust/crates/clap/4.5.58:clap",
         "//third-party/rust/crates/context/3.0.0:context",
+        "//third-party/rust/crates/dashmap/6.1.0:dashmap",
         "//third-party/rust/crates/dotenvy/0.15.7:dotenvy",
         "//third-party/rust/crates/either/1.15.0:either",
         "//third-party/rust/crates/env_logger/0.11.9:env_logger",
@@ -140,6 +146,7 @@ rust_library(
         "//third-party/rust/crates/regex/1.12.3:regex",
         "//third-party/rust/crates/reqwest/0.12.28:reqwest",
         "//third-party/rust/crates/rtnetlink/0.18.1:rtnetlink",
+        "//third-party/rust/crates/rustls-pemfile/2.2.0:rustls-pemfile",
         "//third-party/rust/crates/rustls/0.23.36:rustls",
         "//third-party/rust/crates/serde/1.0.228:serde",
         "//third-party/rust/crates/serde_json/1.0.149:serde_json",
@@ -152,5 +159,6 @@ rust_library(
         "//third-party/rust/crates/tokio/1.49.0:tokio",
         "//third-party/rust/crates/tonic/0.14.4:tonic",
         "//third-party/rust/crates/uuid/1.21.0:uuid",
+        "//third-party/rust/crates/x509-parser/0.18.1:x509-parser",
     ],
 )

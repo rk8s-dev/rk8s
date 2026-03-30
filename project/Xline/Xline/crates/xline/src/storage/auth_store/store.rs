@@ -16,15 +16,13 @@ use pbkdf2::{
     Pbkdf2,
     password_hash::{PasswordHash, PasswordVerifier},
 };
-use tonic::Status;
 use utils::parking_lot_lock::RwLockMap;
 use xlineapi::{
     AuthInfo,
     command::{CommandResponse, KeyRange, SyncResponse},
     execute_error::ExecuteError,
 };
-// TODO: use our own status type
-// use xlinerpc::status::Status;
+use xlinerpc::Status;
 
 use super::{
     backend::{ROOT_ROLE, ROOT_USER},
@@ -47,7 +45,6 @@ use crate::{
         AuthenticateResponse, DeleteRangeRequest, LeaseRevokeRequest, Permission, PutRequest,
         RangeRequest, Request, RequestOp, RequestWrapper, Role, TxnRequest, Type, User,
     },
-    server::get_token,
     storage::{
         auth_store::backend::AuthStoreBackend,
         db::{DB, WriteOp},
@@ -128,26 +125,27 @@ impl AuthStore {
         }
     }
 
-    /// Try get auth info from tonic request
+    /// Try get auth info from xlinerpc request.
     #[allow(clippy::result_large_err)]
-    pub(crate) fn try_get_auth_info_from_request<T>(
+    pub(crate) fn try_get_auth_info_from_rpc_request<T>(
         &self,
-        request: &tonic::Request<T>,
+        request: &xlinerpc::Request<T>,
     ) -> Result<Option<AuthInfo>, Status> {
         if !self.is_enabled() {
             return Ok(None);
         }
-        if let Some(token) = get_token(request.metadata()) {
-            let auth_info = self.verify(&token)?;
+
+        let token = request
+            .metadata()
+            .get(b"token")
+            .or_else(|| request.metadata().get(b"authorization"))
+            .and_then(|v| std::str::from_utf8(v).ok());
+
+        if let Some(token) = token {
+            let auth_info = self.verify(token)?;
             return Ok(Some(auth_info));
         }
-        if let Some(cn) = get_cn(request) {
-            let auth_info = AuthInfo {
-                username: cn,
-                auth_revision: self.revision(),
-            };
-            return Ok(Some(auth_info));
-        }
+
         Ok(None)
     }
 
@@ -1184,14 +1182,6 @@ impl AuthStore {
     pub(crate) fn revision_gen(&self) -> Arc<RevisionNumberGenerator> {
         Arc::clone(&self.revision)
     }
-}
-
-/// Get common name from tonic request
-fn get_cn<T>(request: &tonic::Request<T>) -> Option<String> {
-    let chain = request.peer_certs()?;
-    let cert_der = chain.first()?;
-    let cert = x509_certificate::X509Certificate::from_der(cert_der.as_ref()).ok()?;
-    cert.subject_common_name()
 }
 
 #[cfg(test)]

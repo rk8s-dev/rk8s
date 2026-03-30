@@ -4,22 +4,21 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "anstream-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/anstream/anstream-0.6.21.crate"],
     sha256 = "43d5b281e737544384e969a5ccad3f1cdd24b48086a0fc1b2a5262a26b8f4f4a",
     type = "tar.gz",
     strip_prefix = "anstream-0.6.21",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "anstream-manifest",
-    vendor = ":anstream-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "anstream",
-    srcs = [":anstream-vendor"],
+    srcs = [":vendor"],
     crate = "anstream",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
@@ -28,7 +27,7 @@ rust_library(
         "default",
         "wincon",
     ],
-    rustc_flags = ["@$(location :anstream-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     os_deps = {
         "windows": ["//third-party/rust/crates/anstyle-wincon/3.0.11:anstyle-wincon"],
     },

@@ -4,22 +4,21 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "scopeguard-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/scopeguard/scopeguard-1.2.0.crate"],
     sha256 = "94143f37725109f92c262ed2cf5e59bce7498c01bcc1502d7b9afe439a4e9f49",
     type = "tar.gz",
     strip_prefix = "scopeguard-1.2.0",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "scopeguard-manifest",
-    vendor = ":scopeguard-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "scopeguard",
-    srcs = [":scopeguard-vendor"],
+    srcs = [":vendor"],
     crate = "scopeguard",
     crate_root = "vendor/src/lib.rs",
     edition = "2015",
@@ -27,6 +26,6 @@ rust_library(
         "default",
         "use_std",
     ],
-    rustc_flags = ["@$(location :scopeguard-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
 )

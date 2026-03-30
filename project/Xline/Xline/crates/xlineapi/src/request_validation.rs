@@ -343,18 +343,6 @@ impl From<ValidationError> for Status {
     }
 }
 
-/// Bridge conversion: ValidationError → tonic::Status (via xlinerpc::Status)
-///
-/// This exists because xline server code returns `Result<_, tonic::Status>` and uses `?`
-/// on `ValidationError`. Will be removed when xline server migrates away from tonic.
-impl From<ValidationError> for tonic::Status {
-    #[inline]
-    fn from(err: ValidationError) -> Self {
-        let xlinerpc_status: Status = err.into();
-        xlinerpc_status.into()
-    }
-}
-
 #[cfg(test)]
 mod test {
     use super::*;

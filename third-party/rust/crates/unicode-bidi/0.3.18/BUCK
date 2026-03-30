@@ -4,22 +4,21 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "unicode-bidi-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/unicode-bidi/unicode-bidi-0.3.18.crate"],
     sha256 = "5c1cb5db39152898a79168971543b1cb5020dff7fe43c8dc468b0885f5e29df5",
     type = "tar.gz",
     strip_prefix = "unicode-bidi-0.3.18",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "unicode-bidi-manifest",
-    vendor = ":unicode-bidi-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "unicode-bidi",
-    srcs = [":unicode-bidi-vendor"],
+    srcs = [":vendor"],
     crate = "unicode_bidi",
     crate_root = "vendor/src/lib.rs",
     edition = "2018",
@@ -28,6 +27,6 @@ rust_library(
         "hardcoded-data",
         "std",
     ],
-    rustc_flags = ["@$(location :unicode-bidi-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
 )

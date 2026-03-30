@@ -4,22 +4,21 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "oci-client-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/oci-client/oci-client-0.15.0.crate"],
     sha256 = "9b74df13319e08bc386d333d3dc289c774c88cc543cae31f5347db07b5ec2172",
     type = "tar.gz",
     strip_prefix = "oci-client-0.15.0",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "oci-client-manifest",
-    vendor = ":oci-client-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "oci-client",
-    srcs = [":oci-client-vendor"],
+    srcs = [":vendor"],
     crate = "oci_client",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
@@ -28,7 +27,7 @@ rust_library(
         "native-tls",
         "test-registry",
     ],
-    rustc_flags = ["@$(location :oci-client-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/bytes/1.11.1:bytes",

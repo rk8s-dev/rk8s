@@ -4,27 +4,26 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "buildscript_run", "rust_binary", "rust_library")
 
 http_archive(
-    name = "curve25519-dalek-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/curve25519-dalek/curve25519-dalek-4.1.3.crate"],
     sha256 = "97fb8b7c4503de7d6ae7b42ab72a5a59857b4c937ec27a3d4539dba95b5ab2be",
     type = "tar.gz",
     strip_prefix = "curve25519-dalek-4.1.3",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "curve25519-dalek-manifest",
-    vendor = ":curve25519-dalek-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "curve25519-dalek",
-    srcs = [":curve25519-dalek-vendor"],
+    srcs = [":vendor"],
     crate = "curve25519_dalek",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
-        "OUT_DIR": "$(location :curve25519-dalek-build-script-run[out_dir])",
+        "OUT_DIR": "$(location :build-script-run[out_dir])",
     },
     features = [
         "alloc",
@@ -34,8 +33,8 @@ rust_library(
         "zeroize",
     ],
     rustc_flags = [
-        "@$(location :curve25519-dalek-build-script-run[rustc_flags])",
-        "@$(location :curve25519-dalek-manifest[env_flags])",
+        "@$(location :build-script-run[rustc_flags])",
+        "@$(location :manifest[env_flags])",
     ],
     os_deps = {
         "linux": [
@@ -58,8 +57,8 @@ rust_library(
 )
 
 rust_binary(
-    name = "curve25519-dalek-build-script-build",
-    srcs = [":curve25519-dalek-vendor"],
+    name = "build-script-build",
+    srcs = [":vendor"],
     crate = "build_script_build",
     crate_root = "vendor/build.rs",
     edition = "2021",
@@ -70,16 +69,16 @@ rust_binary(
         "precomputed-tables",
         "zeroize",
     ],
-    rustc_flags = ["@$(location :curve25519-dalek-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = [],
     deps = ["//third-party/rust/crates/rustc_version/0.4.1:rustc_version"],
 )
 
 buildscript_run(
-    name = "curve25519-dalek-build-script-run",
+    name = "build-script-run",
     package_name = "curve25519-dalek",
-    buildscript_rule = ":curve25519-dalek-build-script-build",
-    env_srcs = [":curve25519-dalek-manifest[env_dict]"],
+    buildscript_rule = ":build-script-build",
+    env_srcs = [":manifest[env_dict]"],
     features = [
         "alloc",
         "default",
@@ -88,6 +87,6 @@ buildscript_run(
         "zeroize",
     ],
     version = "4.1.3",
-    manifest_dir = ":curve25519-dalek-vendor",
+    manifest_dir = ":vendor",
     visibility = ["PUBLIC"],
 )

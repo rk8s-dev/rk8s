@@ -4,27 +4,26 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "rand_chacha-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/rand_chacha/rand_chacha-0.9.0.crate"],
     sha256 = "d3022b5f1df60f26e1ffddd6c66e8aa15de382ae63b3a0c1bfc0e4d3e3f325cb",
     type = "tar.gz",
     strip_prefix = "rand_chacha-0.9.0",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "rand_chacha-manifest",
-    vendor = ":rand_chacha-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "rand_chacha",
-    srcs = [":rand_chacha-vendor"],
+    srcs = [":vendor"],
     crate = "rand_chacha",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
     features = ["std"],
-    rustc_flags = ["@$(location :rand_chacha-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/ppv-lite86/0.2.21:ppv-lite86",

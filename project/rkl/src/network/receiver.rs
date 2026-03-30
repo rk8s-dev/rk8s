@@ -12,12 +12,18 @@ use nftables::{helper, schema};
 use quinn::{ClientConfig, Endpoint};
 use serde::{Deserialize, Serialize};
 use serde_json;
+use std::io::Write;
 use std::net::SocketAddr;
 use std::path::Path;
+use std::process::{Command, Stdio};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::{Mutex, mpsc};
 use tokio::task;
+
+const RK8S_TABLE_NAME: &str = "rk8s";
+const RK8S_MAP_CLUSTER_IPS: &str = "cluster_ips";
+const RK8S_MAP_NODE_PORTS: &str = "node_ports";
 
 /// Main network configuration receiver that coordinates subnet and route configuration
 /// This will be the primary interface for receiving network configurations from rks
@@ -115,6 +121,8 @@ impl NetworkReceiver {
                     ipv6_subnet_max: None,
                     subnet_len: 24,
                     ipv6_subnet_len: 64,
+                    service_cidr: None,
+                    service_subnet_len: 24,
                     backend_type: std::env::var("BACKEND_TYPE")
                         .unwrap_or_else(|_| "hostgw".to_string()),
                     backend: None,
@@ -302,13 +310,56 @@ impl NetworkReceiver {
             rules.len()
         );
 
-        let nftables: schema::Nftables = serde_json::from_str(&rules).map_err(|e| {
-            anyhow::anyhow!("Failed to deserialize nftables JSON to crate schema: {}", e)
-        })?;
-
-        task::spawn_blocking(move || helper::apply_ruleset(&nftables))
+        let apply_res = if is_verdict_map_init_rules(&rules) {
+            info!(
+                "Applying nftables map_init payload via raw nft command on node {}",
+                node_id
+            );
+            let raw_rules = rules.clone();
+            let node_id_cl = node_id.to_string();
+            task::spawn_blocking(move || {
+                apply_map_init_payload_with_repair(&node_id_cl, &raw_rules)
+            })
             .await?
-            .map_err(|e| anyhow::anyhow!("nftables::helper::apply_ruleset failed: {}", e))?;
+        } else {
+            let parsed_rules = serde_json::from_str::<schema::Nftables>(&rules);
+            match parsed_rules {
+                Ok(nftables) => task::spawn_blocking(move || helper::apply_ruleset(&nftables))
+                    .await?
+                    .map_err(Into::into),
+                Err(parse_err) => {
+                    warn!(
+                        "Falling back to helper::apply_ruleset_raw for node {} due to schema parse error: {}",
+                        node_id, parse_err
+                    );
+                    let raw_rules = rules.clone();
+                    task::spawn_blocking(move || {
+                        helper::apply_ruleset_raw(&raw_rules, None::<&String>, ["-j", "-f", "-"])
+                            .map(|_| ())
+                    })
+                    .await?
+                    .map_err(Into::into)
+                }
+            }
+        };
+
+        if let Err(e) = apply_res {
+            let rules_for_diag = rules;
+            let diag = task::spawn_blocking(move || collect_nft_check_diagnostics(&rules_for_diag))
+                .await
+                .unwrap_or_else(|join_err| {
+                    format!(
+                        "failed to collect nft diagnostics due to join error: {}",
+                        join_err
+                    )
+                });
+
+            return Err(anyhow::anyhow!(
+                "nftables::helper::apply_ruleset failed: {}; nft --check diagnostics: {}",
+                e,
+                diag
+            ));
+        }
 
         Ok(())
     }
@@ -410,6 +461,236 @@ impl NetworkReceiver {
             route_count,
             v6_route_count,
         }
+    }
+}
+
+fn apply_map_init_payload_with_repair(node_id: &str, raw_rules: &str) -> Result<()> {
+    match apply_ruleset_raw_with_output(raw_rules) {
+        Ok(_) => Ok(()),
+        Err(err) => {
+            let err_text = err.to_string();
+            // "datatype mismatch" indicates we're trying to use new concat keys on an old map type.
+            // "File exists" means the map already exist but could be of the wrong type.
+            if !err_text.contains("File exists") && !err_text.contains("datatype mismatch") {
+                return Err(err);
+            }
+
+            if cluster_ips_map_is_protocol_aware() && nodeports_map_is_protocol_aware() {
+                info!(
+                    "map_init payload is already upgraded on node {}; treating error as success if already applied",
+                    node_id
+                );
+                // If it's a datatype mismatch, we still have a problem if it's not actually upgraded.
+                // But the check above should be authoritative.
+                if err_text.contains("File exists") {
+                    return Ok(());
+                }
+            }
+
+            warn!(
+                "map_init apply failed (exists/mismatch) on node {}; trying verdict-map repair and retry",
+                node_id
+            );
+
+            // Best-effort cleanup for stale verdict maps (e.g. old node_ports/cluster_ips type).
+            // Ignore missing-map errors so retry remains idempotent.
+            best_effort_delete_map(RK8S_TABLE_NAME, RK8S_MAP_NODE_PORTS);
+            best_effort_delete_map(RK8S_TABLE_NAME, RK8S_MAP_CLUSTER_IPS);
+
+            apply_ruleset_raw_with_output(raw_rules)
+        }
+    }
+}
+
+fn apply_ruleset_raw_with_output(raw_rules: &str) -> Result<()> {
+    let mut child = Command::new("nft")
+        .args(["-j", "-f", "-"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|err| anyhow::anyhow!("failed to spawn nft: {}", err))?;
+
+    if let Some(mut stdin) = child.stdin.take() {
+        stdin
+            .write_all(raw_rules.as_bytes())
+            .map_err(|err| anyhow::anyhow!("failed to write rules to nft stdin: {}", err))?;
+    }
+
+    let output = child
+        .wait_with_output()
+        .map_err(|err| anyhow::anyhow!("failed to wait nft output: {}", err))?;
+
+    if output.status.success() {
+        return Ok(());
+    }
+
+    let stdout = truncate_for_log(&String::from_utf8_lossy(&output.stdout), 2000);
+    let stderr = truncate_for_log(&String::from_utf8_lossy(&output.stderr), 2000);
+    Err(anyhow::anyhow!(
+        "nft raw apply failed status={} stdout={} stderr={}",
+        output.status,
+        stdout,
+        stderr
+    ))
+}
+
+fn cluster_ips_map_is_protocol_aware() -> bool {
+    let output = match Command::new("nft")
+        .args(["list", "map", "ip", RK8S_TABLE_NAME, RK8S_MAP_CLUSTER_IPS])
+        .output()
+    {
+        Ok(out) => out,
+        Err(_) => return false,
+    };
+
+    if !output.status.success() {
+        return false;
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout).to_ascii_lowercase();
+    // type inet_proto . ipv4_addr . inet_service
+    stdout.contains("type inet_proto . ipv4_addr . inet_service")
+}
+
+fn nodeports_map_is_protocol_aware() -> bool {
+    let output = match Command::new("nft")
+        .args(["list", "map", "ip", RK8S_TABLE_NAME, RK8S_MAP_NODE_PORTS])
+        .output()
+    {
+        Ok(out) => out,
+        Err(_) => return false,
+    };
+
+    if !output.status.success() {
+        return false;
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout).to_ascii_lowercase();
+    stdout.contains("type inet_proto . inet_service")
+}
+
+fn best_effort_delete_map(table: &str, map_name: &str) {
+    let output = match Command::new("nft")
+        .args(["delete", "map", "ip", table, map_name])
+        .output()
+    {
+        Ok(out) => out,
+        Err(err) => {
+            warn!(
+                "failed to execute nft delete map ip {} {}: {}",
+                table, map_name, err
+            );
+            return;
+        }
+    };
+
+    if output.status.success() {
+        info!(
+            "deleted nft map ip {} {} before map_init retry",
+            table, map_name
+        );
+        return;
+    }
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    if stderr.contains("No such file or directory") {
+        return;
+    }
+
+    warn!(
+        "nft delete map ip {} {} failed status={:?} stderr={}",
+        table,
+        map_name,
+        output.status.code(),
+        stderr.trim()
+    );
+}
+
+fn is_verdict_map_init_rules(rules: &str) -> bool {
+    let value: serde_json::Value = match serde_json::from_str(rules) {
+        Ok(v) => v,
+        Err(_) => return false,
+    };
+
+    let nftables = match value.get("nftables").and_then(|v| v.as_array()) {
+        Some(arr) => arr,
+        None => return false,
+    };
+
+    let mut found_cluster_ips = false;
+    let mut found_node_ports = false;
+
+    for item in nftables {
+        let Some(map_obj) = item.get("map").and_then(|v| v.as_object()) else {
+            continue;
+        };
+
+        let map_kind = map_obj.get("map").and_then(|v| v.as_str());
+        let name = map_obj.get("name").and_then(|v| v.as_str());
+
+        if map_kind == Some("verdict") {
+            match name {
+                Some("cluster_ips") => found_cluster_ips = true,
+                Some("node_ports") => found_node_ports = true,
+                _ => {}
+            }
+        }
+
+        if found_cluster_ips && found_node_ports {
+            return true;
+        }
+    }
+
+    false
+}
+
+fn collect_nft_check_diagnostics(rules: &str) -> String {
+    let mut child = match Command::new("nft")
+        .args(["-j", "--check", "-f", "-"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+    {
+        Ok(c) => c,
+        Err(err) => return format!("failed to spawn nft --check: {}", err),
+    };
+
+    if let Some(mut stdin) = child.stdin.take()
+        && let Err(err) = stdin.write_all(rules.as_bytes())
+    {
+        return format!("failed to write rules to nft stdin: {}", err);
+    }
+
+    let output = match child.wait_with_output() {
+        Ok(out) => out,
+        Err(err) => return format!("failed to wait for nft --check output: {}", err),
+    };
+
+    let stdout = truncate_for_log(&String::from_utf8_lossy(&output.stdout), 4000);
+    let stderr = truncate_for_log(&String::from_utf8_lossy(&output.stderr), 4000);
+
+    format!(
+        "exit_status={}; stdout={}; stderr={}",
+        output.status, stdout, stderr
+    )
+}
+
+fn truncate_for_log(s: &str, max_chars: usize) -> String {
+    let mut it = s.chars();
+    let mut out = String::new();
+    for _ in 0..max_chars {
+        if let Some(c) = it.next() {
+            out.push(c);
+        } else {
+            return out;
+        }
+    }
+    if it.next().is_some() {
+        format!("{}...(truncated)", out)
+    } else {
+        out
     }
 }
 

@@ -4,27 +4,26 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "pgvector-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/pgvector/pgvector-0.4.1.crate"],
     sha256 = "fc58e2d255979a31caa7cabfa7aac654af0354220719ab7a68520ae7a91e8c0b",
     type = "tar.gz",
     strip_prefix = "pgvector-0.4.1",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "pgvector-manifest",
-    vendor = ":pgvector-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "pgvector",
-    srcs = [":pgvector-vendor"],
+    srcs = [":vendor"],
     crate = "pgvector",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
     features = ["serde"],
-    rustc_flags = ["@$(location :pgvector-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = ["//third-party/rust/crates/serde/1.0.228:serde"],
 )

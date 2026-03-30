@@ -4,26 +4,25 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "curve25519-dalek-derive-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/curve25519-dalek-derive/curve25519-dalek-derive-0.1.1.crate"],
     sha256 = "f46882e17999c6cc590af592290432be3bce0428cb0d5f8b6715e4dc7b383eb3",
     type = "tar.gz",
     strip_prefix = "curve25519-dalek-derive-0.1.1",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "curve25519-dalek-derive-manifest",
-    vendor = ":curve25519-dalek-derive-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "curve25519-dalek-derive",
-    srcs = [":curve25519-dalek-derive-vendor"],
+    srcs = [":vendor"],
     crate = "curve25519_dalek_derive",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
-    rustc_flags = ["@$(location :curve25519-dalek-derive-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     proc_macro = True,
     visibility = ["PUBLIC"],
     deps = [

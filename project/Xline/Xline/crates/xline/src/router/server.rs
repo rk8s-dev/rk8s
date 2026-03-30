@@ -1,12 +1,13 @@
-// use crate::{
-// body::{boxed, BoxBody},
-// metadata::GRPC_CONTENT_TYPE,
-// server::NamedService,
-// Status,
-// };
 use super::{Body, Error as GlobalError, HeaderValue, Router, h3wrapper::QuicIncomingBody};
+use crate::{
+    server::command::CommandExecutor, server::quic_service::XlineQuicService, state::State,
+};
 use bytes::Bytes;
-use gm_quic::prelude::{BindUri, ParseBindUriError, QuicListeners, handy};
+use curp::rpc::QuicGrpcServer;
+use gm_quic::{
+    prelude::{BindUri, ParseBindUriError, QuicListeners, handy},
+    qbase,
+};
 use h3::{
     quic::{BidiStream, SendStream},
     server::RequestStream,
@@ -16,25 +17,27 @@ use http::{Request, Response};
 use std::{collections::HashMap, convert::Infallible, future::poll_fn, sync::Arc};
 use tower::Service;
 use utils::config::TlsConfig;
+use xlineapi::command::{Command, CurpClient};
+
 // use anyhow::Result;
 
 /// A Server for creating axum routers for gRPC services
 #[derive(Debug, Default, Clone)]
-pub struct RouterBuilder {
+pub(crate) struct RouterBuilder {
     router: Router,
     tls_config: TlsConfig,
 }
 
 impl RouterBuilder {
     /// Create a new Server with an empty router
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             router: Router::new().fallback(unimplemented),
             tls_config: TlsConfig::default(),
         }
     }
 
-    pub fn add_service<S>(mut self, name: &str, svc: S) -> Self
+    pub(crate) fn add_service<S>(mut self, name: &str, svc: S) -> Self
     where
         S: Service<axum::extract::Request, Error = Infallible> + Clone + Send + 'static,
         S::Future: Send + 'static,
@@ -46,23 +49,12 @@ impl RouterBuilder {
     }
 
     /// Add a router nested to the router
-    pub fn add_subrouter(mut self, name: &str, router: Router) -> Self {
+    pub(crate) fn add_subrouter(mut self, name: &str, router: Router) -> Self {
         self.router = self.router.nest(name, router);
         self
     }
 
-    /// Finalize the router and return it
-    pub fn build(self) -> Router {
-        self.router
-    }
-
-    /// Optimize the router for performance
-    pub fn prepare(mut self) -> Self {
-        self.router = self.router.with_state(());
-        self
-    }
-
-    pub fn tls_config(self, config: &TlsConfig) -> Self {
+    pub(crate) fn tls_config(self, config: &TlsConfig) -> Self {
         Self {
             router: self.router,
             tls_config: config.clone(),
@@ -73,13 +65,49 @@ impl RouterBuilder {
 pub(crate) struct Server {
     // servername: (router, peer_urls)
     routers: HashMap<String, (RouterBuilder, Vec<String>)>,
+    grpc_server: QuicGrpcServer<Command, CommandExecutor, State<Arc<CurpClient>>, XlineQuicService>,
+    client_ports: std::collections::HashSet<u16>,
+    peer_ports: std::collections::HashSet<u16>,
 }
 
 impl Server {
-    pub(crate) fn new() -> Self {
-        Server {
+    pub(crate) fn new_with_grpc_server(
+        grpc_server: QuicGrpcServer<
+            Command,
+            CommandExecutor,
+            State<Arc<CurpClient>>,
+            XlineQuicService,
+        >,
+        client_listen_urls: Vec<String>,
+        peer_listen_urls: Vec<String>,
+    ) -> Result<Self, super::Error> {
+        use gm_quic::prelude::BindUri;
+        let client_ports = client_listen_urls
+            .into_iter()
+            .flat_map(|url| {
+                url.parse::<BindUri>()
+                    .ok()
+                    .and_then(|uri| uri.as_inet_bind_uri())
+                    .map(|x| x.port())
+            })
+            .collect::<std::collections::HashSet<u16>>();
+
+        let peer_ports = peer_listen_urls
+            .into_iter()
+            .flat_map(|url| {
+                url.parse::<BindUri>()
+                    .ok()
+                    .and_then(|uri| uri.as_inet_bind_uri())
+                    .map(|x| x.port())
+            })
+            .collect::<std::collections::HashSet<u16>>();
+
+        Ok(Server {
             routers: HashMap::new(),
-        }
+            grpc_server,
+            client_ports,
+            peer_ports,
+        })
     }
 
     /// Add a router nested to the router
@@ -103,9 +131,12 @@ impl Server {
             builder
                 .without_client_cert_verifier()
                 .with_parameters(handy::server_parameters())
+                .enable_0rtt()
                 .with_alpns(["h3"])
                 .listen(4096)
         })?;
+
+        // Add peer server (HTTP/GRPC API)
         for (server_name, (router_builder, peer_urls)) in &self.routers {
             listeners.add_server(
                 server_name,
@@ -129,7 +160,7 @@ impl Server {
             )?;
 
             let _ = listeners
-                .get_server(&server_name)
+                .get_server(server_name)
                 .unwrap()
                 .bind_interfaces()
                 .iter()
@@ -139,25 +170,46 @@ impl Server {
                 .borrow()?;
         }
 
-        // tracing::info!("yes quic is serving");
         // handle incoming connections and requests
-        while let Ok((new_conn, server, _pathway, _link)) = listeners.accept().await {
-            tracing::info!("get a connection  {server:?} {_pathway:?} {_link:?}");
-            let h3_conn =
-                match h3::server::Connection::new(h3_shim::QuicConnection::new(Arc::new(new_conn)))
+        while let Ok((new_conn, server_name, pathway, _link)) = listeners.accept().await {
+            if let qbase::net::route::EndpointAddr::Socket(socket_addr) = pathway.local() {
+                let local_port = socket_addr.addr().port();
+                if self.peer_ports.contains(&local_port) {
+                    let _ = self.grpc_server.spawn_connection(new_conn);
+                } else if self.client_ports.contains(&local_port) {
+                    let h3_conn = match h3::server::Connection::new(h3_shim::QuicConnection::new(
+                        Arc::new(new_conn),
+                    ))
                     .await
-                {
-                    Ok(h3_conn) => {
-                        tracing::info!("Accept a new quic connection");
-                        h3_conn
+                    {
+                        Ok(h3_conn) => {
+                            tracing::debug!(
+                                "Accept a new quic connection on peer port {local_port}"
+                            );
+                            h3_conn
+                        }
+                        Err(error) => {
+                            tracing::error!(
+                                "Failed to establish h3 connection on port {local_port}: {}",
+                                error
+                            );
+                            continue;
+                        }
+                    };
+                    if let Some((RouterBuilder { router, .. }, _)) = self.routers.get(&server_name)
+                    {
+                        let _ = tokio::spawn(Self::handle_connection(router.clone(), h3_conn));
+                    } else {
+                        tracing::warn!("server {server_name} not found for port {local_port}");
                     }
-                    Err(error) => {
-                        tracing::error!("Failed to establish h3 connection: {}", error);
-                        continue;
-                    }
-                };
-            if let Some((RouterBuilder { router, .. }, _)) = self.routers.get(&server) {
-                let _ = tokio::spawn(Self::handle_connection(router.clone(), h3_conn));
+                } else {
+                    assert!(false, "some port is not added before bind interface");
+                }
+            } else {
+                tracing::warn!(
+                    "could not get local port from pathway {:?}",
+                    pathway.local()
+                );
             }
         }
 
@@ -189,8 +241,8 @@ impl Server {
                     tracing::error!("failed to accept a conenction");
                     break;
                 }
-                Err(_) => {
-                    // tracing::error!("encounter an error: {e:?}");
+                Err(e) => {
+                    tracing::error!("encounter an error: {e:?}");
                     break;
                 }
             }
@@ -263,6 +315,8 @@ where
             Err(frame) => {
                 if let Ok(trailers) = frame.into_trailers() {
                     send.send_trailers(trailers).await?;
+                } else {
+                    tracing::warn!("failed to get body frame");
                 }
                 continue;
             }

@@ -14,7 +14,7 @@ keywords = ["RPC", "Interfaces"]
 async-trait = { workspace = true }
 curp = { path = "../curp" }
 curp-external-api = { path = "../curp-external-api" }
-xlinerpc = { path = "../xlinerpc", features = ["tonic-compat"] }
+xlinerpc = { path = "../xlinerpc" }
 itertools = { workspace = true }
 prost = { workspace = true }
 serde = { workspace = true }
@@ -23,7 +23,7 @@ tonic = { workspace = true }
 utils = { path = "../utils" }
 
 [build-dependencies]
-tonic-build = { workspace = true }
+prost-build = { workspace = true }
 
 [dev-dependencies]
 strum = "0.26"

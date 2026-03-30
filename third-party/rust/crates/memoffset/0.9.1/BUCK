@@ -4,55 +4,54 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "buildscript_run", "rust_binary", "rust_library")
 
 http_archive(
-    name = "memoffset-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/memoffset/memoffset-0.9.1.crate"],
     sha256 = "488016bfae457b036d996092f6cb448677611ce4449e970ceaf42695203f218a",
     type = "tar.gz",
     strip_prefix = "memoffset-0.9.1",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "memoffset-manifest",
-    vendor = ":memoffset-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "memoffset",
-    srcs = [":memoffset-vendor"],
+    srcs = [":vendor"],
     crate = "memoffset",
     crate_root = "vendor/src/lib.rs",
     edition = "2015",
     env = {
-        "OUT_DIR": "$(location :memoffset-build-script-run[out_dir])",
+        "OUT_DIR": "$(location :build-script-run[out_dir])",
     },
     features = ["default"],
     rustc_flags = [
-        "@$(location :memoffset-build-script-run[rustc_flags])",
-        "@$(location :memoffset-manifest[env_flags])",
+        "@$(location :build-script-run[rustc_flags])",
+        "@$(location :manifest[env_flags])",
     ],
     visibility = ["PUBLIC"],
 )
 
 rust_binary(
-    name = "memoffset-build-script-build",
-    srcs = [":memoffset-vendor"],
+    name = "build-script-build",
+    srcs = [":vendor"],
     crate = "build_script_build",
     crate_root = "vendor/build.rs",
     edition = "2015",
     features = ["default"],
-    rustc_flags = ["@$(location :memoffset-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = [],
     deps = ["//third-party/rust/crates/autocfg/1.5.0:autocfg"],
 )
 
 buildscript_run(
-    name = "memoffset-build-script-run",
+    name = "build-script-run",
     package_name = "memoffset",
-    buildscript_rule = ":memoffset-build-script-build",
-    env_srcs = [":memoffset-manifest[env_dict]"],
+    buildscript_rule = ":build-script-build",
+    env_srcs = [":manifest[env_dict]"],
     features = ["default"],
     version = "0.9.1",
-    manifest_dir = ":memoffset-vendor",
+    manifest_dir = ":vendor",
     visibility = ["PUBLIC"],
 )

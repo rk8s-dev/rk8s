@@ -8,15 +8,13 @@ use curp::{
     },
 };
 use itertools::Itertools;
-use tonic::{Request, Response, Status};
-// TODO: use our own status type
-// use xlinerpc::status::Status;
 use utils::timestamp;
 use xlineapi::{
     Member, MemberAddRequest, MemberAddResponse, MemberListRequest, MemberListResponse,
     MemberPromoteRequest, MemberPromoteResponse, MemberRemoveRequest, MemberRemoveResponse,
     MemberUpdateRequest, MemberUpdateResponse, command::CurpClient,
 };
+use xlinerpc::{Request, Response, Status};
 
 use crate::{header_gen::HeaderGenerator, router::endpoint::EndPoint as RouterEndpoint};
 
@@ -77,7 +75,7 @@ impl ClusterServer {
             member: members.iter().find(|m| m.id == node_id).cloned(),
             members,
         };
-        Ok(Response::new(resp))
+        Ok(Response::from_data(resp))
     }
 
     pub(crate) async fn member_remove(
@@ -96,7 +94,7 @@ impl ClusterServer {
             header: Some(self.header_gen.gen_header()),
             members,
         };
-        Ok(Response::new(resp))
+        Ok(Response::from_data(resp))
     }
 
     pub(crate) async fn member_update(
@@ -115,7 +113,7 @@ impl ClusterServer {
             header: Some(self.header_gen.gen_header()),
             members,
         };
-        Ok(Response::new(resp))
+        Ok(Response::from_data(resp))
     }
 
     pub(crate) async fn member_list(
@@ -138,7 +136,7 @@ impl ClusterServer {
                 })
                 .collect(),
         };
-        Ok(Response::new(resp))
+        Ok(Response::from_data(resp))
     }
 
     pub(crate) async fn member_promote(
@@ -157,7 +155,7 @@ impl ClusterServer {
             header: Some(self.header_gen.gen_header()),
             members,
         };
-        Ok(Response::new(resp))
+        Ok(Response::from_data(resp))
     }
 }
 

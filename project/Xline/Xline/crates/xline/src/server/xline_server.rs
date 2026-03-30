@@ -8,17 +8,13 @@ use curp::{
     self,
     client::ClientBuilder as CurpClientBuilder,
     members::{ClusterInfo, get_cluster_info_from_remote},
-    rpc::TransportConfig,
+    rpc::{QuicGrpcServer, TransportConfig},
     server::{DB as CurpDB, Rpc, StorageApi as _},
 };
 use dashmap::DashMap;
 use engine::{MemorySnapshotAllocator, RocksSnapshotAllocator, SnapshotAllocator};
 use jsonwebtoken::{DecodingKey, EncodingKey};
-use tonic::{
-    // TODO: use our own status type
-    // use xlinerpc::status::Status;
-    transport::{Certificate, ClientTlsConfig, Identity, ServerTlsConfig},
-};
+use tonic::transport::{Certificate, ClientTlsConfig, Identity, ServerTlsConfig};
 use tracing::{info, warn};
 
 use utils::{
@@ -36,11 +32,11 @@ use super::{
     auth_wrapper::{AuthWrapper, Server as AuthWrapperEndpointServer},
     cluster_server::{ClusterServer, Server as ClusterEndpointServer},
     command::{Alarmer, CommandExecutor},
-    curp_server::Server as ProtocolEndpointServer,
     kv_server::{KvServer, Server as KvEndpointServer},
     lease_server::{LeaseServer, Server as LeaseEndpointServer},
     lock_server::{LockServer, Server as LockEndPointServer},
     maintenance::{MaintenanceServer, Server as MaintenanceEndpointServer},
+    quic_service::XlineQuicService,
     watch_server::{CHANNEL_SIZE, Server as WatchEndpointServer, WatchServer},
 };
 use crate::{
@@ -171,9 +167,6 @@ impl XlineServer {
         curp_storage: &CurpDB<Command>,
         transport: &TransportConfig,
     ) -> Result<ClusterInfo> {
-        info!("name = {:?}", cluster_config.name());
-        info!("cluster_peers = {:?}", cluster_config.peers());
-
         let name = cluster_config.name().clone();
         let all_members = cluster_config.peers().clone();
         let self_client_urls = cluster_config.client_advertise_urls().clone();
@@ -318,11 +311,15 @@ impl XlineServer {
     ///
     /// Will return `Err` when `init_servers` return an error
     #[inline]
-    pub async fn init_routers(
+    pub(crate) async fn init_routers(
         &self,
         db: Arc<DB>,
         key_pair: Option<(EncodingKey, DecodingKey)>,
-    ) -> Result<(RouterBuilder, RouterBuilder, Arc<CurpClient>)> {
+    ) -> Result<(
+        RouterBuilder,
+        Arc<CurpClient>,
+        QuicGrpcServer<Command, CommandExecutor, State<Arc<CurpClient>>, XlineQuicService>,
+    )> {
         let (
             kv_server,
             lock_server,
@@ -347,59 +344,65 @@ impl XlineServer {
             )
             .add_subrouter(
                 "/etcdserverpb.Auth",
-                AuthEndpointServer::new(auth_server).endpoint().into(),
+                AuthEndpointServer::new(auth_server.clone())
+                    .endpoint()
+                    .into(),
             )
             .add_subrouter(
                 "/etcdserverpb.Lease",
-                LeaseEndpointServer::from_arc(lease_server)
+                LeaseEndpointServer::from_arc(lease_server.clone())
                     .endpoint()
                     .into(),
             )
             .add_subrouter(
                 "/etcdserverpb.KV",
-                KvEndpointServer::new(kv_server).endpoint().into(),
+                KvEndpointServer::new(kv_server.clone()).endpoint().into(),
             )
             .add_subrouter(
                 "/etcdserverpb.Watch",
-                WatchEndpointServer::new(watch_server).endpoint().into(),
+                WatchEndpointServer::new(watch_server.clone())
+                    .endpoint()
+                    .into(),
             )
             .add_subrouter(
                 "/etcdserverpb.Maintenance",
-                MaintenanceEndpointServer::new(maintenance_server)
+                MaintenanceEndpointServer::new(maintenance_server.clone())
                     .endpoint()
                     .into(),
             )
             .add_subrouter(
                 "/etcdserverpb.Cluster",
-                ClusterEndpointServer::new(cluster_server).endpoint().into(),
-            )
-            .add_subrouter(
-                "/commandpb.Protocol",
-                AuthWrapperEndpointServer::new(auth_wrapper)
-                    .endpoint()
-                    .into(),
-            );
-        let curp_router = builder
-            .add_subrouter(
-                "/commandpb.Protocol",
-                ProtocolEndpointServer::new(curp_server.clone())
+                ClusterEndpointServer::new(cluster_server.clone())
                     .endpoint()
                     .into(),
             )
             .add_subrouter(
-                "/inner_messagepb.InnerProtocol",
-                ProtocolEndpointServer::new(curp_server).endpoint().into(),
+                "/commandpb.Protocol",
+                AuthWrapperEndpointServer::new(auth_wrapper.clone())
+                    .endpoint()
+                    .into(),
             );
+
+        // Curp peer communication uses QUIC, with AuthWrapper for token-based auth
+        let quic_server = QuicGrpcServer::new_with_service(auth_wrapper, curp_server)
+            .with_extension(XlineQuicService::new(
+                auth_server,
+                cluster_server,
+                kv_server,
+                lease_server,
+                maintenance_server,
+                watch_server,
+            ));
 
         let xline_router = {
             let (mut reporter, health_server) = tonic_health::server::health_reporter();
             reporter
                 .set_service_status("", tonic_health::ServingStatus::Serving)
                 .await;
-            xline_router.add_service("/", health_server)
+            xline_router.add_service("/*path", health_server)
         };
 
-        Ok((xline_router, curp_router, curp_client))
+        Ok((xline_router, curp_client, quic_server))
     }
 
     /// Start `XlineServer` using gm-quic as transport protocol
@@ -417,15 +420,30 @@ impl XlineServer {
         info!("start curp server on {:?}", peer_listen_urls);
         let db = DB::open(&self.storage_config.engine)?;
         let key_pair = Self::read_key_pair(&self.auth_config).await?;
-        let (xline_router, curp_router, curp_client) = self.init_routers(db, key_pair).await?;
-        let server = Server::new()
-            .add_server("localhost", xline_router, client_listen_urls)
-            .add_server("127.0.0.1", curp_router, peer_listen_urls.clone());
+        let (xline_router, curp_client, quic_server) = self.init_routers(db, key_pair).await?;
+        let server_name = self.cluster_config.name().clone();
+        let server = Server::new_with_grpc_server(
+            quic_server,
+            client_listen_urls.clone(),
+            peer_listen_urls.clone(),
+        )
+        .map_err(|e| anyhow::anyhow!(e))?
+        .add_server(
+            &server_name,
+            xline_router,
+            peer_listen_urls
+                .into_iter()
+                .chain(client_listen_urls.into_iter()),
+        );
 
         self.task_manager
             .spawn(TaskName::CurpServer, |n| async move {
                 tokio::select! {
-                    _ = server.serve() => {},
+                    res = server.serve() => {
+                        if let Err(e) = res {
+                            tracing::error!("{e}");
+                        }
+                    },
                     _ = n.wait() => {},
                 }
             });
@@ -433,6 +451,20 @@ impl XlineServer {
             warn!("publish name to cluster failed: {e:?}");
         }
         Ok(())
+    }
+
+    /// Compatibility entrypoint for test utils that previously passed bound listeners.
+    ///
+    /// The current QUIC server binds from configured URLs, so the listeners are dropped
+    /// here to release ports before delegating to `start_with_quic`.
+    #[inline]
+    pub async fn start_from_listener(
+        &self,
+        xline_listener: tokio::net::TcpListener,
+        curp_listener: tokio::net::TcpListener,
+    ) -> Result<()> {
+        drop((xline_listener, curp_listener));
+        self.start_with_quic().await
     }
 
     /// Init `KvServer`, `LockServer`, `LeaseServer`, `WatchServer` and
@@ -570,7 +602,7 @@ impl XlineServer {
                 Arc::clone(&client),
                 id_gen,
                 Arc::clone(&self.cluster_info),
-                self.client_tls_config.clone(),
+                Arc::clone(&self.quic_client),
                 &self.task_manager,
             ),
             AuthServer::new(Arc::clone(&client), Arc::clone(&auth_storage)),

@@ -704,20 +704,43 @@ fn parse_srv_query(
 
 /// Ensure `nat` table in the ip family and `PREROUTING` chain exist
 pub async fn ensure_nat_prerouting_chain() -> Result<()> {
-    let current = tokio::task::spawn_blocking(nft_helper::get_current_ruleset)
-        .await
-        .map_err(|e| anyhow::anyhow!("failed to run nft helper task: {e}"))??;
+    let current = tokio::task::spawn_blocking(|| {
+        nft_helper::get_current_ruleset_with_args(None::<&String>, ["list", "table", "ip", "nat"])
+    })
+    .await
+    .map_err(|e| anyhow::anyhow!("failed to run nft helper task: {e}"))?;
 
-    let table_exists = current.objects.iter().any(|obj| match obj {
-        NfObject::ListObject(NfListObject::Table(t)) => t.family == NfFamily::IP && t.name == "nat",
-        _ => false,
+    let current = match current {
+        Ok(ruleset) => Some(ruleset),
+        Err(e) => {
+            let msg = e.to_string();
+            if msg.contains("No such file or directory") || msg.contains("No such file") {
+                debug!("nat table not found yet, will create table/chain: {msg}");
+                None
+            } else {
+                return Err(anyhow::anyhow!(
+                    "failed to read nat table nftables rules: {e}"
+                ));
+            }
+        }
+    };
+
+    let table_exists = current.as_ref().is_some_and(|ruleset| {
+        ruleset.objects.iter().any(|obj| match obj {
+            NfObject::ListObject(NfListObject::Table(t)) => {
+                t.family == NfFamily::IP && t.name == "nat"
+            }
+            _ => false,
+        })
     });
 
-    let chain_exists = current.objects.iter().any(|obj| match obj {
-        NfObject::ListObject(NfListObject::Chain(c)) => {
-            c.table == "nat" && c.family == NfFamily::IP && c.name == "PREROUTING"
-        }
-        _ => false,
+    let chain_exists = current.as_ref().is_some_and(|ruleset| {
+        ruleset.objects.iter().any(|obj| match obj {
+            NfObject::ListObject(NfListObject::Chain(c)) => {
+                c.table == "nat" && c.family == NfFamily::IP && c.name == "PREROUTING"
+            }
+            _ => false,
+        })
     });
 
     let mut objects: Vec<NfObject> = Vec::new();
@@ -812,9 +835,11 @@ pub async fn setup_dns_nftable(dns_ip: String, dns_port: u16) -> anyhow::Result<
     let mut objects: Vec<NfObject> = Vec::new();
 
     // Ensure a clean base: delete any existing rules with our comment, then re-add
-    let current = tokio::task::spawn_blocking(nft_helper::get_current_ruleset)
-        .await
-        .map_err(|e| anyhow::anyhow!(format!("failed to run nft helper task: {e}")))?;
+    let current = tokio::task::spawn_blocking(|| {
+        nft_helper::get_current_ruleset_with_args(None::<&String>, ["list", "table", "ip", "nat"])
+    })
+    .await
+    .map_err(|e| anyhow::anyhow!(format!("failed to run nft helper task: {e}")))?;
 
     if let Ok(ruleset) = current {
         let mut delete_objects: Vec<NfObject> = Vec::new();
@@ -976,13 +1001,20 @@ pub async fn setup_dns_nftable(dns_ip: String, dns_port: u16) -> anyhow::Result<
 pub async fn cleanup_dns_nftable() -> anyhow::Result<()> {
     // Identify rules previously added by `setup_dns_nftable` by their comment
     // `rk8s-dns-redirect`, obtain handles, and delete them using the nft JSON API.
-    let current = tokio::task::spawn_blocking(nft_helper::get_current_ruleset)
-        .await
-        .map_err(|e| anyhow::anyhow!("failed to run nft helper task: {e}"))?;
+    let current = tokio::task::spawn_blocking(|| {
+        nft_helper::get_current_ruleset_with_args(None::<&String>, ["list", "table", "ip", "nat"])
+    })
+    .await
+    .map_err(|e| anyhow::anyhow!("failed to run nft helper task: {e}"))?;
 
     let nft = match current {
         Ok(n) => n,
-        Err(e) => return Err(anyhow::anyhow!("failed to get current nft ruleset: {e}")),
+        Err(_) => {
+            // If the nat table does not exist, there's nothing for us to clean up.
+            // This is a common no-op case on fresh or partially configured nodes.
+            info!("Table 'ip nat' not found; skipping DNS NFT rules cleanup.");
+            return Ok(());
+        }
     };
 
     // Collect delete commands for rules with our comment

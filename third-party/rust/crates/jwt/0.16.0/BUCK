@@ -4,26 +4,25 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "jwt-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/jwt/jwt-0.16.0.crate"],
     sha256 = "6204285f77fe7d9784db3fdc449ecce1a0114927a51d5a41c4c7a292011c015f",
     type = "tar.gz",
     strip_prefix = "jwt-0.16.0",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "jwt-manifest",
-    vendor = ":jwt-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "jwt",
-    srcs = [":jwt-vendor"],
+    srcs = [":vendor"],
     crate = "jwt",
     crate_root = "vendor/src/lib.rs",
     edition = "2018",
-    rustc_flags = ["@$(location :jwt-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/base64/0.13.1:base64",

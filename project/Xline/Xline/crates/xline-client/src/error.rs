@@ -1,10 +1,41 @@
 use curp::cmd::Command as CurpCommand;
+use h3;
+use http;
 use thiserror::Error;
 use tonic::transport::Error;
 use xlineapi::{command::Command, execute_error::ExecuteError};
-use xlinerpc::status::Status;
+use xlinerpc::status::{Code, Status};
 /// The result type for `xline-client`
 pub type Result<T> = std::result::Result<T, XlineClientError<Command>>;
+
+/// Convert h3 error::StreamError to Status
+pub fn h3_stream_error_to_status(e: h3::error::StreamError) -> Status {
+    Status::internal(format!("h3 stream error: {e}"))
+}
+
+/// Convert http status code to Status result
+pub fn http_status_to_result(status: http::StatusCode) -> std::result::Result<(), Status> {
+    if status.is_success() {
+        return Ok(());
+    }
+
+    let code = match status {
+        http::StatusCode::BAD_REQUEST => Code::InvalidArgument,
+        http::StatusCode::UNAUTHORIZED => Code::Unauthenticated,
+        http::StatusCode::FORBIDDEN => Code::PermissionDenied,
+        http::StatusCode::NOT_FOUND => Code::NotFound,
+        http::StatusCode::TOO_MANY_REQUESTS => Code::ResourceExhausted,
+        http::StatusCode::REQUEST_TIMEOUT => Code::DeadlineExceeded,
+        http::StatusCode::INTERNAL_SERVER_ERROR => Code::Internal,
+        http::StatusCode::SERVICE_UNAVAILABLE => Code::Unavailable,
+        http::StatusCode::GATEWAY_TIMEOUT => Code::DeadlineExceeded,
+        _ if status.is_client_error() => Code::InvalidArgument,
+        _ if status.is_server_error() => Code::Internal,
+        _ => Code::Unknown,
+    };
+
+    Err(Status::new(code, format!("HTTP {}", status)))
+}
 
 /// Error type of client builder
 #[allow(clippy::module_name_repetitions)] // this-error generate code false-positive
@@ -42,14 +73,6 @@ impl From<Status> for XlineClientBuildError {
     #[inline]
     fn from(e: Status) -> Self {
         Self::RpcError(e.to_string())
-    }
-}
-
-impl From<tonic::Status> for XlineClientBuildError {
-    #[inline]
-    fn from(e: tonic::Status) -> Self {
-        let s: Status = e.into();
-        Self::from(s)
     }
 }
 
@@ -113,15 +136,6 @@ impl From<Status> for XlineClientError<Command> {
     #[inline]
     fn from(e: Status) -> Self {
         Self::RpcError(e.to_string())
-    }
-}
-
-impl From<tonic::Status> for XlineClientError<Command> {
-    #[inline]
-    fn from(e: tonic::Status) -> Self {
-        // Convert tonic::Status → xlinerpc::Status → XlineClientError
-        let s: Status = e.into();
-        Self::from(s)
     }
 }
 

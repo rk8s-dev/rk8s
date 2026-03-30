@@ -4,25 +4,24 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "shell-escape-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/shell-escape/shell-escape-0.1.5.crate"],
     sha256 = "45bb67a18fa91266cc7807181f62f9178a6873bfad7dc788c42e6430db40184f",
     type = "tar.gz",
     strip_prefix = "shell-escape-0.1.5",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "shell-escape-manifest",
-    vendor = ":shell-escape-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "shell-escape",
-    srcs = [":shell-escape-vendor"],
+    srcs = [":vendor"],
     crate = "shell_escape",
     crate_root = "vendor/src/lib.rs",
     edition = "2015",
-    rustc_flags = ["@$(location :shell-escape-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
 )

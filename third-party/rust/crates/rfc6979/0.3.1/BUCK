@@ -4,26 +4,25 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "rfc6979-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/rfc6979/rfc6979-0.3.1.crate"],
     sha256 = "7743f17af12fa0b03b803ba12cd6a8d9483a587e89c69445e3909655c0b9fabb",
     type = "tar.gz",
     strip_prefix = "rfc6979-0.3.1",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "rfc6979-manifest",
-    vendor = ":rfc6979-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "rfc6979",
-    srcs = [":rfc6979-vendor"],
+    srcs = [":vendor"],
     crate = "rfc6979",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
-    rustc_flags = ["@$(location :rfc6979-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/crypto-bigint/0.4.9:crypto-bigint",

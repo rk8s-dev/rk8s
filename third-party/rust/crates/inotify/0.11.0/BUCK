@@ -4,22 +4,21 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "inotify-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/inotify/inotify-0.11.0.crate"],
     sha256 = "f37dccff2791ab604f9babef0ba14fbe0be30bd368dc541e2b08d07c8aa908f3",
     type = "tar.gz",
     strip_prefix = "inotify-0.11.0",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "inotify-manifest",
-    vendor = ":inotify-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "inotify",
-    srcs = [":inotify-vendor"],
+    srcs = [":vendor"],
     crate = "inotify",
     crate_root = "vendor/src/lib.rs",
     edition = "2018",
@@ -29,7 +28,7 @@ rust_library(
         "stream",
         "tokio",
     ],
-    rustc_flags = ["@$(location :inotify-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/bitflags/2.11.0:bitflags",

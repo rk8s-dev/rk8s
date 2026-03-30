@@ -4,43 +4,42 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "buildscript_run", "rust_binary", "rust_library")
 
 http_archive(
-    name = "crc32fast-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/crc32fast/crc32fast-1.5.0.crate"],
     sha256 = "9481c1c90cbf2ac953f07c8d4a58aa3945c425b7185c9154d67a65e4230da511",
     type = "tar.gz",
     strip_prefix = "crc32fast-1.5.0",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "crc32fast-manifest",
-    vendor = ":crc32fast-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "crc32fast",
-    srcs = [":crc32fast-vendor"],
+    srcs = [":vendor"],
     crate = "crc32fast",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
-        "OUT_DIR": "$(location :crc32fast-build-script-run[out_dir])",
+        "OUT_DIR": "$(location :build-script-run[out_dir])",
     },
     features = [
         "default",
         "std",
     ],
     rustc_flags = [
-        "@$(location :crc32fast-build-script-run[rustc_flags])",
-        "@$(location :crc32fast-manifest[env_flags])",
+        "@$(location :build-script-run[rustc_flags])",
+        "@$(location :manifest[env_flags])",
     ],
     visibility = ["PUBLIC"],
     deps = ["//third-party/rust/crates/cfg-if/1.0.4:cfg-if"],
 )
 
 rust_binary(
-    name = "crc32fast-build-script-build",
-    srcs = [":crc32fast-vendor"],
+    name = "build-script-build",
+    srcs = [":vendor"],
     crate = "build_script_build",
     crate_root = "vendor/build.rs",
     edition = "2021",
@@ -48,20 +47,20 @@ rust_binary(
         "default",
         "std",
     ],
-    rustc_flags = ["@$(location :crc32fast-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = [],
 )
 
 buildscript_run(
-    name = "crc32fast-build-script-run",
+    name = "build-script-run",
     package_name = "crc32fast",
-    buildscript_rule = ":crc32fast-build-script-build",
-    env_srcs = [":crc32fast-manifest[env_dict]"],
+    buildscript_rule = ":build-script-build",
+    env_srcs = [":manifest[env_dict]"],
     features = [
         "default",
         "std",
     ],
     version = "1.5.0",
-    manifest_dir = ":crc32fast-vendor",
+    manifest_dir = ":vendor",
     visibility = ["PUBLIC"],
 )

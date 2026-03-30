@@ -4,25 +4,24 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "dunce-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/dunce/dunce-1.0.5.crate"],
     sha256 = "92773504d58c093f6de2459af4af33faa518c13451eb8f2b5698ed3d36e7c813",
     type = "tar.gz",
     strip_prefix = "dunce-1.0.5",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "dunce-manifest",
-    vendor = ":dunce-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "dunce",
-    srcs = [":dunce-vendor"],
+    srcs = [":vendor"],
     crate = "dunce",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
-    rustc_flags = ["@$(location :dunce-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
 )

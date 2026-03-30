@@ -4,25 +4,24 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "iterator-ext-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/iterator-ext/iterator-ext-0.2.1.crate"],
     sha256 = "62c8d6e4fd801741f57d33b759ea39b0e3e81701f04289519cf34a9d893253cc",
     type = "tar.gz",
     strip_prefix = "iterator-ext-0.2.1",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "iterator-ext-manifest",
-    vendor = ":iterator-ext-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "iterator-ext",
-    srcs = [":iterator-ext-vendor"],
+    srcs = [":vendor"],
     crate = "iterator_ext",
     crate_root = "vendor/src/lib.rs",
     edition = "2018",
-    rustc_flags = ["@$(location :iterator-ext-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
 )

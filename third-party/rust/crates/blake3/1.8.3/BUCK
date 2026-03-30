@@ -4,35 +4,34 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "buildscript_run", "rust_binary", "rust_library")
 
 http_archive(
-    name = "blake3-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/blake3/blake3-1.8.3.crate"],
     sha256 = "2468ef7d57b3fb7e16b576e8377cdbde2320c60e1491e961d11da40fc4f02a2d",
     type = "tar.gz",
     strip_prefix = "blake3-1.8.3",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "blake3-manifest",
-    vendor = ":blake3-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "blake3",
-    srcs = [":blake3-vendor"],
+    srcs = [":vendor"],
     crate = "blake3",
     crate_root = "vendor/src/lib.rs",
     edition = "2024",
     env = {
-        "OUT_DIR": "$(location :blake3-build-script-run[out_dir])",
+        "OUT_DIR": "$(location :build-script-run[out_dir])",
     },
     features = [
         "default",
         "std",
     ],
     rustc_flags = [
-        "@$(location :blake3-build-script-run[rustc_flags])",
-        "@$(location :blake3-manifest[env_flags])",
+        "@$(location :build-script-run[rustc_flags])",
+        "@$(location :manifest[env_flags])",
     ],
     os_deps = {
         "linux": ["//third-party/rust/crates/cpufeatures/0.2.17:cpufeatures"],
@@ -48,8 +47,8 @@ rust_library(
 )
 
 rust_binary(
-    name = "blake3-build-script-build",
-    srcs = [":blake3-vendor"],
+    name = "build-script-build",
+    srcs = [":vendor"],
     crate = "build_script_build",
     crate_root = "vendor/build.rs",
     edition = "2024",
@@ -57,21 +56,21 @@ rust_binary(
         "default",
         "std",
     ],
-    rustc_flags = ["@$(location :blake3-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = [],
     deps = ["//third-party/rust/crates/cc/1.2.56:cc"],
 )
 
 buildscript_run(
-    name = "blake3-build-script-run",
+    name = "build-script-run",
     package_name = "blake3",
-    buildscript_rule = ":blake3-build-script-build",
-    env_srcs = [":blake3-manifest[env_dict]"],
+    buildscript_rule = ":build-script-build",
+    env_srcs = [":manifest[env_dict]"],
     features = [
         "default",
         "std",
     ],
     version = "1.8.3",
-    manifest_dir = ":blake3-vendor",
+    manifest_dir = ":vendor",
     visibility = ["PUBLIC"],
 )

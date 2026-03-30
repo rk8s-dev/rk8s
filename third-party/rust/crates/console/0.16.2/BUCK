@@ -4,22 +4,21 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "console-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/console/console-0.16.2.crate"],
     sha256 = "03e45a4a8926227e4197636ba97a9fc9b00477e9f4bd711395687c5f0734bec4",
     type = "tar.gz",
     strip_prefix = "console-0.16.2",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "console-manifest",
-    vendor = ":console-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "console",
-    srcs = [":console-vendor"],
+    srcs = [":vendor"],
     crate = "console",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
@@ -30,7 +29,7 @@ rust_library(
         "std",
         "unicode-width",
     ],
-    rustc_flags = ["@$(location :console-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     os_deps = {
         "windows": [
             "//third-party/rust/crates/encode_unicode/1.0.0:encode_unicode",

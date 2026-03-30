@@ -4,22 +4,21 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "async-lock-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/async-lock/async-lock-3.4.2.crate"],
     sha256 = "290f7f2596bd5b78a9fec8088ccd89180d7f9f55b94b0576823bbbdc72ee8311",
     type = "tar.gz",
     strip_prefix = "async-lock-3.4.2",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "async-lock-manifest",
-    vendor = ":async-lock-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "async-lock",
-    srcs = [":async-lock-vendor"],
+    srcs = [":vendor"],
     crate = "async_lock",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
@@ -27,7 +26,7 @@ rust_library(
         "default",
         "std",
     ],
-    rustc_flags = ["@$(location :async-lock-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/event-listener-strategy/0.5.4:event-listener-strategy",

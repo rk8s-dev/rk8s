@@ -4,22 +4,21 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "aligned-vec-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/aligned-vec/aligned-vec-0.6.4.crate"],
     sha256 = "dc890384c8602f339876ded803c97ad529f3842aba97f6392b3dba0dd171769b",
     type = "tar.gz",
     strip_prefix = "aligned-vec-0.6.4",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "aligned-vec-manifest",
-    vendor = ":aligned-vec-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "aligned-vec",
-    srcs = [":aligned-vec-vendor"],
+    srcs = [":vendor"],
     crate = "aligned_vec",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
@@ -27,7 +26,7 @@ rust_library(
         "default",
         "std",
     ],
-    rustc_flags = ["@$(location :aligned-vec-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = ["//third-party/rust/crates/equator/0.4.2:equator"],
 )

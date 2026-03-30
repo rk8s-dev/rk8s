@@ -4,22 +4,21 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "moxcms-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/moxcms/moxcms-0.7.11.crate"],
     sha256 = "ac9557c559cd6fc9867e122e20d2cbefc9ca29d80d027a8e39310920ed2f0a97",
     type = "tar.gz",
     strip_prefix = "moxcms-0.7.11",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "moxcms-manifest",
-    vendor = ":moxcms-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "moxcms",
-    srcs = [":moxcms-vendor"],
+    srcs = [":vendor"],
     crate = "moxcms",
     crate_root = "vendor/src/lib.rs",
     edition = "2024",
@@ -29,7 +28,7 @@ rust_library(
         "neon",
         "sse",
     ],
-    rustc_flags = ["@$(location :moxcms-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/num-traits/0.2.19:num-traits",

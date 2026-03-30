@@ -4,27 +4,26 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "buildscript_run", "rust_binary", "rust_library")
 
 http_archive(
-    name = "borsh-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/borsh/borsh-1.6.0.crate"],
     sha256 = "d1da5ab77c1437701eeff7c88d968729e7766172279eab0676857b3d63af7a6f",
     type = "tar.gz",
     strip_prefix = "borsh-1.6.0",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "borsh-manifest",
-    vendor = ":borsh-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "borsh",
-    srcs = [":borsh-vendor"],
+    srcs = [":vendor"],
     crate = "borsh",
     crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
-        "OUT_DIR": "$(location :borsh-build-script-run[out_dir])",
+        "OUT_DIR": "$(location :build-script-run[out_dir])",
     },
     features = [
         "borsh-derive",
@@ -33,16 +32,16 @@ rust_library(
         "unstable__schema",
     ],
     rustc_flags = [
-        "@$(location :borsh-build-script-run[rustc_flags])",
-        "@$(location :borsh-manifest[env_flags])",
+        "@$(location :build-script-run[rustc_flags])",
+        "@$(location :manifest[env_flags])",
     ],
     visibility = ["PUBLIC"],
     deps = ["//third-party/rust/crates/borsh-derive/1.6.0:borsh-derive"],
 )
 
 rust_binary(
-    name = "borsh-build-script-build",
-    srcs = [":borsh-vendor"],
+    name = "build-script-build",
+    srcs = [":vendor"],
     crate = "build_script_build",
     crate_root = "vendor/build.rs",
     edition = "2018",
@@ -52,16 +51,16 @@ rust_binary(
         "std",
         "unstable__schema",
     ],
-    rustc_flags = ["@$(location :borsh-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = [],
     deps = ["//third-party/rust/crates/cfg_aliases/0.2.1:cfg_aliases"],
 )
 
 buildscript_run(
-    name = "borsh-build-script-run",
+    name = "build-script-run",
     package_name = "borsh",
-    buildscript_rule = ":borsh-build-script-build",
-    env_srcs = [":borsh-manifest[env_dict]"],
+    buildscript_rule = ":build-script-build",
+    env_srcs = [":manifest[env_dict]"],
     features = [
         "borsh-derive",
         "derive",
@@ -69,6 +68,6 @@ buildscript_run(
         "unstable__schema",
     ],
     version = "1.6.0",
-    manifest_dir = ":borsh-vendor",
+    manifest_dir = ":vendor",
     visibility = ["PUBLIC"],
 )

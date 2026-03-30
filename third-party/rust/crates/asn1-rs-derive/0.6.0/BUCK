@@ -4,26 +4,25 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "asn1-rs-derive-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/asn1-rs-derive/asn1-rs-derive-0.6.0.crate"],
     sha256 = "3109e49b1e4909e9db6515a30c633684d68cdeaa252f215214cb4fa1a5bfee2c",
     type = "tar.gz",
     strip_prefix = "asn1-rs-derive-0.6.0",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "asn1-rs-derive-manifest",
-    vendor = ":asn1-rs-derive-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "asn1-rs-derive",
-    srcs = [":asn1-rs-derive-vendor"],
+    srcs = [":vendor"],
     crate = "asn1_rs_derive",
     crate_root = "vendor/src/lib.rs",
     edition = "2018",
-    rustc_flags = ["@$(location :asn1-rs-derive-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     proc_macro = True,
     visibility = ["PUBLIC"],
     deps = [

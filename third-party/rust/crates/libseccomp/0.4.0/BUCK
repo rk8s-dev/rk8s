@@ -4,31 +4,30 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "buildscript_run", "rust_binary", "rust_library")
 
 http_archive(
-    name = "libseccomp-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/libseccomp/libseccomp-0.4.0.crate"],
     sha256 = "0e5310a2c5b6ffbc094b5f70a2ca7b79ed36ad90e6f90994b166489a1bce3fcc",
     type = "tar.gz",
     strip_prefix = "libseccomp-0.4.0",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "libseccomp-manifest",
-    vendor = ":libseccomp-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "libseccomp",
-    srcs = [":libseccomp-vendor"],
+    srcs = [":vendor"],
     crate = "libseccomp",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
-        "OUT_DIR": "$(location :libseccomp-build-script-run[out_dir])",
+        "OUT_DIR": "$(location :build-script-run[out_dir])",
     },
     rustc_flags = [
-        "@$(location :libseccomp-build-script-run[rustc_flags])",
-        "@$(location :libseccomp-manifest[env_flags])",
+        "@$(location :build-script-run[rustc_flags])",
+        "@$(location :manifest[env_flags])",
     ],
     visibility = ["PUBLIC"],
     deps = [
@@ -39,22 +38,22 @@ rust_library(
 )
 
 rust_binary(
-    name = "libseccomp-build-script-build",
-    srcs = [":libseccomp-vendor"],
+    name = "build-script-build",
+    srcs = [":vendor"],
     crate = "build_script_build",
     crate_root = "vendor/build.rs",
     edition = "2021",
-    rustc_flags = ["@$(location :libseccomp-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = [],
     deps = ["//third-party/rust/crates/pkg-config/0.3.32:pkg-config"],
 )
 
 buildscript_run(
-    name = "libseccomp-build-script-run",
+    name = "build-script-run",
     package_name = "libseccomp",
-    buildscript_rule = ":libseccomp-build-script-build",
-    env_srcs = [":libseccomp-manifest[env_dict]"],
+    buildscript_rule = ":build-script-build",
+    env_srcs = [":manifest[env_dict]"],
     version = "0.4.0",
-    manifest_dir = ":libseccomp-vendor",
+    manifest_dir = ":vendor",
     visibility = ["PUBLIC"],
 )

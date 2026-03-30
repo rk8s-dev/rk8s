@@ -4,26 +4,25 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "symbolic-common-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/symbolic-common/symbolic-common-12.17.2.crate"],
     sha256 = "751a2823d606b5d0a7616499e4130a516ebd01a44f39811be2b9600936509c23",
     type = "tar.gz",
     strip_prefix = "symbolic-common-12.17.2",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "symbolic-common-manifest",
-    vendor = ":symbolic-common-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "symbolic-common",
-    srcs = [":symbolic-common-vendor"],
+    srcs = [":vendor"],
     crate = "symbolic_common",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
-    rustc_flags = ["@$(location :symbolic-common-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/debugid/0.8.0:debugid",

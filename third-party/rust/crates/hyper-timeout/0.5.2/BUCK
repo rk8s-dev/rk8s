@@ -4,26 +4,25 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "hyper-timeout-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/hyper-timeout/hyper-timeout-0.5.2.crate"],
     sha256 = "2b90d566bffbce6a75bd8b09a05aa8c2cb1fabb6cb348f8840c9e4c90a0d83b0",
     type = "tar.gz",
     strip_prefix = "hyper-timeout-0.5.2",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "hyper-timeout-manifest",
-    vendor = ":hyper-timeout-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "hyper-timeout",
-    srcs = [":hyper-timeout-vendor"],
+    srcs = [":vendor"],
     crate = "hyper_timeout",
     crate_root = "vendor/src/lib.rs",
     edition = "2018",
-    rustc_flags = ["@$(location :hyper-timeout-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/hyper-util/0.1.20:hyper-util",

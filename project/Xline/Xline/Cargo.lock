@@ -235,6 +235,28 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c08606f8c3cbf4ce6ec8e28fb0014a2c086708fe954eaa885384a6165172e7e8"
 
 [[package]]
+name = "aws-lc-rs"
+version = "1.16.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "94bffc006df10ac2a68c83692d734a465f8ee6c5b384d8545a636f81d858f4bf"
+dependencies = [
+ "aws-lc-sys",
+ "zeroize",
+]
+
+[[package]]
+name = "aws-lc-sys"
+version = "0.38.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4321e568ed89bb5a7d291a7f37997c2c0df89809d7b6d12062c81ddb54aa782e"
+dependencies = [
+ "cc",
+ "cmake",
+ "dunce",
+ "fs_extra",
+]
+
+[[package]]
 name = "axum"
 version = "0.7.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -539,6 +561,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "cmake"
+version = "0.1.57"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "75443c44cd6b379beb8c5b45d85d0773baf31cce901fe7bb252f4eff3008ef7d"
+dependencies = [
+ "cc",
+]
+
+[[package]]
 name = "colorchoice"
 version = "1.0.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -688,7 +719,7 @@ dependencies = [
  "flume",
  "fs2",
  "futures",
- "gm-quic 0.4.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "gm-quic",
  "indexmap 2.13.0",
  "itertools 0.13.0",
  "mockall",
@@ -700,6 +731,7 @@ dependencies = [
  "prost-build",
  "rand 0.8.5",
  "rcgen",
+ "rustls",
  "serde",
  "serial_test",
  "sha2",
@@ -971,6 +1003,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1435fa1053d8b2fbbe9be7e97eca7f33d37b28409959813daefc1446a14247f1"
 
 [[package]]
+name = "dunce"
+version = "1.0.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "92773504d58c093f6de2459af4af33faa518c13451eb8f2b5698ed3d36e7c813"
+
+[[package]]
 name = "dyn-clone"
 version = "1.0.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1131,6 +1169,12 @@ dependencies = [
  "libc",
  "winapi",
 ]
+
+[[package]]
+name = "fs_extra"
+version = "1.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "42703706b716c37f96a77aea830392ad231f44c9e9a67872fa5548707e11b11c"
 
 [[package]]
 name = "futures"
@@ -1296,23 +1340,7 @@ dependencies = [
  "dashmap",
  "derive_more",
  "futures",
- "qconnection 0.4.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "rustls",
- "thiserror 2.0.18",
- "tokio",
- "tracing",
-]
-
-[[package]]
-name = "gm-quic"
-version = "0.4.0"
-source = "git+https://github.com/genmeta/gm-quic?rev=4cbd9d93#4cbd9d93871076fbf9f86ed1bdf64bcd6749c4cd"
-dependencies = [
- "bytes",
- "dashmap",
- "derive_more",
- "futures",
- "qconnection 0.4.0 (git+https://github.com/genmeta/gm-quic?rev=4cbd9d93)",
+ "qconnection",
  "rustls",
  "thiserror 2.0.18",
  "tokio",
@@ -1361,7 +1389,7 @@ dependencies = [
  "bytes",
  "dashmap",
  "futures",
- "gm-quic 0.4.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "gm-quic",
  "h3",
  "tokio",
 ]
@@ -2646,30 +2674,7 @@ dependencies = [
  "http",
  "netdev",
  "nom 8.0.0",
- "qmacro 0.4.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "rand 0.9.2",
- "rustls",
- "serde",
- "thiserror 2.0.18",
- "tokio",
- "tracing",
-]
-
-[[package]]
-name = "qbase"
-version = "0.4.0"
-source = "git+https://github.com/genmeta/gm-quic?rev=4cbd9d93#4cbd9d93871076fbf9f86ed1bdf64bcd6749c4cd"
-dependencies = [
- "bitflags",
- "bytes",
- "derive_more",
- "enum_dispatch",
- "futures",
- "getset",
- "http",
- "netdev",
- "nom 8.0.0",
- "qmacro 0.4.0 (git+https://github.com/genmeta/gm-quic?rev=4cbd9d93)",
+ "qmacro",
  "rand 0.9.2",
  "rustls",
  "serde",
@@ -2684,21 +2689,8 @@ version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8f1d18c9321ffba0ba83316fc4d3ec687a8a6c3d4d3532ed7105c98cba5556b6"
 dependencies = [
- "qbase 0.4.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "qevent 0.4.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "rand 0.9.2",
- "thiserror 2.0.18",
- "tokio",
- "tracing",
-]
-
-[[package]]
-name = "qcongestion"
-version = "0.4.0"
-source = "git+https://github.com/genmeta/gm-quic?rev=4cbd9d93#4cbd9d93871076fbf9f86ed1bdf64bcd6749c4cd"
-dependencies = [
- "qbase 0.4.0 (git+https://github.com/genmeta/gm-quic?rev=4cbd9d93)",
- "qevent 0.4.0 (git+https://github.com/genmeta/gm-quic?rev=4cbd9d93)",
+ "qbase",
+ "qevent",
  "rand 0.9.2",
  "thiserror 2.0.18",
  "tokio",
@@ -2716,37 +2708,12 @@ dependencies = [
  "derive_more",
  "enum_dispatch",
  "futures",
- "qbase 0.4.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "qcongestion 0.4.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "qevent 0.4.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "qinterface 0.4.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "qrecovery 0.4.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "qunreliable 0.4.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "ring",
- "rustls",
- "thiserror 2.0.18",
- "tokio",
- "tokio-util",
- "tracing",
- "x509-parser",
-]
-
-[[package]]
-name = "qconnection"
-version = "0.4.0"
-source = "git+https://github.com/genmeta/gm-quic?rev=4cbd9d93#4cbd9d93871076fbf9f86ed1bdf64bcd6749c4cd"
-dependencies = [
- "bytes",
- "dashmap",
- "derive_more",
- "enum_dispatch",
- "futures",
- "qbase 0.4.0 (git+https://github.com/genmeta/gm-quic?rev=4cbd9d93)",
- "qcongestion 0.4.0 (git+https://github.com/genmeta/gm-quic?rev=4cbd9d93)",
- "qevent 0.4.0 (git+https://github.com/genmeta/gm-quic?rev=4cbd9d93)",
- "qinterface 0.4.0 (git+https://github.com/genmeta/gm-quic?rev=4cbd9d93)",
- "qrecovery 0.4.0 (git+https://github.com/genmeta/gm-quic?rev=4cbd9d93)",
- "qunreliable 0.4.0 (git+https://github.com/genmeta/gm-quic?rev=4cbd9d93)",
+ "qbase",
+ "qcongestion",
+ "qevent",
+ "qinterface",
+ "qrecovery",
+ "qunreliable",
  "ring",
  "rustls",
  "thiserror 2.0.18",
@@ -2767,25 +2734,7 @@ dependencies = [
  "derive_more",
  "enum_dispatch",
  "pin-project-lite",
- "qbase 0.4.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "serde",
- "serde_json",
- "serde_with",
- "tokio",
- "tracing",
-]
-
-[[package]]
-name = "qevent"
-version = "0.4.0"
-source = "git+https://github.com/genmeta/gm-quic?rev=4cbd9d93#4cbd9d93871076fbf9f86ed1bdf64bcd6749c4cd"
-dependencies = [
- "bytes",
- "derive_builder",
- "derive_more",
- "enum_dispatch",
- "pin-project-lite",
- "qbase 0.4.0 (git+https://github.com/genmeta/gm-quic?rev=4cbd9d93)",
+ "qbase",
  "serde",
  "serde_json",
  "serde_with",
@@ -2805,31 +2754,9 @@ dependencies = [
  "futures",
  "netdev",
  "netwatcher",
- "qbase 0.4.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "qevent 0.4.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "qudp 0.4.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "rustls",
- "serde",
- "thiserror 2.0.18",
- "tokio",
- "tokio-util",
- "tracing",
-]
-
-[[package]]
-name = "qinterface"
-version = "0.4.0"
-source = "git+https://github.com/genmeta/gm-quic?rev=4cbd9d93#4cbd9d93871076fbf9f86ed1bdf64bcd6749c4cd"
-dependencies = [
- "bytes",
- "dashmap",
- "derive_more",
- "futures",
- "netdev",
- "netwatcher",
- "qbase 0.4.0 (git+https://github.com/genmeta/gm-quic?rev=4cbd9d93)",
- "qevent 0.4.0 (git+https://github.com/genmeta/gm-quic?rev=4cbd9d93)",
- "qudp 0.4.0 (git+https://github.com/genmeta/gm-quic?rev=4cbd9d93)",
+ "qbase",
+ "qevent",
+ "qudp",
  "rustls",
  "serde",
  "thiserror 2.0.18",
@@ -2851,17 +2778,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "qmacro"
-version = "0.4.0"
-source = "git+https://github.com/genmeta/gm-quic?rev=4cbd9d93#4cbd9d93871076fbf9f86ed1bdf64bcd6749c4cd"
-dependencies = [
- "darling 0.23.0",
- "proc-macro2",
- "quote",
- "syn",
-]
-
-[[package]]
 name = "qrecovery"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2871,26 +2787,8 @@ dependencies = [
  "derive_more",
  "enum_dispatch",
  "futures",
- "qbase 0.4.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "qevent 0.4.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "rand 0.9.2",
- "rustls",
- "thiserror 2.0.18",
- "tokio",
- "tracing",
-]
-
-[[package]]
-name = "qrecovery"
-version = "0.4.0"
-source = "git+https://github.com/genmeta/gm-quic?rev=4cbd9d93#4cbd9d93871076fbf9f86ed1bdf64bcd6749c4cd"
-dependencies = [
- "bytes",
- "derive_more",
- "enum_dispatch",
- "futures",
- "qbase 0.4.0 (git+https://github.com/genmeta/gm-quic?rev=4cbd9d93)",
- "qevent 0.4.0 (git+https://github.com/genmeta/gm-quic?rev=4cbd9d93)",
+ "qbase",
+ "qevent",
  "rand 0.9.2",
  "rustls",
  "thiserror 2.0.18",
@@ -2915,21 +2813,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "qudp"
-version = "0.4.0"
-source = "git+https://github.com/genmeta/gm-quic?rev=4cbd9d93#4cbd9d93871076fbf9f86ed1bdf64bcd6749c4cd"
-dependencies = [
- "bytes",
- "cfg-if",
- "libc",
- "nix 0.30.1",
- "socket2 0.6.3",
- "tokio",
- "tracing",
- "windows-sys 0.61.2",
-]
-
-[[package]]
 name = "qunreliable"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2937,19 +2820,7 @@ checksum = "1d696ab6023d0f13ca2ad6377c779b87881dbdbacad63a8d50c2a98f96e3a004"
 dependencies = [
  "bytes",
  "futures",
- "qbase 0.4.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "tokio",
- "tracing",
-]
-
-[[package]]
-name = "qunreliable"
-version = "0.4.0"
-source = "git+https://github.com/genmeta/gm-quic?rev=4cbd9d93#4cbd9d93871076fbf9f86ed1bdf64bcd6749c4cd"
-dependencies = [
- "bytes",
- "futures",
- "qbase 0.4.0 (git+https://github.com/genmeta/gm-quic?rev=4cbd9d93)",
+ "qbase",
  "tokio",
  "tracing",
 ]
@@ -3218,6 +3089,7 @@ version = "0.23.37"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "758025cb5fccfd3bc2fd74708fd4682be41d99e5dff73c377c0646c6012c73a4"
 dependencies = [
+ "aws-lc-rs",
  "log",
  "once_cell",
  "ring",
@@ -3251,6 +3123,7 @@ version = "0.103.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d7df23109aa6c1567d1c575b9952556388da57401e4ace1d15f79eedad0d8f53"
 dependencies = [
+ "aws-lc-rs",
  "ring",
  "rustls-pki-types",
  "untrusted",
@@ -4871,7 +4744,7 @@ dependencies = [
  "event-listener",
  "flume",
  "futures",
- "gm-quic 0.4.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "gm-quic",
  "h3",
  "h3-shim",
  "http",
@@ -4930,11 +4803,14 @@ dependencies = [
  "anyhow",
  "async-dropper",
  "async-trait",
+ "bytes",
  "clippy-utilities",
  "curp",
  "futures",
  "getrandom 0.2.17",
- "gm-quic 0.4.0 (git+https://github.com/genmeta/gm-quic?rev=4cbd9d93)",
+ "gm-quic",
+ "h3",
+ "h3-shim",
  "http",
  "prost",
  "rand 0.8.5",
@@ -4974,12 +4850,12 @@ dependencies = [
  "curp-external-api",
  "itertools 0.13.0",
  "prost",
+ "prost-build",
  "serde",
  "strum",
  "strum_macros",
  "thiserror 1.0.69",
  "tonic",
- "tonic-build",
  "utils",
  "xlinerpc",
 ]
@@ -5006,9 +4882,9 @@ name = "xlinerpc"
 version = "0.1.0"
 dependencies = [
  "bytes",
+ "futures",
  "prost",
  "thiserror 1.0.69",
- "tonic",
 ]
 
 [[package]]

@@ -4,22 +4,21 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "aws-smithy-http-client-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/aws-smithy-http-client/aws-smithy-http-client-1.1.10.crate"],
     sha256 = "0709f0083aa19b704132684bc26d3c868e06bd428ccc4373b0b55c3e8748a58b",
     type = "tar.gz",
     strip_prefix = "aws-smithy-http-client-1.1.10",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "aws-smithy-http-client-manifest",
-    vendor = ":aws-smithy-http-client-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "aws-smithy-http-client",
-    srcs = [":aws-smithy-http-client-vendor"],
+    srcs = [":vendor"],
     crate = "aws_smithy_http_client",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
@@ -29,7 +28,7 @@ rust_library(
         "legacy-rustls-ring",
         "rustls-aws-lc",
     ],
-    rustc_flags = ["@$(location :aws-smithy-http-client-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     named_deps = {
         "h2_0_3": "//third-party/rust/crates/h2/0.3.27:h2",
         "http_02x": "//third-party/rust/crates/http/0.2.12:http",

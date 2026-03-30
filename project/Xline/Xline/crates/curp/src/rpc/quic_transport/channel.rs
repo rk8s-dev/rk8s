@@ -17,7 +17,8 @@ use futures::{Stream, future::BoxFuture};
 use gm_quic::prelude::{Connection, QuicClient, StreamReader, StreamWriter};
 use prost::Message;
 use tokio::io::AsyncWriteExt;
-use tokio::sync::RwLock;
+use tokio::sync::{RwLock, oneshot};
+use tokio::task::JoinHandle;
 
 use crate::rpc::CurpError;
 
@@ -218,7 +219,7 @@ impl QuicChannel {
     {
         let conn = self.get_connection().await?;
 
-        tokio::time::timeout(timeout, async {
+        let call = async {
             // Open bidirectional stream
             let (recv_stream, send_stream) = Self::open_bi_stream(&conn).await?;
 
@@ -269,9 +270,15 @@ impl QuicChannel {
             // Decode response
             Resp::decode(resp_bytes.as_slice())
                 .map_err(|e| CurpError::internal(format!("decode response error: {e}")))
-        })
-        .await
-        .map_err(|_| CurpError::RpcTransport(()))?
+        };
+
+        if timeout.is_zero() {
+            return call.await;
+        }
+
+        tokio::time::timeout(timeout, call)
+            .await
+            .map_err(|_| CurpError::RpcTransport(()))?
     }
 
     /// Perform a server-streaming RPC call
@@ -311,7 +318,9 @@ impl QuicChannel {
 
         // Return stream that reads responses
         let reader = FrameReader::new_server_streaming(recv_stream);
-        Ok(Box::pin(ServerStreamingResponse::<Resp>::new(reader, conn)))
+        Ok(Box::pin(ServerStreamingResponse::<Resp>::new(
+            reader, conn, None, None,
+        )))
     }
 
     /// Perform a client-streaming RPC call
@@ -341,7 +350,7 @@ impl QuicChannel {
         // block, and read in the unconditional cleanup that follows.
         let cancel_tx: Arc<std::sync::Mutex<Option<oneshot::Sender<()>>>> =
             Arc::new(std::sync::Mutex::new(None));
-        let send_handle: Arc<std::sync::Mutex<Option<tokio::task::JoinHandle<()>>>> =
+        let send_handle: Arc<std::sync::Mutex<Option<JoinHandle<()>>>> =
             Arc::new(std::sync::Mutex::new(None));
 
         let cancel_tx_inner = Arc::clone(&cancel_tx);
@@ -444,6 +453,68 @@ impl QuicChannel {
         }
 
         result.map_err(|_| CurpError::RpcTransport(()))?
+    }
+
+    /// Perform a bidirectional-streaming RPC call.
+    pub async fn bidirectional_streaming_call<Req, Resp>(
+        &self,
+        method: MethodId,
+        stream: Pin<Box<dyn Stream<Item = Req> + Send>>,
+        meta: Vec<(String, String)>,
+        timeout: Duration,
+    ) -> Result<Pin<Box<dyn Stream<Item = Result<Resp, CurpError>> + Send>>, CurpError>
+    where
+        Req: Message + Send + 'static,
+        Resp: Message + Default + Send + Unpin + 'static,
+    {
+        use futures::StreamExt;
+
+        let conn = self.get_connection().await?;
+
+        let (recv_stream, send_stream): (StreamReader, StreamWriter) = if timeout.is_zero() {
+            Self::open_bi_stream(&conn).await?
+        } else {
+            tokio::time::timeout(timeout, Self::open_bi_stream(&conn))
+                .await
+                .map_err(|_| CurpError::RpcTransport(()))??
+        };
+
+        let mut writer = FrameWriter::new(send_stream);
+        writer.write_request_header(method, &meta).await?;
+
+        let (cancel_tx, mut cancel_rx) = oneshot::channel::<()>();
+
+        let send_task = tokio::spawn(async move {
+            let mut stream = stream;
+            loop {
+                tokio::select! {
+                    _ = &mut cancel_rx => {
+                        break;
+                    }
+                    maybe_req = stream.next() => {
+                        let Some(req) = maybe_req else {
+                            break;
+                        };
+                        let req_bytes = req.encode_to_vec();
+                        if writer.write_frame(&Frame::Data(req_bytes)).await.is_err() {
+                            return;
+                        }
+                    }
+                }
+            }
+            let _ = writer.write_frame(&Frame::End).await;
+            let _ = writer.flush().await;
+            let mut send_stream: StreamWriter = writer.into_inner();
+            let _ = send_stream.shutdown().await;
+        });
+
+        let reader = FrameReader::new_server_streaming(recv_stream);
+        Ok(Box::pin(ServerStreamingResponse::<Resp>::new(
+            reader,
+            conn,
+            Some(cancel_tx),
+            Some(send_task),
+        )))
     }
 
     /// Connect to a single address (for discovery)
@@ -566,6 +637,10 @@ struct ServerStreamingResponse<Resp> {
     ended: bool,
     /// Keep the QUIC connection alive while the stream is being consumed
     _conn: Connection,
+    /// Cancel signal for the client->server send task in bidi mode
+    cancel_tx: Option<oneshot::Sender<()>>,
+    /// Send task handle for cleanup when stream is dropped early
+    send_task: Option<JoinHandle<()>>,
     /// Phantom for response type
     _phantom: std::marker::PhantomData<Resp>,
 }
@@ -582,12 +657,47 @@ enum StreamResponseState {
 
 impl<Resp> ServerStreamingResponse<Resp> {
     /// Create a new server-streaming response
-    fn new(reader: FrameReader<StreamReader>, conn: Connection) -> Self {
+    fn new(
+        reader: FrameReader<StreamReader>,
+        conn: Connection,
+        cancel_tx: Option<oneshot::Sender<()>>,
+        send_task: Option<JoinHandle<()>>,
+    ) -> Self {
         Self {
             state: StreamResponseState::Idle(reader),
             ended: false,
             _conn: conn,
+            cancel_tx,
+            send_task,
             _phantom: std::marker::PhantomData,
+        }
+    }
+}
+
+impl<Resp> Drop for ServerStreamingResponse<Resp> {
+    fn drop(&mut self) {
+        cleanup_send_task(self.cancel_tx.take(), self.send_task.take());
+    }
+}
+
+fn cleanup_send_task(cancel_tx: Option<oneshot::Sender<()>>, send_task: Option<JoinHandle<()>>) {
+    if let Some(handle) = send_task {
+        if let Some(tx) = cancel_tx {
+            let _ = tx.send(());
+        }
+        if let Ok(rt) = tokio::runtime::Handle::try_current() {
+            let _cleanup = rt.spawn(async move {
+                let mut handle = handle;
+                tokio::select! {
+                    _ = &mut handle => {}
+                    _ = tokio::time::sleep(SEND_TASK_GRACE_PERIOD) => {
+                        handle.abort();
+                        let _ = handle.await;
+                    }
+                }
+            });
+        } else {
+            handle.abort();
         }
     }
 }
@@ -659,5 +769,67 @@ where
             this.ended = true;
             Poll::Ready(Some(Err(CurpError::internal("stream state poisoned"))))
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::future::pending;
+
+    use tokio::sync::oneshot;
+
+    use super::{SEND_TASK_GRACE_PERIOD, cleanup_send_task};
+
+    #[tokio::test]
+    async fn cleanup_send_task_cancels_send_task() {
+        let (cancel_tx, mut cancel_rx) = oneshot::channel::<()>();
+        let (done_tx, done_rx) = oneshot::channel::<()>();
+
+        let handle = tokio::spawn(async move {
+            tokio::select! {
+                _ = &mut cancel_rx => {}
+                _ = tokio::time::sleep(std::time::Duration::from_secs(10)) => {}
+            }
+            let _ = done_tx.send(());
+        });
+
+        cleanup_send_task(Some(cancel_tx), Some(handle));
+
+        let done = tokio::time::timeout(std::time::Duration::from_secs(1), done_rx).await;
+        assert!(
+            done.is_ok(),
+            "send task should be cancelled and exit quickly"
+        );
+    }
+
+    #[tokio::test]
+    async fn cleanup_send_task_aborts_stuck_task_after_grace() {
+        struct DropNotify(Option<oneshot::Sender<()>>);
+
+        impl Drop for DropNotify {
+            fn drop(&mut self) {
+                if let Some(tx) = self.0.take() {
+                    let _ = tx.send(());
+                }
+            }
+        }
+
+        let (dropped_tx, dropped_rx) = oneshot::channel::<()>();
+        let handle = tokio::spawn(async move {
+            let _notify = DropNotify(Some(dropped_tx));
+            pending::<()>().await;
+        });
+
+        cleanup_send_task(None, Some(handle));
+
+        let wait = tokio::time::timeout(
+            SEND_TASK_GRACE_PERIOD + std::time::Duration::from_secs(1),
+            dropped_rx,
+        )
+        .await;
+        assert!(
+            wait.is_ok(),
+            "stuck send task should be aborted after grace period"
+        );
     }
 }

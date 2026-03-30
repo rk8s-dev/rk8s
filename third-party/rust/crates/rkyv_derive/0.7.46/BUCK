@@ -4,27 +4,26 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "rkyv_derive-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/rkyv_derive/rkyv_derive-0.7.46.crate"],
     sha256 = "84d7b42d4b8d06048d3ac8db0eb31bcb942cbeb709f0b5f2b2ebde398d3038f5",
     type = "tar.gz",
     strip_prefix = "rkyv_derive-0.7.46",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "rkyv_derive-manifest",
-    vendor = ":rkyv_derive-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "rkyv_derive",
-    srcs = [":rkyv_derive-vendor"],
+    srcs = [":vendor"],
     crate = "rkyv_derive",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
     features = ["default"],
-    rustc_flags = ["@$(location :rkyv_derive-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     proc_macro = True,
     visibility = ["PUBLIC"],
     deps = [

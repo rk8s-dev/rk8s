@@ -4,26 +4,25 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "trait-make-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/trait-make/trait-make-0.1.0.crate"],
     sha256 = "96cbd06a7b648f1603e60d75d9ed295d096b340d30e9f9324f4b512b5d40cd92",
     type = "tar.gz",
     strip_prefix = "trait-make-0.1.0",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "trait-make-manifest",
-    vendor = ":trait-make-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "trait-make",
-    srcs = [":trait-make-vendor"],
+    srcs = [":vendor"],
     crate = "trait_make",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
-    rustc_flags = ["@$(location :trait-make-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     proc_macro = True,
     visibility = ["PUBLIC"],
     deps = [

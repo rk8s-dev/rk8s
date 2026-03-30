@@ -7,12 +7,12 @@ use curp::{cmd::CommandExecutor as _, members::ClusterInfo, server::RawCurp};
 use engine::SnapshotApi;
 use futures::stream::Stream;
 use sha2::{Digest, Sha256};
-use tonic::Status;
 use tracing::{debug, error};
 use xlineapi::{
     RequestWrapper,
     command::{Command, CommandResponse, CurpClient, SyncResponse},
 };
+use xlinerpc::Status;
 // TODO: use our own status type
 // use xlinerpc::status::Status;
 use super::command::CommandExecutor;
@@ -87,12 +87,14 @@ impl MaintenanceServer {
     /// Propose request and get result with fast/slow path
     async fn propose<T>(
         &self,
-        request: tonic::Request<T>,
+        request: xlinerpc::Request<T>,
     ) -> Result<(CommandResponse, Option<SyncResponse>), Status>
     where
         T: Into<RequestWrapper> + Debug,
     {
-        let auth_info = self.auth_store.try_get_auth_info_from_request(&request)?;
+        let auth_info = self
+            .auth_store
+            .try_get_auth_info_from_rpc_request(&request)?;
         let request = request.into_inner().into();
         let cmd = Command::new_with_auth_info(request, auth_info);
         let res = self.client.propose(&cmd, None, false).await??;
@@ -101,8 +103,8 @@ impl MaintenanceServer {
 
     pub(crate) async fn alarm(
         &self,
-        request: tonic::Request<AlarmRequest>,
-    ) -> Result<tonic::Response<AlarmResponse>, Status> {
+        request: xlinerpc::Request<AlarmRequest>,
+    ) -> Result<xlinerpc::Response<AlarmResponse>, Status> {
         let (res, sync_res) = self.propose(request).await?;
         let mut res: AlarmResponse = res.into_inner().into();
         if let Some(sync_res) = sync_res {
@@ -112,13 +114,13 @@ impl MaintenanceServer {
                 header.revision = revision;
             }
         }
-        Ok(tonic::Response::new(res))
+        Ok(xlinerpc::Response::from_data(res))
     }
 
     pub(crate) async fn status(
         &self,
-        _request: tonic::Request<StatusRequest>,
-    ) -> Result<tonic::Response<StatusResponse>, Status> {
+        _request: xlinerpc::Request<StatusRequest>,
+    ) -> Result<xlinerpc::Response<StatusResponse>, Status> {
         let is_learner = self.cluster_info.self_member().is_learner;
         let (leader, term, _) = self.raw_curp.leader();
         let commit_index = self.raw_curp.commit_index();
@@ -149,13 +151,13 @@ impl MaintenanceServer {
             db_size_in_use: size.numeric_cast(),
             is_learner,
         };
-        Ok(tonic::Response::new(response))
+        Ok(xlinerpc::Response::from_data(response))
     }
 
     async fn defragment(
         &self,
-        _request: tonic::Request<DefragmentRequest>,
-    ) -> Result<tonic::Response<DefragmentResponse>, Status> {
+        _request: xlinerpc::Request<DefragmentRequest>,
+    ) -> Result<xlinerpc::Response<DefragmentResponse>, Status> {
         Err(Status::unimplemented(
             "defragment is unimplemented".to_owned(),
         ))
@@ -163,9 +165,9 @@ impl MaintenanceServer {
 
     async fn hash(
         &self,
-        _request: tonic::Request<HashRequest>,
-    ) -> Result<tonic::Response<HashResponse>, Status> {
-        Ok(tonic::Response::new(HashResponse {
+        _request: xlinerpc::Request<HashRequest>,
+    ) -> Result<xlinerpc::Response<HashResponse>, Status> {
+        Ok(xlinerpc::Response::from_data(HashResponse {
             header: Some(self.header_gen.gen_header()),
             hash: self.db.hash()?,
         }))
@@ -173,11 +175,11 @@ impl MaintenanceServer {
 
     async fn hash_kv(
         &self,
-        request: tonic::Request<HashKvRequest>,
-    ) -> Result<tonic::Response<HashKvResponse>, Status> {
+        request: xlinerpc::Request<HashKvRequest>,
+    ) -> Result<xlinerpc::Response<HashKvResponse>, Status> {
         let revision = request.get_ref().revision;
         let (hash, compact_revision, _hash_revision) = self.kv_store.hash_kv(revision)?;
-        Ok(tonic::Response::new(HashKvResponse {
+        Ok(xlinerpc::Response::from_data(HashKvResponse {
             header: Some(self.header_gen.gen_header()),
             hash,
             compact_revision,
@@ -187,31 +189,31 @@ impl MaintenanceServer {
 
     pub(crate) async fn snapshot(
         &self,
-        _request: tonic::Request<SnapshotRequest>,
+        _request: xlinerpc::Request<SnapshotRequest>,
     ) -> Result<
-        tonic::Response<Pin<Box<dyn Stream<Item = Result<SnapshotResponse, Status>> + Send>>>,
+        xlinerpc::Response<Pin<Box<dyn Stream<Item = Result<SnapshotResponse, Status>> + Send>>>,
         Status,
     > {
         let stream = snapshot_stream(self.header_gen.as_ref(), self.db.as_ref())?;
 
-        Ok(tonic::Response::new(Box::pin(stream)))
+        Ok(xlinerpc::Response::from_data(Box::pin(stream)))
     }
 
     async fn move_leader(
         &self,
-        request: tonic::Request<MoveLeaderRequest>,
-    ) -> Result<tonic::Response<MoveLeaderResponse>, Status> {
+        request: xlinerpc::Request<MoveLeaderRequest>,
+    ) -> Result<xlinerpc::Response<MoveLeaderResponse>, Status> {
         let node_id = request.into_inner().target_id;
         self.client.move_leader(node_id).await?;
-        Ok(tonic::Response::new(MoveLeaderResponse {
+        Ok(xlinerpc::Response::from_data(MoveLeaderResponse {
             header: Some(self.header_gen.gen_header()),
         }))
     }
 
     async fn downgrade(
         &self,
-        _request: tonic::Request<DowngradeRequest>,
-    ) -> Result<tonic::Response<DowngradeResponse>, Status> {
+        _request: xlinerpc::Request<DowngradeRequest>,
+    ) -> Result<xlinerpc::Response<DowngradeResponse>, Status> {
         Err(Status::unimplemented(
             "downgrade is unimplemented".to_owned(),
         ))
@@ -291,49 +293,49 @@ impl Server {
         RouterEndpoint::new(self.server)
             .add_unary_fn(
                 "/Alarm",
-                move |this: Arc<MaintenanceServer>, request: tonic::Request<AlarmRequest>| async move {
+                move |this: Arc<MaintenanceServer>, request: xlinerpc::Request<AlarmRequest>| async move {
                     this.alarm(request).await
                 },
             )
             .add_unary_fn(
                 "/Status",
-                move |this: Arc<MaintenanceServer>, request: tonic::Request<StatusRequest>| async move {
+                move |this: Arc<MaintenanceServer>, request: xlinerpc::Request<StatusRequest>| async move {
                     this.status(request).await
                 },
             )
             .add_unary_fn(
                 "/Defragment",
-                move |this: Arc<MaintenanceServer>, request: tonic::Request<DefragmentRequest>| async move {
+                move |this: Arc<MaintenanceServer>, request: xlinerpc::Request<DefragmentRequest>| async move {
                     this.defragment(request).await
                 },
             )
             .add_unary_fn(
                 "/Hash",
-                move |this: Arc<MaintenanceServer>, request: tonic::Request<HashRequest>| async move {
+                move |this: Arc<MaintenanceServer>, request: xlinerpc::Request<HashRequest>| async move {
                     this.hash(request).await
                 },
             )
             .add_unary_fn(
                 "/HashKV",
-                move |this: Arc<MaintenanceServer>, request: tonic::Request<HashKvRequest>| async move {
+                move |this: Arc<MaintenanceServer>, request: xlinerpc::Request<HashKvRequest>| async move {
                     this.hash_kv(request).await
                 }
             )
             .add_server_streaming_fn(
                 "/Snapshot",
-                move |this: Arc<MaintenanceServer>, request: tonic::Request<SnapshotRequest>| async move {
+                move |this: Arc<MaintenanceServer>, request: xlinerpc::Request<SnapshotRequest>| async move {
                     this.snapshot(request).await
                 },
             )
             .add_unary_fn(
                 "/MoveLeader",
-                move |this: Arc<MaintenanceServer>, request: tonic::Request<MoveLeaderRequest>| async move {
+                move |this: Arc<MaintenanceServer>, request: xlinerpc::Request<MoveLeaderRequest>| async move {
                     this.move_leader(request).await
                 },
             )
             .add_unary_fn(
                 "/Downgrade",
-                move |this: Arc<MaintenanceServer>, request: tonic::Request<DowngradeRequest>| async move {
+                move |this: Arc<MaintenanceServer>, request: xlinerpc::Request<DowngradeRequest>| async move {
                     this.downgrade(request).await
                 },
             )

@@ -4,27 +4,26 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "buildscript_run", "rust_binary", "rust_library")
 
 http_archive(
-    name = "rust_decimal-vendor",
+    name = "vendor",
     urls = ["https://static.crates.io/crates/rust_decimal/rust_decimal-1.40.0.crate"],
     sha256 = "61f703d19852dbf87cbc513643fa81428361eb6940f1ac14fd58155d295a3eb0",
     type = "tar.gz",
     strip_prefix = "rust_decimal-1.40.0",
-    out = "vendor",
 )
 
 cargo_manifest(
-    name = "rust_decimal-manifest",
-    vendor = ":rust_decimal-vendor",
+    name = "manifest",
+    vendor = ":vendor",
 )
 
 rust_library(
     name = "rust_decimal",
-    srcs = [":rust_decimal-vendor"],
+    srcs = [":vendor"],
     crate = "rust_decimal",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
-        "OUT_DIR": "$(location :rust_decimal-build-script-run[out_dir])",
+        "OUT_DIR": "$(location :build-script-run[out_dir])",
     },
     features = [
         "maths",
@@ -32,8 +31,8 @@ rust_library(
         "std",
     ],
     rustc_flags = [
-        "@$(location :rust_decimal-build-script-run[rustc_flags])",
-        "@$(location :rust_decimal-manifest[env_flags])",
+        "@$(location :build-script-run[rustc_flags])",
+        "@$(location :manifest[env_flags])",
     ],
     visibility = ["PUBLIC"],
     deps = [
@@ -49,8 +48,8 @@ rust_library(
 )
 
 rust_binary(
-    name = "rust_decimal-build-script-build",
-    srcs = [":rust_decimal-vendor"],
+    name = "build-script-build",
+    srcs = [":vendor"],
     crate = "build_script_build",
     crate_root = "vendor/build.rs",
     edition = "2021",
@@ -59,21 +58,21 @@ rust_binary(
         "serde",
         "std",
     ],
-    rustc_flags = ["@$(location :rust_decimal-manifest[env_flags])"],
+    rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = [],
 )
 
 buildscript_run(
-    name = "rust_decimal-build-script-run",
+    name = "build-script-run",
     package_name = "rust_decimal",
-    buildscript_rule = ":rust_decimal-build-script-build",
-    env_srcs = [":rust_decimal-manifest[env_dict]"],
+    buildscript_rule = ":build-script-build",
+    env_srcs = [":manifest[env_dict]"],
     features = [
         "maths",
         "serde",
         "std",
     ],
     version = "1.40.0",
-    manifest_dir = ":rust_decimal-vendor",
+    manifest_dir = ":vendor",
     visibility = ["PUBLIC"],
 )
