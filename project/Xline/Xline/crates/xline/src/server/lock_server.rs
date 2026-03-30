@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use async_stream::stream;
 use clippy_utilities::OverflowArithmetic;
-use xlinerpc::Status;
+use curp::rpc::QuicChannel;
 use tracing::debug;
 use xlineapi::{
     AuthInfo, EventType,
