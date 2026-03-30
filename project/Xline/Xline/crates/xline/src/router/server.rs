@@ -285,12 +285,12 @@ async fn unimplemented() -> impl axum::response::IntoResponse {
     tracing::error!("unimplemented");
     let status = http::StatusCode::OK;
     let headers = [
-        (http::header::CONTENT_TYPE,
-            HeaderValue::from_static("application/grpc")),
-        ("grpc-status",
-            HeaderValue::from_static("12")),
-        ("grpc-message",
-            HeaderValue::from_static("UNIMPLEMENTED")),
+        (
+            http::header::CONTENT_TYPE,
+            HeaderValue::from_static("application/grpc"),
+        ),
+        ("grpc-status", HeaderValue::from_static("12")),
+        ("grpc-message", HeaderValue::from_static("UNIMPLEMENTED")),
     ];
     (status, headers)
 }

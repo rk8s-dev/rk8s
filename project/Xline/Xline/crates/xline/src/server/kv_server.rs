@@ -10,13 +10,13 @@ use dashmap::DashMap;
 use event_listener::Event;
 use futures::future::Either;
 use tokio::time::timeout;
-use xlinerpc::Status;
 use tracing::{debug, instrument};
 use xlineapi::{
     AuthInfo, ResponseWrapper,
     command::{Command, CurpClient},
     request_validation::RequestValidator,
 };
+use xlinerpc::Status;
 // TODO: use our own status type
 // use xlinerpc::status::{Code,Status};
 

@@ -2,7 +2,6 @@ use std::sync::Arc;
 
 use async_stream::stream;
 use clippy_utilities::OverflowArithmetic;
-use xlinerpc::Status;
 use curp::rpc::QuicChannel;
 use tracing::debug;
 use xlineapi::{
@@ -10,6 +9,7 @@ use xlineapi::{
     command::{Command, CommandResponse, CurpClient, KeyRange, SyncResponse},
     execute_error::ExecuteError,
 };
+use xlinerpc::Status;
 // TODO: use our own status type
 // use xlinerpc::status::Status;
 use crate::{
@@ -143,7 +143,7 @@ impl LockServer {
                 Some(kv) => kv.key.clone(),
                 None => return Ok(()),
             };
-            
+
             // For now, we'll just poll periodically instead of using streaming
             // TODO: Implement proper watch with QUIC
             tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;

@@ -6,8 +6,8 @@ use super::{
 };
 use prost::Message;
 use tokio_stream::Stream;
-use xlinerpc::{Request as XlineRequest, Response as XlineResponse, Status};
 use tower::{Service, service_fn};
+use xlinerpc::{Request as XlineRequest, Response as XlineResponse, Status};
 
 #[derive(Debug)]
 pub struct EndPoint<T> {
@@ -91,7 +91,9 @@ where
             let mut handler = handler.clone();
             let state = state.clone();
             async move {
-                handler(state.clone(), request).await.map(XlineResponse::from_data)
+                handler(state.clone(), request)
+                    .await
+                    .map(XlineResponse::from_data)
             }
         });
 
@@ -121,7 +123,9 @@ where
             let mut handler = handler.clone();
             let state = state.clone();
             async move {
-                handler(state.clone(), request).await.map(XlineResponse::from_data)
+                handler(state.clone(), request)
+                    .await
+                    .map(XlineResponse::from_data)
             }
         });
 

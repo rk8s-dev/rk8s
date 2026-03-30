@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
-use xlinerpc::{Status, MetaData};
 use tracing::debug;
 use utils::hash_password;
+use xlinerpc::{MetaData, Status};
 
 use xlineapi::{
     command::{Command, CommandResponse, CurpClient, SyncResponse},
@@ -218,10 +218,7 @@ impl AuthServer {
         &self,
         request: xlinerpc::Request<AuthRoleGrantPermissionRequest>,
     ) -> Result<xlinerpc::Response<AuthRoleGrantPermissionResponse>, Status> {
-        debug!(
-            "Receive AuthRoleGrantPermissionRequest {}",
-            request.data()
-        );
+        debug!("Receive AuthRoleGrantPermissionRequest {}", request.data());
         request.data().validation()?;
         self.handle_req(request).await
     }
@@ -230,10 +227,7 @@ impl AuthServer {
         &self,
         request: xlinerpc::Request<AuthRoleRevokePermissionRequest>,
     ) -> Result<xlinerpc::Response<AuthRoleRevokePermissionResponse>, Status> {
-        debug!(
-            "Receive AuthRoleRevokePermissionRequest {}",
-            request.data()
-        );
+        debug!("Receive AuthRoleRevokePermissionRequest {}", request.data());
         self.handle_req(request).await
     }
 }

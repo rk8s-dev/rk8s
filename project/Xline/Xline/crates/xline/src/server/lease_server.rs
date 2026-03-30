@@ -2,19 +2,20 @@ use std::{pin::Pin, sync::Arc, time::Duration};
 
 use async_stream::{stream, try_stream};
 use clippy_utilities::NumericCast;
-use curp::{members::ClusterInfo, rpc::{QuicChannel, Metadata, MethodId}};
+use curp::{
+    members::ClusterInfo,
+    rpc::{Metadata, MethodId, QuicChannel},
+};
 use futures::{StreamExt, stream::Stream};
 use http::uri::PathAndQuery;
 use tokio::time;
-use xlinerpc::{Request, Response, Status};
 use tracing::{debug, warn};
-use utils::{
-    task_manager::{Listener, TaskManager, tasks::TaskName},
-};
+use utils::task_manager::{Listener, TaskManager, tasks::TaskName};
 use xlineapi::{
     command::{Command, CommandResponse, CurpClient, SyncResponse},
     execute_error::ExecuteError,
 };
+use xlinerpc::{Request, Response, Status};
 
 use crate::{
     id_gen::IdGenerator,
@@ -96,7 +97,8 @@ impl LeaseServer {
                         let s = Arc::clone(&lease_server);
                         let token_option = lease_server.auth_storage.root_token();
                         async move {
-                            let mut request = xlinerpc::Request::from_data(LeaseRevokeRequest { id });
+                            let mut request =
+                                xlinerpc::Request::from_data(LeaseRevokeRequest { id });
                             if let Ok(token) = token_option {
                                 request.meta_mut().insert("token", token);
                             }
@@ -204,7 +206,9 @@ impl LeaseServer {
     )] // Introduced by tokio::select!
     async fn follower_keep_alive(
         &self,
-        request_stream: Box<dyn Stream<Item = Result<LeaseKeepAliveRequest, Status>> + Send + Unpin + 'static>,
+        request_stream: Box<
+            dyn Stream<Item = Result<LeaseKeepAliveRequest, Status>> + Send + Unpin + 'static,
+        >,
         leader_addrs: &[String],
     ) -> Result<KeepAliveStream, Status> {
         self.follower_keep_alive_stream(request_stream, leader_addrs)
@@ -227,7 +231,11 @@ impl LeaseServer {
             .ok_or(Status::cancelled("The cluster is shutting down"))?;
         // Use QUIC client from curp
         let quic_client = self.client.quic_client();
-        let mut channel = QuicChannel::with_addrs(quic_client, leader_addrs.to_vec(), curp::rpc::DnsFallback::Disabled);
+        let mut channel = QuicChannel::with_addrs(
+            quic_client,
+            leader_addrs.to_vec(),
+            curp::rpc::DnsFallback::Disabled,
+        );
 
         let redirect_stream = stream! {
             loop {
@@ -346,7 +354,9 @@ impl LeaseServer {
     /// to the server and streaming keep alive responses from the server to the client.
     async fn lease_keep_alive(
         &self,
-        request: Request<Box<dyn Stream<Item = Result<LeaseKeepAliveRequest, Status>> + Send + Unpin + 'static>>,
+        request: Request<
+            Box<dyn Stream<Item = Result<LeaseKeepAliveRequest, Status>> + Send + Unpin + 'static>,
+        >,
     ) -> Result<
         Response<Pin<Box<dyn Stream<Item = Result<LeaseKeepAliveResponse, Status>> + Send>>>,
         Status,
@@ -362,10 +372,10 @@ impl LeaseServer {
         request: Request<LeaseTimeToLiveRequest>,
     ) -> Result<Response<LeaseTimeToLiveResponse>, Status> {
         debug!("Receive LeaseTimeToLiveRequest {:?}", request);
-        
+
         // Extract metadata from request
         let metadata = crate::server::auth_wrapper::metadata_from_xlinerpc(request.meta());
-        
+
         loop {
             if self.lease_storage.is_primary() {
                 let time_to_live_req = request.data();
@@ -400,8 +410,12 @@ impl LeaseServer {
             if !self.lease_storage.is_primary() {
                 // Use QUIC client from curp
                 let quic_client = self.client.quic_client();
-                let mut channel = QuicChannel::with_addrs(quic_client, leader_addrs.to_vec(), curp::rpc::DnsFallback::Disabled);
-                
+                let mut channel = QuicChannel::with_addrs(
+                    quic_client,
+                    leader_addrs.to_vec(),
+                    curp::rpc::DnsFallback::Disabled,
+                );
+
                 // Use unary call with QUIC
                 let response = channel
                     .unary_call(
@@ -412,7 +426,7 @@ impl LeaseServer {
                     )
                     .await
                     .map_err(|e| Status::internal(e.to_string()))?;
-                
+
                 return Ok(Response::from_data(response));
             }
         }
@@ -438,8 +452,6 @@ impl LeaseServer {
         Ok(Response::from_data(res))
     }
 }
-
-
 
 pub(crate) struct Server {
     lease_server: Arc<LeaseServer>,

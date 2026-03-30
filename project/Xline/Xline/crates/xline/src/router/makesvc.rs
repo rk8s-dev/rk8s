@@ -1,3 +1,4 @@
+use bytes::Bytes;
 use http::Request;
 use http_body::{Body, SizeHint};
 use prost::Message;
@@ -5,9 +6,8 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
 use tokio_stream::StreamExt;
-use xlinerpc::{Request as XlineRequest, Response as XlineResponse, Status, MetaData, BinaryCodec};
 use tower::Service;
-use bytes::Bytes;
+use xlinerpc::{BinaryCodec, MetaData, Request as XlineRequest, Response as XlineResponse, Status};
 
 /// Decode a gRPC frame from bytes
 /// gRPC frame format: [flags (1 byte)] [length (4 bytes)] [data]
@@ -15,25 +15,25 @@ fn decode_grpc_frame(data: &[u8]) -> Result<&[u8], String> {
     if data.len() < 5 {
         return Err("Insufficient data for gRPC frame".to_string());
     }
-    
+
     // Skip flags (1 byte)
     let length_start = 1;
-    
+
     // Read length (4 bytes, big-endian)
     let length = u32::from_be_bytes([
         data[length_start],
         data[length_start + 1],
         data[length_start + 2],
-        data[length_start + 3]
+        data[length_start + 3],
     ]) as usize;
-    
+
     let data_start = length_start + 4;
     let expected_end = data_start + length;
-    
+
     if expected_end > data.len() {
         return Err("Invalid gRPC frame length".to_string());
     }
-    
+
     Ok(&data[data_start..expected_end])
 }
 
@@ -41,7 +41,7 @@ fn decode_grpc_frame(data: &[u8]) -> Result<&[u8], String> {
 fn create_error_response(status: Status) -> http::Response<http_body::Full<Bytes>> {
     let status_code = status.code();
     let status_message = status.message().to_string();
-    
+
     http::Response::builder()
         .status(http::StatusCode::OK) // gRPC errors still use 200 OK at HTTP level
         .header(http::header::CONTENT_TYPE, "application/grpc")
@@ -105,19 +105,26 @@ where
                     // Encode the item into a temporary buffer first
                     let mut message_buffer = Vec::new();
                     if let Err(e) = item.encode(&mut message_buffer) {
-                        return Poll::Ready(Some(Err(Status::internal(format!("Failed to encode item: {}", e)))));
+                        return Poll::Ready(Some(Err(Status::internal(format!(
+                            "Failed to encode item: {}",
+                            e
+                        )))));
                     }
-                    
+
                     // Add gRPC frame header: [flags (1 byte)] [length (4 bytes)] [data]
                     // Flags: 0 for uncompressed
                     this.encoding_buffer.push(0);
                     // Length: big-endian
-                    this.encoding_buffer.extend_from_slice(&u32::to_be_bytes(message_buffer.len() as u32));
+                    this.encoding_buffer
+                        .extend_from_slice(&u32::to_be_bytes(message_buffer.len() as u32));
                     // Data
                     this.encoding_buffer.extend_from_slice(&message_buffer);
                 }
                 Poll::Ready(Some(Err(e))) => {
-                    return Poll::Ready(Some(Err(Status::internal(format!("Stream error: {}", e)))));
+                    return Poll::Ready(Some(Err(Status::internal(format!(
+                        "Stream error: {}",
+                        e
+                    )))));
                 }
                 Poll::Ready(None) => {
                     // Stream completed, send trailers
@@ -536,7 +543,8 @@ where
         let fut = async move {
             // Read and decode streaming request
             let body = request.into_body();
-            let mut body_bytes = hyper::body::aggregate(body).await
+            let mut body_bytes = hyper::body::aggregate(body)
+                .await
                 .map_err(|e| Status::internal(format!("Failed to read body: {}", e)))?;
 
             let mut all_requests = Vec::new();
@@ -556,18 +564,21 @@ where
                 let frame_data = match decode_grpc_frame(&buffer[pos..]) {
                     Ok(data) => data,
                     Err(e) => {
-                        return Err(Status::internal(format!("Failed to decode gRPC frame: {}", e)));
+                        return Err(Status::internal(format!(
+                            "Failed to decode gRPC frame: {}",
+                            e
+                        )));
                     }
                 };
-                
+
                 // Calculate frame size (1-byte flag + 4-byte length + data length)
                 let frame_size = 1 + 4 + frame_data.len();
-                
+
                 // Decode input from frame data
                 let input = Input::decode_from_slice(frame_data)
                     .map_err(|e| Status::internal(format!("Failed to decode request: {}", e)))?;
                 let xline_request = XlineRequest::from_data(input);
-                
+
                 all_requests.push(xline_request);
                 pos += frame_size;
             }
@@ -577,17 +588,17 @@ where
             // Depending on the service implementation, this might need to be adjusted
             let mut last_response = None;
             for xline_request in all_requests {
-                let xline_response = method.clone().call(xline_request).await
-                    .map_err(|e| e)?;
+                let xline_response = method.clone().call(xline_request).await.map_err(|e| e)?;
                 last_response = Some(xline_response);
             }
 
-            let xline_response = last_response.ok_or_else(|| {
-                Status::internal("No requests received in client stream")
-            })?;
+            let xline_response = last_response
+                .ok_or_else(|| Status::internal("No requests received in client stream"))?;
 
             // Encode response
-            let response_bytes = xline_response.data().encode_to_vec()
+            let response_bytes = xline_response
+                .data()
+                .encode_to_vec()
                 .map_err(|e| Status::internal(format!("Failed to encode response: {}", e)))?;
 
             // Wrap response in gRPC frame

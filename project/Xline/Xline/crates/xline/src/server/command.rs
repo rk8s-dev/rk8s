@@ -12,7 +12,6 @@ use dashmap::DashMap;
 use engine::{Snapshot, TransactionApi};
 use event_listener::Event;
 use parking_lot::RwLock;
-use xlinerpc::Status;
 use tracing::warn;
 use utils::{barrier::IdBarrier, table_names::META_TABLE};
 use xlineapi::{
@@ -21,7 +20,7 @@ use xlineapi::{
     command::{Command, CurpClient, SyncResponse},
     execute_error::ExecuteError,
 };
-
+use xlinerpc::Status;
 
 use crate::{
     revision_number::RevisionNumberGeneratorState,

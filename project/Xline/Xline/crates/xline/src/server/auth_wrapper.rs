@@ -30,9 +30,8 @@ pub(crate) mod commandpb {
         #[async_trait]
         pub trait Protocol: std::marker::Send + std::marker::Sync + 'static {
             /// Server streaming response type for the ProposeStream method.
-            type ProposeStreamStream: Stream<
-                    Item = std::result::Result<::curp::rpc::OpResponse, Status>,
-                > + std::marker::Send
+            type ProposeStreamStream: Stream<Item = std::result::Result<::curp::rpc::OpResponse, Status>>
+                + std::marker::Send
                 + 'static;
             /// Unary
             async fn propose_stream(
@@ -50,10 +49,7 @@ pub(crate) mod commandpb {
             async fn propose_conf_change(
                 &self,
                 request: Request<::curp::rpc::ProposeConfChangeRequest>,
-            ) -> std::result::Result<
-                Response<::curp::rpc::ProposeConfChangeResponse>,
-                Status,
-            >;
+            ) -> std::result::Result<Response<::curp::rpc::ProposeConfChangeResponse>, Status>;
             async fn publish(
                 &self,
                 request: Request<::curp::rpc::PublishRequest>,
@@ -65,17 +61,11 @@ pub(crate) mod commandpb {
             async fn fetch_cluster(
                 &self,
                 request: Request<::curp::rpc::FetchClusterRequest>,
-            ) -> std::result::Result<
-                Response<::curp::rpc::FetchClusterResponse>,
-                Status,
-            >;
+            ) -> std::result::Result<Response<::curp::rpc::FetchClusterResponse>, Status>;
             async fn fetch_read_state(
                 &self,
                 request: Request<::curp::rpc::FetchReadStateRequest>,
-            ) -> std::result::Result<
-                Response<::curp::rpc::FetchReadStateResponse>,
-                Status,
-            >;
+            ) -> std::result::Result<Response<::curp::rpc::FetchReadStateResponse>, Status>;
             async fn move_leader(
                 &self,
                 request: Request<::curp::rpc::MoveLeaderRequest>,
@@ -83,7 +73,10 @@ pub(crate) mod commandpb {
             /// Stream
             async fn lease_keep_alive(
                 &self,
-                request: Request<impl Stream<Item = std::result::Result<::curp::rpc::LeaseKeepAliveMsg, Status>> + Send>,
+                request: Request<
+                    impl Stream<Item = std::result::Result<::curp::rpc::LeaseKeepAliveMsg, Status>>
+                    + Send,
+                >,
             ) -> std::result::Result<Response<::curp::rpc::LeaseKeepAliveMsg>, Status>;
         }
     }
@@ -102,9 +95,9 @@ use curp::{
     },
 };
 use futures::{Stream, StreamExt};
-use xlinerpc::Status;
 use tracing::debug;
 use xlineapi::command::Command;
+use xlinerpc::Status;
 
 use super::xline_server::CurpServer;
 use crate::{router::endpoint::EndPoint as RouterEndpoint, storage::AuthStore};
@@ -131,7 +124,8 @@ pub(crate) fn curp_error_to_xlinerpc_status(err: CurpError) -> Status {
 /// Get token from metadata
 fn get_token(meta: &MetaData) -> Option<&str> {
     // First try to get token from authorization header (standard HTTP auth)
-    if let Some(token) = meta.get_str("authorization")
+    if let Some(token) = meta
+        .get_str("authorization")
         .and_then(|result| match result {
             Ok(token) => Some(token),
             Err(e) => {
@@ -145,22 +139,22 @@ fn get_token(meta: &MetaData) -> Option<&str> {
                 debug!("Authorization token missing 'Bearer ' prefix");
                 None
             }
-        }) {
+        })
+    {
         return Some(token);
     }
-    
+
     // Then try to get token from CURP-specific token header
-    if let Some(token) = meta.get_str("token")
-        .and_then(|result| match result {
-            Ok(token) => Some(token),
-            Err(e) => {
-                debug!("Failed to decode CURP token: {}", e);
-                None
-            }
-        }) {
+    if let Some(token) = meta.get_str("token").and_then(|result| match result {
+        Ok(token) => Some(token),
+        Err(e) => {
+            debug!("Failed to decode CURP token: {}", e);
+            None
+        }
+    }) {
         return Some(token);
     }
-    
+
     None
 }
 
@@ -392,7 +386,9 @@ impl Protocol for AuthWrapper {
 
     async fn lease_keep_alive(
         &self,
-        request: xlinerpc::Request<impl Stream<Item = Result<LeaseKeepAliveMsg, Status>> + Send + 'static>,
+        request: xlinerpc::Request<
+            impl Stream<Item = Result<LeaseKeepAliveMsg, Status>> + Send + 'static,
+        >,
     ) -> Result<xlinerpc::Response<LeaseKeepAliveMsg>, Status> {
         let stream = request.data().clone();
         let curp_stream: Box<

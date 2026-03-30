@@ -7,10 +7,10 @@ use std::{
 use event_listener::Event;
 use tokio::sync::mpsc;
 use tokio_stream::{Stream, StreamExt, wrappers::ReceiverStream};
-use xlinerpc::Status;
 use tracing::{debug, warn};
 use utils::task_manager::{Listener, TaskManager, tasks::TaskName};
 use xlineapi::command::KeyRange;
+use xlinerpc::Status;
 // TODO: use our own status type
 // use xlinerpc::status::Status;
 use crate::{
@@ -153,7 +153,9 @@ impl WatchServer {
     /// last compaction revision.
     async fn watch(
         &self,
-        request: xlinerpc::Request<Box<dyn Stream<Item = Result<WatchRequest, Status>> + Send + Unpin + 'static>>,
+        request: xlinerpc::Request<
+            Box<dyn Stream<Item = Result<WatchRequest, Status>> + Send + Unpin + 'static>,
+        >,
     ) -> Result<xlinerpc::Response<ReceiverStream<Result<WatchResponse, Status>>>, Status> {
         debug!("Receive Watch Connection {:?}", request);
         Ok(xlinerpc::Response::from_data(
@@ -438,9 +440,9 @@ impl Server {
         RouterEndpoint::new(self.watch_server).add_streaming_fn(
             "/Watch",
             move |this: Arc<WatchServer>,
-                  request: xlinerpc::Request<Box<dyn Stream<Item = Result<WatchRequest, Status>> + Send + 'static>>| async move {
-                this.watch(request).await
-            },
+                  request: xlinerpc::Request<
+                Box<dyn Stream<Item = Result<WatchRequest, Status>> + Send + 'static>,
+            >| async move { this.watch(request).await },
         )
     }
 }

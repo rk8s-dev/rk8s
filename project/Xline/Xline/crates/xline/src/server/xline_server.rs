@@ -14,8 +14,8 @@ use curp::{
 use dashmap::DashMap;
 use engine::{MemorySnapshotAllocator, RocksSnapshotAllocator, SnapshotAllocator};
 use jsonwebtoken::{DecodingKey, EncodingKey};
-use xlinerpc::Status;
 use tracing::{info, warn};
+use xlinerpc::Status;
 
 use utils::{
     barrier::IdBarrier,
@@ -76,7 +76,7 @@ pub struct XlineServer {
     /// Client tls config (not used, kept for compatibility)
     client_tls_config: Option<()>,
     /// Server tls config (not used, kept for compatibility)
-    _server_tls_config: Option<()>, 
+    _server_tls_config: Option<()>,
     /// QUIC client for curp peer communication
     quic_client: Arc<gm_quic::prelude::QuicClient>,
     /// Peer TLS certificate (DER) for QUIC server, None = self-signed fallback
@@ -398,11 +398,11 @@ impl XlineServer {
 
         let xline_router = {
             // Create a simple health check service using tower::Service
-            use http::Request;
             use axum::body::Body;
-            use tower::Service;
+            use http::Request;
             use std::task::{Context, Poll};
-            
+            use tower::Service;
+
             #[derive(Clone)]
             // gRPC HealthCheckResponse message definition
             #[derive(prost::Message)]
@@ -410,7 +410,7 @@ impl XlineServer {
                 #[prost(enumeration = "ServingStatus", tag = "1")]
                 status: i32,
             }
-            
+
             #[derive(prost::Enumeration)]
             enum ServingStatus {
                 Unknown = 0,
@@ -418,34 +418,35 @@ impl XlineServer {
                 NotServing = 2,
                 ServiceUnknown = 3,
             }
-            
+
             struct SimpleHealthCheckService;
-            
+
             impl Service<Request<Body>> for SimpleHealthCheckService {
                 type Response = http::Response<Body>;
                 type Error = std::convert::Infallible;
                 type Future = futures::future::Ready<Result<Self::Response, Self::Error>>;
-                
+
                 fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
                     Poll::Ready(Ok(()))
                 }
-                
+
                 fn call(&mut self, _request: Request<Body>) -> Self::Future {
                     // Create HealthCheckResponse with SERVING status
                     let health_response = HealthCheckResponse {
                         status: ServingStatus::Serving as i32,
                     };
-                    
+
                     // Encode the response
                     let mut response_bytes = Vec::new();
                     health_response.encode(&mut response_bytes).unwrap();
-                    
+
                     // Wrap in gRPC frame: [flags (1 byte)] [length (4 bytes)] [data]
                     let mut framed_response = Vec::with_capacity(1 + 4 + response_bytes.len());
                     framed_response.push(0); // 0 for uncompressed
-                    framed_response.extend_from_slice(&u32::to_be_bytes(response_bytes.len() as u32));
+                    framed_response
+                        .extend_from_slice(&u32::to_be_bytes(response_bytes.len() as u32));
                     framed_response.extend_from_slice(&response_bytes);
-                    
+
                     // Return health check response
                     let response = http::Response::builder()
                         .status(http::StatusCode::OK)
@@ -453,11 +454,11 @@ impl XlineServer {
                         .header("grpc-status", "0")
                         .body(Body::from(framed_response))
                         .unwrap();
-                    
+
                     futures::future::ready(Ok(response))
                 }
             }
-            
+
             // Add health check service to router
             xline_router.add_service("/grpc.health.v1.Health/Check", SimpleHealthCheckService)
         };
@@ -726,9 +727,7 @@ impl XlineServer {
     }
 
     /// Read tls cert and key from file (now unused, TLS is handled by gm-quic directly)
-    async fn read_tls_config(
-        _tls_config: &TlsConfig,
-    ) -> Result<(Option<()>, Option<()>)> {
+    async fn read_tls_config(_tls_config: &TlsConfig) -> Result<(Option<()>, Option<()>)> {
         Ok((None, None))
     }
 

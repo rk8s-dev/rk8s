@@ -7,12 +7,12 @@ use curp::{cmd::CommandExecutor as _, members::ClusterInfo, server::RawCurp};
 use engine::SnapshotApi;
 use futures::stream::Stream;
 use sha2::{Digest, Sha256};
-use xlinerpc::Status;
 use tracing::{debug, error};
 use xlineapi::{
     RequestWrapper,
     command::{Command, CommandResponse, CurpClient, SyncResponse},
 };
+use xlinerpc::Status;
 // TODO: use our own status type
 // use xlinerpc::status::Status;
 use super::command::CommandExecutor;

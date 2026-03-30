@@ -16,13 +16,13 @@ use pbkdf2::{
     Pbkdf2,
     password_hash::{PasswordHash, PasswordVerifier},
 };
-use xlinerpc::Status;
 use utils::parking_lot_lock::RwLockMap;
 use xlineapi::{
     AuthInfo,
     command::{CommandResponse, KeyRange, SyncResponse},
     execute_error::ExecuteError,
 };
+use xlinerpc::Status;
 // TODO: use our own status type
 // use xlinerpc::status::Status;
 
@@ -1193,7 +1193,10 @@ fn get_cn<T>(request: &xlinerpc::Request<T>) -> Option<String> {
     // Extract CN from metadata if present
     // This assumes that the server has already extracted the CN from the client certificate
     // and added it to the metadata during request processing
-    request.meta().get_str("x-client-cert-cn").and_then(|res| res.ok().map(String::from))
+    request
+        .meta()
+        .get_str("x-client-cert-cn")
+        .and_then(|res| res.ok().map(String::from))
 }
 
 #[cfg(test)]
