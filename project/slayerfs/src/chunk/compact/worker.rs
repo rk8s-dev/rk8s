@@ -9,6 +9,8 @@ use tokio::sync::RwLock;
 use tokio::time::interval;
 use tracing::{debug, error, info, warn};
 
+type CompactionHook = Arc<dyn Fn(u64) + Send + Sync>;
+
 pub struct ChunkLockGuard<M: MetaStore> {
     chunk_id: u64,
     locked_chunks: Arc<RwLock<HashSet<u64>>>,
@@ -166,6 +168,7 @@ where
     meta_store: Arc<M>,
     compactor: Arc<Compactor<B>>,
     lock_manager: Arc<CompactLockManager<M>>,
+    compaction_hook: Option<CompactionHook>,
 }
 
 impl<M, B> CompactionWorker<M, B>
@@ -206,7 +209,13 @@ where
             meta_store,
             compactor,
             lock_manager,
+            compaction_hook: None,
         }
+    }
+
+    pub fn with_compaction_hook(mut self, hook: CompactionHook) -> Self {
+        self.compaction_hook = Some(hook);
+        self
     }
 
     pub fn start(
@@ -217,6 +226,7 @@ where
         let compactor = self.compactor.clone();
         let meta_store = self.meta_store.clone();
         let lock_manager = self.lock_manager.clone();
+        let compaction_hook = self.compaction_hook.clone();
         let compaction_handle = tokio::spawn(async move {
             if !worker_config.enabled {
                 return;
@@ -226,9 +236,14 @@ where
             loop {
                 ticker.tick().await;
 
-                if let Err(e) =
-                    run_compaction_cycle(&meta_store, &compactor, &lock_manager, &worker_config)
-                        .await
+                if let Err(e) = run_compaction_cycle(
+                    &meta_store,
+                    &compactor,
+                    &lock_manager,
+                    &worker_config,
+                    compaction_hook.as_ref(),
+                )
+                .await
                 {
                     error!(error = %e, "Compaction cycle failed");
                 }
@@ -251,6 +266,7 @@ async fn run_compaction_cycle<M, B>(
     compactor: &Arc<Compactor<B>>,
     lock_manager: &Arc<CompactLockManager<M>>,
     config: &CompactionWorkerConfig,
+    compaction_hook: Option<&CompactionHook>,
 ) -> anyhow::Result<()>
 where
     M: MetaStore + Send + Sync + 'static,
@@ -304,9 +320,15 @@ where
                         }
                         Ok(CompactResult::Light { removed }) => {
                             info!(chunk_id, removed, "Sync light compaction completed");
+                            if let Some(hook) = compaction_hook {
+                                hook(chunk_id);
+                            }
                         }
                         Ok(CompactResult::Heavy { .. }) => {
                             info!(chunk_id, "Sync heavy compaction completed");
+                            if let Some(hook) = compaction_hook {
+                                hook(chunk_id);
+                            }
                         }
                         Err(e) => {
                             warn!(chunk_id, error = %e, "Sync compaction failed");
@@ -317,9 +339,15 @@ where
                         Ok(CompactResult::Skipped) => {}
                         Ok(CompactResult::Light { removed }) => {
                             debug!(chunk_id, removed, "Async light compaction completed");
+                            if let Some(hook) = compaction_hook {
+                                hook(chunk_id);
+                            }
                         }
                         Ok(CompactResult::Heavy { .. }) => {
                             debug!(chunk_id, "Async heavy compaction completed");
+                            if let Some(hook) = compaction_hook {
+                                hook(chunk_id);
+                            }
                         }
                         Err(e) => {
                             warn!(chunk_id, error = %e, "Async compaction failed");

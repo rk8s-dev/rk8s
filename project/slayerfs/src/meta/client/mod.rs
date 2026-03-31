@@ -305,6 +305,11 @@ impl<T: MetaStore + ?Sized + 'static> MetaClient<T> {
         self.store.clone()
     }
 
+    pub(crate) async fn invalidate_chunk_slices(&self, chunk_id: u64) {
+        let (inode, chunk_index) = extract_ino_and_chunk_index(chunk_id);
+        self.inode_cache.invalidate_slices(inode, chunk_index).await;
+    }
+
     /// Update the logical root inode. All subsequent metadata lookups treat
     /// `ROOT_INODE` as an alias for `inode`.
     #[allow(dead_code)]

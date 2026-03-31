@@ -288,6 +288,12 @@ impl InodeCache {
         }
     }
 
+    pub(crate) async fn invalidate_slices(&self, inode: i64, chunk_index: u64) {
+        if let Some(node) = self.ttl_manager.get(&inode).await {
+            node.slices.remove(&chunk_index);
+        }
+    }
+
     pub(crate) async fn get_slices(&self, inode: i64, chunk_index: u64) -> Option<Vec<SliceDesc>> {
         let node = self.ttl_manager.get(&inode).await?;
 

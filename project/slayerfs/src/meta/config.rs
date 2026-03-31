@@ -144,6 +144,7 @@ pub struct MetaClientConfig {
     pub capacity: CacheCapacity,
     pub ttl: CacheTtl,
     pub options: MetaClientOptions,
+    pub compact: CompactConfig,
 }
 
 impl MetaClientConfig {

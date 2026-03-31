@@ -39,16 +39,28 @@ pub struct VfsBackgroundConfig {
 }
 
 impl VfsBackgroundConfig {
-    /// Create background config with block_size from layout
-    pub fn with_layout(layout: &ChunkLayout) -> Self {
+    pub fn from_compact_config(
+        layout: &ChunkLayout,
+        compact_config: CompactConfig,
+        enabled: bool,
+    ) -> Self {
+        let compaction = CompactionWorkerConfig {
+            scan_interval: compact_config.interval,
+            max_chunks_per_run: compact_config.max_chunks_per_run,
+            enabled,
+        };
+
+        let gc = BlockGcConfig {
+            block_size: layout.block_size as u64,
+            interval: compact_config.interval,
+            ..Default::default()
+        };
+
         Self {
-            compaction: CompactionWorkerConfig::default(),
-            gc: BlockGcConfig {
-                block_size: layout.block_size as u64,
-                ..Default::default()
-            },
-            compact_config: CompactConfig::default(),
-            enabled: true,
+            compaction,
+            gc,
+            compact_config,
+            enabled,
         }
     }
 }
@@ -344,7 +356,11 @@ where
         meta_client.initialize().await.map_err(VfsError::from)?;
 
         // Start background compaction and gc tasks
-        let bg_config = VfsBackgroundConfig::with_layout(&layout);
+        let bg_config = VfsBackgroundConfig::from_compact_config(
+            &layout,
+            config.compact.clone(),
+            !config.options.no_background_jobs,
+        );
         let background_tasks =
             Self::start_background_tasks(&meta_client, store.clone(), layout, bg_config).await;
 
@@ -358,7 +374,7 @@ where
 
     /// Start background compaction and gc tasks
     async fn start_background_tasks(
-        meta_client: &MetaClient<R>,
+        meta_client: &Arc<MetaClient<R>>,
         block_store: Arc<S>,
         layout: ChunkLayout,
         config: VfsBackgroundConfig,
@@ -368,14 +384,25 @@ where
         }
 
         let meta_store = meta_client.store();
+        let is_database_store = meta_store.name() == "database";
 
-        let worker = CompactionWorker::with_config(
+        let mut worker = CompactionWorker::with_config(
             meta_store,
             block_store,
             layout,
             config.compact_config.clone(),
             config.compact_config.lock_ttl.clone(),
         );
+
+        if is_database_store {
+            let client = Arc::clone(meta_client);
+            worker = worker.with_compaction_hook(Arc::new(move |chunk_id| {
+                let client = Arc::clone(&client);
+                tokio::spawn(async move {
+                    client.invalidate_chunk_slices(chunk_id).await;
+                });
+            }));
+        }
         let (compaction_handle, gc_handle) = worker.start(config.compaction, config.gc);
 
         Some(VfsBackgroundTasks {
