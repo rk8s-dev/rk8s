@@ -27,12 +27,12 @@ use libcontainer::{
     error::LibcontainerError,
 };
 use liboci_cli::{Create, Delete, List, Start};
-use libruntime::cri::config::ContainerConfigBuilder;
 use libruntime::rootpath;
 use libruntime::utils::{
     ImageType, determine_image, sync_handle_oci_image, sync_handle_oci_image_no_copy,
 };
 use libruntime::volume::{VolumeManager, VolumePattern, string_to_pattern};
+use libruntime::{cri::config::ContainerConfigBuilder, rootpath::determine};
 use libruntime::{
     cri::cri_api::{ContainerConfig, CreateContainerResponse, Mount},
     utils::ImagePuller,

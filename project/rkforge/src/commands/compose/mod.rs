@@ -14,7 +14,7 @@ use libcontainer::syscall::syscall::create_syscall;
 use liboci_cli::{Delete, List};
 
 use serde::{Deserialize, Serialize};
-use tracing::{debug, warn};
+use tracing::{debug, info, warn};
 
 use crate::commands::{
     compose::{
@@ -247,7 +247,7 @@ impl ComposeManager {
         let network_mapping = self.network_manager.network_service_mapping();
 
         for (network_name, services) in network_mapping {
-            println!("Creating network: {network_name}");
+            info!("Creating network: {network_name}");
             let mut ordered: Vec<(String, ServiceSpec)> = services.clone();
             ordered.sort_by_key(|(name, _)| self.startup_order.get(name).unwrap());
 
@@ -329,17 +329,16 @@ impl ComposeManager {
                 runner.add_mounts(mounts);
                 runner.add_mounts(configs_mounts);
 
-                // write container resolv.con, make sure container can parse the container url.
+                // write container resolv.conf, make sure container can parse the container url.
                 // but need to deal the issue : Add rather than overwrite
                 // add add local machine this func
                 let container_id = runner.id();
-                let opts = self
+                let (opts, dns_server) = self
                     .network_manager
                     .create_network_opts(container_id.clone(), ip)?;
-                if let Some(ips) = opts.clone().dns_servers {
-                    create_resolv_conf(ips)?;
-                    add_resolv_conf(&mut runner);
-                }
+
+                create_resolv_conf(dns_server)?;
+                add_resolv_conf(&mut runner);
 
                 match runner.run() {
                     std::result::Result::Ok(_) => {

@@ -237,10 +237,11 @@ impl NetworkManager {
         &self,
         container_id: String,
         ip: IpAddr,
-    ) -> Result<NetworkOptions> {
+    ) -> Result<(NetworkOptions, Vec<Ipv4Addr>)> {
         if !ip.is_ipv4() {
             return Err(anyhow!("Unsupported ipv6 type"));
         }
+        let mut dns_server = vec![];
         let alias = vec![container_id.clone()];
         let mut networks = HashMap::new();
         let mut network_info = HashMap::new();
@@ -276,6 +277,9 @@ impl NetworkManager {
                         )
                     })
                     .ok_or_else(|| anyhow!("No subnet for network {}", network_name))?;
+
+                dns_server.push(gateway);
+
                 let network_opts = PerNetworkOptions {
                     aliases: Some(alias.clone()),
                     interface_name: self
@@ -326,7 +330,7 @@ impl NetworkManager {
             port_mappings: None,
             dns_servers: None,
         };
-        Ok(opts)
+        Ok((opts, dns_server))
     }
 
     pub fn setup_network(opts: &NetworkOptions, pid: i32, container_id: String) -> Result<()> {
@@ -415,11 +419,12 @@ impl NetworkManager {
     }
 }
 
-pub fn create_resolv_conf(name_servers: Vec<IpAddr>) -> Result<()> {
-    let mut contect = "search rkl.internal\n".to_string();
+pub fn create_resolv_conf(name_servers: Vec<Ipv4Addr>) -> Result<()> {
+    let mut contect = "".to_string();
     for name_server in name_servers {
         contect.push_str(&format!("namesever {name_server}\n"));
     }
+    contect.push_str("search rkl.internal\n");
     let mut resolv_path = std::env::temp_dir();
     resolv_path.push("rkl-netavark");
     resolv_path.push("resolv.conf");
