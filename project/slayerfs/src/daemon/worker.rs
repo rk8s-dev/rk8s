@@ -1,6 +1,6 @@
 //! Background workers (upload, gc)
 //!
-//! Note: Background compaction is handled by `chunk::compaction_worker::CompactionWorker`.
+//! Note: Background compaction is handled by `chunk::compact::worker::CompactionWorker`.
 
 use crate::cadapter::client::{ObjectBackend, ObjectClient};
 use crate::chunk::ChunkLayout;

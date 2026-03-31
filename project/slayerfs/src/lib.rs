@@ -29,9 +29,9 @@ pub use crate::cadapter::client::{ObjectBackend, ObjectClient};
 pub use crate::cadapter::localfs::LocalFsBackend;
 pub use crate::cadapter::s3::{S3Backend, S3Config};
 pub use crate::chunk::ChunkLayout;
-pub use crate::chunk::compactor::{CompactResult, Compactor, CompactorError};
-pub use crate::chunk::gc::{BlockGcConfig, BlockStoreGC};
 pub use crate::chunk::store::{BlockKey, BlockStore, InMemoryBlockStore, ObjectBlockStore};
+pub use crate::chunk::{BlockGcConfig, BlockStoreGC};
+pub use crate::chunk::{CompactResult, Compactor, CompactorError};
 pub use crate::meta::client::MetaClient;
 pub use crate::meta::config::{
     CacheConfig, ClientOptions, CompactConfig, Config, DatabaseConfig, DatabaseType,

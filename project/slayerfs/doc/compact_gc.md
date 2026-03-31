@@ -147,7 +147,7 @@ pub struct CompactConfig {
 // - async_threshold: defined but not used in compaction decision currently
 // - max_concurrent_tasks: defined but chunks are processed sequentially currently
 
-// Note: CompactionWorkerConfig (in src/chunk/compaction_worker.rs) also has
+// Note: CompactionWorkerConfig (in src/chunk/compact/worker.rs) also has
 // max_chunks_per_run: usize, // default: 100 (for worker scan limit)
 
 // LockTtlConfig

@@ -10,9 +10,7 @@
 mod tests {
     use slayerfs::DatabaseMetaStore;
     use slayerfs::chunk::{
-        compaction_worker::{
-            ChunkLockGuard, CompactLockManager, CompactionWorker, CompactionWorkerConfig,
-        },
+        compact::{ChunkLockGuard, CompactLockManager, CompactionWorker, CompactionWorkerConfig},
         store::InMemoryBlockStore,
     };
     use slayerfs::meta::store::MetaStore;

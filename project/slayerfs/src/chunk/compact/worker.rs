@@ -1,6 +1,5 @@
-use crate::chunk::{
-    BlockGcConfig, BlockStore, BlockStoreGC, ChunkLayout, CompactResult, Compactor,
-};
+use crate::chunk::compact::{BlockGcConfig, BlockStoreGC, CompactResult, Compactor};
+use crate::chunk::{BlockStore, ChunkLayout};
 use crate::meta::config::{CompactConfig, LockTtlConfig};
 use crate::meta::store::{LockName, MetaError, MetaStore};
 use std::collections::HashSet;
