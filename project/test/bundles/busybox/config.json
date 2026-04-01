@@ -9,7 +9,10 @@
       "destination": "/etc/resolv.conf",
       "type": "bind",
       "source": "/tmp/rkl-netavark/resolv.conf",
-      "options": ["ro", "rbind"]
+      "options": [
+        "ro",
+        "rbind"
+      ]
     },
     {
       "destination": "/proc",
@@ -94,7 +97,7 @@
     },
     "args": [
       "sleep",
-      "10"
+      "300"
     ],
     "env": [
       "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
@@ -103,14 +106,14 @@
     "cwd": "/",
     "capabilities": {
       "bounding": [
-        "CAP_NET_RAW",
-        "CAP_DAC_OVERRIDE",
+        "CAP_NET_BIND_SERVICE",
+        "CAP_SYS_CHROOT",
         "CAP_SETFCAP",
         "CAP_CHOWN",
         "CAP_SETPCAP",
-        "CAP_MKNOD",
+        "CAP_NET_RAW",
+        "CAP_DAC_OVERRIDE",
         "CAP_SETGID",
-        "CAP_SYS_CHROOT",
         "CAP_KILL",
         "CAP_FSETID",
         "CAP_SETUID",
