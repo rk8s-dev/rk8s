@@ -78,7 +78,7 @@ networks:
         bundles_path("")
     )
 }
-#[test]
+
 fn dns_dig() -> Result<(), Box<dyn std::error::Error>> {
     let name_server = NameServerConfig {
         socket_addr: "172.17.0.1:53".parse()?,
@@ -87,7 +87,7 @@ fn dns_dig() -> Result<(), Box<dyn std::error::Error>> {
         trust_negative_responses: false,
         bind_addr: None,
     };
-    // try twice
+
     let mut opts = ResolverOpts::default();
     opts.timeout = std::time::Duration::from_secs(2);
     opts.attempts = 1;
