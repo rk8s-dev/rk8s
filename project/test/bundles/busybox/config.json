@@ -9,10 +9,7 @@
       "destination": "/etc/resolv.conf",
       "type": "bind",
       "source": "/tmp/rkl-netavark/resolv.conf",
-      "options": [
-        "ro",
-        "rbind"
-      ]
+      "options": ["ro", "rbind"]
     },
     {
       "destination": "/proc",
