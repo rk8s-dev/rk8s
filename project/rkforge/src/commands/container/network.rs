@@ -199,7 +199,7 @@ fn build_netavark_opts(spec: &RootfulBridgeSpec, container_id: &str) -> Result<N
             subnet: spec.subnet,
         }]),
         routes: None,
-        network_dns_servers: Some(vec![]),
+        network_dns_servers: Some(vec!["8.8.8.8".parse()?]),
     };
 
     networks.insert(spec.network_name.clone(), per);
