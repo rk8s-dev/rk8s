@@ -6,6 +6,7 @@ use crate::node::server::QUICServer;
 use crate::vault::Vault;
 use common::RksMessage;
 use common::lease::Lease;
+use common::quic::RksConnection;
 use log::info;
 use log::warn;
 use nftables::{batch::Batch, schema, types};
@@ -27,14 +28,16 @@ mod watcher;
 
 #[derive(Clone)]
 pub struct WorkerSession {
+    pub conn: Option<RksConnection>,
     pub tx: mpsc::Sender<RksMessage>,
     pub cancel_notify: Arc<Notify>,
     pub lease: Arc<Mutex<Lease>>,
 }
 
 impl WorkerSession {
-    pub fn new(tx: mpsc::Sender<RksMessage>, lease: Lease) -> Self {
+    pub fn new(conn: Option<RksConnection>, tx: mpsc::Sender<RksMessage>, lease: Lease) -> Self {
         Self {
+            conn,
             tx,
             lease: Arc::new(Mutex::new(lease)),
             cancel_notify: Arc::new(Notify::new()),

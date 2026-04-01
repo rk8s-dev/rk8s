@@ -94,7 +94,11 @@ impl<'a> NodeRegister<'a> {
 
         // Register worker before bootstrap rule generation so incremental
         // broadcasts during this window can still reach this session.
-        let session = Arc::new(WorkerSession::new(msg_tx.clone(), lease));
+        let session = Arc::new(WorkerSession::new(
+            Some(self.conn.clone()),
+            msg_tx.clone(),
+            lease,
+        ));
         self.shared
             .node_registry
             .register(node_id.clone(), session.clone())

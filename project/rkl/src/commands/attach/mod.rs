@@ -1,19 +1,37 @@
-use anyhow::{Error, Result};
+use anyhow::{Error, Result, anyhow};
 use clap::Args;
+use common::quic::{recv_frame, send_frame};
+use common::{AttachControlMessage, AttachTarget};
+use nix::libc;
 use nix::sys::termios::{self, LocalFlags, SetArg, Termios};
-use std::io::{Read, Write};
-use std::os::fd::{AsFd, BorrowedFd, FromRawFd};
+use std::io::Write;
+use std::os::fd::{AsFd, BorrowedFd};
 use std::os::unix::io::AsRawFd;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
+use tokio::sync::mpsc;
 
-use crate::daemon::tty::{TTY_SOCK_PATH, TtyIpcRequest, TtyIpcResponse};
+use crate::commands::pod::TLSConnectionArgs;
+use crate::quic::client::{Cli, QUICClient};
 
 #[derive(Args, Debug, Clone)]
 pub struct AttachCommand {
-    #[arg(value_name = "CONTAINER_ID")]
-    pub container_id: String,
-}
+    #[arg(value_name = "POD_NAME")]
+    pub pod_name: String,
 
-// ── Terminal helpers ──────────────────────────────────────────────────────────
+    #[arg(short = 'c', long, value_name = "CONTAINER")]
+    pub container: Option<String>,
+
+    #[arg(short = 'n', long, value_name = "NAMESPACE", default_value = "default")]
+    pub namespace: String,
+
+    #[arg(long, value_name = "RKS_ADDRESS", env = "RKS_ADDRESS")]
+    pub cluster: String,
+
+    #[clap(flatten)]
+    pub tls_cfg: TLSConnectionArgs,
+}
 
 fn enter_raw_mode(fd: impl AsFd) -> Result<Termios> {
     let original = termios::tcgetattr(&fd)?;
@@ -48,134 +66,177 @@ fn restore_terminal(fd: BorrowedFd<'_>, saved: &Termios) {
     let _ = termios::tcsetattr(fd, SetArg::TCSANOW, saved);
 }
 
-// IPC helpers: simple length-prefixed JSON messages over the socket
-
-fn send_json<T: serde::Serialize>(fd: std::os::unix::io::RawFd, value: &T) -> Result<()> {
-    let payload = serde_json::to_vec(value)?;
-    let len = payload.len() as u32;
-    use std::mem::ManuallyDrop;
-    let mut file = ManuallyDrop::new(unsafe { std::fs::File::from_raw_fd(fd) });
-    file.write_all(&len.to_be_bytes())?;
-    file.write_all(&payload)?;
-    Ok(())
-}
-
-fn recv_json<T: serde::de::DeserializeOwned>(fd: std::os::unix::io::RawFd) -> Result<T> {
-    use std::mem::ManuallyDrop;
-    let mut file = ManuallyDrop::new(unsafe { std::fs::File::from_raw_fd(fd) });
-    let mut len_buf = [0u8; 4];
-    file.read_exact(&mut len_buf)?;
-    let len = u32::from_be_bytes(len_buf) as usize;
-    if len > 4 * 1024 * 1024 {
-        anyhow::bail!("[attach] message too large ({} bytes)", len);
+fn current_winsize(fd: i32) -> Option<(u16, u16)> {
+    let mut winsize = libc::winsize {
+        ws_row: 0,
+        ws_col: 0,
+        ws_xpixel: 0,
+        ws_ypixel: 0,
+    };
+    let rc = unsafe { libc::ioctl(fd, libc::TIOCGWINSZ, &mut winsize) };
+    if rc == -1 || winsize.ws_row == 0 || winsize.ws_col == 0 {
+        return None;
     }
-    let mut body = vec![0u8; len];
-    file.read_exact(&mut body)?;
-    Ok(serde_json::from_slice(&body)?)
-}
-
-/// print debug info to stderr in raw mode, replace \n with \r\n
-macro_rules! raw_debug {
-    ($($arg:tt)*) => {{
-        let msg = format!($($arg)*);
-        let msg = msg.replace('\n', "\r\n");
-        let _ = std::io::Write::write_all(&mut std::io::stderr(), format!("[attach-dbg] {}\r\n", msg).as_bytes());
-    }};
+    Some((winsize.ws_row, winsize.ws_col))
 }
 
 pub fn attach_execute(cmd: AttachCommand) -> Result<(), Error> {
-    // 1. Connect to daemon tty-ipc socket and send Attach request.
-    let sock = std::os::unix::net::UnixStream::connect(TTY_SOCK_PATH)
-        .map_err(|e| anyhow::anyhow!("connect tty-ipc: {e} (is rkl daemon running?)"))?;
-    let sock_fd = sock.as_raw_fd();
-
-    send_json(
-        sock_fd,
-        &TtyIpcRequest::Attach {
-            container_id: cmd.container_id.clone(),
-        },
-    )?;
-
-    if let TtyIpcResponse::Error { message } = recv_json(sock_fd)? {
-        anyhow::bail!("attach: {message}");
-    }
-
-    eprintln!(
-        "[attach-dbg] attached to '{}'. Ctrl-P Ctrl-Q to detach.",
-        cmd.container_id
-    );
-
-    // 2. Switch local terminal to raw mode.
     let stdin = std::io::stdin();
     let is_tty = nix::unistd::isatty(stdin.as_raw_fd()).unwrap_or(false);
-    eprintln!("[attach-dbg] stdin is_tty={is_tty}, entering raw mode");
     let saved_termios = if is_tty {
         Some(enter_raw_mode(&stdin)?)
     } else {
         None
     };
 
-    // 3. stdin → daemon socket (daemon forwards to pty master).
-    //    write directly to sock_fd from this thread, and signal detach via shutdown(SHUT_WR)
-    //    so the daemon's reader sees EOF without closing the fd (main thread still reads from it).
+    let result = tokio::runtime::Runtime::new()?.block_on(async move { attach_cluster(cmd).await });
+
+    if let Some(ref saved) = saved_termios {
+        restore_terminal(stdin.as_fd(), saved);
+    }
+
+    result
+}
+
+async fn attach_cluster(cmd: AttachCommand) -> Result<(), Error> {
+    let cli = QUICClient::<Cli>::connect(&cmd.cluster, &cmd.tls_cfg).await?;
+    let mut stream = cli.open_bi().await?;
+
+    stream
+        .send_frame(&AttachControlMessage::Open(AttachTarget {
+            namespace: cmd.namespace.clone(),
+            pod_name: cmd.pod_name.clone(),
+            container_name: cmd.container.clone(),
+        }))
+        .await?;
+
+    match stream.recv_frame::<AttachControlMessage>().await? {
+        AttachControlMessage::Ack => {}
+        AttachControlMessage::Error(message) => anyhow::bail!("attach: {message}"),
+        other => anyhow::bail!("attach: unexpected response: {other:?}"),
+    }
+
+    eprintln!(
+        "[rkl] attached to {}/{}{}. Ctrl-P Ctrl-Q to detach.",
+        cmd.namespace,
+        cmd.pod_name,
+        cmd.container
+            .as_deref()
+            .map(|container| format!(" (container {container})"))
+            .unwrap_or_default()
+    );
+
+    let (mut send_stream, mut recv_stream) = stream.into_inner();
+    let (tx, mut rx) = mpsc::unbounded_channel::<AttachControlMessage>();
+    let stop = Arc::new(AtomicBool::new(false));
+
+    if let Some((rows, cols)) = current_winsize(std::io::stdin().as_raw_fd()) {
+        let _ = tx.send(AttachControlMessage::Resize { rows, cols });
+    }
+
+    let writer_stop = stop.clone();
+    let writer = tokio::spawn(async move {
+        while let Some(msg) = rx.recv().await {
+            send_frame(&mut send_stream, &msg).await?;
+            if matches!(
+                msg,
+                AttachControlMessage::Close | AttachControlMessage::Error(_)
+            ) {
+                break;
+            }
+        }
+        writer_stop.store(true, Ordering::SeqCst);
+        let _ = send_stream.finish();
+        Ok::<(), anyhow::Error>(())
+    });
+
+    let stdin_stop = stop.clone();
+    let stdin_tx = tx.clone();
     let stdin_thread = std::thread::spawn(move || {
         let mut stdin = std::io::stdin().lock();
         let mut buf = [0u8; 256];
         let mut prev_ctrl_p = false;
-        let mut writer =
-            unsafe { std::mem::ManuallyDrop::new(std::fs::File::from_raw_fd(sock_fd)) };
-        loop {
-            let n = match stdin.read(&mut buf) {
+        while !stdin_stop.load(Ordering::SeqCst) {
+            let n = match std::io::Read::read(&mut stdin, &mut buf) {
                 Ok(0) | Err(_) => break,
                 Ok(n) => n,
             };
-            // Detach sequence: Ctrl-P (0x10) then Ctrl-Q (0x11)
-            for i in 0..n {
-                if prev_ctrl_p && buf[i] == 0x11 {
-                    // Shut down the write half of the socket so daemon's
-                    // input loop gets EOF, triggering broadcast cleanup
-                    // and unblocking the main thread's reader.
-                    let _ = nix::sys::socket::shutdown(sock_fd, nix::sys::socket::Shutdown::Write);
-                    raw_debug!(
-                        "detach sequence detected, shutting down write half of socket and exiting stdin thread"
-                    );
-                    return; // detach
+            for &byte in buf.iter().take(n) {
+                if prev_ctrl_p && byte == 0x11 {
+                    let _ = stdin_tx.send(AttachControlMessage::Close);
+                    stdin_stop.store(true, Ordering::SeqCst);
+                    return;
                 }
-                prev_ctrl_p = buf[i] == 0x10;
+                prev_ctrl_p = byte == 0x10;
             }
-            if writer.write_all(&buf[..n]).is_err() {
+            if stdin_tx
+                .send(AttachControlMessage::Data(buf[..n].to_vec()))
+                .is_err()
+            {
                 break;
             }
         }
     });
 
-    // 4. daemon socket → stdout (daemon forwards tee output to us).
-    //    Runs on the main thread; blocks until daemon closes the connection
-    {
-        let mut reader =
-            unsafe { std::mem::ManuallyDrop::new(std::fs::File::from_raw_fd(sock_fd)) };
-        let mut stdout = std::io::stdout();
-        let mut buf = [0u8; 4096];
-        loop {
-            let n = match reader.read(&mut buf) {
-                Ok(0) | Err(_) => break,
-                Ok(n) => n,
-            };
-            if stdout.write_all(&buf[..n]).is_err() {
-                break;
+    let resize_stop = stop.clone();
+    let resize_tx = tx.clone();
+    let resize_thread = std::thread::spawn(move || {
+        let stdin = std::io::stdin();
+        let fd = stdin.as_raw_fd();
+        let mut last_size = current_winsize(fd);
+        while !resize_stop.load(Ordering::SeqCst) {
+            std::thread::sleep(Duration::from_millis(250));
+            let size = current_winsize(fd);
+            if size.is_some() && size != last_size {
+                last_size = size;
+                if let Some((rows, cols)) = size
+                    && resize_tx
+                        .send(AttachControlMessage::Resize { rows, cols })
+                        .is_err()
+                {
+                    break;
+                }
             }
-            let _ = stdout.flush();
         }
-        raw_debug!("reader from daemon socket quit");
-    }
+    });
 
+    let reader_stop = stop.clone();
+    let reader = tokio::spawn(async move {
+        let mut stdout = std::io::stdout();
+        loop {
+            let msg = recv_frame::<AttachControlMessage>(&mut recv_stream).await?;
+            match msg {
+                AttachControlMessage::Data(data) => {
+                    stdout.write_all(&data)?;
+                    stdout.flush()?;
+                }
+                AttachControlMessage::Close => {
+                    break;
+                }
+                AttachControlMessage::Error(message) => {
+                    return Err(anyhow!("attach: {message}"));
+                }
+                AttachControlMessage::Resize { .. }
+                | AttachControlMessage::Open(_)
+                | AttachControlMessage::Ack => {}
+            }
+        }
+        reader_stop.store(true, Ordering::SeqCst);
+        Ok::<(), anyhow::Error>(())
+    });
+
+    let reader_result = reader
+        .await
+        .map_err(|e| anyhow!("attach reader task failed: {e}"))?;
+    stop.store(true, Ordering::SeqCst);
+    drop(tx);
     let _ = stdin_thread.join();
+    let _ = resize_thread.join();
+    writer
+        .await
+        .map_err(|e| anyhow!("attach writer task failed: {e}"))??;
+    reader_result?;
 
-    // 5. Restore terminal.
-    if let Some(ref saved) = saved_termios {
-        restore_terminal(stdin.as_fd(), saved);
-    }
-
-    eprintln!("\n[rkl] detached from '{}'.", cmd.container_id);
+    eprintln!("\n[rkl] detached from '{}'.", cmd.pod_name);
     Ok(())
 }

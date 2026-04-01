@@ -132,6 +132,14 @@ impl RksStream {
     pub async fn send_msg(&mut self, msg: &RksMessage) -> anyhow::Result<usize> {
         self.sender().send_msg(msg).await
     }
+
+    pub async fn send_frame<T: serde::Serialize>(&mut self, value: &T) -> anyhow::Result<()> {
+        send_frame(self.sender(), value).await
+    }
+
+    pub async fn recv_frame<T: serde::de::DeserializeOwned>(&mut self) -> anyhow::Result<T> {
+        recv_frame(self.receiver()).await
+    }
 }
 
 #[async_trait::async_trait]
@@ -168,4 +176,26 @@ impl RecvStreamExt for RecvStream {
         serde_json::from_slice::<RksMessage>(&buf)
             .with_context(|| "Failed to deserialize rks message")
     }
+}
+
+pub async fn send_frame<T: serde::Serialize>(
+    stream: &mut SendStream,
+    value: &T,
+) -> anyhow::Result<()> {
+    let payload = serde_json::to_vec(value)?;
+    let len = payload.len() as u32;
+    stream.write_all(&len.to_be_bytes()).await?;
+    stream.write_all(&payload).await?;
+    Ok(())
+}
+
+pub async fn recv_frame<T: serde::de::DeserializeOwned>(
+    stream: &mut RecvStream,
+) -> anyhow::Result<T> {
+    let mut len_buf = [0u8; 4];
+    stream.read_exact(&mut len_buf).await?;
+    let len = u32::from_be_bytes(len_buf) as usize;
+    let mut payload = vec![0u8; len];
+    stream.read_exact(&mut payload).await?;
+    Ok(serde_json::from_slice(&payload)?)
 }

@@ -3,10 +3,9 @@ use std::error::Error;
 use std::fmt::Write as _;
 use std::fs;
 use std::io;
-use std::io::{Read, Write};
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
-use std::sync::atomic::{AtomicPtr, Ordering};
 
 use anyhow::{Context, Result, anyhow, bail};
 use chrono::{DateTime, Local, Utc};
@@ -20,29 +19,6 @@ use liboci_cli::{Create, Delete, Kill, List, Start, State};
 use nix::sys::wait::{WaitStatus, waitpid};
 use tabwriter::TabWriter;
 use tracing::info;
-
-/// Broadcast hook: called by the tee thread with every raw chunk read from
-/// the pty master. Daemon registers a concrete function here so that
-/// libruntime stays free of daemon-specific dependencies.
-///
-/// Signature: `fn(container_id: &str, data: &[u8])`
-static ATTACH_BROADCAST_PTR: AtomicPtr<()> = AtomicPtr::new(std::ptr::null_mut());
-
-type AttachBroadcastFn = fn(&str, &[u8]);
-
-/// Register the broadcast hook. Call once from daemon initialisation.
-pub fn set_attach_broadcast(f: AttachBroadcastFn) {
-    ATTACH_BROADCAST_PTR.store(f as *mut (), Ordering::Release);
-}
-
-fn get_attach_broadcast() -> Option<AttachBroadcastFn> {
-    let ptr = ATTACH_BROADCAST_PTR.load(Ordering::Acquire);
-    if ptr.is_null() {
-        None
-    } else {
-        Some(unsafe { std::mem::transmute::<*mut (), AttachBroadcastFn>(ptr) })
-    }
-}
 
 pub fn construct_container_root<P: AsRef<Path>>(
     root_path: P,
@@ -181,9 +157,8 @@ pub fn create(args: Create, root_path: PathBuf, systemd_cgroup: bool) -> Result<
 /// ## PTY mode (`console_socket = Some(path)`)
 /// The container is created with `process.terminal = true`. After `build()`,
 /// the pty master fd is received from `console_socket` via SCM_RIGHTS.
-/// A single tee thread reads from the master and writes to `log_path` in CRI
-/// format. The master fd (as `OwnedFd`) is returned so the caller can register
-/// it in a TTY store for later `attach` use.
+/// The master fd (as `OwnedFd`) is returned so the caller can register it in a
+/// TTY store and take responsibility for teeing it to logs / attach sessions.
 ///
 /// Returns `Some(OwnedFd)` in PTY mode, `None` in pipe mode.
 pub fn create_with_log(
@@ -202,7 +177,9 @@ pub fn create_with_log(
     if let Some(sock_path) = args.console_socket.as_deref() {
         // PTY mode
         // 1. Create and bind the console socket so libcontainer can connect.
-        use nix::sys::socket::{self as nix_sock, AddressFamily, Backlog, SockFlag, SockType, UnixAddr};
+        use nix::sys::socket::{
+            self as nix_sock, AddressFamily, Backlog, SockFlag, SockType, UnixAddr,
+        };
         use std::os::fd::AsRawFd;
 
         if let Some(parent) = sock_path.parent() {
@@ -260,75 +237,7 @@ pub fn create_with_log(
         // Clean up the socket file
         let _ = fs::remove_file(sock_path);
 
-        // 4. dup() the master fd for the tee thread; the original is returned
-        //    to the caller for TTY store registration.
-        let master_for_log = nix::unistd::dup(master_raw)?;
         let master_owned = unsafe { std::os::fd::OwnedFd::from_raw_fd(master_raw) };
-
-        let container_id_for_tee = args.container_id.clone();
-
-        // 5. Tee thread: pty master → CRI log + attach broadcast.
-        //
-        // Reads raw bytes to preserve terminal control sequences.
-        // For each chunk, it:
-        //   a) Calls the attach broadcast hook (registered by daemon/tty.rs)
-        //      so any active attach session receives the output.
-        //   b) Writes CRI-format lines to the log file.
-        std::thread::spawn(move || {
-            let mut reader = unsafe { std::fs::File::from_raw_fd(master_for_log) };
-            let mut log_file = match fs::OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(&log_path)
-            {
-                Ok(f) => f,
-                Err(e) => {
-                    tracing::error!("[tty-tee] failed to open log file {:?}: {e}", log_path);
-                    return;
-                }
-            };
-
-            let mut raw_buf = [0u8; 4096];
-            // Line accumulator for CRI log formatting
-            let mut line_buf: Vec<u8> = Vec::with_capacity(256);
-
-            loop {
-                let n = match reader.read(&mut raw_buf) {
-                    Ok(0) | Err(_) => break, // EIO when slave closes (container exits)
-                    Ok(n) => n,
-                };
-                let chunk = &raw_buf[..n];
-
-                // ── Broadcast raw bytes to any active attach session ────────
-                // The hook is a fn-pointer stored in ATTACH_BROADCAST set by
-                // daemon/tty.rs; libruntime stays dependency-free by calling
-                // it through a static AtomicPtr.
-                if let Some(f) = get_attach_broadcast() {
-                    f(&container_id_for_tee, chunk);
-                }
-
-                // CRI log (line-oriented)
-                for &byte in chunk {
-                    if byte == b'\n' {
-                        let ts = Utc::now()
-                            .to_rfc3339_opts(chrono::SecondsFormat::Nanos, true);
-                        let line = String::from_utf8_lossy(&line_buf);
-                        let _ = writeln!(log_file, "{ts} stdout F {line}");
-                        line_buf.clear();
-                    } else if byte != b'\r' {
-                        line_buf.push(byte);
-                    }
-                }
-            }
-
-            // Flush any remaining partial line on container exit
-            if !line_buf.is_empty() {
-                let ts = Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Nanos, true);
-                let line = String::from_utf8_lossy(&line_buf);
-                let _ = writeln!(log_file, "{ts} stdout F {line}");
-            }
-        });
-
         Ok(Some(master_owned))
     } else {
         // Pipe mode (original behaviour)

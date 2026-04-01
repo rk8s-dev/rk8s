@@ -21,9 +21,10 @@ use commands::{
     pod::PodCommand, replicaset::ReplicaSetCommand, run::RunCommand, service::ServiceCommand,
 };
 use commands::{
-    apply::apply_execute, attach::attach_execute, container::container_execute, delete::delete_execute,
-    deployment::deployment_execute, exec::exec_execute, get::get_execute, logs::logs_execute,
-    pod::pod_execute, replicaset::replicaset_execute, run::run_execute, service::service_execute,
+    apply::apply_execute, attach::attach_execute, container::container_execute,
+    delete::delete_execute, deployment::deployment_execute, exec::exec_execute, get::get_execute,
+    logs::logs_execute, pod::pod_execute, replicaset::replicaset_execute, run::run_execute,
+    service::service_execute,
 };
 use tracing::error;
 
