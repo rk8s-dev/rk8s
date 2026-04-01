@@ -16,12 +16,12 @@ mod quic;
 mod task;
 
 use commands::{
-    apply::ApplyCommand, container::ContainerCommand, delete::DeleteCommand,
+    apply::ApplyCommand, attach::AttachCommand, container::ContainerCommand, delete::DeleteCommand,
     deployment::DeploymentCommand, exec::ExecCommand, get::GetCommand, logs::LogCommand,
     pod::PodCommand, replicaset::ReplicaSetCommand, run::RunCommand, service::ServiceCommand,
 };
 use commands::{
-    apply::apply_execute, container::container_execute, delete::delete_execute,
+    apply::apply_execute, attach::attach_execute, container::container_execute, delete::delete_execute,
     deployment::deployment_execute, exec::exec_execute, get::get_execute, logs::logs_execute,
     pod::pod_execute, replicaset::replicaset_execute, run::run_execute, service::service_execute,
 };
@@ -49,6 +49,7 @@ impl Cli {
     fn run(self) -> Result<(), anyhow::Error> {
         match self.workload {
             Workload::Apply(cmd) => apply_execute(cmd),
+            Workload::Attach(cmd) => attach_execute(cmd),
             Workload::Run(cmd) => run_execute(cmd),
             Workload::Exec(cmd) => exec_execute(cmd),
             Workload::Get(cmd) => get_execute(cmd),
@@ -68,6 +69,9 @@ impl Cli {
 enum Workload {
     #[command(about = "Apply a configuration to a resource whether it exists or not")]
     Apply(ApplyCommand),
+
+    #[command(about = "Attach to a process that is already running inside an existing container.")]
+    Attach(AttachCommand),
 
     #[command(about = "Create and run a particular image in a pod")]
     Run(RunCommand),

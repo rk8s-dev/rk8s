@@ -13,6 +13,7 @@ use libruntime::cri::cri_api::{
     StopPodSandboxRequest, StopPodSandboxResponse,
 };
 use libruntime::cri::{create, create_with_log, delete, kill, load_container, start};
+use crate::daemon::tty::register_tty_local;
 use libruntime::oci::{self, OCISpecGenerator};
 use libruntime::rootpath;
 use libruntime::utils::{
@@ -249,6 +250,7 @@ impl TaskRunner {
             image: "pause:3.9".to_string(),
             ports: vec![],
             args: vec![],
+            tty: false,
             resources: None,
             liveness_probe: None,
             readiness_probe: None,
@@ -368,6 +370,7 @@ impl TaskRunner {
             // image: "/home/harry/Documents/rk8s/project/test/bundles/pause".to_string(),
             ports: vec![],
             args: vec![],
+            tty: false,
             resources: None,
             liveness_probe: None,
             readiness_probe: None,
@@ -757,9 +760,18 @@ impl TaskRunner {
             writer.flush()?;
         }
 
+        // If container requests a TTY, pass a console_socket path to create_with_log
+        // so it can receive the pty master fd from libcontainer via SCM_RIGHTS.
+        // Otherwise (tty=false) the original pipe-based log capture is used.
+        let console_sock_path = if container_spec.tty {
+            Some(PathBuf::from(format!("/run/rkl/tty/{}.sock", container_id)))
+        } else {
+            None
+        };
+
         let create_args = Create {
             bundle: bundle_path.clone().into(),
-            console_socket: None,
+            console_socket: console_sock_path.clone(),
             pid_file: None,
             no_pivot: false,
             no_new_keyring: false,
@@ -783,8 +795,19 @@ impl TaskRunner {
             original_container_name,
         ));
 
-        create_with_log(create_args, root_path.clone(), log_path)
-            .map_err(|e| anyhow!("Failed to create container: {}", e))?;
+        let master_owned = create_with_log(
+            create_args,
+            root_path.clone(),
+            log_path,
+        )
+        .map_err(|e| anyhow!("Failed to create container: {}", e))?;
+
+        // If PTY mode: register the master fd directly into TTY_STORE (same process as daemon).
+        if let Some(owned_fd) = master_owned {
+            use std::os::fd::IntoRawFd;
+            register_tty_local(&container_id, owned_fd.into_raw_fd())
+                .map_err(|e| anyhow!("Failed to register PTY master for {container_id}: {e}"))?;
+        }
 
         Ok(CreateContainerResponse { container_id })
     }

@@ -1,6 +1,7 @@
 use crate::commands::pod::PodInfo;
 use crate::commands::{Exec, ExecPod};
 use crate::commands::{delete, exec, kill, load_container, start, state};
+use crate::daemon::tty::unregister_tty_local;
 use crate::{network::plugin_chain, task::TaskRunner};
 use anyhow::{Result, anyhow};
 use libcontainer::container::ContainerStatus;
@@ -60,6 +61,15 @@ fn kill_and_wait_container(root_path: &std::path::Path, container_name: &str) ->
 
     warn!("Container {} did not stop within timeout", container_name);
     Ok(())
+}
+
+fn cleanup_container_tty(container_name: &str) {
+    if let Err(e) = unregister_tty_local(container_name) {
+        warn!(
+            "Failed to release PTY master for container {}: {}",
+            container_name, e
+        );
+    }
 }
 
 pub fn delete_pod(pod_name: &str) -> Result<(), anyhow::Error> {
@@ -129,6 +139,7 @@ fn delete_pod_inner(pod_name: &str, skip_network_cleanup: bool) -> Result<(), an
                 container_name, delete_err
             );
         } else {
+            cleanup_container_tty(container_name);
             info!("Container deleted: {}", container_name);
         }
 
@@ -153,6 +164,7 @@ fn delete_pod_inner(pod_name: &str, skip_network_cleanup: bool) -> Result<(), an
             pod_info.pod_sandbox_id, delete_err
         );
     } else {
+        cleanup_container_tty(&pod_info.pod_sandbox_id);
         info!("PodSandbox deleted: {}", pod_info.pod_sandbox_id);
     }
 

@@ -29,6 +29,7 @@ use tabwriter::TabWriter;
 use tracing::info;
 
 pub mod apply;
+pub mod attach;
 pub mod container;
 pub mod delete;
 pub mod deployment;

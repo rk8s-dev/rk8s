@@ -270,6 +270,7 @@ impl ComposeManager {
                     volume_mounts: None,
                     command: None,
                     working_dir: None,
+                    tty: false,
                 };
 
                 // handle the services volume name

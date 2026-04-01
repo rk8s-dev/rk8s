@@ -4,8 +4,9 @@ pub mod pod_worker;
 pub mod static_pods;
 pub mod status;
 pub mod sync_loop;
+pub mod tty;
 
-use std::{env, sync::Arc, time::Duration};
+use std::{env, os::fd::OwnedFd, sync::Arc, time::Duration};
 
 //mod status_access;
 use crate::{
@@ -82,6 +83,16 @@ pub fn main(tls_cfg: TLSConnectionArgs) -> Result<(), anyhow::Error> {
                 sync_loop.run().await;
                 error!("[daemon] sync_loop exited unexpectedly");
             });
+
+            use std::collections::HashMap;
+            use std::sync::Mutex;
+            tty::TTY_STORE.get_or_init(|| Mutex::new(HashMap::<String, OwnedFd>::new()));
+            tokio::spawn(async move {
+                if let Err(e) = tty::run_server().await {
+                    error!("[tty-ipc] server exited: {e}");
+                }
+            });
+
             tokio::signal::ctrl_c().await?;
             info!("[daemon] received Ctrl-C, shutting down");
             Ok(())

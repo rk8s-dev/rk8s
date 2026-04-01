@@ -544,6 +544,9 @@ pub struct ContainerSpec {
     #[serde(default)]
     pub args: Vec<String>,
 
+    #[serde(default)]
+    pub tty: bool,
+
     pub resources: Option<ContainerRes>,
 
     #[serde(rename = "livenessProbe", default)]

@@ -202,6 +202,7 @@ impl ContainerRunner {
                 image: "".to_string(),
                 ports: vec![],
                 args: vec![],
+                tty: false,
                 resources: None,
                 liveness_probe: None,
                 readiness_probe: None,
@@ -776,7 +777,11 @@ pub fn print_status(container_id: String, root_path: PathBuf) -> Result<()> {
 
 pub fn setup_network_conf() -> Result<()> {
     let conf = CliNetworkConfig::from_name_bridge("single-net", "single0");
-    let conf_value = serde_json::to_value(conf).expect("Failed to parse network config");
+    let mut conf_value = serde_json::to_value(conf).expect("Failed to parse network config");
+
+    if let Some(obj) = conf_value.as_object_mut() {
+        obj.insert("cniVersion".to_string(), serde_json::json!("1.0.0"));
+    }
 
     let mut conf_path = PathBuf::from(STD_CONF_PATH);
     conf_path.push(BRIDGE_CONF);
