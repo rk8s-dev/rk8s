@@ -1,4 +1,5 @@
 use ipnet::IpNet;
+
 use libruntime::cri::cri_api::Mount;
 
 use netavark::commands::setup::Setup;
@@ -6,6 +7,7 @@ use netavark::commands::teardown::Teardown;
 use netavark::network::types::Network;
 use netavark::network::types::NetworkOptions;
 use netavark::network::types::PerNetworkOptions;
+
 use netavark::network::types::Subnet;
 use std::collections::HashMap;
 use std::ffi::OsString;
@@ -242,7 +244,7 @@ impl NetworkManager {
             return Err(anyhow!("Unsupported ipv6 type"));
         }
         let mut dns_server = vec![];
-        let alias = vec![container_id.clone()];
+        let alias = vec![format!("{}.rkl.internal", container_id)];
         let mut networks = HashMap::new();
         let mut network_info = HashMap::new();
         for (network_name, _) in self.map.clone() {
@@ -313,7 +315,7 @@ impl NetworkManager {
                         subnet: subnet_net,
                     }]),
                     routes: None,
-                    network_dns_servers: Some(vec![]),
+                    network_dns_servers: Some(vec!["8.8.8.8".parse()?]),
                 };
 
                 networks.insert(network_name.clone(), network_opts);
@@ -337,13 +339,13 @@ impl NetworkManager {
         let netns_path = format!("/proc/{pid}/ns/net");
         if !Path::new(&netns_path).exists() {
             return Err(anyhow!(
-                "[container {}] netns path not found: {netns_path}",
+                "[compose {}] netns path not found: {netns_path}",
                 container_id
             ));
         }
         let netns_path_clone = netns_path.clone();
         let setup = Setup::new(netns_path);
-        let json_path = create_tmp_netavark_json(&opts, &container_id)?;
+        let json_path = create_tmp_netavark_json(opts, &container_id)?;
         let config_dir = default_netavark_config_dir();
         fs::create_dir_all(PathBuf::from(&config_dir))?;
         setup
@@ -355,7 +357,7 @@ impl NetworkManager {
                 None,
                 false,
             )
-            .map_err(|e| anyhow!("[container {}] netavark setup failed: {e}", &container_id))?;
+            .map_err(|e| anyhow!("[compose {}] netavark setup failed: {e}", &container_id))?;
 
         // Create bind mount backup of network namespace
         let bind_mount_name = format!("rkforge-{}", &container_id);
@@ -399,7 +401,7 @@ impl NetworkManager {
                 None,
                 false,
             )
-            .map_err(|e| anyhow!("[container {}] netavark teardown failed: {e}", id))?;
+            .map_err(|e| anyhow!("[compose {}] netavark teardown failed: {e}", id))?;
         // Remove state file after successful teardown.
         let mut json_path = std::env::temp_dir();
         json_path.push("rkl-netavark");
@@ -422,7 +424,7 @@ impl NetworkManager {
 pub fn create_resolv_conf(name_servers: Vec<Ipv4Addr>) -> Result<()> {
     let mut contect = "".to_string();
     for name_server in name_servers {
-        contect.push_str(&format!("namesever {name_server}\n"));
+        contect.push_str(&format!("nameserver {name_server}\n"));
     }
     contect.push_str("search rkl.internal\n");
     let mut resolv_path = std::env::temp_dir();

@@ -242,7 +242,7 @@ pub fn setup_rootful_bridge(
             None,
             false,
         )
-        .map_err(|e| anyhow!("[{container_id}] netavark setup failed: {e}"))?;
+        .map_err(|e| anyhow!("[container {container_id}] netavark setup failed: {e}"))?;
 
     // Create bind mount backup of network namespace
     let bind_mount_name = format!("rkforge-{}", container_id);

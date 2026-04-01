@@ -27,12 +27,12 @@ use libcontainer::{
     error::LibcontainerError,
 };
 use liboci_cli::{Create, Delete, List, Start};
+use libruntime::cri::config::ContainerConfigBuilder;
 use libruntime::rootpath;
 use libruntime::utils::{
     ImageType, determine_image, sync_handle_oci_image, sync_handle_oci_image_no_copy,
 };
 use libruntime::volume::{VolumeManager, VolumePattern, string_to_pattern};
-use libruntime::{cri::config::ContainerConfigBuilder, rootpath::determine};
 use libruntime::{
     cri::cri_api::{ContainerConfig, CreateContainerResponse, Mount},
     utils::ImagePuller,
@@ -491,6 +491,7 @@ impl ContainerRunner {
         let container_id = id.unwrap_or_else(|| self.container_id.clone());
 
         if self.determine_single_status() {
+            debug!("container");
             let state = self.get_container_state()?;
             let pid = state
                 .pid
@@ -500,6 +501,7 @@ impl ContainerRunner {
             let ip = setup_rootful_bridge(&netns_path, &container_id, spec)?;
             self.ip = Some(IpAddr::V4(ip));
         } else if let Some(ip) = self.compose_assigned_ip {
+            debug!("compose");
             self.ip = Some(ip);
         }
         start(
