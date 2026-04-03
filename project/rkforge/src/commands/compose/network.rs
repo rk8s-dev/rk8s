@@ -32,6 +32,11 @@ use anyhow::Result;
 use anyhow::anyhow;
 use tracing::{debug, warn};
 
+/// this path is container resolv.conf location
+const CONTAINER_RESOLV_PATH: &str = "/etc/resolv.conf";
+/// this path is used to save netavark config dir
+const DEAULT_NETAVARK_CONFIG_DIR: &str = "/run/containers/networks";
+
 #[derive(Debug)]
 struct NetworkSubnet {
     subnet: Ipv4Network,
@@ -380,21 +385,34 @@ impl NetworkManager {
     }
 
     pub fn clean_up(network_name_space: String, id: String) -> Result<()> {
-        let teardown = Teardown::new(network_name_space);
+        let bind_mount_name = format!("rkforge-{}", id);
+        let bind_mount_path = format!("/var/run/netns/{}", bind_mount_name);
         let config_dir = default_netavark_config_dir();
         let mut json_path = std::env::temp_dir();
         json_path.push("rkl-netavark");
         json_path.push(format!("{}.network.json", id));
-        // If the setup state file is missing, treat cleanup as idempotent.
-        if !json_path.exists() {
-            // Still try to clean up bind mount if it exists
-            let bind_mount_name = format!("rkforge-{}", id);
+        let netns_path = if Path::new(&bind_mount_path).exists() {
+            bind_mount_path
+        } else {
+            network_name_space
+        };
+
+        if !Path::new(&netns_path).exists() {
+            warn!(
+                "Network namespace not found for container {}, attempting minimal cleanup",
+                id
+            );
+
             let _ = unbind_mount_netns(&bind_mount_name);
+            let _ = std::fs::remove_file(json_path);
             return Ok(());
         }
+
+        let teardown = Teardown::new(netns_path);
+        // ... rest of teardown logic
         teardown
             .exec(
-                Some(json_path.into_os_string()),
+                Some(json_path.clone().into_os_string()),
                 Some(config_dir),
                 None,
                 default_aardvark_bin()?,
@@ -402,22 +420,9 @@ impl NetworkManager {
                 false,
             )
             .map_err(|e| anyhow!("[container {}] netavark teardown failed: {e}", id))?;
-        // Remove state file after successful teardown.
-        let mut json_path = std::env::temp_dir();
-        json_path.push("rkl-netavark");
-        json_path.push(format!("{}.network.json", id));
-        let _ = std::fs::remove_file(&json_path);
 
-        // Clean up bind mount backup
-        let bind_mount_name = format!("rkforge-{}", id);
-        if let Err(e) = unbind_mount_netns(&bind_mount_name) {
-            warn!(
-                "Failed to clean up bind mount backup for container {}: {}",
-                id, e
-            );
-            // Continue anyway
-        }
-
+        let _ = unbind_mount_netns(&bind_mount_name);
+        let _ = std::fs::remove_file(json_path);
         Ok(())
     }
 }
@@ -445,7 +450,7 @@ pub fn add_resolv_conf(runner: &mut ContainerRunner) {
     host_path.push("rkl-netavark");
     host_path.push("resolv.conf");
     let host_path = host_path.into_os_string().into_string().unwrap();
-    let container_path = "/etc/resolv.conf".to_string();
+    let container_path = CONTAINER_RESOLV_PATH.to_string();
 
     runner.add_mounts(vec![Mount {
         host_path,
@@ -546,7 +551,7 @@ fn default_netavark_config_dir() -> OsString {
         return v;
     }
 
-    OsString::from("/run/containers/networks")
+    OsString::from(DEAULT_NETAVARK_CONFIG_DIR)
 }
 
 fn default_aardvark_bin() -> Result<OsString> {

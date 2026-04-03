@@ -13,7 +13,7 @@ use libcontainer::syscall::syscall::create_syscall;
 use liboci_cli::{Delete, List};
 
 use serde::{Deserialize, Serialize};
-use tracing::{debug, warn};
+use tracing::debug;
 
 use crate::commands::{
     compose::{
@@ -157,13 +157,6 @@ impl ComposeManager {
             })?;
             let id = container.id.clone();
             let netns_path = format!("/proc/{pid}/ns/net");
-            if !Path::new(&netns_path).exists() {
-                warn!(
-                    "Failed to find {} file, skipping teardown, you may need to manually clean up the network namespace",
-                    &netns_path
-                );
-                return Ok(());
-            }
             self.teardown_network(netns_path, id)?;
             remove_container(&self.root_path, container)?;
         }
@@ -309,7 +302,6 @@ impl ComposeManager {
                     Some(self.root_path.clone()),
                 )?;
 
-                // Allocate IP from subnet for this container on this network (instead of 127.0.0.1)
                 let container_id = container_spec.name.clone();
                 let allocated_ip = self
                     .network_manager
