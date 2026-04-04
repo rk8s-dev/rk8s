@@ -112,12 +112,9 @@ fn daemon_mount_libfuse(
     use libfuse_fs::overlayfs::OverlayArgs;
     use std::sync::Arc;
 
-    let mut lowerdir = cfg.lower_dir.clone();
-    lowerdir.reverse();
-
     crate::rt::block_on(async {
         let mut mount_handle = libfuse_fs::overlayfs::mount_fs(OverlayArgs {
-            lowerdir: &lowerdir,
+            lowerdir: &cfg.lower_dir,
             upperdir: &cfg.upper_dir,
             mountpoint: &cfg.mountpoint,
             privileged: CONFIG.is_root,
@@ -197,7 +194,6 @@ fn daemon_mount_native(
     let lower_dirs_bytes: Vec<&[u8]> = cfg
         .lower_dir
         .iter()
-        .rev()
         .map(|p| p.as_os_str().as_bytes())
         .collect();
     let lower_dir_option = lower_dirs_bytes.join(&b':');
