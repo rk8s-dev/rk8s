@@ -14,7 +14,7 @@ use libcontainer::syscall::syscall::create_syscall;
 use liboci_cli::{Delete, List};
 
 use serde::{Deserialize, Serialize};
-use tracing::debug;
+use tracing::{debug, info};
 
 use crate::commands::{
     compose::{
