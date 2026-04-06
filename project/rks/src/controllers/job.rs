@@ -132,7 +132,7 @@ impl JobController {
             job_name, active, succeeded, failed
         );
 
-        // Check conditions 
+        // Check conditions
 
         // Active-deadline exceeded.
         if let Some(deadline_secs) = job.spec.active_deadline_seconds
