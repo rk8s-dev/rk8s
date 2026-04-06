@@ -973,6 +973,62 @@ pub async fn dispatch_user(
                 }
             }
         }
+
+        // Job operations
+        RksMessage::CreateJob(mut job) => {
+            let name = job.metadata.name.clone();
+            if xline_store.get_job_yaml(&name).await?.is_some() {
+                conn.send_msg(&RksMessage::Error(format!(
+                    "job \"{}\" already exists",
+                    name
+                )))
+                .await?;
+                return Ok(());
+            }
+            if job.metadata.creation_timestamp.is_none() {
+                job.metadata.creation_timestamp = Some(Utc::now());
+            }
+            let yaml = serde_yaml::to_string(&*job)?;
+            xline_store.insert_job_yaml(&name, &yaml).await?;
+            info!(
+                target: "rks::node::user_dispatch",
+                "created Job {name}"
+            );
+            conn.send_msg(&RksMessage::Ack).await?;
+        }
+
+        RksMessage::DeleteJob(name) => {
+            xline_store.delete_job(&name).await?;
+            info!(
+                target: "rks::node::user_dispatch",
+                "marked Job {} for deletion (background policy)", name
+            );
+            conn.send_msg(&RksMessage::Ack).await?;
+        }
+
+        RksMessage::GetJob(name) => {
+            if let Some(job) = xline_store.get_job(&name).await? {
+                info!(
+                    target: "rks::node::user_dispatch",
+                    "retrieved Job {name}"
+                );
+                conn.send_msg(&RksMessage::GetJobRes(Box::new(job))).await?;
+            } else {
+                conn.send_msg(&RksMessage::Error(format!("Job {} not found", name)))
+                    .await?;
+            }
+        }
+
+        RksMessage::ListJob => {
+            let jobs = xline_store.list_jobs().await?;
+            info!(
+                target: "rks::node::user_dispatch",
+                "list current jobs: {} items",
+                jobs.len()
+            );
+            conn.send_msg(&RksMessage::ListJobRes(jobs)).await?;
+        }
+
         _ => warn!(
             target: "rks::node::user_dispatch",
             "unknown message"

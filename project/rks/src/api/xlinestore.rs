@@ -741,6 +741,7 @@ impl XlineStore {
             ResourceKind::Deployment => self.get_deployment_yaml(name).await,
             ResourceKind::ReplicaSet => self.get_replicaset_yaml(name).await,
             ResourceKind::Endpoint => self.get_endpoint_yaml(name).await,
+            ResourceKind::Job => self.get_job_yaml(name).await,
             ResourceKind::Unknown => Ok(None),
         }
     }
@@ -758,6 +759,7 @@ impl XlineStore {
             ResourceKind::Deployment => self.insert_deployment_yaml(name, yaml).await,
             ResourceKind::ReplicaSet => self.insert_replicaset_yaml(name, yaml).await,
             ResourceKind::Endpoint => self.insert_endpoint_yaml(name, yaml).await,
+            ResourceKind::Job => self.insert_job_yaml(name, yaml).await,
             ResourceKind::Unknown => Ok(()),
         }
     }
@@ -774,6 +776,7 @@ impl XlineStore {
             ResourceKind::Deployment => format!("/registry/deployments/{name}"),
             ResourceKind::ReplicaSet => format!("/registry/replicasets/{name}"),
             ResourceKind::Endpoint => format!("/registry/endpoints/{name}"),
+            ResourceKind::Job => format!("/registry/jobs/{name}"),
             ResourceKind::Unknown => return Ok(()),
         };
         let yaml = self.get_object_yaml(kind, name).await?;
@@ -819,6 +822,61 @@ impl XlineStore {
         }
 
         Ok(())
+    }
+
+    /// Insert a Job YAML definition into xline.
+    pub async fn insert_job_yaml(&self, job_name: &str, job_yaml: &str) -> Result<()> {
+        let key = format!("/registry/jobs/{job_name}");
+        let mut client = self.client.write().await;
+        client.put(key, job_yaml, Some(PutOptions::new())).await?;
+        Ok(())
+    }
+
+    /// Get a Job YAML definition from xline.
+    pub async fn get_job_yaml(&self, job_name: &str) -> Result<Option<String>> {
+        let key = format!("/registry/jobs/{job_name}");
+        let mut client = self.client.write().await;
+        let resp = client.get(key, None).await?;
+        Ok(resp
+            .kvs()
+            .first()
+            .map(|kv| String::from_utf8_lossy(kv.value()).to_string()))
+    }
+
+    /// Get a Job object from xline.
+    pub async fn get_job(&self, job_name: &str) -> Result<Option<common::Job>> {
+        match self.get_job_yaml(job_name).await? {
+            Some(yaml) => Ok(Some(serde_yaml::from_str::<common::Job>(&yaml)?)),
+            None => Ok(None),
+        }
+    }
+
+    /// List all Jobs (deserialize values).
+    pub async fn list_jobs(&self) -> Result<Vec<common::Job>> {
+        let key = "/registry/jobs/".to_string();
+        let mut client = self.client.write().await;
+        let resp = client
+            .get(key.clone(), Some(GetOptions::new().with_prefix()))
+            .await?;
+        let jobs: Vec<common::Job> = resp
+            .kvs()
+            .iter()
+            .filter_map(|kv| {
+                let yaml_str = String::from_utf8_lossy(kv.value());
+                serde_yaml::from_str::<common::Job>(&yaml_str).ok()
+            })
+            .collect();
+        Ok(jobs)
+    }
+
+    /// Delete a Job from xline (Background propagation — GC handles owned Pods).
+    pub async fn delete_job(&self, job_name: &str) -> Result<()> {
+        self.delete_object(
+            ResourceKind::Job,
+            job_name,
+            DeletePropagationPolicy::Background,
+        )
+        .await
     }
 
     async fn update_meta(

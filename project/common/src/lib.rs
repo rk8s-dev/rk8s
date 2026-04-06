@@ -102,6 +102,7 @@ pub enum ResourceKind {
     Deployment,
     ReplicaSet,
     Endpoint,
+    Job,
     #[default]
     Unknown,
 }
@@ -114,6 +115,7 @@ impl fmt::Display for ResourceKind {
             ResourceKind::Deployment => "Deployment",
             ResourceKind::ReplicaSet => "ReplicaSet",
             ResourceKind::Endpoint => "Endpoint",
+            ResourceKind::Job => "Job",
             ResourceKind::Unknown => "Unknown",
         };
         write!(f, "{}", kind)
@@ -127,6 +129,7 @@ impl From<&str> for ResourceKind {
             "Deployment" => ResourceKind::Deployment,
             "ReplicaSet" => ResourceKind::ReplicaSet,
             "Endpoint" => ResourceKind::Endpoint,
+            "Job" => ResourceKind::Job,
             _ => ResourceKind::Unknown, // Default to Unknown for unknown kinds
         }
     }
@@ -904,6 +907,12 @@ pub enum RksMessage {
     GetService(String),
     ListService,
 
+    // Job operations
+    CreateJob(Box<Job>),
+    DeleteJob(String),
+    GetJob(String),
+    ListJob,
+
     GetNodeCount,
     RegisterNode(Box<Node>),
     UserRequest(String),
@@ -971,6 +980,9 @@ pub enum RksMessage {
     // Service responses
     GetServiceRes(Box<ServiceTask>),
     ListServiceRes(Vec<ServiceTask>),
+    // Job responses
+    GetJobRes(Box<Job>),
+    ListJobRes(Vec<Job>),
     // (Podname, Podip)
     SetPodip((String, String)),
     Certificate(IssueCertificateResponse),
@@ -1176,6 +1188,14 @@ impl std::fmt::Debug for RksMessage {
                 "RksMessage::PodLogsError {{ namespace: {}, pod_name: {}, error: {} }}",
                 namespace, pod_name, error
             ),
+            Self::CreateJob(_) => f.write_str("RksMessage::CreateJob { .. }"),
+            Self::DeleteJob(name) => write!(f, "RksMessage::DeleteJob {{ name: {} }}", name),
+            Self::GetJob(name) => write!(f, "RksMessage::GetJob {{ name: {} }}", name),
+            Self::ListJob => f.write_str("RksMessage::ListJob"),
+            Self::GetJobRes(_) => f.write_str("RksMessage::GetJobRes { .. }"),
+            Self::ListJobRes(jobs) => {
+                write!(f, "RksMessage::ListJobRes {{ count: {} }}", jobs.len())
+            }
         }
     }
 }
@@ -1433,6 +1453,12 @@ impl Display for RksMessage {
             } => {
                 write!(f, "Log error for {}/{}: {}", namespace, pod_name, error)
             }
+            Self::CreateJob(job) => write!(f, "Create job '{}'", job.metadata.name),
+            Self::DeleteJob(name) => write!(f, "Delete job '{}'", name),
+            Self::GetJob(name) => write!(f, "Get job '{}'", name),
+            Self::ListJob => f.write_str("List jobs"),
+            Self::GetJobRes(job) => write!(f, "Get job '{}' response", job.metadata.name),
+            Self::ListJobRes(jobs) => write!(f, "List jobs response: {} item(s)", jobs.len()),
         }
     }
 }
@@ -1993,4 +2019,111 @@ pub struct Deployment {
     pub spec: DeploymentSpec,
     #[serde(default)]
     pub status: DeploymentStatus,
+}
+
+fn default_completions() -> i32 {
+    1
+}
+
+fn default_parallelism() -> i32 {
+    1
+}
+
+fn default_backoff_limit() -> i32 {
+    6
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+pub enum CompletionMode {
+    // Only the total number of succeeded pods matters.
+    #[serde(rename = "NonIndexed")]
+    NonIndexed,
+    // each completion index is treated independently.
+    #[serde(rename = "Indexed")]
+    Indexed,
+}
+
+fn default_completion_mode() -> CompletionMode {
+    CompletionMode::NonIndexed
+}
+
+/// Supports two modes:
+/// The historical/simple behavior is controlled by `completions` + `parallelism`:
+/// - **Single Pod** (`completions=1`, `parallelism=1`): run one Pod, succeed when it exits 0.
+/// - **Fixed-completion parallel** (`completions=N`, `parallelism=P`): maintain up to P active
+///   Pods until N Pods have succeeded.
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct JobSpec {
+    // Completion mode for how pods are tracked by completion index.
+    #[serde(default = "default_completion_mode")]
+    pub completion_mode: CompletionMode,
+    // Number of Pods that must successfully complete. Defaults to 1.
+    #[serde(default = "default_completions")]
+    pub completions: i32,
+    // Maximum number of Pods running concurrently. Defaults to 1.
+    #[serde(default = "default_parallelism")]
+    pub parallelism: i32,
+    // Number of retries before the Job is marked Failed. Defaults to 6.
+    #[serde(default = "default_backoff_limit")]
+    pub backoff_limit: i32,
+    #[serde(default)]
+    pub active_deadline_seconds: Option<i64>,
+    // Seconds after the Job finishes before it is automatically deleted.
+    #[serde(default)]
+    pub ttl_seconds_after_finished: Option<i64>,
+    // Now, spec.restartPolicy only supports never.
+    pub template: PodTemplateSpec,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+pub enum JobConditionType {
+    Complete,
+    Failed,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct JobCondition {
+    #[serde(rename = "type")]
+    pub condition_type: JobConditionType,
+    pub status: ConditionStatus,
+    #[serde(default)]
+    pub last_transition_time: Option<DateTime<Utc>>,
+    #[serde(default)]
+    pub reason: Option<String>,
+    #[serde(default)]
+    pub message: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct JobStatus {
+    #[serde(default)]
+    pub conditions: Vec<JobCondition>,
+    #[serde(default)]
+    pub start_time: Option<DateTime<Utc>>,
+    #[serde(default)]
+    pub completion_time: Option<DateTime<Utc>>,
+    // Pending or Running.
+    #[serde(default)]
+    pub active: i32,
+    #[serde(default)]
+    pub succeeded: i32,
+    #[serde(default)]
+    pub failed: i32,
+    #[serde(default)]
+    pub ready: i32,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct Job {
+    #[serde(rename = "apiVersion")]
+    pub api_version: String,
+    #[serde(rename = "kind")]
+    pub kind: String,
+    pub metadata: ObjectMeta,
+    pub spec: JobSpec,
+    #[serde(default)]
+    pub status: JobStatus,
 }
