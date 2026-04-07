@@ -38,12 +38,7 @@ impl Action for NodeAction {
                 let theta = stdout.first().unwrap().clone();
                 out_channels.broadcast(Content::new(theta)).await
             }
-            Output::Err(e) => panic!("{}", e),
-            Output::ErrWithExitCode(code, content) => panic!(
-                "Exit with {:?}, {:?}",
-                code,
-                content.unwrap().get::<(Vec<String>, Vec<String>)>()
-            ),
+            Output::Err(e) => panic!("{e}"),
             _ => panic!(),
         };
         Output::empty()

@@ -1,3 +1,4 @@
+use crate::DagrsResult;
 use crate::connection::{in_channel::InChannels, out_channel::OutChannels};
 use crate::node::{Node, NodeId, NodeName, NodeTable};
 use crate::utils::{env::EnvVar, output::FlowControl, output::Output};
@@ -56,6 +57,16 @@ pub trait LoopCondition: Send + Sync {
     /// Implementors MUST reset any internal counters or state here to ensure
     /// the loop behaves correctly on subsequent graph executions.
     fn reset(&mut self) {}
+
+    /// Restore the condition state when resuming from a checkpoint.
+    ///
+    /// `completed_iterations` is the graph-level loop jump count restored from the
+    /// checkpoint. Custom conditions that maintain their own iteration counters
+    /// should override this to keep resume semantics idempotent. The built-in
+    /// [`CountLoopCondition`] restores its internal counter from this value.
+    fn restore_from_checkpoint(&mut self, _completed_iterations: usize) -> DagrsResult<()> {
+        Ok(())
+    }
 }
 
 /// Loop node that repeats execution of a target node based on a condition
@@ -92,6 +103,11 @@ impl LoopCondition for CountLoopCondition {
 
     fn reset(&mut self) {
         self.current_iteration = 0;
+    }
+
+    fn restore_from_checkpoint(&mut self, completed_iterations: usize) -> DagrsResult<()> {
+        self.current_iteration = completed_iterations.min(self.max_iterations);
+        Ok(())
     }
 }
 
@@ -189,5 +205,17 @@ impl Node for LoopNode {
                 poisoned.into_inner()
             })
             .reset();
+    }
+
+    fn restore_from_checkpoint(&mut self, loop_count: usize) -> DagrsResult<()> {
+        self.condition
+            .lock()
+            .unwrap_or_else(|poisoned| {
+                log::warn!(
+                    "LoopNode condition mutex was poisoned during checkpoint restore, recovering"
+                );
+                poisoned.into_inner()
+            })
+            .restore_from_checkpoint(loop_count)
     }
 }

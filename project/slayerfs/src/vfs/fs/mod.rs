@@ -219,8 +219,8 @@ where
     M: MetaLayer + Send + Sync + 'static,
 {
     layout: ChunkLayout,
-    backend: Arc<Backend<S, M>>,
-    meta_layer: Arc<M>,
+    pub(crate) backend: Arc<Backend<S, M>>,
+    pub(crate) meta_layer: Arc<M>,
     root: i64,
 }
 

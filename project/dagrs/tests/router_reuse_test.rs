@@ -84,9 +84,9 @@ async fn test_router_reuse() {
     );
     let id_router = router.id();
 
-    graph.add_node(router);
-    graph.add_node(node_a);
-    graph.add_node(node_b);
+    graph.add_node(router).unwrap();
+    graph.add_node(node_a).unwrap();
+    graph.add_node(node_b).unwrap();
 
     // Add Node C downstream of B
     let exec_c = Arc::new(Mutex::new(false));
@@ -98,10 +98,10 @@ async fn test_router_reuse() {
         &mut table,
     );
     let id_c = node_c.id();
-    graph.add_node(node_c);
+    graph.add_node(node_c).unwrap();
 
-    graph.add_edge(id_router, vec![id_a, id_b]);
-    graph.add_edge(id_b, vec![id_c]);
+    graph.add_edge(id_router, vec![id_a, id_b]).unwrap();
+    graph.add_edge(id_b, vec![id_c]).unwrap();
 
     // First Run: Target A
     println!("First Run: Expect A to run");
@@ -111,7 +111,7 @@ async fn test_router_reuse() {
     assert!(!*exec_c.lock().unwrap());
 
     // Reset
-    graph.reset().await;
+    graph.reset().await.unwrap();
     *exec_a.lock().unwrap() = false;
     *exec_b.lock().unwrap() = false;
     *exec_c.lock().unwrap() = false;

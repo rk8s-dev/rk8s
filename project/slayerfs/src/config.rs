@@ -16,13 +16,19 @@ pub struct Cli {
     pub cmd: Command,
 }
 
-#[derive(Subcommand)]
+#[derive(Subcommand, Debug)]
 pub enum Command {
     /// Mount SlayerFS via FUSE.
     #[command(
         after_help = "Examples:\n  slayerfs mount --config examples/mount-config.local.yaml\n  slayerfs mount --config examples/mount-config.s3.yaml\n  slayerfs mount --config examples/mount-config.local.yaml /mnt/slayer\n  slayerfs mount --config examples/mount-config.s3.yaml --s3-bucket override-bucket"
     )]
-    Mount(MountArgs),
+    Mount(Box<MountArgs>),
+
+    /// Talk to a mounted SlayerFS instance and run orphan gc.
+    Gc(GcArgs),
+
+    /// Talk to a mounted SlayerFS instance and print mount information.
+    Info(InfoArgs),
 }
 
 #[derive(Args, Debug, Clone)]
@@ -86,6 +92,24 @@ pub struct MountArgs {
     /// Block size in bytes.
     #[arg(long)]
     pub block_size: Option<u32>,
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct GcArgs {
+    /// Optional mount point used to locate the target instance.
+    #[arg(value_name = "MOUNT_POINT")]
+    pub mount_point: Option<PathBuf>,
+
+    /// Scan only; do not delete orphan data.
+    #[arg(long, default_value_t = false)]
+    pub dry_run: bool,
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct InfoArgs {
+    /// Optional mount point used to locate the target instance.
+    #[arg(value_name = "MOUNT_POINT")]
+    pub mount_point: Option<PathBuf>,
 }
 
 #[derive(ValueEnum, Deserialize, Clone, Copy, Debug)]
@@ -249,5 +273,23 @@ impl MountConfig {
                 .or(layout_cfg.block_size)
                 .unwrap_or(DEFAULT_BLOCK_SIZE),
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::Parser;
+
+    #[test]
+    fn info_subcommand_parses_mount_point() {
+        let cli = Cli::parse_from(["slayerfs", "info", "/mnt/slayer"]);
+
+        match cli.cmd {
+            Command::Info(args) => {
+                assert_eq!(args.mount_point, Some(PathBuf::from("/mnt/slayer")));
+            }
+            other => panic!("expected info command, got {other:?}"),
+        }
     }
 }

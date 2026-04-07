@@ -1,76 +1,81 @@
-use std::{collections::HashMap, marker::PhantomData, sync::Arc};
+use std::{
+    collections::{HashMap, HashSet},
+    marker::PhantomData,
+    sync::Arc,
+};
 
-use futures::future::join_all;
-use futures::future::select_ok;
+use futures::future::{join_all, select_ok};
 use tokio::sync::{Mutex, broadcast, mpsc};
 
 use crate::NodeId;
+use crate::graph::error::{DagrsError, DagrsResult, ErrorCode};
 
 use super::information_packet::Content;
 
-/// # Input Channels
-/// A hash-table mapping `NodeId` to `InChannel`. In **Dagrs**, each `Node` stores input
-/// channels in this map, enabling `Node` to receive information packets from other `Node`s.
 #[derive(Default)]
-pub struct InChannels(pub(crate) HashMap<NodeId, Arc<Mutex<InChannel>>>);
+pub struct InChannels(
+    pub(crate) HashMap<NodeId, Arc<Mutex<InChannel>>>,
+    pub(crate) HashSet<NodeId>,
+);
 
 impl InChannels {
-    /// Perform an asynchronous receive on the incoming channel from `NodeId`.
-    pub async fn recv_from(&mut self, id: &NodeId) -> Result<Content, RecvErr> {
+    pub async fn recv_from(&mut self, id: &NodeId) -> DagrsResult<Content> {
+        if self.is_disabled(id) {
+            return Err(disabled_channel(*id));
+        }
         match self.get(id) {
-            Some(channel) => channel.lock().await.recv().await,
-            None => Err(RecvErr::NoSuchChannel),
+            Some(channel) => channel.lock().await.recv(*id).await,
+            None => Err(no_such_channel(*id)),
         }
     }
 
-    /// Receives data from any available channel and returns both the sender's ID and the content.
-    /// This method will wait until any channel has data available.
-    pub async fn recv_any(&mut self) -> Result<(NodeId, Content), RecvErr> {
+    pub async fn recv_any(&mut self) -> DagrsResult<(NodeId, Content)> {
         let mut futures = Vec::new();
-        let ids: Vec<NodeId> = self.keys();
+        let ids = self.keys();
 
         for id in ids {
-            let channel = self.get(&id).ok_or(RecvErr::NoSuchChannel)?;
+            let channel = self.get(&id).ok_or_else(|| no_such_channel(id))?;
             let fut = Box::pin(async move {
-                let content = channel.lock().await.recv().await?;
-                Ok::<_, RecvErr>((id, content))
+                let content = channel.lock().await.recv(id).await?;
+                Ok::<_, DagrsError>((id, content))
             });
             futures.push(fut);
         }
 
         if futures.is_empty() {
-            return Err(RecvErr::NoSuchChannel);
+            return Err(no_such_channel(NodeId(0)).with_detail("scope", "recv_any"));
         }
 
         match select_ok(futures).await {
             Ok((result, _)) => Ok(result),
-            Err(_) => Err(RecvErr::Closed),
+            Err(err) => Err(err),
         }
     }
 
-    /// Calls `recv` for all the [`InChannel`]s, and applies transformation `f` to
-    /// the return values of the call asynchronously.
     pub async fn map<F, T>(&mut self, f: F) -> Vec<T>
     where
-        F: FnMut(Result<Content, RecvErr>) -> T,
+        F: FnMut(DagrsResult<Content>) -> T,
     {
+        let disabled = self.1.clone();
         let futures = self
             .0
             .iter_mut()
-            .map(|(_, c)| async { c.lock().await.recv().await });
+            .filter(|(id, _)| !disabled.contains(id))
+            .map(|(id, c)| async move { c.lock().await.recv(*id).await });
         join_all(futures).await.into_iter().map(f).collect()
     }
 
-    /// Close the channel by the given `NodeId` asynchronously, and remove the channel in this map.
     pub async fn close(&mut self, id: &NodeId) {
         if let Some(c) = self.get(id) {
             c.lock().await.close();
             self.0.remove(id);
+            self.1.remove(id);
         }
     }
 
     pub(crate) fn insert(&mut self, node_id: NodeId, channel: Arc<Mutex<InChannel>>) {
         self.0.insert(node_id, channel);
+        self.1.remove(&node_id);
     }
 
     pub(crate) async fn close_all(&mut self) {
@@ -78,9 +83,23 @@ impl InChannels {
         for channel in channels {
             channel.lock().await.close();
         }
+        self.1.clear();
     }
 
-    /// Returns a list of all available sender node IDs.
+    pub(crate) fn disable_sender(&mut self, node_id: NodeId) {
+        if self.0.contains_key(&node_id) {
+            self.1.insert(node_id);
+        }
+    }
+
+    pub(crate) fn enable_sender(&mut self, node_id: NodeId) {
+        self.1.remove(&node_id);
+    }
+
+    pub(crate) fn clear_disabled(&mut self) {
+        self.1.clear();
+    }
+
     pub fn get_sender_ids(&self) -> Vec<NodeId> {
         self.keys()
     }
@@ -90,116 +109,120 @@ impl InChannels {
     }
 
     fn keys(&self) -> Vec<NodeId> {
-        self.0.keys().copied().collect()
+        self.0
+            .keys()
+            .filter(|id| !self.is_disabled(id))
+            .copied()
+            .collect()
+    }
+
+    fn is_disabled(&self, id: &NodeId) -> bool {
+        self.1.contains(id)
     }
 }
 
-/// # Input Channel
-/// Wrapper of receivers of `tokio::sync::mpsc` and `tokio::sync::broadcast`. **Dagrs** will
-/// decide the inner type of channel when building the graph.
-/// Learn more about [Tokio Channels](https://tokio.rs/tokio/tutorial/channels).
 pub enum InChannel {
-    /// Receiver of a `tokio::sync::mpsc` channel.
     Mpsc(mpsc::Receiver<Content>),
-    /// Receiver of a `tokio::sync::broadcast` channel.
     Bcst(broadcast::Receiver<Content>),
 }
 
 impl InChannel {
-    /// Perform an asynchronous receive on this channel.
-    async fn recv(&mut self) -> Result<Content, RecvErr> {
+    async fn recv(&mut self, channel_id: NodeId) -> DagrsResult<Content> {
         match self {
-            InChannel::Mpsc(receiver) => {
-                if let Some(content) = receiver.recv().await {
-                    Ok(content)
-                } else {
-                    Err(RecvErr::Closed)
-                }
-            }
+            InChannel::Mpsc(receiver) => receiver.recv().await.ok_or_else(|| {
+                DagrsError::new(ErrorCode::DgChn0002Closed, "channel is closed")
+                    .with_channel(channel_id.as_usize())
+            }),
             InChannel::Bcst(receiver) => match receiver.recv().await {
                 Ok(v) => Ok(v),
-                Err(e) => match e {
-                    broadcast::error::RecvError::Closed => Err(RecvErr::Closed),
-                    broadcast::error::RecvError::Lagged(x) => Err(RecvErr::Lagged(x)),
-                },
+                Err(broadcast::error::RecvError::Closed) => Err(DagrsError::new(
+                    ErrorCode::DgChn0002Closed,
+                    "channel is closed",
+                )
+                .with_channel(channel_id.as_usize())),
+                Err(broadcast::error::RecvError::Lagged(x)) => Err(DagrsError::new(
+                    ErrorCode::DgChn0003Lagged,
+                    "channel receiver lagged behind broadcast sender",
+                )
+                .with_channel(channel_id.as_usize())
+                .with_detail("lagged", x.to_string())),
             },
         }
     }
-    /// Close the channel and drop the messages inside.
+
     fn close(&mut self) {
         match self {
             InChannel::Mpsc(receiver) => receiver.close(),
-            // Broadcast channel will be closed after `self` is dropped.
             InChannel::Bcst(_) => (),
         }
     }
 }
 
-/// # Typed Input Channels
-/// A hash-table mapping `NodeId` to `InChannel`. This provides type-safe channel communication
-/// between nodes.
 #[derive(Default)]
 pub struct TypedInChannels<T: Send + Sync + 'static>(
     pub(crate) HashMap<NodeId, Arc<Mutex<InChannel>>>,
-    // maker for type T
+    pub(crate) HashSet<NodeId>,
     pub(crate) PhantomData<T>,
 );
 
 impl<T: Send + Sync + 'static> TypedInChannels<T> {
-    /// Perform an asynchronous receive on the incoming channel from `NodeId`.
-    pub async fn recv_from(&mut self, id: &NodeId) -> Result<Option<Arc<T>>, RecvErr> {
+    pub async fn recv_from(&mut self, id: &NodeId) -> DagrsResult<Option<Arc<T>>> {
+        if self.is_disabled(id) {
+            return Err(disabled_channel(*id));
+        }
         match self.get(id) {
             Some(channel) => {
-                let content: Content = channel.lock().await.recv().await?;
+                let content: Content = channel.lock().await.recv(*id).await?;
                 Ok(content.into_inner())
             }
-            None => Err(RecvErr::NoSuchChannel),
+            None => Err(no_such_channel(*id)),
         }
     }
 
-    /// Receives typed data from any available channel and returns both the sender's ID and the typed content.
-    /// This method will wait until any channel has data available.
-    pub async fn recv_any(&mut self) -> Result<(NodeId, Option<Arc<T>>), RecvErr> {
+    pub async fn recv_any(&mut self) -> DagrsResult<(NodeId, Option<Arc<T>>)> {
         let mut futures = Vec::new();
-        let ids: Vec<NodeId> = self.keys();
+        let ids = self.keys();
 
         for id in ids {
-            let channel = self.get(&id).ok_or(RecvErr::NoSuchChannel)?;
+            let channel = self.get(&id).ok_or_else(|| no_such_channel(id))?;
             let fut = Box::pin(async move {
-                let content: Content = channel.lock().await.recv().await?;
-                Ok::<_, RecvErr>((id, content.into_inner()))
+                let content: Content = channel.lock().await.recv(id).await?;
+                Ok::<_, DagrsError>((id, content.into_inner()))
             });
             futures.push(fut);
         }
 
         if futures.is_empty() {
-            return Err(RecvErr::NoSuchChannel);
+            return Err(no_such_channel(NodeId(0)).with_detail("scope", "typed_recv_any"));
         }
 
         match select_ok(futures).await {
             Ok((result, _)) => Ok(result),
-            Err(_) => Err(RecvErr::Closed),
+            Err(err) => Err(err),
         }
     }
 
-    /// Calls `recv` for all the [`InChannel`]s, and applies transformation `f` to
-    /// the return values of the call asynchronously.
     pub async fn map<F, U>(&mut self, f: F) -> Vec<U>
     where
-        F: FnMut(Result<Option<Arc<T>>, RecvErr>) -> U,
+        F: FnMut(DagrsResult<Option<Arc<T>>>) -> U,
     {
-        let futures = self.0.iter_mut().map(|(_, c)| async {
-            let content: Content = c.lock().await.recv().await?;
-            Ok(content.into_inner())
-        });
+        let disabled = self.1.clone();
+        let futures = self
+            .0
+            .iter_mut()
+            .filter(|(id, _)| !disabled.contains(id))
+            .map(|(id, c)| async move {
+                let content: Content = c.lock().await.recv(*id).await?;
+                Ok(content.into_inner())
+            });
         join_all(futures).await.into_iter().map(f).collect()
     }
 
-    /// Close the channel by the given `NodeId` asynchronously, and remove the channel in this map.
     pub async fn close(&mut self, id: &NodeId) {
         if let Some(c) = self.get(id) {
             c.lock().await.close();
             self.0.remove(id);
+            self.1.remove(id);
         }
     }
 
@@ -208,18 +231,28 @@ impl<T: Send + Sync + 'static> TypedInChannels<T> {
     }
 
     fn keys(&self) -> Vec<NodeId> {
-        self.0.keys().copied().collect()
+        self.0
+            .keys()
+            .filter(|id| !self.is_disabled(id))
+            .copied()
+            .collect()
+    }
+
+    fn is_disabled(&self, id: &NodeId) -> bool {
+        self.1.contains(id)
     }
 }
 
-/// # Input Channel Error Types
-/// - NoSuchChannel: try to get a channel with an invalid `NodeId`.
-/// - Closed: the channel to receive messages from is closed and empty already.
-/// - Lagged(x): the channel encounters a cache overflow and `x` information
-///   pakages are dropped on this receiver's side.
-#[derive(Debug)]
-pub enum RecvErr {
-    NoSuchChannel,
-    Closed,
-    Lagged(u64),
+fn no_such_channel(id: NodeId) -> DagrsError {
+    DagrsError::new(ErrorCode::DgChn0001NoSuchChannel, "channel not found")
+        .with_channel(id.as_usize())
+}
+
+fn disabled_channel(id: NodeId) -> DagrsError {
+    DagrsError::new(
+        ErrorCode::DgChn0002Closed,
+        "channel is disabled by restored control flow state",
+    )
+    .with_channel(id.as_usize())
+    .with_detail("state", "disabled")
 }

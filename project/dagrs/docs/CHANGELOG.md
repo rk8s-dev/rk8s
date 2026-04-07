@@ -5,6 +5,49 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.1] - 2026-03-23
+
+### Changed
+- **Unified Error Contract**:
+  - Introduced `DagrsError` and `ErrorCode` as the stable public error surface.
+  - Replaced string-based node errors and channel/checkpoint-specific public error enums with structured errors.
+  - Command-style example errors now carry exit metadata through `DagrsError.context`.
+- **Build API Contract**:
+  - `Graph::add_node(...)`, `Graph::add_edge(...)`, and `LoopSubgraph::add_node(...)` now return `Result`.
+  - Graph construction paths now reject duplicate node IDs and invalid edges with stable error codes instead of panicking.
+- **Execution Contract**:
+  - `Graph::async_start()` and checkpoint resume APIs now return `ExecutionReport`.
+  - `reset()` preserves caller-provided environment state by default; `reset_with(...)` provides explicit reset control.
+  - Runtime panic and join failures are surfaced through structured runtime error codes.
+- **Event / Hook / Checkpoint Contract**:
+  - `GraphEvent::ExecutionTerminated` replaces `GraphFinished` as the final execution signal.
+  - `Progress` events are emitted during execution at block granularity.
+  - `ExecutionHook::on_error` has been removed; failures are reported via `DagrsError`, `NodeFailed`, and `ExecutionTerminated`.
+  - Checkpoint node state now uses `NodeExecStatus`, `Output::empty()` is persisted as successful completion, serializable outputs are replayed into downstream channels on resume, and restored skipped parents are hidden from downstream input selection until they execute again.
+- **Examples & Tests**:
+  - Updated examples, `dagrs-sklearn`, tests, and docs to the new build/runtime/error APIs.
+
+### Removed
+- `Output::ErrWithExitCode(...)`.
+- `GraphEvent::GraphFinished`.
+- `CheckpointConfig::before_conditional`.
+- `ExecutionHook::on_error`.
+- Public reliance on `GraphError`, `RecvErr`, `SendErr`, and `CheckpointError`.
+
+### Migration
+- Replace:
+  - `graph.add_node(node);`
+  - `graph.add_edge(from, to);`
+  - `loop_subgraph.add_node(node);`
+  - `let _: () = graph.async_start().await?;`
+  - `GraphEvent::GraphFinished`
+- With:
+  - `graph.add_node(node)?;`
+  - `graph.add_edge(from, to)?;`
+  - `loop_subgraph.add_node(node)?;`
+  - `let report = graph.async_start().await?;`
+  - `GraphEvent::ExecutionTerminated { .. }`
+
 ## [0.8.0] - 2026-03-17
 
 ### Changed

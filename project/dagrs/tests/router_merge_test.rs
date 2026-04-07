@@ -85,14 +85,14 @@ async fn test_router_merge() {
     );
     let id_router = router.id();
 
-    graph.add_node(router);
-    graph.add_node(node_b);
-    graph.add_node(node_c);
-    graph.add_node(node_d);
+    graph.add_node(router).unwrap();
+    graph.add_node(node_b).unwrap();
+    graph.add_node(node_c).unwrap();
+    graph.add_node(node_d).unwrap();
 
-    graph.add_edge(id_router, vec![id_b, id_c]);
-    graph.add_edge(id_b, vec![id_d]);
-    graph.add_edge(id_c, vec![id_d]);
+    graph.add_edge(id_router, vec![id_b, id_c]).unwrap();
+    graph.add_edge(id_b, vec![id_d]).unwrap();
+    graph.add_edge(id_c, vec![id_d]).unwrap();
 
     match graph.async_start().await {
         Ok(_) => {}

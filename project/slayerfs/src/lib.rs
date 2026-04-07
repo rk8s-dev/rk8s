@@ -4,6 +4,7 @@
 
 pub mod cadapter;
 pub mod chunk;
+pub(crate) mod control;
 pub mod daemon;
 pub(crate) mod fs;
 pub mod fuse;

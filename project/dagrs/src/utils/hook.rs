@@ -1,3 +1,4 @@
+use crate::DagrsError;
 use crate::node::Node;
 use crate::utils::env::EnvVar;
 use crate::utils::output::Output;
@@ -18,7 +19,8 @@ pub enum RetryDecision {
 /// Execution hook trait for monitoring node execution
 ///
 /// Hooks allow users to inject custom logic at specific points in a node's lifecycle.
-/// They are useful for logging, monitoring, error reporting, or modifying execution context.
+/// They are intended for in-band execution customisation such as retry control or
+/// node-scoped side effects. For general observability, prefer `GraphEvent`.
 ///
 /// # Thread Safety
 /// Hooks are executed in the same async task as the node.
@@ -49,13 +51,6 @@ pub trait ExecutionHook: Send + Sync {
     /// * `env` - The global environment variables.
     async fn after_node_run(&self, node: &dyn Node, output: &Output, env: &Arc<EnvVar>);
 
-    /// Called when a node execution fails (returns an error or panics).
-    ///
-    /// # Arguments
-    /// * `error` - The error that occurred (as a Send + Sync trait object).
-    /// * `env` - The global environment variables.
-    async fn on_error(&self, error: &(dyn std::error::Error + Send + Sync), env: &Arc<EnvVar>);
-
     /// Called when a node is about to be retried after a failure.
     ///
     /// This hook is called before each retry attempt.
@@ -77,7 +72,7 @@ pub trait ExecutionHook: Send + Sync {
     async fn on_retry(
         &self,
         _node: &dyn Node,
-        _error: &(dyn std::error::Error + Send + Sync),
+        _error: &DagrsError,
         _attempt: u32,
         _max_retries: u32,
         _env: &Arc<EnvVar>,

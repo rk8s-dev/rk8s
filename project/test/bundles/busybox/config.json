@@ -6,6 +6,15 @@
   },
   "mounts": [
     {
+      "destination": "/etc/resolv.conf",
+      "type": "bind",
+      "source": "/tmp/rkl-netavark/resolv.conf",
+      "options": [
+        "ro",
+        "rbind"
+      ]
+    },
+    {
       "destination": "/proc",
       "type": "proc",
       "source": "proc"
@@ -104,6 +113,7 @@
         "CAP_FSETID",
         "CAP_SETGID",
         "CAP_SETFCAP",
+        "CAP_CHOWN",
         "CAP_SETPCAP",
         "CAP_SYS_CHROOT",
         "CAP_NET_RAW",
@@ -120,6 +130,7 @@
         "CAP_FSETID",
         "CAP_SETGID",
         "CAP_SETFCAP",
+        "CAP_CHOWN",
         "CAP_SETPCAP",
         "CAP_SYS_CHROOT",
         "CAP_NET_RAW",
@@ -136,6 +147,7 @@
         "CAP_FSETID",
         "CAP_SETGID",
         "CAP_SETFCAP",
+        "CAP_CHOWN",
         "CAP_SETPCAP",
         "CAP_SYS_CHROOT",
         "CAP_NET_RAW",
@@ -152,6 +164,7 @@
         "CAP_FSETID",
         "CAP_SETGID",
         "CAP_SETFCAP",
+        "CAP_CHOWN",
         "CAP_SETPCAP",
         "CAP_SYS_CHROOT",
         "CAP_NET_RAW",
@@ -168,6 +181,7 @@
         "CAP_FSETID",
         "CAP_SETGID",
         "CAP_SETFCAP",
+        "CAP_CHOWN",
         "CAP_SETPCAP",
         "CAP_SYS_CHROOT",
         "CAP_NET_RAW",

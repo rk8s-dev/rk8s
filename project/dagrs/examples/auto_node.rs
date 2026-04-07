@@ -10,7 +10,7 @@ use dagrs::{EmptyAction, EnvVar, InChannels, Node, NodeTable, OutChannels, auto_
 struct MyNode {/*Put customized fields here.*/}
 
 #[auto_node]
-struct _MyNodeGeneric<T, 'a> {
+struct _MyNodeGeneric<'a, T: Send + Sync> {
     /*Put customized fields here.*/
     my_field: Vec<T>,
     my_name: &'a str,

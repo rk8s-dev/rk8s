@@ -128,10 +128,14 @@ impl Parser for YamlParser {
             task.init_precursors(pres.clone());
         }
 
-        tasks.into_iter().for_each(|task| dag.add_node(task));
-        edges.into_iter().for_each(|(x, ys)| {
-            dag.add_edge(x, ys);
-        });
+        tasks.into_iter()
+            .try_for_each(|task| {
+                dag.add_node(task)
+                    .map(|_| ())
+                    .map_err(|err| ParseError(err.to_string()))
+            })?;
+        edges.into_iter()
+            .try_for_each(|(from, to)| dag.add_edge(from, to).map_err(|err| ParseError(err.to_string())))?;
 
         let env_var = EnvVar::new(node_table);
         dag.set_env(env_var.clone());

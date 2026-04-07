@@ -10,6 +10,8 @@ pub use manager::ControllerManager;
 
 pub mod endpoint_controller;
 pub mod garbage_collector;
+pub mod job;
 pub mod nftrules_controller;
 
+pub use job::JobController;
 pub use nftrules_controller::NftablesController;

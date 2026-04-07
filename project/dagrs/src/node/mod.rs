@@ -19,6 +19,7 @@ use async_trait::async_trait;
 use tokio::sync::Mutex;
 
 use crate::{
+    DagrsResult,
     connection::{in_channel::InChannels, out_channel::OutChannels},
     utils::{env::EnvVar, output::Output},
 };
@@ -113,6 +114,14 @@ pub trait Node: Send + Sync {
     /// - Nodes with internal state (e.g., counters, buffers) **MUST** implement this method
     ///   to ensure correct behavior when the graph is re-executed.
     fn reset(&mut self) {}
+
+    /// Restore node-internal execution state from checkpoint metadata.
+    ///
+    /// The default implementation is a no-op. Nodes with internal scheduling state
+    /// that affects resume semantics, such as loop controllers, should override this.
+    fn restore_from_checkpoint(&mut self, _loop_count: usize) -> DagrsResult<()> {
+        Ok(())
+    }
 }
 
 #[derive(Debug, Hash, PartialEq, Eq, Clone, Copy, Ord, PartialOrd)]
@@ -169,7 +178,7 @@ impl NodeTable {
 impl EnvVar {
     /// Get a [`Node`]'s [`NodeId`] by providing its name.
     pub fn get_node_id(&self, node_name: &str) -> Option<&NodeId> {
-        let node_table: &NodeTable = self.get_ref(NODE_TABLE_STR).unwrap();
-        node_table.get(node_name)
+        self.get_ref::<NodeTable>(NODE_TABLE_STR)
+            .and_then(|node_table| node_table.get(node_name))
     }
 }

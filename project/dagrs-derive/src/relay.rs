@@ -54,23 +54,23 @@ pub(crate) fn add_relay(relaies: Relaies) -> proc_macro2::TokenStream {
         use dagrs::NodeId;
         use std::collections::HashMap;
         use std::collections::HashSet;
-        let mut edge: HashMap<NodeId, HashSet<NodeId>> = HashMap::new();
-        let mut graph = Graph::new();
+        let mut __dagrs_edge_map: HashMap<NodeId, HashSet<NodeId>> = HashMap::new();
+        let mut __dagrs_graph = Graph::new();
     ));
     for relay in relaies.0.iter() {
         let task = relay.task.clone();
         token.extend(quote::quote!(
-            let task_id = #task.id();
-            if(!edge.contains_key(&task_id)){
-                edge.insert(task_id, HashSet::new());
+            let __dagrs_task_id = #task.id();
+            if !__dagrs_edge_map.contains_key(&__dagrs_task_id) {
+                __dagrs_edge_map.insert(__dagrs_task_id, HashSet::new());
             }
         ));
         for successor in relay.successors.iter() {
             token.extend(quote::quote!(
-                let successor_id = #successor.id();
-                edge.entry(task_id)
+                let __dagrs_successor_id = #successor.id();
+                __dagrs_edge_map.entry(__dagrs_task_id)
                 .or_insert_with(HashSet::new)
-                .insert(successor_id);
+                .insert(__dagrs_successor_id);
             ));
         }
     }
@@ -78,28 +78,30 @@ pub(crate) fn add_relay(relaies: Relaies) -> proc_macro2::TokenStream {
         let task = relay.task.clone();
         if !cache.contains(&task) {
             token.extend(quote::quote!(
-                graph.add_node(#task);
+                __dagrs_graph.add_node(#task)?;
             ));
             cache.insert(task);
         }
         for successor in relay.successors.iter() {
             if !cache.contains(successor) {
                 token.extend(quote::quote!(
-                    graph.add_node(#successor);
+                    __dagrs_graph.add_node(#successor)?;
                 ));
                 cache.insert(successor.clone());
             }
         }
     }
-    token.extend(quote::quote!(for (key, value) in &edge {
-        let vec = value.iter().cloned().collect();
-        graph.add_edge(key.clone(), vec);
-    }));
+    token.extend(quote::quote!(
+        for (__dagrs_from_id, __dagrs_to_ids) in &__dagrs_edge_map {
+            let __dagrs_targets = __dagrs_to_ids.iter().cloned().collect::<Vec<NodeId>>();
+            __dagrs_graph.add_edge(*__dagrs_from_id, __dagrs_targets)?;
+        }
+    ));
 
     quote::quote!(
         {
             #token;
-            graph
+            Ok::<dagrs::Graph, dagrs::DagrsError>(__dagrs_graph)
         }
     )
 }

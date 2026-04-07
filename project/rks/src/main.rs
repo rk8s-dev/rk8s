@@ -15,7 +15,7 @@ mod vault;
 use crate::controllers::endpoint_controller::EndpointController;
 use crate::controllers::garbage_collector::GarbageCollector;
 use crate::controllers::{
-    CONTROLLER_MANAGER, ControllerManager, DeploymentController, NftablesController,
+    CONTROLLER_MANAGER, ControllerManager, DeploymentController, JobController, NftablesController,
     ReplicaSetController,
 };
 use crate::dns::authority::{run_dns_server, setup_dns_nftable};
@@ -411,6 +411,7 @@ async fn register_controllers(
     let ep = EndpointController::new(xline_store.clone());
     let deploy = DeploymentController::new(xline_store.clone());
     let nft = NftablesController::new(xline_store.clone(), node_registry);
+    let job = JobController::new(xline_store.clone());
 
     mgr.clone()
         .register(Arc::new(RwLock::new(gc)), workers)
@@ -426,6 +427,9 @@ async fn register_controllers(
         .await?;
     mgr.clone()
         .register(Arc::new(RwLock::new(nft)), workers)
+        .await?;
+    mgr.clone()
+        .register(Arc::new(RwLock::new(job)), workers)
         .await?;
     Ok(())
 }

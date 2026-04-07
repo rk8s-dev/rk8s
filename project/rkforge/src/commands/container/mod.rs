@@ -127,7 +127,6 @@ pub struct ContainerRunner {
     volumes: Option<Vec<String>>,
     requested_devices: Vec<DeviceRequest>,
     ip: Option<IpAddr>,
-
     compose_assigned_ip: Option<IpAddr>,
     /// Persistent overlay rootfs mount (None when disabled)
     rootfs_mount: Option<RootfsMount>,
@@ -493,6 +492,7 @@ impl ContainerRunner {
         let container_id = id.unwrap_or_else(|| self.container_id.clone());
 
         if self.determine_single_status() {
+            debug!("container");
             let state = self.get_container_state()?;
             let pid = state
                 .pid
@@ -502,6 +502,7 @@ impl ContainerRunner {
             let ip = setup_rootful_bridge(&netns_path, &container_id, spec)?;
             self.ip = Some(IpAddr::V4(ip));
         } else if let Some(ip) = self.compose_assigned_ip {
+            debug!("compose");
             self.ip = Some(ip);
         }
         start(

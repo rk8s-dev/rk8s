@@ -34,6 +34,7 @@ fn test_container_commands() {
     let result = container_execute(ContainerCommand::Run {
         container_yaml: container_path.clone(),
         volumes: None,
+        device: vec![],
     });
     // Note: In test environment without proper runtime setup, commands may fail
     // We just ensure they don't panic

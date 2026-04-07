@@ -206,6 +206,7 @@ impl Controller for GarbageCollector {
             ResourceKind::Pod,
             ResourceKind::ReplicaSet,
             ResourceKind::Deployment,
+            ResourceKind::Job,
         ]
     }
 

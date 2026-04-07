@@ -16,41 +16,39 @@ pub(crate) fn auto_node(args: TokenStream, input: TokenStream) -> TokenStream {
     let mut item_struct = parse_macro_input!(input as ItemStruct);
     let _ = parse_macro_input!(args as parse::Nothing);
 
-    let generics = &item_struct.generics;
+    if let Some(err) = ensure_reserved_fields_are_available(&item_struct) {
+        return err.into_compile_error().into();
+    }
 
-    let field_id = syn::Field::parse_named
-        .parse2(quote! {
-            id: dagrs::NodeId
-        })
-        .unwrap();
+    let field_id = match parse_named_field(quote! { id: dagrs::NodeId }) {
+        Ok(field) => field,
+        Err(err) => return err.into_compile_error().into(),
+    };
 
-    let field_name = syn::Field::parse_named
-        .parse2(quote! {
-            name: String
-        })
-        .unwrap();
+    let field_name = match parse_named_field(quote! { name: String }) {
+        Ok(field) => field,
+        Err(err) => return err.into_compile_error().into(),
+    };
 
-    let field_in_channels = syn::Field::parse_named
-        .parse2(quote! {
-            input_channels: dagrs::InChannels
-        })
-        .unwrap();
+    let field_in_channels = match parse_named_field(quote! { input_channels: dagrs::InChannels }) {
+        Ok(field) => field,
+        Err(err) => return err.into_compile_error().into(),
+    };
 
-    let field_out_channels = syn::Field::parse_named
-        .parse2(quote! {
-            output_channels: dagrs::OutChannels
-        })
-        .unwrap();
+    let field_out_channels = match parse_named_field(quote! { output_channels: dagrs::OutChannels })
+    {
+        Ok(field) => field,
+        Err(err) => return err.into_compile_error().into(),
+    };
 
-    let field_action = syn::Field::parse_named
-        .parse2(quote! {
-            action: Box<dyn dagrs::Action>
-        })
-        .unwrap();
+    let field_action = match parse_named_field(quote! { action: Box<dyn dagrs::Action> }) {
+        Ok(field) => field,
+        Err(err) => return err.into_compile_error().into(),
+    };
 
     let auto_impl = auto_impl_node(
         &item_struct.ident,
-        generics,
+        &item_struct.generics,
         &field_id,
         &field_name,
         &field_in_channels,
@@ -97,6 +95,33 @@ pub(crate) fn auto_node(args: TokenStream, input: TokenStream) -> TokenStream {
     .into()
 }
 
+fn parse_named_field(tokens: proc_macro2::TokenStream) -> syn::Result<Field> {
+    syn::Field::parse_named.parse2(tokens)
+}
+
+fn ensure_reserved_fields_are_available(item_struct: &ItemStruct) -> Option<syn::Error> {
+    const RESERVED_FIELDS: [&str; 5] =
+        ["id", "name", "input_channels", "output_channels", "action"];
+
+    match &item_struct.fields {
+        syn::Fields::Named(fields) => {
+            for field in &fields.named {
+                if let Some(ident) = &field.ident {
+                    if RESERVED_FIELDS.contains(&ident.to_string().as_str()) {
+                        return Some(syn::Error::new_spanned(
+                            ident,
+                            format!("field `{ident}` is reserved by `auto_node`"),
+                        ));
+                    }
+                }
+            }
+            None
+        }
+        syn::Fields::Unit => None,
+        syn::Fields::Unnamed(_) => None,
+    }
+}
+
 fn auto_impl_node(
     struct_ident: &Ident,
     generics: &Generics,
@@ -106,6 +131,7 @@ fn auto_impl_node(
     field_out_channels: &Field,
     field_action: &Field,
 ) -> proc_macro2::TokenStream {
+    let (impl_generics, ty_generics, where_clause) = generics.split_for_impl();
     let mut impl_tokens = proc_macro2::TokenStream::new();
     impl_tokens.extend([
         impl_id(field_id),
@@ -117,11 +143,9 @@ fn auto_impl_node(
 
     quote::quote!(
         #[dagrs::async_trait::async_trait]
-        impl #generics dagrs::Node for #struct_ident #generics {
+        impl #impl_generics dagrs::Node for #struct_ident #ty_generics #where_clause {
             #impl_tokens
         }
-        unsafe impl #generics Send for #struct_ident #generics{}
-        unsafe impl #generics Sync for #struct_ident #generics{}
     )
 }
 

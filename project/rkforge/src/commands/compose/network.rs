@@ -1,4 +1,5 @@
 use ipnet::IpNet;
+
 use libruntime::cri::cri_api::Mount;
 
 use netavark::commands::setup::Setup;
@@ -6,6 +7,7 @@ use netavark::commands::teardown::Teardown;
 use netavark::network::types::Network;
 use netavark::network::types::NetworkOptions;
 use netavark::network::types::PerNetworkOptions;
+
 use netavark::network::types::Subnet;
 use std::collections::HashMap;
 use std::ffi::OsString;
@@ -31,6 +33,11 @@ use crate::commands::container::network::{bind_mount_netns, unbind_mount_netns};
 use anyhow::Result;
 use anyhow::anyhow;
 use tracing::{debug, warn};
+
+/// this path is container resolv.conf location
+const CONTAINER_RESOLV_PATH: &str = "/etc/resolv.conf";
+/// this path is used to save netavark config dir
+const DEAULT_NETAVARK_CONFIG_DIR: &str = "/run/containers/networks";
 
 #[derive(Debug)]
 struct NetworkSubnet {
@@ -233,168 +240,179 @@ impl NetworkManager {
         Ok(())
     }
 
-    pub(crate) fn after_container_started(&self, runner: ContainerRunner) -> Result<()> {
-        let container_id = runner.id();
-        if runner
-            .ip()
-            .unwrap_or(IpAddr::V4(Ipv4Addr::UNSPECIFIED))
-            .is_ipv4()
-        {
-            let alias = vec![runner.id()];
-            let mut networks = HashMap::new();
-            let mut network_info = HashMap::new();
-            for (network_name, _) in self.map.clone() {
-                let network_se = match self.network_service.get(&network_name) {
-                    Some(network) => network,
-                    None => continue,
-                };
-                for (_container, container_spec) in network_se {
-                    let Some(container_name) = container_spec.container_name.as_ref() else {
-                        continue;
-                    };
-                    if *container_name == container_id {
-                        let container_ip = self
-                            .get_container_ip(&container_id, &network_name)
-                            .map(IpAddr::V4)
-                            .ok_or_else(|| {
-                                anyhow!(
-                                    "[container {}] No allocated IP for network {}",
-                                    container_id,
-                                    network_name
-                                )
-                            })?;
-                        let (gateway, subnet_net) = self
-                            .network_subnets
-                            .get(&network_name)
-                            .map(|s| {
-                                (
-                                    s.gateway,
-                                    IpNet::new(IpAddr::V4(s.subnet.network()), s.subnet.prefix())
-                                        .unwrap(),
-                                )
-                            })
-                            .ok_or_else(|| anyhow!("No subnet for network {}", network_name))?;
-                        let network_opts = PerNetworkOptions {
-                            aliases: Some(alias.clone()),
-                            interface_name: self
-                                .network_interface
-                                .get(&network_name)
-                                .unwrap_or(&"vethcni0".to_string())
-                                .clone(),
-                            static_ips: Some(vec![container_ip]),
-                            static_mac: None,
-                            options: None,
-                        };
-                        let network_interface = Some(
-                            self.network_interface
-                                .get(&network_name)
-                                .unwrap_or(&"vethcni0".to_string())
-                                .clone(),
-                        );
-                        let network = Network {
-                            dns_enabled: true,
-                            driver: "bridge".to_string(),
-                            id: network_name.clone(),
-                            internal: false,
-                            ipv6_enabled: false,
-                            name: network_name.clone(),
-                            network_interface,
-                            options: None,
-                            ipam_options: None,
-                            subnets: Some(vec![Subnet {
-                                gateway: Some(IpAddr::V4(gateway)),
-                                lease_range: None,
-                                subnet: subnet_net,
-                            }]),
-                            routes: None,
-                            network_dns_servers: Some(vec![]),
-                        };
-
-                        networks.insert(network_name.clone(), network_opts);
-                        network_info.insert(network_name, network);
-                        break;
-                    }
-                }
-            }
-            let opts = NetworkOptions {
-                container_id: runner.id(),
-                container_name: runner.id(),
-                container_hostname: None,
-                networks,
-                network_info,
-                port_mappings: None,
-                dns_servers: None,
-            };
-
-            let pid = runner
-                .get_container_state()?
-                .pid
-                .ok_or_else(|| anyhow!("[container {}] PID not found", runner.id()))?;
-            let netns_path = format!("/proc/{pid}/ns/net");
-            if !Path::new(&netns_path).exists() {
-                return Err(anyhow!(
-                    "[container {}] netns path not found: {netns_path}",
-                    runner.id()
-                ));
-            }
-            let netns_path_clone = netns_path.clone();
-            let setup = Setup::new(netns_path);
-            let json_path = create_tmp_netavark_json(&opts, &runner.id())?;
-            let config_dir = default_netavark_config_dir();
-            fs::create_dir_all(PathBuf::from(&config_dir))?;
-            setup
-                .exec(
-                    Some(json_path),
-                    Some(config_dir),
-                    None,
-                    default_aardvark_bin()?,
-                    None,
-                    false,
-                )
-                .map_err(|e| anyhow!("[container {}] netavark setup failed: {e}", runner.id()))?;
-
-            // Create bind mount backup of network namespace
-            let bind_mount_name = format!("rkforge-{}", runner.id());
-            match bind_mount_netns(&netns_path_clone, &bind_mount_name) {
-                Ok(bind_path) => {
-                    debug!(
-                        "Created bind mount backup at {:?} for container {}",
-                        bind_path,
-                        runner.id()
-                    );
-                }
-                Err(e) => {
-                    warn!(
-                        "Failed to create bind mount backup for container {}: {}",
-                        runner.id(),
-                        e
-                    );
-                    // Continue anyway, as bind mount is just a backup
-                }
-            }
-        } else {
+    pub(crate) fn create_network_opts(
+        &self,
+        container_id: String,
+        ip: IpAddr,
+    ) -> Result<(NetworkOptions, Vec<Ipv4Addr>)> {
+        if !ip.is_ipv4() {
             return Err(anyhow!("Unsupported ipv6 type"));
+        }
+        let mut dns_server = vec![];
+        let alias = vec![format!("{}.rkl.internal", container_id)];
+        let mut networks = HashMap::new();
+        let mut network_info = HashMap::new();
+        for (network_name, _) in self.map.clone() {
+            let network_se = match self.network_service.get(&network_name) {
+                Some(network) => network,
+                None => continue,
+            };
+            for (_container, container_spec) in network_se {
+                let Some(container_name) = container_spec.container_name.as_ref() else {
+                    continue;
+                };
+                if *container_name != container_id {
+                    continue;
+                }
+                let container_ip = self
+                    .get_container_ip(&container_id, &network_name)
+                    .map(IpAddr::V4)
+                    .ok_or_else(|| {
+                        anyhow!(
+                            "[container {}] No allocated IP for network {}",
+                            container_id,
+                            network_name
+                        )
+                    })?;
+                let (gateway, subnet_net) = self
+                    .network_subnets
+                    .get(&network_name)
+                    .map(|s| {
+                        (
+                            s.gateway,
+                            IpNet::new(IpAddr::V4(s.subnet.network()), s.subnet.prefix()).unwrap(),
+                        )
+                    })
+                    .ok_or_else(|| anyhow!("No subnet for network {}", network_name))?;
+
+                dns_server.push(gateway);
+
+                let network_opts = PerNetworkOptions {
+                    aliases: Some(alias.clone()),
+                    interface_name: self
+                        .network_interface
+                        .get(&network_name)
+                        .unwrap_or(&"vethcni0".to_string())
+                        .clone(),
+                    static_ips: Some(vec![container_ip]),
+                    static_mac: None,
+                    options: None,
+                };
+                let network_interface = Some(
+                    self.network_interface
+                        .get(&network_name)
+                        .unwrap_or(&"vethcni0".to_string())
+                        .clone(),
+                );
+                let network = Network {
+                    dns_enabled: true,
+                    driver: "bridge".to_string(),
+                    id: network_name.clone(),
+                    internal: false,
+                    ipv6_enabled: false,
+                    name: network_name.clone(),
+                    network_interface,
+                    options: None,
+                    ipam_options: None,
+                    subnets: Some(vec![Subnet {
+                        gateway: Some(IpAddr::V4(gateway)),
+                        lease_range: None,
+                        subnet: subnet_net,
+                    }]),
+                    routes: None,
+                    network_dns_servers: Some(vec!["8.8.8.8".parse()?]),
+                };
+
+                networks.insert(network_name.clone(), network_opts);
+                network_info.insert(network_name, network);
+                break;
+            }
+        }
+        let opts = NetworkOptions {
+            container_id: container_id.clone(),
+            container_name: container_id.clone(),
+            container_hostname: None,
+            networks,
+            network_info,
+            port_mappings: None,
+            dns_servers: None,
+        };
+        Ok((opts, dns_server))
+    }
+
+    pub fn setup_network(opts: &NetworkOptions, pid: i32, container_id: String) -> Result<()> {
+        let netns_path = format!("/proc/{pid}/ns/net");
+        if !Path::new(&netns_path).exists() {
+            return Err(anyhow!(
+                "[compose {}] netns path not found: {netns_path}",
+                container_id
+            ));
+        }
+        let netns_path_clone = netns_path.clone();
+        let setup = Setup::new(netns_path);
+        let json_path = create_tmp_netavark_json(opts, &container_id)?;
+        let config_dir = default_netavark_config_dir();
+        fs::create_dir_all(PathBuf::from(&config_dir))?;
+        setup
+            .exec(
+                Some(json_path),
+                Some(config_dir),
+                None,
+                default_aardvark_bin()?,
+                None,
+                false,
+            )
+            .map_err(|e| anyhow!("[compose {}] netavark setup failed: {e}", &container_id))?;
+
+        // Create bind mount backup of network namespace
+        let bind_mount_name = format!("rkforge-{}", &container_id);
+        match bind_mount_netns(&netns_path_clone, &bind_mount_name) {
+            Ok(bind_path) => {
+                debug!(
+                    "Created bind mount backup at {:?} for container {}",
+                    bind_path, &container_id
+                );
+            }
+            Err(e) => {
+                warn!(
+                    "Failed to create bind mount backup for container {}: {}",
+                    &container_id, e
+                );
+            }
         }
 
         Ok(())
     }
 
     pub fn clean_up(network_name_space: String, id: String) -> Result<()> {
-        let teardown = Teardown::new(network_name_space);
+        let bind_mount_name = format!("rkforge-{}", id);
+        let bind_mount_path = format!("/var/run/netns/{}", bind_mount_name);
         let config_dir = default_netavark_config_dir();
         let mut json_path = std::env::temp_dir();
         json_path.push("rkl-netavark");
         json_path.push(format!("{}.network.json", id));
-        // If the setup state file is missing, treat cleanup as idempotent.
-        if !json_path.exists() {
-            // Still try to clean up bind mount if it exists
-            let bind_mount_name = format!("rkforge-{}", id);
+        let netns_path = if Path::new(&bind_mount_path).exists() {
+            bind_mount_path
+        } else {
+            network_name_space
+        };
+
+        if !Path::new(&netns_path).exists() {
+            warn!(
+                "Network namespace not found for container {}, attempting minimal cleanup",
+                id
+            );
+
             let _ = unbind_mount_netns(&bind_mount_name);
+            let _ = std::fs::remove_file(json_path);
             return Ok(());
         }
+
+        let teardown = Teardown::new(netns_path);
+        // ... rest of teardown logic
         teardown
             .exec(
-                Some(json_path.into_os_string()),
+                Some(json_path.clone().into_os_string()),
                 Some(config_dir),
                 None,
                 default_aardvark_bin()?,
@@ -402,32 +420,19 @@ impl NetworkManager {
                 false,
             )
             .map_err(|e| anyhow!("[container {}] netavark teardown failed: {e}", id))?;
-        // Remove state file after successful teardown.
-        let mut json_path = std::env::temp_dir();
-        json_path.push("rkl-netavark");
-        json_path.push(format!("{}.network.json", id));
-        let _ = std::fs::remove_file(&json_path);
 
-        // Clean up bind mount backup
-        let bind_mount_name = format!("rkforge-{}", id);
-        if let Err(e) = unbind_mount_netns(&bind_mount_name) {
-            warn!(
-                "Failed to clean up bind mount backup for container {}: {}",
-                id, e
-            );
-            // Continue anyway
-        }
-
+        let _ = unbind_mount_netns(&bind_mount_name);
+        let _ = std::fs::remove_file(json_path);
         Ok(())
     }
 }
 
-// in the future , add dns server
-/// create resolv.conf file
-/// save base resolv.conf file
-pub fn create_resolv_conf() -> Result<()> {
-    // todo perfect future
-    let contect = "search rkl.internal\nnameserver 172.17.0.1\n";
+pub fn create_resolv_conf(name_servers: Vec<Ipv4Addr>) -> Result<()> {
+    let mut contect = "".to_string();
+    for name_server in name_servers {
+        contect.push_str(&format!("nameserver {name_server}\n"));
+    }
+    contect.push_str("search rkl.internal\n");
     let mut resolv_path = std::env::temp_dir();
     resolv_path.push("rkl-netavark");
     resolv_path.push("resolv.conf");
@@ -445,7 +450,7 @@ pub fn add_resolv_conf(runner: &mut ContainerRunner) {
     host_path.push("rkl-netavark");
     host_path.push("resolv.conf");
     let host_path = host_path.into_os_string().into_string().unwrap();
-    let container_path = "/etc/resolv.conf".to_string();
+    let container_path = CONTAINER_RESOLV_PATH.to_string();
 
     runner.add_mounts(vec![Mount {
         host_path,
@@ -546,7 +551,7 @@ fn default_netavark_config_dir() -> OsString {
         return v;
     }
 
-    OsString::from("/run/containers/networks")
+    OsString::from(DEAULT_NETAVARK_CONFIG_DIR)
 }
 
 fn default_aardvark_bin() -> Result<OsString> {
@@ -565,4 +570,60 @@ fn default_aardvark_bin() -> Result<OsString> {
     }
 
     Err(anyhow!("aardvark-dns not found"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::commands::compose::spec::{ComposeSpec, NetworkSpec, ServiceSpec};
+    use ipnetwork::Ipv4Network;
+    use std::collections::HashMap;
+
+    fn create_test_spec(
+        services: HashMap<String, ServiceSpec>,
+        networks: Option<HashMap<String, NetworkSpec>>,
+    ) -> ComposeSpec {
+        ComposeSpec {
+            name: Some("test-project".to_string()),
+            services,
+            volumes: None,
+            configs: None,
+            networks,
+            secrets: None,
+        }
+    }
+
+    #[test]
+    fn test_next_container_ip_in_subnet() {
+        let subnet = Ipv4Network::new(Ipv4Addr::new(192, 168, 1, 0), 24).unwrap();
+        let gateway = Ipv4Addr::new(192, 168, 1, 1);
+
+        let ip = next_container_ip_in_subnet(&subnet, gateway, None);
+        assert_eq!(ip, Some(Ipv4Addr::new(192, 168, 1, 2)));
+        let ip = next_container_ip_in_subnet(&subnet, gateway, Some(Ipv4Addr::new(192, 168, 1, 2)));
+        assert_eq!(ip, Some(Ipv4Addr::new(192, 168, 1, 3)));
+
+        // when ip exhausted, return None
+        let last = Ipv4Addr::new(192, 168, 1, 254);
+        let ip = next_container_ip_in_subnet(&subnet, gateway, Some(last));
+        assert_eq!(ip, None);
+    }
+
+    #[test]
+    fn test_network_intersects() {
+        let net1 = Ipv4Network::new(Ipv4Addr::new(192, 168, 1, 0), 24).unwrap();
+        let net2 = Ipv4Network::new(Ipv4Addr::new(192, 168, 2, 0), 24).unwrap();
+        let net3 = Ipv4Network::new(Ipv4Addr::new(192, 168, 1, 128), 25).unwrap();
+
+        assert!(!network_intersects(&net1, &net2));
+        assert!(network_intersects(&net1, &net3));
+        assert!(network_intersects(&net3, &net1));
+    }
+
+    // #[test]
+    // fn test_clean_up_idempotent() {
+    //     let result =
+    //         NetworkManager::clean_up("/proc/123/ns/net".to_string(), "nonexistent".to_string());
+    //     assert!(result.is_ok());
+    // }
 }

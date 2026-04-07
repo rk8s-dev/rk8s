@@ -17,7 +17,7 @@
 //! # Example
 //!
 //! ```ignore
-//! use dagrs::{Graph, checkpoint::{FileCheckpointStore, CheckpointConfig}};
+//! use dagrs::{CheckpointConfig, FileCheckpointStore, Graph};
 //!
 //! let mut graph = Graph::new();
 //! // ... add nodes ...
@@ -25,7 +25,8 @@
 //! // Configure checkpointing
 //! let store = FileCheckpointStore::new("/tmp/checkpoints");
 //! graph.set_checkpoint_store(Box::new(store));
-//! graph.set_checkpoint_interval(5); // Checkpoint every 5 nodes
+//! let config = CheckpointConfig::enabled().with_node_interval(5);
+//! graph.set_checkpoint_config(config);
 //!
 //! // Run with automatic checkpointing
 //! graph.async_start().await?;
@@ -36,25 +37,69 @@
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
-use crate::node::NodeId;
+use crate::{DagrsError, DagrsResult, ErrorCode, node::NodeId};
 
 /// Checkpoint identifier
 pub type CheckpointId = String;
+
+static CHECKPOINT_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+
+// NOTE: This sequence is process-global (shared by all Graph instances in the same process).
+// It is used as a monotonic tiebreaker in checkpoint IDs and ordering, so sequence values may
+// interleave across concurrently running graphs.
+
+fn checkpoint_sequence_hint(id: &str) -> u64 {
+    id.rsplit('_')
+        .next()
+        .and_then(|segment| segment.parse().ok())
+        .unwrap_or(0)
+}
+
+pub(crate) fn checkpoint_cmp(left: &Checkpoint, right: &Checkpoint) -> std::cmp::Ordering {
+    left.timestamp
+        .cmp(&right.timestamp)
+        .then_with(|| checkpoint_sequence_hint(&left.id).cmp(&checkpoint_sequence_hint(&right.id)))
+        .then_with(|| left.id.cmp(&right.id))
+}
+
+/// Represents the execution state of a single node
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub enum NodeExecStatus {
+    Pending,
+    Running,
+    Succeeded,
+    Failed,
+    Skipped,
+}
+
+/// Identifies the concrete type encoded in [`NodeState::output_data`].
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub enum StoredOutputKind {
+    String,
+    I32,
+    I64,
+    U32,
+    U64,
+    F64,
+    Bool,
+    VecString,
+    VecI32,
+    VecI64,
+}
 
 /// Represents the execution state of a single node
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NodeState {
     /// Node ID
     pub node_id: usize,
-    /// Whether the node has completed execution
-    pub completed: bool,
-    /// Whether execution was successful
-    pub success: bool,
+    /// Current execution status
+    pub status: NodeExecStatus,
     /// Serialized output data (if serializable)
     ///
     /// This field stores JSON-serialized output data for nodes that produce
@@ -63,37 +108,88 @@ pub struct NodeState {
     /// Note: Only outputs that implement `serde::Serialize` can be stored here.
     /// For non-serializable outputs, this field will be `None`.
     pub output_data: Option<Vec<u8>>,
+    /// Type tag for `output_data`, used to restore checkpointed outputs safely.
+    #[serde(default)]
+    pub output_kind: Option<StoredOutputKind>,
     /// Human-readable output summary (for debugging)
     #[serde(default)]
     pub output_summary: Option<String>,
 }
 
 impl NodeState {
-    /// Create a new NodeState with completed status
-    pub fn completed(node_id: usize, success: bool) -> Self {
+    /// Create a new NodeState with a successful terminal status.
+    pub fn succeeded(node_id: usize) -> Self {
         Self {
             node_id,
-            completed: true,
-            success,
+            status: NodeExecStatus::Succeeded,
             output_data: None,
+            output_kind: None,
             output_summary: None,
         }
     }
 
-    /// Create a new NodeState for a pending node
+    /// Create a new NodeState with a failed terminal status.
+    pub fn failed(node_id: usize) -> Self {
+        Self {
+            node_id,
+            status: NodeExecStatus::Failed,
+            output_data: None,
+            output_kind: None,
+            output_summary: None,
+        }
+    }
+
+    /// Create a new NodeState for a pending node.
     pub fn pending(node_id: usize) -> Self {
         Self {
             node_id,
-            completed: false,
-            success: false,
+            status: NodeExecStatus::Pending,
             output_data: None,
+            output_kind: None,
             output_summary: None,
+        }
+    }
+
+    /// Create a new NodeState for a running node.
+    pub fn running(node_id: usize) -> Self {
+        Self {
+            node_id,
+            status: NodeExecStatus::Running,
+            output_data: None,
+            output_kind: None,
+            output_summary: None,
+        }
+    }
+
+    /// Create a new NodeState for a skipped node.
+    pub fn skipped(node_id: usize) -> Self {
+        Self {
+            node_id,
+            status: NodeExecStatus::Skipped,
+            output_data: None,
+            output_kind: None,
+            output_summary: None,
+        }
+    }
+
+    /// Compatibility helper for callers that only know whether completion succeeded.
+    pub fn completed(node_id: usize, success: bool) -> Self {
+        if success {
+            Self::succeeded(node_id)
+        } else {
+            Self::failed(node_id)
         }
     }
 
     /// Set serialized output data
     pub fn with_output_data(mut self, data: Vec<u8>) -> Self {
         self.output_data = Some(data);
+        self
+    }
+
+    /// Set the serialized output type tag
+    pub fn with_output_kind(mut self, kind: StoredOutputKind) -> Self {
+        self.output_kind = Some(kind);
         self
     }
 
@@ -109,7 +205,7 @@ impl NodeState {
 pub struct Checkpoint {
     /// Unique identifier for this checkpoint
     pub id: CheckpointId,
-    /// Timestamp when checkpoint was created (Unix epoch seconds)
+    /// Timestamp when checkpoint was created (Unix epoch nanoseconds)
     pub timestamp: u64,
     /// Current program counter (block index)
     pub pc: usize,
@@ -126,14 +222,19 @@ pub struct Checkpoint {
 }
 
 impl Checkpoint {
-    /// Create a new checkpoint with generated ID
-    pub fn new(pc: usize, loop_count: usize) -> Self {
-        let timestamp = SystemTime::now()
+    fn current_timestamp_nanos() -> u64 {
+        SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
-            .as_secs();
+            .as_nanos() as u64
+    }
 
-        let id = format!("ckpt_{}_{}", timestamp, pc);
+    /// Create a new checkpoint with generated ID
+    pub fn new(pc: usize, loop_count: usize) -> Self {
+        let timestamp = Self::current_timestamp_nanos();
+        let sequence = CHECKPOINT_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+
+        let id = format!("ckpt_{}_{}_{}", timestamp, pc, sequence);
 
         Self {
             id,
@@ -149,10 +250,7 @@ impl Checkpoint {
 
     /// Create checkpoint with a specific ID
     pub fn with_id(id: impl Into<String>, pc: usize, loop_count: usize) -> Self {
-        let timestamp = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs();
+        let timestamp = Self::current_timestamp_nanos();
 
         Self {
             id: id.into(),
@@ -187,62 +285,28 @@ impl Checkpoint {
     }
 }
 
-/// Error types for checkpoint operations
-#[derive(Debug, Clone)]
-pub enum CheckpointError {
-    /// Checkpoint not found
-    NotFound(CheckpointId),
-    /// Serialization error
-    SerializationError(String),
-    /// Deserialization error  
-    DeserializationError(String),
-    /// Storage I/O error
-    StorageError(String),
-    /// Invalid checkpoint data
-    InvalidCheckpoint(String),
-    /// Checkpoint store not configured
-    StoreNotConfigured,
-}
-
-impl std::fmt::Display for CheckpointError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            CheckpointError::NotFound(id) => write!(f, "Checkpoint not found: {}", id),
-            CheckpointError::SerializationError(msg) => write!(f, "Serialization error: {}", msg),
-            CheckpointError::DeserializationError(msg) => {
-                write!(f, "Deserialization error: {}", msg)
-            }
-            CheckpointError::StorageError(msg) => write!(f, "Storage error: {}", msg),
-            CheckpointError::InvalidCheckpoint(msg) => write!(f, "Invalid checkpoint: {}", msg),
-            CheckpointError::StoreNotConfigured => write!(f, "Checkpoint store not configured"),
-        }
-    }
-}
-
-impl std::error::Error for CheckpointError {}
-
 /// Trait for checkpoint storage backends
 ///
 /// Implement this trait to provide custom checkpoint storage (e.g., database, cloud storage).
 #[async_trait]
 pub trait CheckpointStore: Send + Sync {
     /// Save a checkpoint
-    async fn save(&self, checkpoint: &Checkpoint) -> Result<(), CheckpointError>;
+    async fn save(&self, checkpoint: &Checkpoint) -> DagrsResult<()>;
 
     /// Load a checkpoint by ID
-    async fn load(&self, id: &CheckpointId) -> Result<Checkpoint, CheckpointError>;
+    async fn load(&self, id: &CheckpointId) -> DagrsResult<Checkpoint>;
 
     /// Delete a checkpoint
-    async fn delete(&self, id: &CheckpointId) -> Result<(), CheckpointError>;
+    async fn delete(&self, id: &CheckpointId) -> DagrsResult<()>;
 
     /// List all checkpoint IDs
-    async fn list(&self) -> Result<Vec<CheckpointId>, CheckpointError>;
+    async fn list(&self) -> DagrsResult<Vec<CheckpointId>>;
 
     /// Get the latest checkpoint
-    async fn latest(&self) -> Result<Option<Checkpoint>, CheckpointError>;
+    async fn latest(&self) -> DagrsResult<Option<Checkpoint>>;
 
     /// Clear all checkpoints
-    async fn clear(&self) -> Result<(), CheckpointError>;
+    async fn clear(&self) -> DagrsResult<()>;
 }
 
 /// In-memory checkpoint store (for testing and temporary storage)
@@ -261,50 +325,59 @@ impl MemoryCheckpointStore {
 
 #[async_trait]
 impl CheckpointStore for MemoryCheckpointStore {
-    async fn save(&self, checkpoint: &Checkpoint) -> Result<(), CheckpointError> {
-        let mut store = self.checkpoints.write().map_err(|e| {
-            CheckpointError::StorageError(format!("Failed to acquire write lock: {}", e))
-        })?;
+    async fn save(&self, checkpoint: &Checkpoint) -> DagrsResult<()> {
+        let mut store = self
+            .checkpoints
+            .write()
+            .map_err(|e| checkpoint_io_error(e.to_string()))?;
         store.insert(checkpoint.id.clone(), checkpoint.clone());
         Ok(())
     }
 
-    async fn load(&self, id: &CheckpointId) -> Result<Checkpoint, CheckpointError> {
-        let store = self.checkpoints.read().map_err(|e| {
-            CheckpointError::StorageError(format!("Failed to acquire read lock: {}", e))
-        })?;
+    async fn load(&self, id: &CheckpointId) -> DagrsResult<Checkpoint> {
+        let store = self
+            .checkpoints
+            .read()
+            .map_err(|e| checkpoint_io_error(e.to_string()))?;
         store
             .get(id)
             .cloned()
-            .ok_or(CheckpointError::NotFound(id.clone()))
+            .ok_or_else(|| checkpoint_not_found(id))
     }
 
-    async fn delete(&self, id: &CheckpointId) -> Result<(), CheckpointError> {
-        let mut store = self.checkpoints.write().map_err(|e| {
-            CheckpointError::StorageError(format!("Failed to acquire write lock: {}", e))
-        })?;
+    async fn delete(&self, id: &CheckpointId) -> DagrsResult<()> {
+        let mut store = self
+            .checkpoints
+            .write()
+            .map_err(|e| checkpoint_io_error(e.to_string()))?;
         store.remove(id);
         Ok(())
     }
 
-    async fn list(&self) -> Result<Vec<CheckpointId>, CheckpointError> {
-        let store = self.checkpoints.read().map_err(|e| {
-            CheckpointError::StorageError(format!("Failed to acquire read lock: {}", e))
-        })?;
+    async fn list(&self) -> DagrsResult<Vec<CheckpointId>> {
+        let store = self
+            .checkpoints
+            .read()
+            .map_err(|e| checkpoint_io_error(e.to_string()))?;
         Ok(store.keys().cloned().collect())
     }
 
-    async fn latest(&self) -> Result<Option<Checkpoint>, CheckpointError> {
-        let store = self.checkpoints.read().map_err(|e| {
-            CheckpointError::StorageError(format!("Failed to acquire read lock: {}", e))
-        })?;
-        Ok(store.values().max_by_key(|c| c.timestamp).cloned())
+    async fn latest(&self) -> DagrsResult<Option<Checkpoint>> {
+        let store = self
+            .checkpoints
+            .read()
+            .map_err(|e| checkpoint_io_error(e.to_string()))?;
+        Ok(store
+            .values()
+            .max_by(|left, right| checkpoint_cmp(left, right))
+            .cloned())
     }
 
-    async fn clear(&self) -> Result<(), CheckpointError> {
-        let mut store = self.checkpoints.write().map_err(|e| {
-            CheckpointError::StorageError(format!("Failed to acquire write lock: {}", e))
-        })?;
+    async fn clear(&self) -> DagrsResult<()> {
+        let mut store = self
+            .checkpoints
+            .write()
+            .map_err(|e| checkpoint_io_error(e.to_string()))?;
         store.clear();
         Ok(())
     }
@@ -329,89 +402,86 @@ impl FileCheckpointStore {
         }
     }
 
-    fn checkpoint_path(&self, id: &CheckpointId) -> Result<PathBuf, CheckpointError> {
+    fn checkpoint_path(&self, id: &CheckpointId) -> DagrsResult<PathBuf> {
         // Security: Validate checkpoint ID to prevent path traversal attacks
         if id.contains('/') || id.contains('\\') || id.contains("..") {
-            return Err(CheckpointError::InvalidCheckpoint(
-                "Checkpoint ID contains invalid characters".to_string(),
-            ));
+            return Err(DagrsError::new(
+                ErrorCode::DgChk0003InvalidCheckpoint,
+                "checkpoint id contains invalid characters",
+            )
+            .with_checkpoint(id.clone()));
         }
         Ok(self.base_path.join(format!("{}.json", id)))
     }
 
-    async fn ensure_dir(&self) -> Result<(), CheckpointError> {
+    async fn ensure_dir(&self) -> DagrsResult<()> {
         tokio::fs::create_dir_all(&self.base_path)
             .await
-            .map_err(|e| {
-                CheckpointError::StorageError(format!(
-                    "Failed to create checkpoint directory: {}",
-                    e
-                ))
-            })
+            .map_err(|e| checkpoint_io_error(format!("Failed to create checkpoint directory: {e}")))
     }
 }
 
 #[async_trait]
 impl CheckpointStore for FileCheckpointStore {
-    async fn save(&self, checkpoint: &Checkpoint) -> Result<(), CheckpointError> {
+    async fn save(&self, checkpoint: &Checkpoint) -> DagrsResult<()> {
         self.ensure_dir().await?;
 
         let json = serde_json::to_string_pretty(checkpoint)
-            .map_err(|e| CheckpointError::SerializationError(e.to_string()))?;
+            .map_err(|e| checkpoint_io_error(format!("Failed to serialize checkpoint: {e}")))?;
 
         let path = self.checkpoint_path(&checkpoint.id)?;
-        tokio::fs::write(&path, json).await.map_err(|e| {
-            CheckpointError::StorageError(format!("Failed to write checkpoint file: {}", e))
-        })?;
+        tokio::fs::write(&path, json)
+            .await
+            .map_err(|e| checkpoint_io_error(format!("Failed to write checkpoint file: {e}")))?;
 
         Ok(())
     }
 
-    async fn load(&self, id: &CheckpointId) -> Result<Checkpoint, CheckpointError> {
+    async fn load(&self, id: &CheckpointId) -> DagrsResult<Checkpoint> {
         let path = self.checkpoint_path(id)?;
 
         // Use async metadata check instead of sync path.exists()
         match tokio::fs::metadata(&path).await {
             Ok(_) => {}
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                return Err(CheckpointError::NotFound(id.clone()));
+                return Err(checkpoint_not_found(id));
             }
             Err(e) => {
-                return Err(CheckpointError::StorageError(format!(
-                    "Failed to check checkpoint file: {}",
-                    e
+                return Err(checkpoint_io_error(format!(
+                    "Failed to check checkpoint file: {e}"
                 )));
             }
         }
 
-        let json = tokio::fs::read_to_string(&path).await.map_err(|e| {
-            CheckpointError::StorageError(format!("Failed to read checkpoint file: {}", e))
-        })?;
+        let json = tokio::fs::read_to_string(&path)
+            .await
+            .map_err(|e| checkpoint_io_error(format!("Failed to read checkpoint file: {e}")))?;
 
-        serde_json::from_str(&json)
-            .map_err(|e| CheckpointError::DeserializationError(e.to_string()))
+        serde_json::from_str(&json).map_err(|e| {
+            DagrsError::new(
+                ErrorCode::DgChk0003InvalidCheckpoint,
+                format!("Failed to deserialize checkpoint: {e}"),
+            )
+            .with_checkpoint(id.clone())
+        })
     }
 
-    async fn delete(&self, id: &CheckpointId) -> Result<(), CheckpointError> {
+    async fn delete(&self, id: &CheckpointId) -> DagrsResult<()> {
         let path = self.checkpoint_path(id)?;
 
         // Use async metadata check instead of sync path.exists()
         match tokio::fs::metadata(&path).await {
             Ok(_) => {
                 tokio::fs::remove_file(&path).await.map_err(|e| {
-                    CheckpointError::StorageError(format!(
-                        "Failed to delete checkpoint file: {}",
-                        e
-                    ))
+                    checkpoint_io_error(format!("Failed to delete checkpoint file: {e}"))
                 })?;
             }
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
                 // File doesn't exist, nothing to delete
             }
             Err(e) => {
-                return Err(CheckpointError::StorageError(format!(
-                    "Failed to check checkpoint file: {}",
-                    e
+                return Err(checkpoint_io_error(format!(
+                    "Failed to check checkpoint file: {e}"
                 )));
             }
         }
@@ -419,17 +489,19 @@ impl CheckpointStore for FileCheckpointStore {
         Ok(())
     }
 
-    async fn list(&self) -> Result<Vec<CheckpointId>, CheckpointError> {
+    async fn list(&self) -> DagrsResult<Vec<CheckpointId>> {
         self.ensure_dir().await?;
 
         let mut entries = tokio::fs::read_dir(&self.base_path).await.map_err(|e| {
-            CheckpointError::StorageError(format!("Failed to read checkpoint directory: {}", e))
+            checkpoint_io_error(format!("Failed to read checkpoint directory: {e}"))
         })?;
 
         let mut ids = Vec::new();
-        while let Some(entry) = entries.next_entry().await.map_err(|e| {
-            CheckpointError::StorageError(format!("Failed to read directory entry: {}", e))
-        })? {
+        while let Some(entry) = entries
+            .next_entry()
+            .await
+            .map_err(|e| checkpoint_io_error(format!("Failed to read directory entry: {e}")))?
+        {
             if let Some(name) = entry.file_name().to_str()
                 && name.ends_with(".json")
             {
@@ -440,7 +512,7 @@ impl CheckpointStore for FileCheckpointStore {
         Ok(ids)
     }
 
-    async fn latest(&self) -> Result<Option<Checkpoint>, CheckpointError> {
+    async fn latest(&self) -> DagrsResult<Option<Checkpoint>> {
         let ids = self.list().await?;
 
         let mut latest: Option<Checkpoint> = None;
@@ -448,7 +520,7 @@ impl CheckpointStore for FileCheckpointStore {
             if let Ok(checkpoint) = self.load(&id).await
                 && latest
                     .as_ref()
-                    .is_none_or(|l| checkpoint.timestamp > l.timestamp)
+                    .is_none_or(|current| checkpoint_cmp(&checkpoint, current).is_gt())
             {
                 latest = Some(checkpoint);
             }
@@ -457,7 +529,7 @@ impl CheckpointStore for FileCheckpointStore {
         Ok(latest)
     }
 
-    async fn clear(&self) -> Result<(), CheckpointError> {
+    async fn clear(&self) -> DagrsResult<()> {
         let ids = self.list().await?;
         for id in ids {
             self.delete(&id).await?;
@@ -477,8 +549,6 @@ pub struct CheckpointConfig {
     pub interval_seconds: Option<u64>,
     /// Checkpoint on loop iteration
     pub on_loop_iteration: bool,
-    /// Checkpoint before conditional nodes
-    pub before_conditional: bool,
     /// Maximum number of checkpoints to keep (0 = unlimited)
     pub max_checkpoints: usize,
 }
@@ -490,10 +560,21 @@ impl Default for CheckpointConfig {
             interval_nodes: Some(10),
             interval_seconds: None,
             on_loop_iteration: true,
-            before_conditional: true,
             max_checkpoints: 5,
         }
     }
+}
+
+fn checkpoint_not_found(id: &CheckpointId) -> DagrsError {
+    DagrsError::new(
+        ErrorCode::DgChk0002CheckpointNotFound,
+        "checkpoint not found",
+    )
+    .with_checkpoint(id.clone())
+}
+
+fn checkpoint_io_error(message: impl Into<String>) -> DagrsError {
+    DagrsError::new(ErrorCode::DgChk0004CheckpointIo, message.into())
 }
 
 impl CheckpointConfig {
@@ -574,9 +655,12 @@ mod tests {
     #[test]
     fn test_checkpoint_creation() {
         let checkpoint = Checkpoint::new(10, 3);
+        let another = Checkpoint::new(10, 3);
         assert_eq!(checkpoint.pc, 10);
         assert_eq!(checkpoint.loop_count, 3);
         assert!(checkpoint.id.starts_with("ckpt_"));
+        assert_ne!(checkpoint.id, another.id);
+        assert!(another.timestamp >= checkpoint.timestamp);
     }
 
     #[test]
@@ -590,5 +674,7 @@ mod tests {
         assert_eq!(config.interval_nodes, Some(5));
         assert_eq!(config.interval_seconds, Some(60));
         assert_eq!(config.max_checkpoints, 10);
+        assert_eq!(NodeState::running(1).status, NodeExecStatus::Running);
+        assert_eq!(NodeState::skipped(2).status, NodeExecStatus::Skipped);
     }
 }

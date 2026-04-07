@@ -85,16 +85,16 @@ async fn test_branch_pruning() {
     );
     let id_router = router.id();
 
-    graph.add_node(router);
-    graph.add_node(node_a);
-    graph.add_node(node_b);
-    graph.add_node(node_c);
-    graph.add_node(node_d);
+    graph.add_node(router).unwrap();
+    graph.add_node(node_a).unwrap();
+    graph.add_node(node_b).unwrap();
+    graph.add_node(node_c).unwrap();
+    graph.add_node(node_d).unwrap();
 
     // Edges
-    graph.add_edge(id_router, vec![id_a, id_c]); // Router connects to A and C
-    graph.add_edge(id_a, vec![id_b]); // A -> B
-    graph.add_edge(id_c, vec![id_d]); // C -> D
+    graph.add_edge(id_router, vec![id_a, id_c]).unwrap(); // Router connects to A and C
+    graph.add_edge(id_a, vec![id_b]).unwrap(); // A -> B
+    graph.add_edge(id_c, vec![id_d]).unwrap(); // C -> D
 
     graph.async_start().await.unwrap();
 
@@ -187,22 +187,22 @@ async fn test_branch_pruning_diamond_with_active_alternate_parent() {
     let id_router = router.id();
 
     // Add all nodes
-    graph.add_node(router);
-    graph.add_node(node_a);
-    graph.add_node(node_b);
-    graph.add_node(node_c);
-    graph.add_node(node_d);
-    graph.add_node(node_e);
+    graph.add_node(router).unwrap();
+    graph.add_node(node_a).unwrap();
+    graph.add_node(node_b).unwrap();
+    graph.add_node(node_c).unwrap();
+    graph.add_node(node_d).unwrap();
+    graph.add_node(node_e).unwrap();
 
     // Build topology:
     // Router -> A, C
     // A -> B
     // B -> D
     // E -> D (independent path to D)
-    graph.add_edge(id_router, vec![id_a, id_c]);
-    graph.add_edge(id_a, vec![id_b]);
-    graph.add_edge(id_b, vec![id_d]);
-    graph.add_edge(id_e, vec![id_d]); // E is an independent node that also connects to D
+    graph.add_edge(id_router, vec![id_a, id_c]).unwrap();
+    graph.add_edge(id_a, vec![id_b]).unwrap();
+    graph.add_edge(id_b, vec![id_d]).unwrap();
+    graph.add_edge(id_e, vec![id_d]).unwrap(); // E is an independent node that also connects to D
 
     graph.async_start().await.unwrap();
 
@@ -354,18 +354,18 @@ async fn test_router_in_loop_alternating_branches() {
     let id_loop = loop_node.id();
 
     // Add nodes
-    graph.add_node(router);
-    graph.add_node(node_a);
-    graph.add_node(node_b);
-    graph.add_node(loop_node);
+    graph.add_node(router).unwrap();
+    graph.add_node(node_a).unwrap();
+    graph.add_node(node_b).unwrap();
+    graph.add_node(loop_node).unwrap();
 
     // Build topology:
     // Router -> A, B
     // A -> Loop
     // B -> Loop
-    graph.add_edge(id_router, vec![id_a, id_b]);
-    graph.add_edge(id_a, vec![id_loop]);
-    graph.add_edge(id_b, vec![id_loop]);
+    graph.add_edge(id_router, vec![id_a, id_b]).unwrap();
+    graph.add_edge(id_a, vec![id_loop]).unwrap();
+    graph.add_edge(id_b, vec![id_loop]).unwrap();
 
     graph.async_start().await.unwrap();
 
