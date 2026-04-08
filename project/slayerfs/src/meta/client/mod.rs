@@ -574,16 +574,6 @@ impl<T: MetaStore + ?Sized + 'static> MetaClient<T> {
                 CacheInvalidationEvent::UpdateInodeMetadata { ino, metadata } => {
                     self.inode_cache.update_metadata(ino, metadata).await;
                 }
-
-                CacheInvalidationEvent::UpdateChildren {
-                    parent_ino,
-                    children,
-                } => {
-                    self.inode_cache
-                        .replace_children(parent_ino, children)
-                        .await;
-                    self.invalidate_parent_path(parent_ino).await;
-                }
             }
         }
 

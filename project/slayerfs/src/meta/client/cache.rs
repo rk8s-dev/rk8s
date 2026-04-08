@@ -299,6 +299,7 @@ impl InodeCache {
         }
     }
 
+    #[allow(dead_code)]
     pub(crate) async fn replace_children(&self, parent_ino: i64, children: HashMap<String, i64>) {
         if let Some(parent_node) = self.ttl_manager.get(&parent_ino).await {
             let mut children_lock = parent_node.children.write().await;

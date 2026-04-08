@@ -84,11 +84,6 @@ impl EtcdMetaStore {
         format!("r:{}", ino)
     }
 
-    /// Etcd helper method: generate directory children key
-    fn etcd_children_key(inode: i64) -> String {
-        format!("c:{}", inode)
-    }
-
     fn etcd_session_key(session_id: Option<Uuid>) -> String {
         match session_id {
             Some(id) => format!("session:{}", id),
@@ -340,37 +335,6 @@ impl EtcdMetaStore {
         .await
     }
 
-    #[cfg(feature = "rkyv-serialization")]
-    async fn etcd_get_json_lenient<T>(&self, key: &str) -> Result<Option<T>, MetaError>
-    where
-        T: rkyv::Archive,
-        T::Archived:
-            rkyv::Deserialize<T, rkyv::rancor::Strategy<rkyv::de::Pool, rkyv::rancor::Error>>,
-        for<'de> T: serde::de::DeserializeOwned,
-    {
-        match self.etcd_get_json::<T>(key).await {
-            Ok(v) => Ok(v),
-            Err(e) => {
-                error!("Etcd get failed for {}: {}", key, e);
-                Ok(None)
-            }
-        }
-    }
-
-    #[cfg(not(feature = "rkyv-serialization"))]
-    async fn etcd_get_json_lenient<T: DeserializeOwned>(
-        &self,
-        key: &str,
-    ) -> Result<Option<T>, MetaError> {
-        match self.etcd_get_json::<T>(key).await {
-            Ok(v) => Ok(v),
-            Err(e) => {
-                error!("Etcd get failed for {}: {}", key, e);
-                Ok(None)
-            }
-        }
-    }
-
     async fn etcd_get_json_lenient_serde_only<T: DeserializeOwned>(
         &self,
         key: &str,
@@ -387,12 +351,6 @@ impl EtcdMetaStore {
     /// Initialize root directory
     async fn init_root_directory(&self) -> Result<(), MetaError> {
         let now = Utc::now().timestamp_nanos_opt().unwrap_or(0);
-
-        // Create children key for root directory
-        let children_key = Self::etcd_children_key(1);
-        let root_children = EtcdDirChildren::new(1, HashMap::new());
-        let children_json = serde_json::to_string(&root_children)
-            .map_err(|e| MetaError::Internal(e.to_string()))?;
 
         // Create reverse key (metadata) for root directory
         let reverse_key = Self::etcd_reverse_key(1);
@@ -418,11 +376,8 @@ impl EtcdMetaStore {
         // Atomically create root directory only if it doesn't exist
         // version == 0 means the key is currently not present
         let txn = Txn::new()
-            .when([Compare::version(children_key.clone(), CompareOp::Equal, 0)])
-            .and_then([
-                TxnOp::put(children_key.clone(), children_json, None),
-                TxnOp::put(reverse_key, reverse_json, None),
-            ]);
+            .when([Compare::version(reverse_key.clone(), CompareOp::Equal, 0)])
+            .and_then([TxnOp::put(reverse_key, reverse_json, None)]);
 
         let resp = client.txn(txn).await.map_err(|e| {
             MetaError::Config(format!("Failed to initialize root directory: {}", e))
@@ -477,26 +432,12 @@ impl EtcdMetaStore {
         &self,
         parent_inode: i64,
     ) -> Result<Option<Vec<ContentMetaModel>>, MetaError> {
-        let children_key = Self::etcd_children_key(parent_inode);
-        // strict read of children list
-        let dir_children_opt = self
-            .etcd_get_json_lenient::<EtcdDirChildren>(&children_key)
-            .await?;
-        let dir_children = match dir_children_opt {
-            Some(dc) => dc,
-            None => return Ok(None),
-        };
-
-        if dir_children.children.is_empty() {
-            return Ok(None);
-        }
-
         // Optimization: Batch fetch all forward entries with a single prefix query
-        // Instead of N individual queries, use one range request for f:{parent_inode}:
+        // Use one range request for f:{parent_inode}:
         let mut client = self.client.clone();
         let forward_prefix = format!("f:{}:", parent_inode);
 
-        let forward_entries_map: HashMap<String, EtcdForwardEntry> = match client
+        let mut content_list: Vec<ContentMetaModel> = match client
             .get(
                 forward_prefix.clone(),
                 Some(etcd_client::GetOptions::new().with_prefix()),
@@ -504,17 +445,19 @@ impl EtcdMetaStore {
             .await
         {
             Ok(resp) => {
-                let mut map = HashMap::new();
+                let mut list = Vec::new();
                 for kv in resp.kvs() {
                     if let Ok(entry) = serde_json::from_slice::<EtcdForwardEntry>(kv.value()) {
-                        // Extract child name from key: "f:{parent}:{name}" -> name
-                        let key_str = String::from_utf8_lossy(kv.key());
-                        if let Some(name) = key_str.strip_prefix(&forward_prefix) {
-                            map.insert(name.to_string(), entry);
-                        }
+                        let entry_type = entry.resolved_entry_type();
+                        list.push(ContentMetaModel {
+                            inode: entry.inode,
+                            parent_inode,
+                            entry_name: entry.name,
+                            entry_type,
+                        });
                     }
                 }
-                map
+                list
             }
             Err(e) => {
                 error!(
@@ -528,23 +471,7 @@ impl EtcdMetaStore {
             }
         };
 
-        let mut content_list = Vec::new();
-        // Sort children names to ensure consistent order (matching BTreeMap in cache)
-        let mut sorted_names: Vec<_> = dir_children.children.keys().collect();
-        sorted_names.sort();
-
-        for child_name in sorted_names {
-            if let Some(forward_entry) = forward_entries_map.get(child_name.as_str()) {
-                let entry_type = forward_entry.resolved_entry_type();
-
-                content_list.push(ContentMetaModel {
-                    inode: forward_entry.inode,
-                    parent_inode,
-                    entry_name: child_name.clone(),
-                    entry_type,
-                });
-            }
-        }
+        content_list.sort_by(|a, b| a.entry_name.cmp(&b.entry_name));
 
         if content_list.is_empty() {
             Ok(None)
@@ -643,11 +570,6 @@ impl EtcdMetaStore {
         let reverse_json =
             serde_json::to_string(&entry_info).map_err(|e| MetaError::Internal(e.to_string()))?;
 
-        let children_key = Self::etcd_children_key(inode);
-        let children = EtcdDirChildren::new(inode, HashMap::new());
-        let children_json =
-            serde_json::to_string(&children).map_err(|e| MetaError::Internal(e.to_string()))?;
-
         // Step 2: Atomic transaction - create all keys only if forward key doesn't exist
         info!(
             "Creating directory with transaction: parent={}, name={}, inode={}",
@@ -657,63 +579,16 @@ impl EtcdMetaStore {
         let operations = vec![
             (forward_key.as_str(), forward_json.as_str()),
             (reverse_key.as_str(), reverse_json.as_str()),
-            (children_key.as_str(), children_json.as_str()),
         ];
 
         self.create_entry(&forward_key, &operations, parent_inode, &name)
             .await?;
 
-        // Step 3: Update parent's children set
-        // If this fails, forward/reverse/children keys are created
-        // but parent's children map is not updated. Consider using compensation or
-        // background reconciliation.
-        let name_for_closure = name.clone();
-        let inode_for_closure = inode;
-        match self
-            .update_parent_children(
-                parent_inode,
-                move |children| {
-                    children.insert(name_for_closure.clone(), inode_for_closure);
-                },
-                10,
-            )
-            .await
-        {
-            Ok(_) => {
-                info!(
-                    "Directory created successfully: parent={}, name={}, inode={}",
-                    parent_inode, name, inode
-                );
-                Ok(inode)
-            }
-            Err(e) => {
-                // Compensation: Try to rollback the created entry
-                error!(
-                    "Failed to update parent children for dir creation, attempting rollback: parent={}, name={}, inode={}, error={}",
-                    parent_inode, name, inode, e
-                );
-
-                let rollback_keys = vec![
-                    forward_key.as_str(),
-                    reverse_key.as_str(),
-                    children_key.as_str(),
-                ];
-
-                if let Err(rollback_err) =
-                    self.delete_entry(&forward_key, &rollback_keys, inode).await
-                {
-                    error!(
-                        "Failed to rollback directory creation: inode={}, error={}. Manual cleanup may be required.",
-                        inode, rollback_err
-                    );
-                }
-
-                Err(MetaError::Internal(format!(
-                    "Failed to create directory: {}",
-                    e
-                )))
-            }
-        }
+        info!(
+            "Directory created successfully: parent={}, name={}, inode={}",
+            parent_inode, name, inode
+        );
+        Ok(inode)
     }
 
     /// Create a new file
@@ -798,49 +673,11 @@ impl EtcdMetaStore {
         self.create_entry(&forward_key, &operations, parent_inode, &name)
             .await?;
 
-        // Step 3: Update parent's children set
-        // If this fails, forward/reverse keys are created
-        // but parent's children map is not updated. Rollback is attempted below.
-        let name_for_closure = name.clone();
-        let inode_for_closure = inode;
-        match self
-            .update_parent_children(
-                parent_inode,
-                move |children| {
-                    children.insert(name_for_closure.clone(), inode_for_closure);
-                },
-                10,
-            )
-            .await
-        {
-            Ok(_) => {
-                info!(
-                    "File created successfully: parent={}, name={}, inode={}",
-                    parent_inode, name, inode
-                );
-                Ok(inode)
-            }
-            Err(e) => {
-                // Compensation: Try to rollback the created entry
-                error!(
-                    "Failed to update parent children for file creation, attempting rollback: parent={}, name={}, inode={}, error={}",
-                    parent_inode, name, inode, e
-                );
-
-                let rollback_keys = vec![forward_key.as_str(), reverse_key.as_str()];
-
-                if let Err(rollback_err) =
-                    self.delete_entry(&forward_key, &rollback_keys, inode).await
-                {
-                    error!(
-                        "Failed to rollback file creation: inode={}, error={}. Manual cleanup may be required.",
-                        inode, rollback_err
-                    );
-                }
-
-                Err(MetaError::Internal(format!("Failed to create file: {}", e)))
-            }
-        }
+        info!(
+            "File created successfully: parent={}, name={}, inode={}",
+            parent_inode, name, inode
+        );
+        Ok(inode)
     }
 
     /// Generate unique ID using local pool with batch allocation from Etcd
@@ -990,40 +827,6 @@ impl EtcdMetaStore {
                 })
             })
             .await
-    }
-
-    /// Update parent directory children
-    ///
-    /// Uses optimistic concurrency control to safely update the children map
-    /// in multi-client scenarios. Retries on conflicts up to max_retries.
-    async fn update_parent_children(
-        &self,
-        parent_ino: i64,
-        updater: impl Fn(&mut HashMap<String, i64>) + Send + Sync,
-        max_retries: usize,
-    ) -> Result<(), MetaError> {
-        let key = Self::etcd_children_key(parent_ino);
-
-        EtcdTxn::new(&self.client)
-            .max_retries(max_retries as u64)
-            .run(|tx| {
-                let key = key.clone();
-                let updater = &updater;
-
-                Box::pin(async move {
-                    let dir = tx.get_typed_json::<EtcdDirChildren>(&key).await?;
-
-                    let mut children = dir.map(|dir| dir.children).unwrap_or_default();
-                    updater(&mut children);
-
-                    let dir = EtcdDirChildren::new(parent_ino, children);
-                    tx.set_typed_json(&key, &dir)?;
-
-                    Ok(())
-                })
-            })
-            .await
-            .map_err(|e| MetaError::Internal(format!("Update parent children failed: {e}")))
     }
 
     /// Check file is existing
@@ -1476,10 +1279,16 @@ impl MetaStore for EtcdMetaStore {
             return Err(MetaError::Internal("Not a directory".to_string()));
         }
 
-        let children_key = Self::etcd_children_key(child_ino);
-        if let Some(children) = self.etcd_get_json::<EtcdDirChildren>(&children_key).await?
-            && !children.children.is_empty()
-        {
+        let mut client = self.client.clone();
+        let child_prefix = format!("f:{}:", child_ino);
+        let child_entries = client
+            .get(
+                child_prefix,
+                Some(etcd_client::GetOptions::new().with_prefix().with_limit(1)),
+            )
+            .await
+            .map_err(|e| MetaError::Internal(format!("Failed to check directory empty: {}", e)))?;
+        if !child_entries.kvs().is_empty() {
             return Err(MetaError::DirectoryNotEmpty(child_ino));
         }
 
@@ -1488,56 +1297,21 @@ impl MetaStore for EtcdMetaStore {
             parent, name, child_ino
         );
 
-        // Step 1: Delete the directory entries first (forward, reverse, children keys)
-        // This ensures the directory is properly deleted before updating parent
+        // Step 1: Delete the directory entries first (forward, reverse keys)
+        // This ensures the directory is properly deleted.
         let reverse_key = Self::etcd_reverse_key(child_ino);
-        let children_key = Self::etcd_children_key(child_ino);
-        let delete_keys = vec![
-            forward_key.as_str(),
-            reverse_key.as_str(),
-            children_key.as_str(),
-        ];
+        let delete_keys = vec![forward_key.as_str(), reverse_key.as_str()];
 
         match self
             .delete_entry(&forward_key, &delete_keys, child_ino)
             .await
         {
             Ok(_) => {
-                // Step 2: Directory deleted successfully, now update parent children map
-                // If this fails, forward key is deleted but parent still references it
-                // This is acceptable: lookup will fail (forward key gone), no dangling data
-                let name_for_closure = name.to_string();
-
-                match self
-                    .update_parent_children(
-                        parent,
-                        move |children| {
-                            children.remove(&name_for_closure);
-                        },
-                        10,
-                    )
-                    .await
-                {
-                    Ok(_) => {
-                        info!(
-                            "Directory deleted successfully: parent={}, name={}, inode={}",
-                            parent, name, child_ino
-                        );
-                        Ok(())
-                    }
-                    Err(e) => {
-                        // Parent update failed, but directory is deleted
-                        // Forward key is deleted, so lookup will fail correctly
-                        // Log warning but don't fail the operation
-                        warn!(
-                            "Rmdir succeeded but failed to update parent children map: parent={}, name={}, inode={}, error={}. Forward key deleted, lookup will fail correctly.",
-                            parent, name, child_ino, e
-                        );
-                        // Return success since the directory is effectively deleted
-                        // (forward key deleted = directory is unreachable)
-                        Ok(())
-                    }
-                }
+                info!(
+                    "Directory deleted successfully: parent={}, name={}, inode={}",
+                    parent, name, child_ino
+                );
+                Ok(())
             }
             Err(e) => {
                 // Deletion failed
@@ -1692,24 +1466,6 @@ impl MetaStore for EtcdMetaStore {
             })
             .await?;
 
-        let name_for_closure = name.to_string();
-        let ino_for_closure = ino;
-        if let Err(e) = self
-            .update_parent_children(
-                parent,
-                move |children| {
-                    children.insert(name_for_closure.clone(), ino_for_closure);
-                },
-                10,
-            )
-            .await
-        {
-            warn!(
-                "Link succeeded but failed to update parent children map: parent={}, name={}, inode={}, error={}. Forward key created, lookup remains consistent.",
-                parent, name, ino, e
-            );
-        }
-
         Ok(attr)
     }
 
@@ -1785,37 +1541,6 @@ impl MetaStore for EtcdMetaStore {
 
         self.create_entry(&forward_key, &operations, parent, name)
             .await?;
-
-        let name_for_closure = name.to_string();
-        let inode_for_closure = inode;
-        if let Err(e) = self
-            .update_parent_children(
-                parent,
-                move |children| {
-                    children.insert(name_for_closure.clone(), inode_for_closure);
-                },
-                10,
-            )
-            .await
-        {
-            error!(
-                "Symlink created but failed to update parent children map: parent={}, name={}, inode={}, error={}. Rolling back forward entry.",
-                parent, name, inode, e
-            );
-
-            let rollback_keys = vec![forward_key.as_str(), reverse_key.as_str()];
-            if let Err(rollback_err) = self.delete_entry(&forward_key, &rollback_keys, inode).await
-            {
-                error!(
-                    "Failed to rollback symlink creation after parent update error: inode={}, error={}",
-                    inode, rollback_err
-                );
-            }
-
-            return Err(MetaError::Internal(format!(
-                "Failed to update parent children map: {e}"
-            )));
-        }
 
         let attr = self.stat(inode).await?.ok_or(MetaError::NotFound(inode))?;
         Ok((inode, attr))
@@ -1933,32 +1658,11 @@ impl MetaStore for EtcdMetaStore {
             parent, name, file_ino
         );
 
-        let name_for_closure = name.clone();
-        match self
-            .update_parent_children(
-                parent,
-                move |children| {
-                    children.remove(&name_for_closure);
-                },
-                10,
-            )
-            .await
-        {
-            Ok(_) => {
-                info!(
-                    "File unlinked successfully: parent={}, name={}, inode={}",
-                    parent, name, file_ino
-                );
-                Ok(())
-            }
-            Err(e) => {
-                warn!(
-                    "Unlink succeeded but failed to update parent children map: parent={}, name={}, inode={}, error={}. Forward key deleted, lookup will fail correctly.",
-                    parent, name, file_ino, e
-                );
-                Ok(())
-            }
-        }
+        info!(
+            "File unlinked successfully: parent={}, name={}, inode={}",
+            parent, name, file_ino
+        );
+        Ok(())
     }
 
     #[tracing::instrument(
@@ -2055,88 +1759,6 @@ impl MetaStore for EtcdMetaStore {
                 })
             })
             .await?;
-
-        // Atomic transaction succeeded, now update parent children maps
-        // If parent updates fail, forward/reverse keys already reflect the new state
-        // This is acceptable: lookup will work correctly with new forward key
-
-        // Update parent children maps
-        // Note: Parent children map updates are NOT atomic with the forward/reverse key updates
-        // This is a known limitation. If these updates fail:
-        // - Forward key points to new location (correct)
-        // - Parent children map may be stale (but lookup still works via forward key)
-        // - Consider this acceptable as forward key is the source of truth
-
-        if old_parent != new_parent {
-            // Different parents: remove from old, add to new
-            let old_name_for_closure = old_name.to_string();
-            match self
-                .update_parent_children(
-                    old_parent,
-                    move |children| {
-                        children.remove(&old_name_for_closure);
-                    },
-                    10,
-                )
-                .await
-            {
-                Ok(_) => {}
-                Err(e) => {
-                    warn!(
-                        "Rename succeeded but failed to update old parent children map: old_parent={}, name={}, inode={}, error={}. Forward key updated, lookup will work correctly.",
-                        old_parent, old_name, entry_ino, e
-                    );
-                    // Don't fail the operation - forward key is already updated
-                }
-            }
-
-            let new_name_for_closure = new_name.clone();
-            let entry_ino_for_closure = entry_ino;
-            match self
-                .update_parent_children(
-                    new_parent,
-                    move |children| {
-                        children.insert(new_name_for_closure.clone(), entry_ino_for_closure);
-                    },
-                    10,
-                )
-                .await
-            {
-                Ok(_) => {}
-                Err(e) => {
-                    warn!(
-                        "Rename succeeded but failed to update new parent children map: new_parent={}, name={}, inode={}, error={}. Forward key updated, lookup will work correctly.",
-                        new_parent, new_name, entry_ino, e
-                    );
-                    // Don't fail the operation - forward key is already updated
-                }
-            }
-        } else if old_name != new_name {
-            // Same parent, different name: single atomic update
-            let old_name_for_closure = old_name.to_string();
-            let new_name_for_closure = new_name.clone();
-            let entry_ino_for_closure = entry_ino;
-            match self
-                .update_parent_children(
-                    new_parent,
-                    move |children| {
-                        children.remove(&old_name_for_closure);
-                        children.insert(new_name_for_closure.clone(), entry_ino_for_closure);
-                    },
-                    10,
-                )
-                .await
-            {
-                Ok(_) => {}
-                Err(e) => {
-                    warn!(
-                        "Rename succeeded but failed to update parent children map: parent={}, old_name={}, new_name={}, inode={}, error={}. Forward key updated, lookup will work correctly.",
-                        new_parent, old_name, new_name, entry_ino, e
-                    );
-                    // Don't fail the operation - forward key is already updated
-                }
-            }
-        }
 
         // Update parent directory timestamps
         let now = chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0);
