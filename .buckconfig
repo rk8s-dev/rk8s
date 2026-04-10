@@ -18,7 +18,7 @@
   buckal = git
 
 [external_cell_buckal]
-  commit_hash = 22bd38c79d2348d9a6591b7156c42d615377eaad
+  commit_hash = 221b613c564f7a1b33b4588d33d3a92779eb2d8d
   git_origin = https://github.com/buck2hub/buckal-bundles
 
 [parser]
