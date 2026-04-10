@@ -1,0 +1,43 @@
+name: 'Install Buck2'
+description: 'Install Buck2 by downloading prebuilt binary from GitHub releases'
+
+inputs:
+  version:
+    description: 'Buck2 release version (e.g., 2026-01-02, latest)'
+    required: false
+    default: 'latest'
+
+runs:
+  using: "composite"
+  steps:
+    - name: Install Buck2
+      shell: bash
+      env:
+        INPUT_VERSION: ${{ inputs.version }}
+        RUNNER_OS_ARCH: ${{ runner.os }}-${{ runner.arch }}
+      run: |
+        # Determine platform
+        case "$RUNNER_OS_ARCH" in
+          Linux-X64)   PLATFORM="x86_64-unknown-linux-musl" ;;
+          Linux-ARM64) PLATFORM="aarch64-unknown-linux-musl" ;;
+          macOS-X64)   PLATFORM="x86_64-apple-darwin" ;;
+          macOS-ARM64) PLATFORM="aarch64-apple-darwin" ;;
+          *) echo "Unsupported platform: $RUNNER_OS_ARCH"; exit 1 ;;
+        esac
+
+        VERSION="$INPUT_VERSION"
+        URL="https://github.com/facebook/buck2/releases/download/${VERSION}/buck2-${PLATFORM}.zst"
+
+        echo "Downloading buck2 from $URL"
+        mkdir -p "$HOME/.cargo/bin"
+        if [ "$VERSION" = "latest" ] || [ ! -x "$HOME/.cargo/bin/buck2" ]; then
+          curl -fsSL "$URL" | zstd -d -o "$HOME/.cargo/bin/buck2"
+          chmod +x "$HOME/.cargo/bin/buck2"
+        else
+          echo "buck2 already exists (cached), skipping download"
+        fi
+
+        echo "Verifying buck2 installation..."
+        "$HOME/.cargo/bin/buck2" --version
+
+        echo "$HOME/.cargo/bin" >> $GITHUB_PATH
