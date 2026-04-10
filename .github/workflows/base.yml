@@ -17,9 +17,9 @@ jobs:
     env:
       CARGO_TERM_COLOR: always
     steps:
-      - uses: ./.github/actions/install-sys-deps
-      - uses: dtolnay/rust-toolchain@stable
       - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: ./.github/actions/install-sys-deps
       - run: |
           cd project
           cargo fmt --all --check
@@ -33,9 +33,9 @@ jobs:
       CARGO_TERM_COLOR: always
       RUSTUP_TOOLCHAIN: stable
     steps:
-      - uses: ./.github/actions/install-sys-deps
-      - uses: dtolnay/rust-toolchain@stable
       - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: ./.github/actions/install-sys-deps
       - run: |
           cd project
           cargo clippy --workspace -- -D warnings
@@ -66,10 +66,10 @@ jobs:
       RUSTUP_TOOLCHAIN: stable
 
     steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
       - uses: ./.github/actions/install-sys-deps
       - uses: ./.github/actions/install-buck2
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: actions/checkout@v4
       - run: buck2 build //project/...
 
   test:
