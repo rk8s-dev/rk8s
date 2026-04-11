@@ -674,6 +674,7 @@ async fn update_pod_status(
             status: pod_status.clone(),
         })
         .await?;
+    stream.sender().finish()?;
 
     match stream.fetch_msg().await? {
         RksMessage::Ack => {
@@ -1340,17 +1341,7 @@ mod tests {
         common::ContainerSpec {
             name: name.to_string(),
             image: "image".to_string(),
-            ports: Vec::new(),
-            args: Vec::new(),
-            resources: None,
-            liveness_probe: None,
-            readiness_probe: None,
-            startup_probe: None,
-            security_context: None,
-            env: None,
-            volume_mounts: None,
-            command: None,
-            working_dir: None,
+            ..Default::default()
         }
     }
 

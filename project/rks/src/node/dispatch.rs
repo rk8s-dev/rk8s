@@ -154,6 +154,15 @@ pub async fn dispatch_worker_bi(
             );
             stream.send_msg(&RksMessage::ListPodRes(pods)).await?;
         }
+        RksMessage::UpdatePodStatus {
+            pod_name,
+            pod_namespace,
+            status,
+        } => {
+            let response =
+                update_pod_status_in_store(xline_store, &pod_name, &pod_namespace, status).await?;
+            stream.send_msg(&response).await?;
+        }
         _ => {
             warn!(
                 target: "rks::node::worker_dispatch_bi",
@@ -856,39 +865,11 @@ pub async fn dispatch_user(
         RksMessage::UpdatePodStatus {
             pod_name,
             pod_namespace,
-            mut status,
+            status,
         } => {
-            info!(
-                target: "rks::node::user_dispatch",
-                "UpdatePodStatus received for Pod {}/{}", pod_namespace, pod_name
-            );
-            // Update the pod status in xline store
-            if let Some(pod_yaml) = xline_store.get_pod_yaml(&pod_name).await? {
-                let mut pod_task: PodTask = serde_yaml::from_str(&pod_yaml)?;
-                // Preserve existing pod_ip if the incoming status does not carry it.
-                // This avoids wiping pod_ip set by SetPodip.
-                if status.pod_ip.is_none() {
-                    status.pod_ip = pod_task.status.pod_ip.clone();
-                }
-                pod_task.status = status;
-                let new_yaml = serde_yaml::to_string(&pod_task)?;
-                xline_store.insert_pod_yaml(&pod_name, &new_yaml).await?;
-                info!(
-                    target: "rks::node::user_dispatch",
-                    "updated PodTask {}/{} status", pod_namespace, pod_name
-                );
-                conn.send_msg(&RksMessage::Ack).await?;
-            } else {
-                warn!(
-                    target: "rks::node::user_dispatch",
-                    "PodTask {}/{} not found when updating status", pod_namespace, pod_name
-                );
-                conn.send_msg(&RksMessage::Error(format!(
-                    "PodTask {}/{} not found",
-                    pod_namespace, pod_name
-                )))
-                .await?;
-            }
+            let response =
+                update_pod_status_in_store(xline_store, &pod_name, &pod_namespace, status).await?;
+            conn.send_msg(&response).await?;
         }
         RksMessage::GetPodLogs {
             pod_name,
@@ -1289,4 +1270,47 @@ async fn relay_attach_streams(
     user_to_worker??;
     worker_to_user??;
     Ok(())
+}
+
+async fn update_pod_status_in_store(
+    xline_store: &Arc<XlineStore>,
+    pod_name: &str,
+    pod_namespace: &str,
+    mut status: PodStatus,
+) -> anyhow::Result<RksMessage> {
+    info!(
+        target: "rks::node::pod_status",
+        "UpdatePodStatus received for Pod {}/{}",
+        pod_namespace,
+        pod_name
+    );
+
+    if let Some(pod_yaml) = xline_store.get_pod_yaml(pod_name).await? {
+        let mut pod_task: PodTask = serde_yaml::from_str(&pod_yaml)?;
+        // Preserve an existing pod_ip when the incoming status omits it.
+        if status.pod_ip.is_none() {
+            status.pod_ip = pod_task.status.pod_ip.clone();
+        }
+        pod_task.status = status;
+        let new_yaml = serde_yaml::to_string(&pod_task)?;
+        xline_store.insert_pod_yaml(pod_name, &new_yaml).await?;
+        info!(
+            target: "rks::node::pod_status",
+            "updated PodTask {}/{} status",
+            pod_namespace,
+            pod_name
+        );
+        Ok(RksMessage::Ack)
+    } else {
+        warn!(
+            target: "rks::node::pod_status",
+            "PodTask {}/{} not found when updating status",
+            pod_namespace,
+            pod_name
+        );
+        Ok(RksMessage::Error(format!(
+            "PodTask {}/{} not found",
+            pod_namespace, pod_name
+        )))
+    }
 }

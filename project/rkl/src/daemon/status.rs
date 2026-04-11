@@ -56,7 +56,7 @@ pub async fn get_pod_task_by_uid(uid: &Uuid) -> anyhow::Result<Option<PodTask>> 
     let mut stream = client.open_bi().await?;
     stream.send_msg(&RksMessage::GetPodByUid(*uid)).await?;
     stream.sender().finish()?;
-    let pod = match client.fetch_msg().await? {
+    let pod = match stream.fetch_msg().await? {
         RksMessage::GetPodByUidRes(res) => Some(*res),
         _ => None,
     };

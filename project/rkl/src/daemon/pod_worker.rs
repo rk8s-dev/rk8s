@@ -350,6 +350,16 @@ async fn sync_pod_for_pod_lifecycle_event(
         "[PodWorker] Syncing pod for lifecycle event"
     );
 
+    if is_pod_sandbox_event(event) {
+        debug!(
+            pod_uid = %event.pod_uid,
+            pod_name = %event.pod_name,
+            container_id = %event.container.state.id,
+            "[PodWorker] Ignoring pod sandbox lifecycle event for workload status sync"
+        );
+        return Ok(());
+    }
+
     let pod = get_pod_task_by_uid(&event.pod_uid)
         .await?
         .ok_or(anyhow::anyhow!("Pod not found"))?;
@@ -401,6 +411,11 @@ async fn sync_pod_for_pod_lifecycle_event(
         }
     }
     Ok(())
+}
+
+fn is_pod_sandbox_event(event: &PodLifecycleEvent) -> bool {
+    // TaskRunner uses the pod name as the sandbox container ID.
+    event.container.state.id == event.pod_name
 }
 
 async fn apply_pod_lifecycle_event(
@@ -788,6 +803,7 @@ mod tests {
                     image: "bundle".to_string(),
                     ports: vec![],
                     args: vec![],
+                    tty: false,
                     resources: None,
                     liveness_probe: None,
                     readiness_probe: None,
@@ -963,6 +979,21 @@ mod tests {
             .unwrap();
 
         assert_eq!(pod_status.phase, PodPhase::Running);
+    }
+
+    #[test]
+    fn sandbox_event_is_detected_by_matching_pod_name() {
+        let sandbox_event = make_event(
+            PodLifecycleEventType::ContainerStarted,
+            make_container("pod", None),
+        );
+        assert!(is_pod_sandbox_event(&sandbox_event));
+
+        let workload_event = make_event(
+            PodLifecycleEventType::ContainerStarted,
+            make_container("c1", None),
+        );
+        assert!(!is_pod_sandbox_event(&workload_event));
     }
 
     #[test]
