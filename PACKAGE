@@ -12,8 +12,6 @@ set_cfg_constructor(aliases = ALIASES)
 
 set_cfg_modifiers(
     cfg_modifiers = [
-        # default is debug mode.
-        # override with -m release
         "buckal//config/mode:debug",
     ],
 )

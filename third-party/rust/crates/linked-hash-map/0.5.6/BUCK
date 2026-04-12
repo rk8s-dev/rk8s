@@ -5,10 +5,10 @@ load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
     name = "vendor",
-    urls = ["https://static.crates.io/crates/cpufeatures/cpufeatures-0.2.17.crate"],
-    sha256 = "59ed5838eebb26a2bb2e58f6d5b5316989ae9d08bab10e0e6d103e656d1b0280",
+    urls = ["https://static.crates.io/crates/linked-hash-map/linked-hash-map-0.5.6.crate"],
+    sha256 = "0717cef1bc8b636c6e1c1bbdefc09e6322da8a9321966e8928ef80d20f7f770f",
     type = "tar.gz",
-    strip_prefix = "cpufeatures-0.2.17",
+    strip_prefix = "linked-hash-map-0.5.6",
 )
 
 cargo_manifest(
@@ -17,14 +17,11 @@ cargo_manifest(
 )
 
 rust_library(
-    name = "cpufeatures",
+    name = "linked-hash-map",
     srcs = [":vendor"],
-    crate = "cpufeatures",
+    crate = "linked_hash_map",
     crate_root = "vendor/src/lib.rs",
-    edition = "2018",
+    edition = "2015",
     rustc_flags = ["@$(location :manifest[env_flags])"],
-    os_deps = {
-        "macos": ["//third-party/rust/crates/libc/0.2.182:libc"],
-    },
     visibility = ["PUBLIC"],
 )
