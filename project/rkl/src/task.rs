@@ -248,7 +248,7 @@ impl TaskRunner {
         let sandbox_spec = ContainerSpec {
             name: "sandbox".to_string(),
             // FIXME: SHOULD define a const variable image name
-            image: "pause:3.9".to_string(),
+            image: "lingbou/pause:3.9".to_string(),
             ports: vec![],
             args: vec![],
             tty: false,
@@ -367,7 +367,7 @@ impl TaskRunner {
         let sandbox_spec = ContainerSpec {
             name: "sandbox".to_string(),
             // FIXME: SHOULD define a const variable image name
-            image: "pause:3.9".to_string(),
+            image: "lingbou/pause:3.9".to_string(),
             // image: "/home/harry/Documents/rk8s/project/test/bundles/pause".to_string(),
             ports: vec![],
             args: vec![],

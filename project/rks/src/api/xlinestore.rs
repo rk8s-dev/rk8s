@@ -630,6 +630,37 @@ impl XlineStore {
         Ok((watcher, stream))
     }
 
+    /// Get all jobs as a snapshot with the current revision.
+    pub async fn jobs_snapshot_with_rev(&self) -> Result<(Vec<(String, String)>, i64)> {
+        let prefix = "/registry/jobs/";
+        let opts = Some(GetOptions::new().with_prefix());
+        let mut client = self.client.write().await;
+        let resp = client.get(prefix, opts).await?;
+
+        let mut items = Vec::new();
+        let rev = resp.header().unwrap().revision();
+
+        for kv in resp.kvs() {
+            let key = String::from_utf8_lossy(kv.key()).replace("/registry/jobs/", "");
+            let yaml = String::from_utf8_lossy(kv.value()).to_string();
+            items.push((key, yaml));
+        }
+
+        Ok((items, rev))
+    }
+
+    /// Watch jobs starting from a specific revision.
+    pub async fn watch_jobs(&self, start_rev: i64) -> Result<(Watcher, WatchStream)> {
+        let key_prefix = "/registry/jobs/".to_string();
+        let opts = WatchOptions::new()
+            .with_prefix()
+            .with_prev_key()
+            .with_start_revision(start_rev);
+        let mut client = self.client.write().await;
+        let (watcher, stream) = client.watch(key_prefix, Some(opts)).await?;
+        Ok((watcher, stream))
+    }
+
     /// Insert a deployment YAML definition into xline.
     pub async fn insert_deployment_yaml(&self, deploy_name: &str, deploy_yaml: &str) -> Result<()> {
         let key = format!("/registry/deployments/{deploy_name}");

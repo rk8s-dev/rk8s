@@ -1,6 +1,7 @@
 use common::{
-    ContainerRes, ContainerSpec, Node, NodeAddress, NodeCondition, NodeSpec, NodeStatus,
-    ObjectMeta, PodSpec, PodStatus, PodTask, Resource,
+    Affinity, ContainerRes, ContainerSpec, Node, NodeAddress, NodeAffinity, NodeCondition,
+    NodeSelector, NodeSelectorOperator, NodeSelectorRequirement, NodeSelectorTerm, NodeSpec,
+    NodeStatus, ObjectMeta, PodSpec, PodStatus, PodTask, Resource,
 };
 use libscheduler::plugins::{Plugins, node_resources_fit::ScoringStrategy};
 use libvault::storage::xline::XlineOptions;
@@ -116,17 +117,8 @@ fn create_test_pod(name: &str, cpu_limit: Option<&str>, memory_limit: Option<&st
             containers: vec![ContainerSpec {
                 name: "app".to_string(),
                 image: "nginx:latest".to_string(),
-                ports: vec![],
-                args: vec![],
                 resources,
-                liveness_probe: None,
-                readiness_probe: None,
-                startup_probe: None,
-                security_context: None,
-                env: None,
-                volume_mounts: None,
-                command: None,
-                working_dir: None,
+                ..Default::default()
             }],
             init_containers: vec![],
             tolerations: vec![],
@@ -326,7 +318,23 @@ async fn test_no_pod_assignment_when_no_nodes() -> Result<()> {
 
     // Create a PodTask with proper structure for the scheduler
     let pod_name = "scheduler-test-pod-no-nodes";
-    let pod_task = create_test_pod(pod_name, Some("1"), Some("1Gi"));
+    let mut pod_task = create_test_pod(pod_name, Some("1"), Some("1Gi"));
+    pod_task.spec.affinity = Some(Affinity {
+        node_affinity: Some(NodeAffinity {
+            required_during_scheduling_ignored_during_execution: Some(NodeSelector {
+                node_selector_terms: vec![NodeSelectorTerm {
+                    match_expressions: vec![NodeSelectorRequirement {
+                        key: "rk8s.io/scheduler-test-no-match".to_string(),
+                        operator: NodeSelectorOperator::In,
+                        values: vec!["true".to_string()],
+                    }],
+                }],
+            }),
+            ..Default::default()
+        }),
+        pod_affinity: None,
+        pod_anti_affinity: None,
+    });
 
     let initial_pod_yaml = serde_yaml::to_string(&pod_task).expect("Failed to serialize pod");
 
