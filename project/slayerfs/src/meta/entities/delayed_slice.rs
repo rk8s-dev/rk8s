@@ -15,7 +15,11 @@ pub struct Model {
     pub slice_id: i64,
     /// Chunk ID that this slice belongs to
     pub chunk_id: i64,
-    /// Offset within the chunk (for calculating block index)
+    /// Offset within the chunk.
+    ///
+    /// Kept for compaction provenance/debug context. Current block-store GC deletion
+    /// uses slice-relative block addressing and does not derive delete start index
+    /// from this field.
     pub offset: i64,
     /// Size of the slice (for object storage cleanup)
     pub size: i64,

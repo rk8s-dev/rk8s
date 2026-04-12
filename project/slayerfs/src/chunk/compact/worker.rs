@@ -14,7 +14,6 @@ type CompactionHook = Arc<dyn Fn(u64) + Send + Sync>;
 pub struct ChunkLockGuard<M: MetaStore> {
     chunk_id: u64,
     locked_chunks: Arc<RwLock<HashSet<u64>>>,
-    #[allow(dead_code)]
     meta_store: Arc<M>,
     unlocked: bool,
 }
@@ -35,12 +34,18 @@ impl<M: MetaStore> ChunkLockGuard<M> {
         }
         self.unlocked = true;
 
-        // NOTE: Best-effort locking design - we only release the local lock here.
-        // The global lock (via MetaStore TTL) is not explicitly released; it
-        // expires automatically after the dynamic TTL calculated based on
-        // compaction type and slice count. This simplifies crash recovery
-        // and cross-process synchronization at the cost of potential write
-        // blocking for up to TTL seconds after compaction completes.
+        // Best-effort explicit release on the normal path. Crash paths still
+        // rely on TTL expiry for self-healing.
+        let released = self
+            .meta_store
+            .release_global_lock(LockName::ChunkCompactLock(self.chunk_id))
+            .await;
+        if !released {
+            warn!(
+                chunk_id = self.chunk_id,
+                "Failed to release global compact lock explicitly, TTL fallback applies"
+            );
+        }
 
         let mut locked = self.locked_chunks.write().await;
         locked.remove(&self.chunk_id);

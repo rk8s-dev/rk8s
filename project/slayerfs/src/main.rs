@@ -49,7 +49,8 @@ use crate::fuse::mount::mount_vfs_unprivileged;
 use crate::meta::MetaStore;
 use crate::meta::client::MetaClient;
 use crate::meta::config::{
-    CacheConfig, ClientOptions, Config, DatabaseConfig, DatabaseType, MetaClientConfig, CompactConfig
+    CacheConfig, ClientOptions, CompactConfig, Config, DatabaseConfig, DatabaseType,
+    MetaClientConfig,
 };
 use crate::meta::factory::MetaStoreFactory;
 use crate::meta::layer::MetaLayer;

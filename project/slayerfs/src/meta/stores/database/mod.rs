@@ -795,6 +795,15 @@ impl DatabaseMetaStore {
         }
     }
 
+    async fn release_lock_internal(&self, lock_name: LockName) -> anyhow::Result<bool> {
+        let lock_name_str = lock_name.to_string();
+        let result = LocksMeta::delete_many()
+            .filter(locks_meta::Column::LockName.eq(lock_name_str))
+            .exec(&self.db)
+            .await?;
+        Ok(result.rows_affected > 0)
+    }
+
     async fn shutdown_session_by_id<C: ConnectionTrait>(
         &self,
         session_id: Uuid,
@@ -2825,6 +2834,11 @@ impl MetaStore for DatabaseMetaStore {
         self.is_lock_held_internal(lock_name, ttl_secs)
             .await
             .unwrap_or(false)
+    }
+
+    #[tracing::instrument(level = "trace", skip(self), fields(lock_name = ?lock_name))]
+    async fn release_global_lock(&self, lock_name: LockName) -> bool {
+        self.release_lock_internal(lock_name).await.unwrap_or(false)
     }
 
     fn as_any(&self) -> &dyn std::any::Any {

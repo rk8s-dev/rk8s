@@ -571,6 +571,14 @@ pub trait MetaStore: Send + Sync {
         false
     }
 
+    /// Best-effort explicit release for a global lock.
+    ///
+    /// Callers should still rely on TTL expiry for crash recovery.
+    async fn release_global_lock(&self, lock_name: LockName) -> bool {
+        let _ = lock_name;
+        false
+    }
+
     // ---------- Attribute / handle management (proposed extensions) ----------
 
     async fn set_attr(

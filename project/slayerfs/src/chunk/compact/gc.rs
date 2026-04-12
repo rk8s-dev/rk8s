@@ -178,7 +178,7 @@ where
     async fn delete_slice_blocks(
         &self,
         slice_id: u64,
-        _offset: u64,
+        _chunk_offset: u64,
         size: u64,
         block_size: u64,
     ) -> Result<(), GCError> {
@@ -186,6 +186,9 @@ where
             return Ok(());
         }
 
+        // Block keys are (slice_id, slice_relative_block_index), so deletion always
+        // starts from block index 0 for the target slice. chunk_offset is kept in
+        // metadata for audit/replay context and is intentionally not used here.
         let num_blocks = size.div_ceil(block_size);
 
         if num_blocks == 0 {
