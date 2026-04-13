@@ -23,7 +23,7 @@
 
 ```
 主机 (Host)
-├── docker-compose  →  etcd :2379 / redis :6379 / postgres :15432
+├── docker compose  →  etcd :2379 / redis :6379 / postgres :15432
 ├── qlean 测试进程  →  通过 vsock SSH 管理 VM
 └── libvirt / qlbr0 (192.168.221.1/24)
      ├── client1 VM  (CID 10, IP 192.168.221.x)
@@ -67,7 +67,7 @@ sudo apt-get install -y \
 
 ### 2.2 Docker（后端服务）
 
-参考 [docker-compose-test-guide.md](docker-compose-test-guide.md) 安装 Docker 和 docker-compose。
+参考 [docker compose-test-guide.md](docker compose-test-guide.md) 安装 Docker 和 docker compose。
 
 ### 2.3 Rust 工具链
 
@@ -185,10 +185,10 @@ ls -la /boot/vmlinuz-* | head -3
 在 `project/slayerfs/` 目录下：
 
 ```bash
-docker-compose -f docker-compose.yml up -d
+docker compose -f docker/docker compose.integration.yml up -d
 
 # 验证三个服务均健康
-docker-compose -f docker-compose.yml ps
+docker compose -f docker/docker compose.integration.yml ps
 ```
 
 ### 步骤 4.3 — 构建 persistence_demo
@@ -213,7 +213,7 @@ cargo build -p slayerfs --example persistence_demo --release
 ```bash
 cd /path/to/rk8s/project/slayerfs
 
-# 完整运行（首次需要 --skip-services=false，确保 docker-compose 服务已起）
+# 完整运行（首次需要 --skip-services=false，确保 docker compose 服务已起）
 # 注意：必须在 kvm 和 libvirt 组下执行
 sg libvirt -c "sg kvm -c './scripts/run_integration_tests.sh --skip-deps'"
 ```
@@ -338,12 +338,12 @@ sudo chmod u+s /usr/lib/qemu/qemu-bridge-helper
 
 ### 问题 6：`connection refused` 到 `192.168.221.1:2379/6379/15432`
 
-**原因**：docker-compose 后端服务未启动，或监听在 `127.0.0.1` 而非 `0.0.0.0`。
+**原因**：docker compose 后端服务未启动，或监听在 `127.0.0.1` 而非 `0.0.0.0`。
 
 **解决**：
 ```bash
 cd project/slayerfs
-docker-compose -f docker-compose.yml up -d
+docker compose -f docker/docker compose.integration.yml up -d
 # 验证连通性（从主机）
 nc -zv 192.168.221.1 2379 && nc -zv 192.168.221.1 6379 && nc -zv 192.168.221.1 15432
 ```
@@ -389,7 +389,7 @@ WSL2 重启后，以下状态会丢失，需要重新配置：
 |------|----------|------------|
 | `vhost_vsock` 模块 | ❌ 丢失 | `sudo modprobe vhost_vsock`（或配置了 `/etc/modules-load.d/` 则自动） |
 | `libvirtd` 服务 | ❌ 丢失 | `sudo systemctl start libvirtd` |
-| docker-compose 服务 | ❌ 丢失 | `docker-compose -f docker-compose.yml up -d` |
+| docker compose 服务 | ❌ 丢失 | `docker compose -f docker/docker compose.integration.yml up -d` |
 | KVM/libvirt 组成员 | ✅ 持久 | 无需操作 |
 | `/etc/qemu/bridge.conf` | ✅ 持久 | 无需操作 |
 | qemu-bridge-helper setuid | ✅ 持久 | 无需操作 |
@@ -403,5 +403,5 @@ WSL2 重启后，以下状态会丢失，需要重新配置：
 sudo modprobe vhost_vsock
 sudo systemctl start libvirtd
 cd /path/to/rk8s/project/slayerfs
-docker-compose -f docker-compose.yml up -d
+docker compose -f docker/docker compose.integration.yml up -d
 ```

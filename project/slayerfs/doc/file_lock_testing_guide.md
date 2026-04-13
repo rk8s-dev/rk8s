@@ -313,9 +313,9 @@ echo "=== 测试完成 ==="
 # docker rm redis-test etcd-test
 ```
 
-### Docker Compose 配置
+### docker compose 配置
 
-创建 `tests/docker-compose.test.yml`：
+创建 `tests/docker compose.test.yml`：
 
 ```yaml
 version: '3.8'
@@ -346,9 +346,9 @@ services:
       - --initial-cluster node1=http://0.0.0.0:2380
 ```
 
-使用 Docker Compose 启动：
+使用 docker compose 启动：
 ```bash
-docker-compose -f tests/docker-compose.test.yml up -d
+docker compose -f tests/docker compose.test.yml up -d
 ```
 
 ## 预期结果

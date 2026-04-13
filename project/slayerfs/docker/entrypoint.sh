@@ -11,7 +11,7 @@ write_data_section() {
 data:
   backend: local-fs
   localfs:
-  data_dir: ${SLAYERFS_DATA_DIR:-${SLAYERFS_HOME:-/var/lib/slayerfs}/data}
+    data_dir: ${SLAYERFS_DATA_DIR:-${SLAYERFS_HOME:-/var/lib/slayerfs}/data}
 EOF
       ;;
     s3)
@@ -20,11 +20,11 @@ EOF
 data:
   backend: s3
   s3:
-  bucket: ${SLAYERFS_S3_BUCKET}
-  region: ${SLAYERFS_S3_REGION:-us-east-1}
-  part_size: ${SLAYERFS_S3_PART_SIZE:-16777216}
-  max_concurrency: ${SLAYERFS_S3_MAX_CONCURRENCY:-8}
-  force_path_style: ${SLAYERFS_S3_FORCE_PATH_STYLE:-false}
+    bucket: ${SLAYERFS_S3_BUCKET}
+    region: ${SLAYERFS_S3_REGION:-us-east-1}
+    part_size: ${SLAYERFS_S3_PART_SIZE:-16777216}
+    max_concurrency: ${SLAYERFS_S3_MAX_CONCURRENCY:-8}
+    force_path_style: ${SLAYERFS_S3_FORCE_PATH_STYLE:-false}
 EOF
       if [[ -n "${SLAYERFS_S3_ENDPOINT:-}" ]]; then
         echo "    endpoint: ${SLAYERFS_S3_ENDPOINT}"
@@ -53,7 +53,7 @@ write_meta_section() {
 meta:
   backend: sqlx
   sqlx:
-  url: "$meta_url"
+    url: "$meta_url"
 EOF
       ;;
     sqlx|postgres)
@@ -62,7 +62,7 @@ EOF
 meta:
   backend: sqlx
   sqlx:
-  url: "$meta_url"
+    url: "$meta_url"
 EOF
       ;;
     redis)
@@ -71,7 +71,7 @@ EOF
 meta:
   backend: redis
   redis:
-  url: "$meta_url"
+    url: "$meta_url"
 EOF
       ;;
     etcd)
@@ -80,7 +80,7 @@ EOF
 meta:
   backend: etcd
   etcd:
-  urls:
+    urls:
 EOF
       local old_ifs="$IFS"
       IFS=','

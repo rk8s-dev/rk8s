@@ -1,3 +1,5 @@
 slayerfs-meta/
 *.env
 results/
+ai_conversations/
+

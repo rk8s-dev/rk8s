@@ -1,0 +1,515 @@
+diff --git a/project/slayerfs/README.md b/project/slayerfs/README.md
+index 183b608..ba26a71 100644
+--- a/project/slayerfs/README.md
++++ b/project/slayerfs/README.md
+@@ -98,6 +98,8 @@ docker build \
+ 	project
+ ```
+ 
++The image currently builds with a `rust:1.91-bookworm` builder stage and a `debian:trixie-slim` runtime stage so the Rust toolchain and bundled `xfs_io` stay compatible with the checked-in lockfile and prebuilt artifacts.
++
+ To copy a different tool from the prebuilt xfstests bundle, override `XFSTESTS_BINARY`:
+ 
+ ```bash
+@@ -112,10 +114,56 @@ Default runtime behavior:
+ - entrypoint starts `slayerfs mount`;
+ - local data backend uses `/var/lib/slayerfs/data`;
+ - default metadata backend is sqlite at `/var/lib/slayerfs/metadata.db`;
+-- the extracted xfstests helper is placed under `/opt/xfstests/bin`.
++- the extracted xfstests helper is placed under `/opt/xfstests/bin`;
++- the image declares `/mnt/slayerfs` and `/var/lib/slayerfs` as volumes.
++
++Minimal local-fs + sqlite run example:
++
++```bash
++docker run --rm \
++	--device /dev/fuse \
++	--cap-add SYS_ADMIN \
++	--security-opt apparmor=unconfined \
++	-v slayerfs-state:/var/lib/slayerfs \
++	-v slayerfs-mount:/mnt/slayerfs \
++	slayerfs:local
++```
++
++Redis metadata example:
++
++```bash
++docker run --rm \
++	--device /dev/fuse \
++	--cap-add SYS_ADMIN \
++	--security-opt apparmor=unconfined \
++	--network slayerfs_slayerfs-network \
++	-e SLAYERFS_META_BACKEND=redis \
++	-e SLAYERFS_META_URL=redis://redis:6379 \
++	-v slayerfs-data:/var/lib/slayerfs \
++	-v slayerfs-mount:/mnt/slayerfs \
++	slayerfs:local
++```
++
++Etcd metadata example:
++
++```bash
++docker run --rm \
++	--device /dev/fuse \
++	--cap-add SYS_ADMIN \
++	--security-opt apparmor=unconfined \
++	--network slayerfs_slayerfs-network \
++	-e SLAYERFS_META_BACKEND=etcd \
++	-e SLAYERFS_META_ETCD_URLS=http://etcd:2379 \
++	-v slayerfs-data:/var/lib/slayerfs \
++	-v slayerfs-mount:/mnt/slayerfs \
++	slayerfs:local
++```
++
++If `/dev/fuse` and the required container privileges are not provided, the image can still generate config and initialize metadata backends, but the FUSE mount step will fail.
+ 
+ CI uses `.github/workflows/slayerfs-docker.yml` to build this same image on pull requests and pushes to `main`. Docker Hub publishing is only enabled when `SLAYERFS_DOCKERHUB_REPOSITORY`, `DOCKERHUB_USERNAME`, and `DOCKERHUB_TOKEN` are configured in GitHub.
+ 
++
+ ---
+ 
+ 
+diff --git a/project/slayerfs/README_CN.md b/project/slayerfs/README_CN.md
+index 3dce85c..ef777cf 100644
+--- a/project/slayerfs/README_CN.md
++++ b/project/slayerfs/README_CN.md
+@@ -98,6 +98,8 @@ docker build \
+ 	project
+ ```
+ 
++当前镜像使用 `rust:1.91-bookworm` 作为 builder、`debian:trixie-slim` 作为 runtime，以匹配当前 lockfile 与预构建 `xfs_io` 的运行时依赖。
++
+ 如果希望换成预构建包里的其他 xfstests 工具，可以覆盖 `XFSTESTS_BINARY`：
+ 
+ ```bash
+@@ -112,10 +114,56 @@ docker build \
+ - 入口会执行 `slayerfs mount`；
+ - 本地数据后端默认目录为 `/var/lib/slayerfs/data`；
+ - 元数据后端默认使用 sqlite，路径为 `/var/lib/slayerfs/metadata.db`；
+-- 提取出的 xfstests 辅助二进制位于 `/opt/xfstests/bin`。
++- 提取出的 xfstests 辅助二进制位于 `/opt/xfstests/bin`；
++- 镜像声明了 `/mnt/slayerfs` 和 `/var/lib/slayerfs` 两个 volume。
++
++默认 local-fs + sqlite 运行示例：
++
++```bash
++docker run --rm \
++	--device /dev/fuse \
++	--cap-add SYS_ADMIN \
++	--security-opt apparmor=unconfined \
++	-v slayerfs-state:/var/lib/slayerfs \
++	-v slayerfs-mount:/mnt/slayerfs \
++	slayerfs:local
++```
++
++Redis 元数据后端示例：
++
++```bash
++docker run --rm \
++	--device /dev/fuse \
++	--cap-add SYS_ADMIN \
++	--security-opt apparmor=unconfined \
++	--network slayerfs_slayerfs-network \
++	-e SLAYERFS_META_BACKEND=redis \
++	-e SLAYERFS_META_URL=redis://redis:6379 \
++	-v slayerfs-data:/var/lib/slayerfs \
++	-v slayerfs-mount:/mnt/slayerfs \
++	slayerfs:local
++```
++
++Etcd 元数据后端示例：
++
++```bash
++docker run --rm \
++	--device /dev/fuse \
++	--cap-add SYS_ADMIN \
++	--security-opt apparmor=unconfined \
++	--network slayerfs_slayerfs-network \
++	-e SLAYERFS_META_BACKEND=etcd \
++	-e SLAYERFS_META_ETCD_URLS=http://etcd:2379 \
++	-v slayerfs-data:/var/lib/slayerfs \
++	-v slayerfs-mount:/mnt/slayerfs \
++	slayerfs:local
++```
++
++如果没有传入 `/dev/fuse` 和对应权限，容器仍然可以生成配置并初始化元数据后端，但会在 FUSE 挂载阶段失败。
+ 
+ CI 中对应的是 `.github/workflows/slayerfs-docker.yml`。该工作流会在 pull request 和 `main` 分支 push 时构建同一份镜像；只有在配置了 `SLAYERFS_DOCKERHUB_REPOSITORY`、`DOCKERHUB_USERNAME` 和 `DOCKERHUB_TOKEN` 后，才会执行 Docker Hub 发布。
+ 
++
+ ---
+ 
+ ## 🤝 参与贡献
+diff --git a/project/slayerfs/doc/docker-image-build.md b/project/slayerfs/doc/docker-image-build.md
+index dfddab1..c4f6cf6 100644
+--- a/project/slayerfs/doc/docker-image-build.md
++++ b/project/slayerfs/doc/docker-image-build.md
+@@ -1,36 +1,43 @@
+-# SlayerFS Docker Image Build
++# SlayerFS Docker 镜像构建与运行
+ 
+-本文档说明当前仓库中 SlayerFS Docker 镜像的构建入口、前置条件和 CI 发布方式。
++本文档说明当前仓库里 SlayerFS runtime image 的构建入口、运行前提、环境变量约定，以及目前已经完成的验证范围。
+ 
+-## 构建入口
++## 1. 相关文件
+ 
+-- Dockerfile: `project/slayerfs/docker/Dockerfile`
+-- Entrypoint: `project/slayerfs/docker/entrypoint.sh`
+-- GitHub Actions workflow: `.github/workflows/slayerfs-docker.yml`
++- Dockerfile：`project/slayerfs/docker/Dockerfile`
++- Entrypoint：`project/slayerfs/docker/entrypoint.sh`
++- CI 工作流：`.github/workflows/slayerfs-docker.yml`
+ 
+-镜像当前只承担两件事：
++这份镜像的目标是：
+ 
+-1. 构建并封装 `slayerfs` 主二进制。
+-2. 从 xfstests 预构建包中复制一个辅助二进制到镜像内，默认是 `xfs_io`。
++1. 在 builder 阶段编译 `slayerfs` 主程序。
++2. 在 runtime 阶段提供可直接启动的挂载容器入口。
++3. 额外携带一个从 xfstests 预构建包中提取的辅助工具，默认是 `xfs_io`。
+ 
+-## 前置条件
++## 2. 构建前提
+ 
+-Dockerfile 依赖 Git LFS 管理的预构建压缩包：
++### 2.1 Git LFS 资源
++
++Dockerfile 依赖以下 Git LFS 管理的预构建资源：
+ 
+ - `project/slayerfs/tests/scripts/xfstests-prebuilt/xfstests-prebuilt.tar.gz`
+ 
+-构建前先在仓库根目录拉取该资源：
++构建前先在 `rk8s` 仓库根目录执行：
+ 
+ ```bash
+ git lfs install --local
+ git lfs pull --include="project/slayerfs/tests/scripts/xfstests-prebuilt/*.tar.gz"
+ ```
+ 
+-如果没有先拉取 LFS 文件，构建阶段在解压预构建包时会失败。
++如果没有先拉取该 tarball，构建阶段在解压预构建包时会失败。
++
++### 2.2 Docker 构建上下文
++
++必须从 `rk8s` 仓库根目录发起构建，并使用 `project` 作为 build context。这样才与 CI 中的路径保持一致。
+ 
+-## 本地构建
++## 3. 本地构建
+ 
+-需要从 `rk8s` 仓库根目录执行构建，使上下文与 CI 保持一致：
++在 `rk8s` 仓库根目录执行：
+ 
+ ```bash
+ docker build \
+@@ -39,13 +46,23 @@ docker build \
+   project
+ ```
+ 
+-## 可选构建参数
++当前镜像分两段：
++
++- builder：`rust:1.91-bookworm`
++- runtime：`debian:trixie-slim`
++
++这样做的原因是：
+ 
+-Dockerfile 暴露了一个可选参数：
++- 当前 `Cargo.lock` 解析出的依赖需要比 1.85 更高的 Rust 版本；
++- 预构建包里的 `xfs_io` 运行时依赖与 `debian:trixie-slim` 兼容。
+ 
+-- `XFSTESTS_BINARY`：指定要从预构建包中复制到镜像内的 xfstests 辅助工具，默认值为 `xfs_io`
++## 4. 可选构建参数
+ 
+-例如：
++Dockerfile 当前暴露一个参数：
++
++- `XFSTESTS_BINARY`：指定从预构建包中拷贝到镜像里的辅助工具名，默认值为 `xfs_io`
++
++示例：
+ 
+ ```bash
+ docker build \
+@@ -55,24 +72,26 @@ docker build \
+   project
+ ```
+ 
+-## 镜像内容
++## 5. 镜像内容与默认行为
+ 
+ 镜像构建完成后，关键内容如下：
+ 
+ - `/usr/local/bin/slayerfs`：主程序
+ - `/usr/local/bin/slayerfs-entrypoint`：默认入口脚本
+-- `/opt/xfstests/bin/<tool>`：从预构建包提取出的 xfstests 辅助二进制
+-- `/opt/xfstests/lib`：预构建包中存在时一并复制的运行库
++- `/opt/xfstests/bin/<tool>`：从预构建包提取出的辅助工具
++- `/usr/sbin/xfs_io`：runtime 基础镜像内 `xfsprogs` 提供的系统工具
+ 
+-默认入口会执行：
++容器默认入口会执行：
+ 
+ ```bash
+ slayerfs mount --config /run/slayerfs/config.yaml /mnt/slayerfs
+ ```
+ 
+-## 默认运行时环境变量
++也就是说，容器启动时会先由 `entrypoint.sh` 生成配置文件，然后直接执行挂载。
++
++## 6. 默认环境变量
+ 
+-镜像内预置了以下默认值：
++镜像内置默认值：
+ 
+ - `SLAYERFS_HOME=/var/lib/slayerfs`
+ - `SLAYERFS_MOUNT_POINT=/mnt/slayerfs`
+@@ -80,26 +99,115 @@ slayerfs mount --config /run/slayerfs/config.yaml /mnt/slayerfs
+ - `SLAYERFS_DATA_DIR=/var/lib/slayerfs/data`
+ - `SLAYERFS_META_BACKEND=sqlite`
+ - `SLAYERFS_SQLITE_PATH=/var/lib/slayerfs/metadata.db`
+-- `LD_LIBRARY_PATH=/opt/xfstests/lib`
++- `RUST_LOG=slayerfs=info`
++
++默认 volume：
++
++- `/mnt/slayerfs`
++- `/var/lib/slayerfs`
++
++因此默认 local-fs 数据目录和 sqlite 元数据文件都会落在 `/var/lib/slayerfs` 下面。
++
++## 7. 运行前提
++
++SlayerFS 通过 FUSE 挂载文件系统，因此运行容器时至少需要：
++
++- `--device /dev/fuse`
++- `--cap-add SYS_ADMIN`
++- `--security-opt apparmor=unconfined`
++
++如果没有这些权限：
++
++- entrypoint 仍然可以生成 `/run/slayerfs/config.yaml`
++- metadata backend 也可能初始化成功
++- 但最终会在 FUSE 挂载阶段失败
++
++## 8. 最小运行示例
++
++### 8.1 默认 local-fs + sqlite
++
++```bash
++docker run --rm \
++  --device /dev/fuse \
++  --cap-add SYS_ADMIN \
++  --security-opt apparmor=unconfined \
++  -v slayerfs-state:/var/lib/slayerfs \
++  -v slayerfs-mount:/mnt/slayerfs \
++  slayerfs:local
++```
++
++### 8.2 Redis 元数据后端
++
++先确保 Redis 与 SlayerFS 容器处于同一网络，例如 `slayerfs_slayerfs-network`。
++
++```bash
++docker run --rm \
++  --device /dev/fuse \
++  --cap-add SYS_ADMIN \
++  --security-opt apparmor=unconfined \
++  --network slayerfs_slayerfs-network \
++  -e SLAYERFS_META_BACKEND=redis \
++  -e SLAYERFS_META_URL=redis://redis:6379 \
++  -v slayerfs-data:/var/lib/slayerfs \
++  -v slayerfs-mount:/mnt/slayerfs \
++  slayerfs:local
++```
++
++### 8.3 Etcd 元数据后端
+ 
+-其中：
++先确保 Etcd 与 SlayerFS 容器处于同一网络，例如 `slayerfs_slayerfs-network`。
+ 
+-- 数据后端默认使用本地目录。
+-- 元数据后端默认使用 sqlite。
+-- 如需切换到 redis、etcd 或 sqlx/postgres，对应参数由 `entrypoint.sh` 在启动时写入配置文件。
++```bash
++docker run --rm \
++  --device /dev/fuse \
++  --cap-add SYS_ADMIN \
++  --security-opt apparmor=unconfined \
++  --network slayerfs_slayerfs-network \
++  -e SLAYERFS_META_BACKEND=etcd \
++  -e SLAYERFS_META_ETCD_URLS=http://etcd:2379 \
++  -v slayerfs-data:/var/lib/slayerfs \
++  -v slayerfs-mount:/mnt/slayerfs \
++  slayerfs:local
++```
+ 
+-## CI 行为
++## 9. 当前已验证范围
+ 
+-`.github/workflows/slayerfs-docker.yml` 包含两个 job：
++本次实际完成的验证是：
++
++1. `docker build -f project/slayerfs/docker/Dockerfile -t slayerfs:local project` 可成功构建。
++2. 容器 entrypoint 生成的 YAML 与 `src/config.rs` 期望的嵌套结构一致。
++3. 在提供 FUSE 权限后：
++   - Redis 元数据后端可成功挂载；
++   - Etcd 元数据后端可成功挂载；
++   - 两者都已完成基本文件读写 smoke test。
++
++本次**没有**完成的验证：
++
++- 没有跑完整 xfstests 测试集；
++- 没有得出“xfstests 全部通过”的结论。
++
++因此当前能确认的是：
++
++- runtime image 能构建；
++- Redis / Etcd 两条运行路径能挂载并做基础读写；
++- 但 **xfstests 全量兼容性结果目前仍未知**。
++
++## 10. CI 行为
++
++`.github/workflows/slayerfs-docker.yml` 中当前包含两类 job：
+ 
+ 1. `docker-build`
+-   - 在 pull request 和 push 到 `main` 时执行。
+-   - 先安装 `git-lfs` 并拉取预构建压缩包，再构建镜像。
++   - 在 pull request 和 push 到 `main` 时执行；
++   - 会先安装 `git-lfs`，再拉取预构建 tarball 并构建镜像。
++
+ 2. `docker-publish`
+-   - 只在非 pull request 场景下触发。
+-   - 只有同时配置以下仓库变量或密钥时才会执行：
++   - 仅在非 pull request 场景触发；
++   - 只有同时配置以下仓库变量/密钥时才会执行发布：
+      - `SLAYERFS_DOCKERHUB_REPOSITORY`
+      - `DOCKERHUB_USERNAME`
+      - `DOCKERHUB_TOKEN`
+ 
+-发布时使用 `docker/metadata-action` 生成标签，包含默认分支的 `latest`、分支名、tag 和 sha 标签。
+\ No newline at end of file
++CI 与本地构建入口保持一致：
++
++- Dockerfile：`project/slayerfs/docker/Dockerfile`
++- build context：`project`
+diff --git a/project/slayerfs/docker/Dockerfile b/project/slayerfs/docker/Dockerfile
+index d8ff748..7e2c215 100644
+--- a/project/slayerfs/docker/Dockerfile
++++ b/project/slayerfs/docker/Dockerfile
+@@ -1,4 +1,4 @@
+-FROM rust:1.85-bookworm AS builder
++FROM rust:1.91-bookworm AS builder
+ 
+ WORKDIR /usr/src/rk8s/project
+ 
+@@ -11,13 +11,11 @@ RUN apt-get update && \
+         libsqlite3-dev && \
+     rm -rf /var/lib/apt/lists/*
+ 
+-COPY Cargo.toml Cargo.lock ./
+-COPY rfuse3 ./rfuse3
+-COPY slayerfs ./slayerfs
++COPY . ./
+ 
+ RUN cargo build --release -p slayerfs --bin slayerfs
+ 
+-FROM debian:bookworm-slim
++FROM debian:trixie-slim
+ 
+ ARG XFSTESTS_BINARY=xfs_io
+ 
+@@ -39,13 +37,9 @@ COPY slayerfs/tests/scripts/xfstests-prebuilt/xfstests-prebuilt.tar.gz /tmp/xfst
+ COPY slayerfs/docker/entrypoint.sh /usr/local/bin/slayerfs-entrypoint
+ 
+ RUN set -e; \
+-    mkdir -p /opt/xfstests/bin /opt/xfstests/lib /mnt/slayerfs /run/slayerfs /var/lib/slayerfs/data; \
++    mkdir -p /opt/xfstests/bin /mnt/slayerfs /run/slayerfs /var/lib/slayerfs/data; \
+     tar -xzf /tmp/xfstests-prebuilt.tar.gz -C /tmp xfstests/bundled/bin/${XFSTESTS_BINARY}; \
+     cp /tmp/xfstests/bundled/bin/${XFSTESTS_BINARY} /opt/xfstests/bin/${XFSTESTS_BINARY}; \
+-    if tar -tzf /tmp/xfstests-prebuilt.tar.gz | grep -q '^xfstests/bundled/lib/'; then \
+-        tar -xzf /tmp/xfstests-prebuilt.tar.gz -C /tmp xfstests/bundled/lib; \
+-        cp -a /tmp/xfstests/bundled/lib/. /opt/xfstests/lib/; \
+-    fi; \
+     chmod +x /usr/local/bin/slayerfs /usr/local/bin/slayerfs-entrypoint /opt/xfstests/bin/${XFSTESTS_BINARY}; \
+     rm -rf /tmp/xfstests /tmp/xfstests-prebuilt.tar.gz; \
+     grep -q '^user_allow_other$' /etc/fuse.conf 2>/dev/null || echo 'user_allow_other' >> /etc/fuse.conf
+@@ -56,9 +50,8 @@ ENV SLAYERFS_HOME=/var/lib/slayerfs \
+     SLAYERFS_DATA_DIR=/var/lib/slayerfs/data \
+     SLAYERFS_META_BACKEND=sqlite \
+     SLAYERFS_SQLITE_PATH=/var/lib/slayerfs/metadata.db \
+-    RUST_LOG=slayerfs=info \
+-    LD_LIBRARY_PATH=/opt/xfstests/lib
++    RUST_LOG=slayerfs=info
+ 
+-VOLUME ["/mnt/slayerfs", "/var/lib/slayerfs/data"]
++VOLUME ["/mnt/slayerfs", "/var/lib/slayerfs"]
+ 
+ ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/slayerfs-entrypoint"]
+\ No newline at end of file
+diff --git a/project/slayerfs/docker/entrypoint.sh b/project/slayerfs/docker/entrypoint.sh
+index f99923e..3a92711 100644
+--- a/project/slayerfs/docker/entrypoint.sh
++++ b/project/slayerfs/docker/entrypoint.sh
+@@ -11,7 +11,7 @@ write_data_section() {
+ data:
+   backend: local-fs
+   localfs:
+-  data_dir: ${SLAYERFS_DATA_DIR:-${SLAYERFS_HOME:-/var/lib/slayerfs}/data}
++    data_dir: ${SLAYERFS_DATA_DIR:-${SLAYERFS_HOME:-/var/lib/slayerfs}/data}
+ EOF
+       ;;
+     s3)
+@@ -20,11 +20,11 @@ EOF
+ data:
+   backend: s3
+   s3:
+-  bucket: ${SLAYERFS_S3_BUCKET}
+-  region: ${SLAYERFS_S3_REGION:-us-east-1}
+-  part_size: ${SLAYERFS_S3_PART_SIZE:-16777216}
+-  max_concurrency: ${SLAYERFS_S3_MAX_CONCURRENCY:-8}
+-  force_path_style: ${SLAYERFS_S3_FORCE_PATH_STYLE:-false}
++    bucket: ${SLAYERFS_S3_BUCKET}
++    region: ${SLAYERFS_S3_REGION:-us-east-1}
++    part_size: ${SLAYERFS_S3_PART_SIZE:-16777216}
++    max_concurrency: ${SLAYERFS_S3_MAX_CONCURRENCY:-8}
++    force_path_style: ${SLAYERFS_S3_FORCE_PATH_STYLE:-false}
+ EOF
+       if [[ -n "${SLAYERFS_S3_ENDPOINT:-}" ]]; then
+         echo "    endpoint: ${SLAYERFS_S3_ENDPOINT}"
+@@ -53,7 +53,7 @@ write_meta_section() {
+ meta:
+   backend: sqlx
+   sqlx:
+-  url: "$meta_url"
++    url: "$meta_url"
+ EOF
+       ;;
+     sqlx|postgres)
+@@ -62,7 +62,7 @@ EOF
+ meta:
+   backend: sqlx
+   sqlx:
+-  url: "$meta_url"
++    url: "$meta_url"
+ EOF
+       ;;
+     redis)
+@@ -71,7 +71,7 @@ EOF
+ meta:
+   backend: redis
+   redis:
+-  url: "$meta_url"
++    url: "$meta_url"
+ EOF
+       ;;
+     etcd)
+@@ -80,7 +80,7 @@ EOF
+ meta:
+   backend: etcd
+   etcd:
+-  urls:
++    urls:
+ EOF
+       local old_ifs="$IFS"
+       IFS=','

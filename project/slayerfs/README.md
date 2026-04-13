@@ -98,6 +98,8 @@ docker build \
 	project
 ```
 
+The image currently builds with a `rust:1.91-bookworm` builder stage and a `debian:trixie-slim` runtime stage so the Rust toolchain and bundled `xfs_io` stay compatible with the checked-in lockfile and prebuilt artifacts.
+
 To copy a different tool from the prebuilt xfstests bundle, override `XFSTESTS_BINARY`:
 
 ```bash
@@ -112,9 +114,55 @@ Default runtime behavior:
 - entrypoint starts `slayerfs mount`;
 - local data backend uses `/var/lib/slayerfs/data`;
 - default metadata backend is sqlite at `/var/lib/slayerfs/metadata.db`;
-- the extracted xfstests helper is placed under `/opt/xfstests/bin`.
+- the extracted xfstests helper is placed under `/opt/xfstests/bin`;
+- the image declares `/mnt/slayerfs` and `/var/lib/slayerfs` as volumes.
+
+Minimal local-fs + sqlite run example:
+
+```bash
+docker run --rm \
+	--device /dev/fuse \
+	--cap-add SYS_ADMIN \
+	--security-opt apparmor=unconfined \
+	-v slayerfs-state:/var/lib/slayerfs \
+	-v slayerfs-mount:/mnt/slayerfs \
+	slayerfs:local
+```
+
+Redis metadata example:
+
+```bash
+docker run --rm \
+	--device /dev/fuse \
+	--cap-add SYS_ADMIN \
+	--security-opt apparmor=unconfined \
+	--network slayerfs_slayerfs-network \
+	-e SLAYERFS_META_BACKEND=redis \
+	-e SLAYERFS_META_URL=redis://redis:6379 \
+	-v slayerfs-data:/var/lib/slayerfs \
+	-v slayerfs-mount:/mnt/slayerfs \
+	slayerfs:local
+```
+
+Etcd metadata example:
+
+```bash
+docker run --rm \
+	--device /dev/fuse \
+	--cap-add SYS_ADMIN \
+	--security-opt apparmor=unconfined \
+	--network slayerfs_slayerfs-network \
+	-e SLAYERFS_META_BACKEND=etcd \
+	-e SLAYERFS_META_ETCD_URLS=http://etcd:2379 \
+	-v slayerfs-data:/var/lib/slayerfs \
+	-v slayerfs-mount:/mnt/slayerfs \
+	slayerfs:local
+```
+
+If `/dev/fuse` and the required container privileges are not provided, the image can still generate config and initialize metadata backends, but the FUSE mount step will fail.
 
 CI uses `.github/workflows/slayerfs-docker.yml` to build this same image on pull requests and pushes to `main`. Docker Hub publishing is only enabled when `SLAYERFS_DOCKERHUB_REPOSITORY`, `DOCKERHUB_USERNAME`, and `DOCKERHUB_TOKEN` are configured in GitHub.
+
 
 ---
 

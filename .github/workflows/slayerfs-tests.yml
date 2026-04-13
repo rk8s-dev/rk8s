@@ -46,7 +46,7 @@ jobs:
 
       - name: Start backend services
         run: |
-          docker compose -f project/slayerfs/docker-compose.yml up -d
+          docker compose -f project/slayerfs/docker/docker-compose.integration.yml up -d
 
       - name: Run tests
         run: |
@@ -57,7 +57,7 @@ jobs:
       - name: Stop backend services
         if: always()
         run: |
-          docker compose -f project/slayerfs/docker-compose.yml down -v
+          docker compose -f project/slayerfs/docker/docker-compose.integration.yml down -v
 
       - name: Install nightly toolchain and cargo-fuzz
         run: |
@@ -149,12 +149,10 @@ jobs:
       - name: Start backend services
         if: matrix.backend != 'sqlite'
         run: |
-          docker compose -f project/slayerfs/docker-compose.yml up -d
-          # Wait for services to be healthy
-          for svc in etcd redis postgres; do
-            echo "Waiting for $svc..."
-            timeout 60 bash -c "until docker compose -f project/slayerfs/docker-compose.yml exec -T $svc true 2>/dev/null; do sleep 2; done" || true
-          done
+          COMPOSE_FILE="project/slayerfs/docker/docker-compose.${{ matrix.backend }}.yml"
+          docker compose -f "$COMPOSE_FILE" up -d
+          echo "Waiting for ${{ matrix.backend }}..."
+          timeout 60 bash -c "until docker compose -f '$COMPOSE_FILE' exec -T '${{ matrix.backend }}' true 2>/dev/null; do sleep 2; done"
 
       - name: Build slayerfs persistence demo
         working-directory: project
@@ -244,7 +242,7 @@ jobs:
       - name: Stop backend services
         if: always() && matrix.backend != 'sqlite'
         run: |
-          docker compose -f project/slayerfs/docker-compose.yml down -v || true
+          docker compose -f project/slayerfs/docker/docker-compose.${{ matrix.backend }}.yml down -v || true
 
       - name: Upload xfstests artifacts (always)
         if: always()

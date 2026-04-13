@@ -98,6 +98,8 @@ docker build \
 	project
 ```
 
+当前镜像使用 `rust:1.91-bookworm` 作为 builder、`debian:trixie-slim` 作为 runtime，以匹配当前 lockfile 与预构建 `xfs_io` 的运行时依赖。
+
 如果希望换成预构建包里的其他 xfstests 工具，可以覆盖 `XFSTESTS_BINARY`：
 
 ```bash
@@ -112,9 +114,55 @@ docker build \
 - 入口会执行 `slayerfs mount`；
 - 本地数据后端默认目录为 `/var/lib/slayerfs/data`；
 - 元数据后端默认使用 sqlite，路径为 `/var/lib/slayerfs/metadata.db`；
-- 提取出的 xfstests 辅助二进制位于 `/opt/xfstests/bin`。
+- 提取出的 xfstests 辅助二进制位于 `/opt/xfstests/bin`；
+- 镜像声明了 `/mnt/slayerfs` 和 `/var/lib/slayerfs` 两个 volume。
+
+默认 local-fs + sqlite 运行示例：
+
+```bash
+docker run --rm \
+	--device /dev/fuse \
+	--cap-add SYS_ADMIN \
+	--security-opt apparmor=unconfined \
+	-v slayerfs-state:/var/lib/slayerfs \
+	-v slayerfs-mount:/mnt/slayerfs \
+	slayerfs:local
+```
+
+Redis 元数据后端示例：
+
+```bash
+docker run --rm \
+	--device /dev/fuse \
+	--cap-add SYS_ADMIN \
+	--security-opt apparmor=unconfined \
+	--network slayerfs_slayerfs-network \
+	-e SLAYERFS_META_BACKEND=redis \
+	-e SLAYERFS_META_URL=redis://redis:6379 \
+	-v slayerfs-data:/var/lib/slayerfs \
+	-v slayerfs-mount:/mnt/slayerfs \
+	slayerfs:local
+```
+
+Etcd 元数据后端示例：
+
+```bash
+docker run --rm \
+	--device /dev/fuse \
+	--cap-add SYS_ADMIN \
+	--security-opt apparmor=unconfined \
+	--network slayerfs_slayerfs-network \
+	-e SLAYERFS_META_BACKEND=etcd \
+	-e SLAYERFS_META_ETCD_URLS=http://etcd:2379 \
+	-v slayerfs-data:/var/lib/slayerfs \
+	-v slayerfs-mount:/mnt/slayerfs \
+	slayerfs:local
+```
+
+如果没有传入 `/dev/fuse` 和对应权限，容器仍然可以生成配置并初始化元数据后端，但会在 FUSE 挂载阶段失败。
 
 CI 中对应的是 `.github/workflows/slayerfs-docker.yml`。该工作流会在 pull request 和 `main` 分支 push 时构建同一份镜像；只有在配置了 `SLAYERFS_DOCKERHUB_REPOSITORY`、`DOCKERHUB_USERNAME` 和 `DOCKERHUB_TOKEN` 后，才会执行 Docker Hub 发布。
+
 
 ---
 

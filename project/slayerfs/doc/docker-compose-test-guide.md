@@ -1,6 +1,6 @@
-# Docker Compose Testing Setup
+# docker compose Testing Setup
 
-Several SlayerFS cargo tests depend on storage services (PostgreSQL, etcd, Redis). This document describes how to quickly set up these services using Docker Compose or Podman Compose.
+Several SlayerFS cargo tests depend on storage services (PostgreSQL, etcd, Redis). This document describes how to quickly set up these services using docker compose or Podman Compose.
 
 ## Installation
 
@@ -8,7 +8,7 @@ Several SlayerFS cargo tests depend on storage services (PostgreSQL, etcd, Redis
 
 ```bash
 # Docker
-sudo apt update && sudo apt install docker.io docker-compose
+sudo apt update && sudo apt install docker.io docker compose
 
 # Podman
 sudo apt update && sudo apt install podman podman-compose
@@ -18,7 +18,7 @@ sudo apt update && sudo apt install podman podman-compose
 
 ```bash
 # Docker
-sudo pacman -S docker docker-compose
+sudo pacman -S docker docker compose
 
 # Podman
 sudo pacman -S podman podman-compose
@@ -28,7 +28,7 @@ sudo pacman -S podman podman-compose
 
 ```bash
 # Docker
-brew install docker docker-compose
+brew install docker docker compose
 
 # Podman
 brew install podman podman-compose
@@ -36,19 +36,19 @@ brew install podman podman-compose
 
 ## Version Compatibility
 
-The commands in this guide use `docker compose` (without hyphen), which is the modern Docker Compose V2 syntax. This is available in:
+The commands in this guide use `docker compose` (without hyphen), which is the modern docker compose V2 syntax. This is available in:
 - Docker Desktop 4.10+ (includes Compose V2)
-- Docker Engine with the `docker-compose-plugin` package installed
+- Docker Engine with the `docker compose-plugin` package installed
 
-For older installations using the standalone `docker-compose` binary (with hyphen), replace `docker compose` with `docker-compose` in all commands.
+For older installations using the standalone `docker compose` binary (with hyphen), replace `docker compose` with `docker compose` in all commands.
 
 Example for older versions:
 ```bash
-# Start services (older docker-compose v1 syntax)
-docker-compose up -d
+# Start services (older docker compose v1 syntax)
+docker compose up -d
 
 # Stop services
-docker-compose down
+docker compose down
 ```
 
 Both `podman-compose` and `podman compose` syntaxes are supported.

@@ -2,7 +2,7 @@
 # 用途:
 #   在本地运行 slayerfs 集成测试，流程与 CI (slayerfs-tests.yml) 保持一致。
 #   支持以下测试阶段：
-#     1. 启动后端服务 (etcd / redis / postgres via docker-compose)
+#     1. 启动后端服务 (etcd / redis / postgres via docker compose)
 #     2. 构建 persistence_demo 示例
 #     3. 运行 qlean multinode smoke 集成测试
 #     4. (可选) 运行 fuzz 探索 (--fuzz)
@@ -16,7 +16,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SLAYERFS_DIR="$(realpath "$SCRIPT_DIR/..")"
 PROJECT_DIR="$(realpath "$SLAYERFS_DIR/..")"
-COMPOSE_FILE="$SLAYERFS_DIR/docker-compose.yml"
+COMPOSE_FILE="$SCRIPT_DIR/docker compose.integration.yml"
 
 # --------------------------------------------------------------------------- #
 # 命令行参数
@@ -34,7 +34,7 @@ usage() {
   --fuzz              在集成测试后额外运行 fuzz 探索 (fs_ops target, ${FUZZ_MAX_TIME}s)
   --fuzz-time <秒>    自定义 fuzz 最大运行时间 (默认: ${FUZZ_MAX_TIME})
   --skip-deps         跳过系统依赖安装 (apt-get)
-  --skip-services     跳过 docker-compose 后端服务的启停 (适合已手动启动后端的场景)
+  --skip-services     跳过 docker compose 后端服务的启停 (适合已手动启动后端的场景)
   -h, --help          显示此帮助
 
 示例:
@@ -89,7 +89,7 @@ check_cmd docker
 
 if [[ "$SKIP_SERVICES" == false ]]; then
     if ! docker compose version &>/dev/null; then
-        err "需要 docker compose (v2) 插件，请升级 Docker Desktop 或安装 docker-compose-plugin"
+        err "需要 docker compose (v2) 插件，请升级 Docker Desktop 或安装 docker compose-plugin"
         exit 1
     fi
 fi
