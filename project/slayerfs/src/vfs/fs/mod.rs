@@ -357,7 +357,13 @@ where
 
         Self::with_meta_layer_with_compact_config(layout, store, meta_client, config.compact)
     }
+}
 
+impl<S, R> VFS<S, MetaClient<R>>
+where
+    S: BlockStore + Send + Sync + 'static,
+    R: MetaStore + Send + Sync + ?Sized + 'static,
+{
     pub(crate) fn with_meta_layer_with_compact_config(
         layout: ChunkLayout,
         store: Arc<S>,

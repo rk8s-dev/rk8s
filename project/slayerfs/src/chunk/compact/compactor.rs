@@ -16,19 +16,20 @@ pub enum CompactResult {
     Heavy { new_slice_id: u64 },
 }
 
-pub struct Compactor<B> {
-    meta_store: Arc<dyn MetaStore>,
+pub struct Compactor<B, M: MetaStore + ?Sized> {
+    meta_store: Arc<M>,
     block_store: Arc<B>,
     layout: ChunkLayout,
     config: CompactConfig,
 }
 
-impl<B> Compactor<B>
+impl<B, M: ?Sized> Compactor<B, M>
 where
+    M: MetaStore + Send + Sync + 'static,
     B: BlockStore + Send + Sync + 'static,
 {
     #[allow(dead_code)]
-    pub fn new(meta_store: Arc<dyn MetaStore>, block_store: Arc<B>) -> Self {
+    pub fn new(meta_store: Arc<M>, block_store: Arc<B>) -> Self {
         Self {
             meta_store,
             block_store,
@@ -38,11 +39,7 @@ where
     }
 
     #[allow(dead_code)]
-    pub fn with_layout(
-        meta_store: Arc<dyn MetaStore>,
-        block_store: Arc<B>,
-        layout: ChunkLayout,
-    ) -> Self {
+    pub fn with_layout(meta_store: Arc<M>, block_store: Arc<B>, layout: ChunkLayout) -> Self {
         Self {
             meta_store,
             block_store,
@@ -53,7 +50,7 @@ where
 
     #[allow(dead_code)]
     pub fn with_config(
-        meta_store: Arc<dyn MetaStore>,
+        meta_store: Arc<M>,
         block_store: Arc<B>,
         layout: ChunkLayout,
         config: CompactConfig,

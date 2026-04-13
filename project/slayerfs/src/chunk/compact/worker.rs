@@ -11,14 +11,14 @@ use tracing::{debug, error, info, warn};
 
 type CompactionHook = Arc<dyn Fn(u64) + Send + Sync>;
 
-pub struct ChunkLockGuard<M: MetaStore> {
+pub struct ChunkLockGuard<M: MetaStore + ?Sized> {
     chunk_id: u64,
     locked_chunks: Arc<RwLock<HashSet<u64>>>,
     meta_store: Arc<M>,
     unlocked: bool,
 }
 
-impl<M: MetaStore> ChunkLockGuard<M> {
+impl<M: MetaStore + ?Sized> ChunkLockGuard<M> {
     fn new(chunk_id: u64, locked_chunks: Arc<RwLock<HashSet<u64>>>, meta_store: Arc<M>) -> Self {
         Self {
             chunk_id,
@@ -52,7 +52,7 @@ impl<M: MetaStore> ChunkLockGuard<M> {
     }
 }
 
-impl<M: MetaStore> Drop for ChunkLockGuard<M> {
+impl<M: MetaStore + ?Sized> Drop for ChunkLockGuard<M> {
     fn drop(&mut self) {
         if !self.unlocked {
             let chunk_id = self.chunk_id;
@@ -88,13 +88,13 @@ impl Default for CompactionWorkerConfig {
 /// and global locks (via MetaStore) for cross-process synchronization.
 /// Supports dynamic TTL calculation based on compaction type and slice count.
 #[derive(Debug)]
-pub struct CompactLockManager<M: MetaStore> {
+pub struct CompactLockManager<M: MetaStore + ?Sized> {
     locked_chunks: Arc<RwLock<HashSet<u64>>>,
     meta_store: Arc<M>,
     ttl_config: LockTtlConfig,
 }
 
-impl<M: MetaStore> CompactLockManager<M> {
+impl<M: MetaStore + ?Sized> CompactLockManager<M> {
     #[allow(dead_code)]
     pub fn new(meta_store: Arc<M>) -> Self {
         Self {
@@ -168,15 +168,15 @@ impl<M: MetaStore> CompactLockManager<M> {
 
 pub struct CompactionWorker<M, B>
 where
-    M: MetaStore,
+    M: MetaStore + ?Sized,
 {
     meta_store: Arc<M>,
-    compactor: Arc<Compactor<B>>,
+    compactor: Arc<Compactor<B, M>>,
     lock_manager: Arc<CompactLockManager<M>>,
     compaction_hook: Option<CompactionHook>,
 }
 
-impl<M, B> CompactionWorker<M, B>
+impl<M: ?Sized, B> CompactionWorker<M, B>
 where
     M: MetaStore + Send + Sync + 'static,
     B: BlockStore + Send + Sync + 'static,
@@ -199,9 +199,8 @@ where
         compact_config: CompactConfig,
         lock_ttl_config: LockTtlConfig,
     ) -> Self {
-        let meta_store_dyn: Arc<dyn MetaStore> = meta_store.clone();
-        let compactor: Arc<Compactor<B>> = Arc::new(Compactor::with_config(
-            meta_store_dyn,
+        let compactor: Arc<Compactor<B, M>> = Arc::new(Compactor::with_config(
+            Arc::clone(&meta_store),
             block_store,
             layout,
             compact_config,
@@ -268,13 +267,13 @@ where
 
 async fn run_compaction_cycle<M, B>(
     meta_store: &Arc<M>,
-    compactor: &Arc<Compactor<B>>,
+    compactor: &Arc<Compactor<B, M>>,
     lock_manager: &Arc<CompactLockManager<M>>,
     config: &CompactionWorkerConfig,
     compaction_hook: Option<&CompactionHook>,
 ) -> anyhow::Result<()>
 where
-    M: MetaStore + Send + Sync + 'static,
+    M: MetaStore + Send + Sync + ?Sized + 'static,
     B: BlockStore + Send + Sync + 'static,
 {
     let chunk_ids = match meta_store.list_chunk_ids(config.max_chunks_per_run).await {

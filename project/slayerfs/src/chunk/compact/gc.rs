@@ -27,12 +27,12 @@ impl Default for BlockGcConfig {
     }
 }
 
-pub struct BlockStoreGC<M, B> {
+pub struct BlockStoreGC<M: ?Sized, B> {
     meta_store: Arc<M>,
     block_store: Arc<B>,
 }
 
-impl<M, B> BlockStoreGC<M, B>
+impl<M: ?Sized, B> BlockStoreGC<M, B>
 where
     M: MetaStore + Send + Sync + 'static,
     B: BlockStore + Send + Sync + 'static,
