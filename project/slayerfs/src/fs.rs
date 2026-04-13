@@ -469,33 +469,34 @@ where
         meta_config: MetaClientConfig,
         config: FileSystemConfig,
     ) -> io::Result<Self> {
-        let store = Arc::new(store);
-        let meta = Arc::new(meta);
-        let meta_client = MetaClient::with_options(
-            Arc::clone(&meta),
-            meta_config.capacity.clone(),
-            meta_config.effective_ttl(),
-            meta_config.options.clone(),
-        );
-        meta_client
-            .initialize()
+        let vfs = VFS::with_meta_client_config(layout, store, meta, meta_config)
             .await
-            .map_err(|e| io::Error::other(format!("meta init failed: {e}")))?;
-        Self::from_components(layout, store, meta, meta_client, config)
+            .map_err(|e| io::Error::other(format!("vfs init failed: {e}")))?;
+
+        let access_log_tx = access_log_sender(&config);
+
+        Ok(Self {
+            vfs,
+            config,
+            access_log_tx,
+            next_file_id: AtomicU64::new(1),
+        })
     }
 
     /// Create a new FileSystem from components and an existing meta layer.
     pub fn from_components(
         layout: ChunkLayout,
         store: Arc<S>,
-        meta: Arc<M>,
         meta_layer: Arc<MetaClient<M>>,
         config: FileSystemConfig,
     ) -> io::Result<Self> {
         let access_log_tx = access_log_sender(&config);
-        let _ = meta;
-        let vfs = VFS::with_meta_layer(layout, Arc::clone(&store), Arc::clone(&meta_layer))
-            .map_err(std::io::Error::from)?;
+        let vfs = VFS::with_meta_layer_with_default_background(
+            layout,
+            Arc::clone(&store),
+            Arc::clone(&meta_layer),
+        )
+        .map_err(std::io::Error::from)?;
         Ok(Self {
             vfs,
             config,

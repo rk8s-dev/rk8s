@@ -252,13 +252,11 @@ impl LocalClient {
         let meta_handle = create_meta_store_from_url("sqlite::memory:")
             .await
             .map_err(io::Error::other)?;
-        let meta = meta_handle.store();
         let meta_layer = meta_handle.layer();
         let store = Arc::new(ObjectBlockStore::new(client));
         let fs = FileSystem::from_components(
             layout,
             Arc::clone(&store),
-            meta,
             meta_layer,
             FileSystemConfig::default(),
         )?;
@@ -275,10 +273,9 @@ impl LocalClient {
         let meta_handle = create_meta_store_from_url("sqlite::memory:")
             .await
             .map_err(io::Error::other)?;
-        let meta = meta_handle.store();
         let meta_layer = meta_handle.layer();
         let store = Arc::new(ObjectBlockStore::new(client));
-        let fs = FileSystem::from_components(layout, Arc::clone(&store), meta, meta_layer, config)?;
+        let fs = FileSystem::from_components(layout, Arc::clone(&store), meta_layer, config)?;
         Ok(VfsClient { fs })
     }
 }

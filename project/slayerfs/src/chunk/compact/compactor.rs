@@ -69,16 +69,6 @@ where
     pub fn block_store(&self) -> &Arc<B> {
         &self.block_store
     }
-
-    #[allow(dead_code)]
-    pub fn meta_store(&self) -> &Arc<dyn MetaStore> {
-        &self.meta_store
-    }
-
-    #[allow(dead_code)]
-    pub fn config(&self) -> &CompactConfig {
-        &self.config
-    }
     pub async fn analyze_chunk(&self, chunk_id: u64) -> Result<(usize, u64, f64), CompactorError> {
         let slices = self.meta_store.get_slices(chunk_id).await?;
         let count = slices.len();
@@ -158,36 +148,6 @@ where
     // Wrapper, TODO:
     pub async fn compact_chunk(&self, chunk_id: u64) -> Result<CompactResult, CompactorError> {
         self.compact_sequential(chunk_id).await
-    }
-
-    /// Scan all chunks and compact those exceeding the configured thresholds.
-    /// Returns the number of chunks actually compacted.
-    #[allow(dead_code)]
-    pub async fn run_compaction_cycle(&self) -> Result<usize, CompactorError> {
-        let chunk_ids = self
-            .meta_store
-            .list_chunk_ids(self.config.max_chunks_per_run)
-            .await?;
-
-        let mut compacted = 0usize;
-        for chunk_id in chunk_ids {
-            match self.should_compact(chunk_id).await {
-                Ok((true, _is_sync)) => match self.compact_chunk(chunk_id).await {
-                    Ok(CompactResult::Skipped) => {}
-                    Ok(_result) => {
-                        compacted += 1;
-                    }
-                    Err(e) => {
-                        warn!(chunk_id, error = %e, "failed to compact chunk");
-                    }
-                },
-                Ok((false, _)) => {}
-                Err(e) => {
-                    warn!(chunk_id, error = %e, "error checking compaction status");
-                }
-            }
-        }
-        Ok(compacted)
     }
 
     #[allow(dead_code)]

@@ -231,8 +231,13 @@ where
         .await
         .map_err(anyhow::Error::from)?;
 
-    let fs =
-        VFS::with_meta_layer(layout, store, meta_client.clone()).map_err(anyhow::Error::from)?;
+    let fs = VFS::with_meta_layer_with_compact_config(
+        layout,
+        store,
+        meta_client.clone(),
+        meta_config.compact.clone(),
+    )
+    .map_err(anyhow::Error::from)?;
     let handle = mount_vfs_unprivileged(fs, mount_point).await?;
 
     println!("mounted at {}", mount_point.display());

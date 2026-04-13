@@ -355,25 +355,43 @@ where
 
         meta_client.initialize().await.map_err(VfsError::from)?;
 
-        // Start background compaction and gc tasks
-        let bg_config = VfsBackgroundConfig::from_compact_config(
-            &layout,
-            config.compact.clone(),
-            !config.options.no_background_jobs,
-        );
+        Self::with_meta_layer_with_compact_config(layout, store, meta_client, config.compact)
+    }
+
+    pub(crate) fn with_meta_layer_with_compact_config(
+        layout: ChunkLayout,
+        store: Arc<S>,
+        meta_layer: Arc<MetaClient<R>>,
+        compact_config: CompactConfig,
+    ) -> Result<Self, VfsError> {
+        let enabled = !meta_layer.options().no_background_jobs;
+        let bg_config = VfsBackgroundConfig::from_compact_config(&layout, compact_config, enabled);
         let background_tasks =
-            Self::start_background_tasks(&meta_client, store.clone(), layout, bg_config).await;
+            Self::start_background_tasks(&meta_layer, Arc::clone(&store), layout, bg_config);
 
         Self::from_components_with_background(
             VFSConfig::new(layout),
             store,
-            meta_client,
+            meta_layer,
             background_tasks,
         )
     }
 
+    pub(crate) fn with_meta_layer_with_default_background(
+        layout: ChunkLayout,
+        store: Arc<S>,
+        meta_layer: Arc<MetaClient<R>>,
+    ) -> Result<Self, VfsError> {
+        Self::with_meta_layer_with_compact_config(
+            layout,
+            store,
+            meta_layer,
+            CompactConfig::default(),
+        )
+    }
+
     /// Start background compaction and gc tasks
-    async fn start_background_tasks(
+    fn start_background_tasks(
         meta_client: &Arc<MetaClient<R>>,
         block_store: Arc<S>,
         layout: ChunkLayout,
@@ -418,23 +436,6 @@ where
     S: BlockStore + Send + Sync + 'static,
     M: MetaLayer + Send + Sync + 'static,
 {
-    pub(crate) fn with_meta_layer(
-        layout: ChunkLayout,
-        store: Arc<S>,
-        meta_layer: Arc<M>,
-    ) -> Result<Self, VfsError> {
-        let config = VFSConfig::new(layout);
-        Self::from_components(config, store, meta_layer)
-    }
-
-    fn from_components(
-        config: VFSConfig,
-        store: Arc<S>,
-        meta_layer: Arc<M>,
-    ) -> Result<Self, VfsError> {
-        Self::from_components_with_background(config, store, meta_layer, None)
-    }
-
     fn from_components_with_background(
         config: VFSConfig,
         store: Arc<S>,
