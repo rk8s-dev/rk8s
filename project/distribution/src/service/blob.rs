@@ -1,4 +1,5 @@
 use crate::error::{AppError, HeaderError, OciError};
+use crate::service::manifest::{delete_blob_if_unreferenced, purge_repo_tags_for_digest};
 use crate::utils::state::AppState;
 use crate::utils::validation::is_valid_name;
 use axum::body::Body;
@@ -239,12 +240,13 @@ pub async fn get_blob_status_handler(
 
 pub async fn delete_blob_handler(
     State(state): State<Arc<AppState>>,
-    Path((_name, digest_str)): Path<(String, String)>,
+    Path((name, digest_str)): Path<(String, String)>,
 ) -> Result<impl IntoResponse, AppError> {
     let digest =
         oci_digest::from_str(&digest_str).map_err(|_| OciError::DigestInvalid(digest_str))?;
 
-    state.storage.delete_blob(&digest).await?;
+    purge_repo_tags_for_digest(&state, &name, &digest).await?;
+    delete_blob_if_unreferenced(&state, &digest).await?;
 
     Ok(Response::builder()
         .status(StatusCode::ACCEPTED)

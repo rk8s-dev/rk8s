@@ -20,10 +20,112 @@ use axum::{
     extract::{Path, Query, Request, State},
     http::{Response, StatusCode, header},
 };
+use chrono::Utc;
 use oci_spec::image::ImageManifest;
 use oci_spec::{distribution::TagListBuilder, image::Digest as oci_digest};
 use sha2::{Digest, Sha256};
 use std::{collections::HashMap, str::FromStr, sync::Arc};
+
+fn manifest_size_bytes(manifest: &ImageManifest) -> Result<i64, AppError> {
+    let total_bytes = manifest
+        .layers()
+        .iter()
+        .map(|layer| layer.size())
+        .try_fold(manifest.config().size(), |acc, size| {
+            acc.checked_add(size).ok_or_else(|| {
+                OciError::ManifestInvalid(
+                    "manifest size overflowed while computing metadata".to_string(),
+                )
+            })
+        })?;
+
+    i64::try_from(total_bytes).map_err(|_| {
+        OciError::ManifestInvalid("manifest size exceeds BIGINT range".to_string()).into()
+    })
+}
+
+pub(crate) async fn purge_repo_tags_for_digest(
+    state: &Arc<AppState>,
+    name: &str,
+    digest: &oci_digest,
+) -> Result<(), AppError> {
+    let identifier = identifier_from_full_name(name);
+    let Some(repo) = state
+        .repo_storage
+        .query_repo_by_identifier_optional(&identifier)
+        .await?
+    else {
+        return Ok(());
+    };
+
+    let repo_tags = state
+        .repo_storage
+        .query_repo_tags_by_digest(repo.id, digest.as_ref())
+        .await?;
+
+    for repo_tag in &repo_tags {
+        state.storage.delete_tag(name, &repo_tag.tag).await?;
+    }
+
+    state
+        .repo_storage
+        .delete_repo_tags_by_digest(repo.id, digest.as_ref())
+        .await?;
+
+    Ok(())
+}
+
+async fn blob_is_referenced_by_tagged_manifest(
+    state: &Arc<AppState>,
+    digest: &oci_digest,
+) -> Result<bool, AppError> {
+    let digest_str = digest.to_string();
+    if state
+        .repo_storage
+        .repo_tag_exists_for_digest(&digest_str)
+        .await?
+    {
+        return Ok(true);
+    }
+
+    for manifest_digest in state.repo_storage.query_distinct_manifest_digests().await? {
+        let manifest_digest = match oci_digest::from_str(&manifest_digest) {
+            Ok(digest) => digest,
+            Err(_) => continue,
+        };
+        let manifest_bytes = match state.storage.get_blob(&manifest_digest).await {
+            Ok(blob) => blob.into_bytes().await.map_to_internal()?,
+            Err(AppError::Oci(OciError::BlobUnknown(_))) => continue,
+            Err(err) => return Err(err),
+        };
+        let manifest: ImageManifest = match serde_json::from_slice(&manifest_bytes) {
+            Ok(manifest) => manifest,
+            Err(_) => continue,
+        };
+
+        if manifest.config().digest() == digest
+            || manifest
+                .layers()
+                .iter()
+                .any(|layer| layer.digest() == digest)
+        {
+            return Ok(true);
+        }
+    }
+
+    Ok(false)
+}
+
+pub(crate) async fn delete_blob_if_unreferenced(
+    state: &Arc<AppState>,
+    digest: &oci_digest,
+) -> Result<(), AppError> {
+    if blob_is_referenced_by_tagged_manifest(state, digest).await? {
+        return Ok(());
+    }
+
+    state.storage.delete_blob(digest).await
+}
 
 pub async fn get_manifest_handler(
     State(state): State<Arc<AppState>>,
@@ -168,7 +270,25 @@ pub async fn put_manifest_handler(
     }
 
     let identifier = identifier_from_full_name(&name);
-    state.repo_storage.ensure_repo_exists(&identifier).await?;
+    let repo = state.repo_storage.create_or_get_repo(&identifier).await?;
+    if !is_valid_digest(&reference) {
+        let pushed_at = Utc::now();
+        state
+            .repo_storage
+            .upsert_repo_tag(
+                repo.id,
+                &reference,
+                &calculated_digest_str,
+                manifest_size_bytes(&manifest)?,
+                pushed_at,
+            )
+            .await?;
+        state
+            .repo_storage
+            .mark_repo_pushed(repo.id, pushed_at)
+            .await?;
+    }
+
     let location = format!("/v2/{name}/manifests/{calculated_digest_str}");
     Ok((
         StatusCode::CREATED,
@@ -261,9 +381,21 @@ pub async fn delete_manifest_handler(
     if is_valid_digest(&reference) {
         let digest =
             oci_digest::from_str(&reference).map_err(|_| OciError::DigestInvalid(reference))?;
-        state.storage.delete_blob(&digest).await?;
+        purge_repo_tags_for_digest(&state, &name, &digest).await?;
+        delete_blob_if_unreferenced(&state, &digest).await?;
     } else {
         state.storage.delete_tag(&name, &reference).await?;
+        let identifier = identifier_from_full_name(&name);
+        if let Some(repo) = state
+            .repo_storage
+            .query_repo_by_identifier_optional(&identifier)
+            .await?
+        {
+            state
+                .repo_storage
+                .delete_repo_tag(repo.id, &reference)
+                .await?;
+        }
     }
 
     Ok(StatusCode::ACCEPTED)

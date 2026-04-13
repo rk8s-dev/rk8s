@@ -3,6 +3,7 @@ use crate::compressor::{LayerCompressionConfig, LayerCompressor};
 use crate::config::meta::Repositories;
 use crate::pull::media::{MediaType, get_media_type};
 use crate::storage::{DigestExt, full_image_ref, read_manifest, ultimate_blob_path};
+use crate::utils::cli::format_size;
 use anyhow::{Context, Result, anyhow, bail};
 use chrono::{DateTime, Local};
 use clap::Parser;
@@ -845,22 +846,6 @@ fn get_image_metadata(digest: &str) -> Result<(String, String)> {
     Ok((size, created))
 }
 
-fn format_size(bytes: u64) -> String {
-    const KB: u64 = 1024;
-    const MB: u64 = KB * 1024;
-    const GB: u64 = MB * 1024;
-
-    if bytes >= GB {
-        format!("{:.1} GB", bytes as f64 / GB as f64)
-    } else if bytes >= MB {
-        format!("{:.1} MB", bytes as f64 / MB as f64)
-    } else if bytes >= KB {
-        format!("{:.1} KB", bytes as f64 / KB as f64)
-    } else {
-        format!("{} B", bytes)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -914,13 +899,6 @@ mod tests {
             "1234567890ab"
         );
         assert_eq!(short_id("invalid-digest"), "invalid-digest");
-    }
-
-    #[test]
-    fn test_format_size() {
-        assert_eq!(format_size(999), "999 B");
-        assert_eq!(format_size(1024), "1.0 KB");
-        assert_eq!(format_size(1024 * 1024), "1.0 MB");
     }
 
     #[test]

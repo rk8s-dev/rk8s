@@ -1,3 +1,4 @@
+use chrono::{DateTime, Utc};
 use serde::Deserialize;
 use std::fmt::{Display, Formatter};
 use std::str::FromStr;
@@ -39,4 +40,12 @@ pub struct RepoView {
     pub namespace: String,
     pub name: String,
     pub is_public: bool,
+    #[serde(default)]
+    pub tags: Vec<String>,
+    #[serde(default)]
+    pub size_tag: Option<String>,
+    #[serde(default)]
+    pub size_bytes: Option<u64>,
+    #[serde(default)]
+    pub last_pushed_at: Option<DateTime<Utc>>,
 }

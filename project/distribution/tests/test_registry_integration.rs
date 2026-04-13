@@ -10,6 +10,7 @@ use std::time::Duration;
 
 use anyhow::{Context, Result};
 use qlean::{Distro, Machine, MachineConfig, create_image, with_machine};
+use serde_json::Value;
 use tracing_subscriber::EnvFilter;
 
 const REGISTRY_HOST: &str = "127.0.0.1";
@@ -347,12 +348,19 @@ async fn push_minimal_image(
     namespace: &str,
     repo: &str,
     tag: &str,
-) -> Result<()> {
+) -> Result<String> {
     let api_url = format!("http://{}:{}", REGISTRY_HOST, REGISTRY_PORT);
 
-    // Create a minimal blob (empty tar)
-    exec_check(vm, "echo -n '' > /tmp/empty_blob").await?;
-    let blob_digest = "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"; // sha256 of empty string
+    // Create a deterministic per-repository blob so tags in the same repo share
+    // a digest while different repos do not interfere with each other.
+    exec_check(
+        vm,
+        &format!("printf '%s' '{namespace}/{repo}' > /tmp/repo_blob"),
+    )
+    .await?;
+    let blob_size = exec_check(vm, "wc -c < /tmp/repo_blob").await?;
+    let blob_digest_hex = exec_check(vm, "sha256sum /tmp/repo_blob | awk '{print $1}'").await?;
+    let blob_digest = format!("sha256:{}", blob_digest_hex.trim());
 
     // Initiate blob upload
     tracing::info!("Initiating blob upload for {}/{}...", namespace, repo);
@@ -383,7 +391,7 @@ async fn push_minimal_image(
     exec_check(
         vm,
         &format!(
-            r#"curl -sf -X PUT -H "Authorization: Bearer {}" -H "Content-Type: application/octet-stream" --data-binary @/tmp/empty_blob '{}'"#,
+            r#"curl -sf -X PUT -H "Authorization: Bearer {}" -H "Content-Type: application/octet-stream" --data-binary @/tmp/repo_blob '{}'"#,
             token, upload_url
         ),
     ).await?;
@@ -396,25 +404,147 @@ async fn push_minimal_image(
   "mediaType": "application/vnd.docker.distribution.manifest.v2+json",
   "config": {{
     "mediaType": "application/vnd.docker.container.image.v1+json",
-    "size": 0,
+    "size": {},
     "digest": "{}"
   }},
   "layers": []
 }}"#,
+        blob_size.trim(),
         config_digest
     );
 
     // Push the manifest
     tracing::info!("Pushing manifest for {}:{}", repo, tag);
+    let manifest_digest = exec_check(
+        vm,
+        &format!(
+            r#"curl -s -D - -o /dev/null -X PUT -H "Authorization: Bearer {}" -H "Content-Type: application/vnd.docker.distribution.manifest.v2+json" -d '{}' '{}/v2/{}/{}/manifests/{}' | grep -i '^Docker-Content-Digest:' | tr -d '\r' | cut -d' ' -f2"#,
+            token, manifest, api_url, namespace, repo, tag
+        ),
+    )
+    .await?;
+
+    tracing::info!("Successfully pushed {}/{}:{}", namespace, repo, tag);
+    Ok(manifest_digest.trim().to_string())
+}
+
+async fn get_visible_repos(vm: &mut Machine, token: &str) -> Result<Value> {
+    let api_url = format!("http://{}:{}/api/v1/repo", REGISTRY_HOST, REGISTRY_PORT);
+    let output = exec_check(
+        vm,
+        &format!(
+            r#"curl -sf -H "Authorization: Bearer {}" '{}'"#,
+            token, api_url
+        ),
+    )
+    .await?;
+    serde_json::from_str(&output).context("Failed to parse repo list JSON")
+}
+
+fn repo_entry<'a>(repos: &'a Value, namespace: &str, repo: &str) -> Result<&'a Value> {
+    repos["data"]
+        .as_array()
+        .and_then(|items| {
+            items.iter().find(|item| {
+                item["namespace"].as_str() == Some(namespace) && item["name"].as_str() == Some(repo)
+            })
+        })
+        .with_context(|| format!("Repository {namespace}/{repo} not found in repo list"))
+}
+
+fn repo_tags(repo: &Value) -> Vec<String> {
+    repo["tags"]
+        .as_array()
+        .map(|values| {
+            values
+                .iter()
+                .filter_map(|value| value.as_str().map(ToOwned::to_owned))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+async fn test_repo_list_metadata(vm: &mut Machine, user: &str, pass: &str) -> Result<()> {
+    tracing::info!("--- Running Test Case 4: Repo List Metadata ---");
+
+    let api_url = format!("http://{}:{}", REGISTRY_HOST, REGISTRY_PORT);
+    let token = get_auth_token(vm, user, pass).await?;
+    let latest_repo = "repo-list-latest";
+    let recent_repo = "repo-list-recent";
+
+    let _ = push_minimal_image(vm, &token, user, latest_repo, "v1").await?;
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    let _ = push_minimal_image(vm, &token, user, latest_repo, "latest").await?;
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    let latest_digest = push_minimal_image(vm, &token, user, latest_repo, "v2").await?;
+
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    let _ = push_minimal_image(vm, &token, user, recent_repo, "v1").await?;
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    let _ = push_minimal_image(vm, &token, user, recent_repo, "v2").await?;
+
+    let repos = get_visible_repos(vm, &token).await?;
+
+    let latest_entry = repo_entry(&repos, user, latest_repo)?;
+    assert_eq!(
+        repo_tags(latest_entry),
+        vec!["latest".to_string(), "v2".to_string(), "v1".to_string()]
+    );
+    assert_eq!(latest_entry["size_tag"].as_str(), Some("latest"));
+    assert_eq!(
+        latest_entry["size_bytes"].as_u64(),
+        Some(format!("{user}/{latest_repo}").len() as u64)
+    );
+    assert!(latest_entry["last_pushed_at"].is_string());
+
+    let recent_entry = repo_entry(&repos, user, recent_repo)?;
+    assert_eq!(
+        repo_tags(recent_entry),
+        vec!["v2".to_string(), "v1".to_string()]
+    );
+    assert_eq!(recent_entry["size_tag"].as_str(), Some("v2"));
+    assert_eq!(
+        recent_entry["size_bytes"].as_u64(),
+        Some(format!("{user}/{recent_repo}").len() as u64)
+    );
+    assert!(recent_entry["last_pushed_at"].is_string());
+
+    tracing::info!("Deleting {}:{} tag v1...", recent_repo, "v1");
     exec_check(
         vm,
         &format!(
-            r#"curl -sf -X PUT -H "Authorization: Bearer {}" -H "Content-Type: application/vnd.docker.distribution.manifest.v2+json" -d '{}' '{}/v2/{}/{}/manifests/{}'"#,
-            token, manifest, api_url, namespace, repo, tag
+            r#"curl -sf -X DELETE -H "Authorization: Bearer {}" '{}/v2/{}/{}/manifests/v1'"#,
+            token, api_url, user, recent_repo
         ),
-    ).await?;
+    )
+    .await?;
 
-    tracing::info!("Successfully pushed {}/{}:{}", namespace, repo, tag);
+    let repos = get_visible_repos(vm, &token).await?;
+    let recent_entry = repo_entry(&repos, user, recent_repo)?;
+    assert_eq!(repo_tags(recent_entry), vec!["v2".to_string()]);
+    assert_eq!(recent_entry["size_tag"].as_str(), Some("v2"));
+    assert_eq!(
+        recent_entry["size_bytes"].as_u64(),
+        Some(format!("{user}/{recent_repo}").len() as u64)
+    );
+
+    tracing::info!("Deleting digest-backed tags from {}...", latest_repo);
+    exec_check(
+        vm,
+        &format!(
+            r#"curl -sf -X DELETE -H "Authorization: Bearer {}" '{}/v2/{}/{}/manifests/{}'"#,
+            token, api_url, user, latest_repo, latest_digest
+        ),
+    )
+    .await?;
+
+    let repos = get_visible_repos(vm, &token).await?;
+    let latest_entry = repo_entry(&repos, user, latest_repo)?;
+    assert_eq!(repo_tags(latest_entry), Vec::<String>::new());
+    assert!(latest_entry["size_tag"].is_null());
+    assert!(latest_entry["size_bytes"].is_null());
+    assert!(latest_entry["last_pushed_at"].is_null());
+
     Ok(())
 }
 
@@ -436,11 +566,11 @@ async fn test_visibility_permissions(
 
     // User B creates a private repository
     tracing::info!("User B creating private repository...");
-    push_minimal_image(vm, &token_b, user_b, "private-repo", "v1").await?;
+    let _ = push_minimal_image(vm, &token_b, user_b, "private-repo", "v1").await?;
 
     // User B creates a public repository
     tracing::info!("User B creating public repository...");
-    push_minimal_image(vm, &token_b, user_b, "public-repo", "v1").await?;
+    let _ = push_minimal_image(vm, &token_b, user_b, "public-repo", "v1").await?;
 
     // Set public-repo to public
     tracing::info!("User B setting repository to public...");
@@ -588,6 +718,7 @@ async fn test_registry_integration() -> Result<()> {
             test_anonymous_user(vm).await?;
             test_cross_namespace_push(vm, &user_a, pass_a, &user_b, pass_b).await?;
             test_visibility_permissions(vm, &user_a, pass_a, &user_b, pass_b).await?;
+            test_repo_list_metadata(vm, &user_a, pass_a).await?;
 
             tracing::info!("");
             tracing::info!("=================================================");

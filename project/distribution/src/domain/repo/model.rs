@@ -9,6 +9,7 @@ pub struct Repo {
     pub namespace: String,
     pub name: String,
     pub is_public: bool,
+    pub last_pushed_at: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -23,4 +24,13 @@ impl Repo {
             ..Default::default()
         }
     }
+}
+
+#[derive(Debug, Clone, FromRow)]
+pub struct RepoTag {
+    pub repo_id: Uuid,
+    pub tag: String,
+    pub manifest_digest: String,
+    pub manifest_size_bytes: i64,
+    pub pushed_at: DateTime<Utc>,
 }

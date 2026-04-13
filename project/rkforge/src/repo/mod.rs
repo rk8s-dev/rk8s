@@ -7,7 +7,9 @@ use crate::registry::{
 };
 use crate::repo::types::{ListRepoResponse, Visibility};
 use crate::rt::block_on;
+use crate::utils::cli::format_size;
 use axum::http::{HeaderMap, StatusCode};
+use chrono::{DateTime, Local, Utc};
 use clap::{Parser, Subcommand};
 use comfy_table::Table;
 use comfy_table::presets::UTF8_FULL;
@@ -67,18 +69,41 @@ async fn handle_repo_list(
 
     let mut table = Table::new();
     table.load_preset(UTF8_FULL);
-    table.set_header(vec!["repository", "visibility"]);
+    table.set_header(vec!["repository", "visibility", "tags", "size", "updated"]);
 
     res.data.into_iter().for_each(|view| {
         let visibility = if view.is_public { "public" } else { "private" };
+        let tags = if view.tags.is_empty() {
+            "-".to_string()
+        } else {
+            view.tags.join("\n")
+        };
+        let size = match (view.size_tag.as_deref(), view.size_bytes) {
+            (Some(tag), Some(size_bytes)) => format!("{tag}  {}", format_size(size_bytes)),
+            _ => "-".to_string(),
+        };
+        let updated = format_local_timestamp(view.last_pushed_at);
         table.add_row(vec![
             format!("{}/{}", view.namespace, view.name),
             visibility.to_string(),
+            tags,
+            size,
+            updated,
         ]);
     });
 
     println!("{table}");
     Ok(())
+}
+
+fn format_local_timestamp(value: Option<DateTime<Utc>>) -> String {
+    match value {
+        Some(utc) => {
+            let local: DateTime<Local> = DateTime::from(utc);
+            local.format("%Y-%m-%d %H:%M:%S").to_string()
+        }
+        None => "-".to_string(),
+    }
 }
 
 async fn handle_repo_visibility(
