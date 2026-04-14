@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use std::pin::Pin;
 use std::time::Duration;
 
-type BoxedFuture = Pin<Box<dyn Future<Output = Result<PushResponse, OciDistributionError>> + Send>>;
+type BoxedFuture = Pin<Box<dyn Future<Output = anyhow::Result<PushResponse>> + Send>>;
 
 pub struct PushTask {
     digest: String,
@@ -78,9 +78,9 @@ impl Pusher {
     }
 }
 
-fn format_push_error(e: &OciDistributionError) -> anyhow::Result<String> {
-    match e {
-        OciDistributionError::ServerError { message, .. } => {
+fn format_push_error(e: &anyhow::Error) -> anyhow::Result<String> {
+    match e.downcast_ref::<OciDistributionError>() {
+        Some(OciDistributionError::ServerError { message, .. }) => {
             let errors = serde_json::from_str::<ErrorResponse>(message)?;
             let first_error = &errors.detail()[0];
             first_error
@@ -91,6 +91,7 @@ fn format_push_error(e: &OciDistributionError) -> anyhow::Result<String> {
                     anyhow::anyhow!("response from distribution should include error message")
                 })
         }
-        _ => Ok(e.to_string()),
+        Some(other) => Ok(other.to_string()),
+        None => Ok(e.to_string()),
     }
 }

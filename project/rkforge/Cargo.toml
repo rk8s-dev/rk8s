@@ -42,7 +42,7 @@ serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 serde_yaml = { workspace = true }
 ipc-channel = { workspace = true }
-reqwest = { workspace = true, features = ["json"] }
+reqwest = { workspace = true, features = ["json", "stream"] }
 axum = { workspace = true }
 confy = { workspace = true }
 comfy-table = { workspace = true }
@@ -72,6 +72,7 @@ hickory-server = { version = "0.25.2", features=["resolver"] }
 hickory-proto = { workspace = true }
 hickory-resolver = { workspace = true }
 hickory-client = { workspace = true }
+tokio-util = { workspace = true }
 ipnet = "2.11.0"
 netavark = "1.17.1"
 trust-dns-resolver = "0.23.2"
