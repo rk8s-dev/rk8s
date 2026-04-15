@@ -12,8 +12,7 @@ use clap::Parser;
 use oci_client::client::ImageLayer;
 use oci_client::manifest::{OciImageIndex, OciManifest};
 use oci_client::secrets::RegistryAuth;
-use oci_client::{Client, client};
-use oci_spec::distribution::Reference;
+use oci_client::{Client, Reference, client};
 use std::collections::HashMap;
 use std::path::Path;
 use tokio::io::AsyncReadExt;
@@ -335,9 +334,7 @@ mod tests {
 
     #[test]
     fn test_registry_qualified_push_ref_is_not_prefixed_twice() {
-        let parsed = "ghcr.io/acme/app:v1"
-            .parse::<oci_spec::distribution::Reference>()
-            .unwrap();
+        let parsed = "ghcr.io/acme/app:v1".parse::<Reference>().unwrap();
         let normalized = format!("{}:{}", parsed.repository(), parsed.tag().unwrap());
         let target = parse_image_ref(parsed.registry(), normalized, None::<String>).unwrap();
         assert_eq!(target.whole(), "ghcr.io/acme/app:v1");

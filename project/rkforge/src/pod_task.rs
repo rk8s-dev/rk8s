@@ -153,6 +153,8 @@ impl TaskRunner {
             image: "pause:3.9".to_string(),
             ports: vec![],
             args: vec![],
+            tty: false,
+            gpus: None,
             resources: None,
             liveness_probe: None,
             readiness_probe: None,
@@ -162,7 +164,6 @@ impl TaskRunner {
             volume_mounts: None,
             command: None,
             working_dir: None,
-            tty: false,
         };
 
         let puller = RkforgeImagePuller {};

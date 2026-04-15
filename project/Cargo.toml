@@ -41,7 +41,7 @@ proc-macro2 = "1.0"
 rfuse3 = { path = "rfuse3", version = "0.0.7", features = ["tokio-runtime", "unprivileged"] }
 slayerfs = { path = "slayerfs" }
 libcgroups = { version = "0.5.7", default-features = false }
-libcontainer = "0.5.7"
+libcontainer = "0.6.0"
 tonic-build = "=0.7.2"
 anyhow = "1.0.100"
 async-recursion = "1.0"
@@ -140,7 +140,7 @@ netlink-packet-route = "0.25.1"
 nftables = "0.6.3"
 nix = "0.29.0"
 oci-client = "0.15.0"
-oci-spec = "0.8.1"
+oci-spec = "0.9.0"
 once_cell = "1.21.3"
 openssl = "0.10.73"
 openssl-sys = "0.9.109"

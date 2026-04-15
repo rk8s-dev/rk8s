@@ -1,8 +1,8 @@
 use crate::config::image::CONFIG;
 use crate::config::meta::Repositories;
 use anyhow::Context;
+use oci_client::Reference;
 use oci_client::manifest::OciManifest;
-use oci_spec::distribution::Reference;
 use serde::Serialize;
 use std::path::{Path, PathBuf};
 use tokio::io::AsyncWriteExt;
