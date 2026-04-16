@@ -1146,6 +1146,8 @@ where
         new_name: &str,
     ) -> Result<(), VfsError> {
         let parent_ino = self.resolve_parent_inode(dir).await?;
+        let old_path = format!("{}{}{}", dir, if dir == "/" { "" } else { "/" }, old_name);
+        let new_path = format!("{}{}{}", dir, if dir == "/" { "" } else { "/" }, new_name);
 
         // Validate the rename operation
         let (_src_ino, src_attr) = self

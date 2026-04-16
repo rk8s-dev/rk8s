@@ -1278,7 +1278,16 @@ impl<T: MetaStore + ?Sized + 'static> MetaLayer for MetaClient<T> {
         // Load all children from database into cache, replacing any stale data
         let children_data: Vec<(String, i64)> =
             entries.iter().map(|e| (e.name.clone(), e.ino)).collect();
-        self.inode_cache.load_children(inode, children_data).await;
+        if !self
+            .inode_cache
+            .load_children_if_fresh(inode, children_data, children_generation)
+            .await
+        {
+            trace!(
+                "MetaClient: skipped stale readdir cache write for inode {}",
+                inode
+            );
+        }
 
         // Note: We shouldn't pre-fetch attributes here; use batch prefetch instead.
         Ok(entries)
@@ -1554,18 +1563,14 @@ impl<T: MetaStore + ?Sized + 'static> MetaLayer for MetaClient<T> {
                     .add_child(new_parent, new_name.clone(), child_ino)
                     .await;
 
-                // Step 5: Update parent-child relationship based on hard link count
+                // Directories keep their inline parent even though nlink is >= 2.
                 if let Some(attr) = &src_attr {
-                    if attr.nlink <= 1 {
-                        // Single link: update parent directly
+                    if attr.kind == FileType::Dir || attr.nlink <= 1 {
                         if let Some(child_node) = self.inode_cache.get_node(child_ino).await {
                             child_node.set_parent(new_parent).await;
                         }
-                    } else {
-                        // Multiple links: clear parent (use LinkParentMeta instead)
-                        if let Some(child_node) = self.inode_cache.get_node(child_ino).await {
-                            child_node.clear_parent().await;
-                        }
+                    } else if let Some(child_node) = self.inode_cache.get_node(child_ino).await {
+                        child_node.clear_parent().await;
                     }
                 }
             }

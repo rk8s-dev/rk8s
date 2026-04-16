@@ -24,18 +24,38 @@ usage() {
 
 选项:
   --s3                       使用 rustfs 作为对象存储（SLAYERFS_DATA_BACKEND=s3）
-  --cases "<case...>"          只跑指定用例，例如: "generic/001 generic/002"
-  --check-args "<args...>"     直接透传给 xfstests ./check 的参数
-  --keep                       结束后不执行 compose down（便于调试）
-  -h, --help                   显示帮助
+  --cases "<case...>"        只跑指定用例，例如: "generic/001 generic/002"
+  --skip-cases <N>           全量模式下跳过默认测试序列中的前 N 个用例
+  --check-args "<args...>"   直接透传给 xfstests ./check 的参数
+  --keep                     结束后不执行 compose down（便于调试）
+  -h, --help                 显示帮助
 EOF
     exit 0
+}
+
+require_value() {
+    local option="$1"
+    local value="${2:-}"
+    if [[ -z "$value" ]]; then
+        err "$option 需要提供参数值"
+        exit 1
+    fi
+}
+
+require_non_negative_integer() {
+    local option="$1"
+    local value="${2:-}"
+    if ! [[ "$value" =~ ^[0-9]+$ ]]; then
+        err "$option 需要提供非负整数，当前值: ${value:-<empty>}"
+        exit 1
+    fi
 }
 
 KEEP=false
 USE_S3=false
 XFSTESTS_CASES_VALUE=""
 XFSTESTS_CHECK_ARGS_VALUE=""
+XFSTESTS_SKIP_CASES_VALUE="0"
 
 while [[ $# -gt 0 ]]; do
     case "${1:-}" in
@@ -44,10 +64,18 @@ while [[ $# -gt 0 ]]; do
             shift
             ;;
         --cases)
+            require_value "$1" "${2:-}"
             XFSTESTS_CASES_VALUE="${2:-}"
             shift 2
             ;;
+        --skip-cases)
+            require_value "$1" "${2:-}"
+            require_non_negative_integer "$1" "${2:-}"
+            XFSTESTS_SKIP_CASES_VALUE="${2:-}"
+            shift 2
+            ;;
         --check-args)
+            require_value "$1" "${2:-}"
             XFSTESTS_CHECK_ARGS_VALUE="${2:-}"
             shift 2
             ;;
@@ -64,6 +92,16 @@ while [[ $# -gt 0 ]]; do
             ;;
     esac
 done
+
+if [[ "$XFSTESTS_SKIP_CASES_VALUE" != "0" && -n "$XFSTESTS_CASES_VALUE" ]]; then
+    err "--skip-cases 不能与 --cases 同时使用"
+    exit 1
+fi
+
+if [[ "$XFSTESTS_SKIP_CASES_VALUE" != "0" && -n "$XFSTESTS_CHECK_ARGS_VALUE" ]]; then
+    err "--skip-cases 不能与 --check-args 同时使用"
+    exit 1
+fi
 
 mkdir -p "$ARTIFACTS_DIR"
 
@@ -86,6 +124,7 @@ ts="$(date +%s)-$RANDOM"
 export SLAYERFS_ARTIFACT_DIR="/artifacts/run-${ts}"
 export XFSTESTS_CASES="$XFSTESTS_CASES_VALUE"
 export XFSTESTS_CHECK_ARGS="$XFSTESTS_CHECK_ARGS_VALUE"
+export XFSTESTS_SKIP_CASES="$XFSTESTS_SKIP_CASES_VALUE"
 if [[ "$USE_S3" == true ]]; then
     export SLAYERFS_DATA_BACKEND="s3"
 else

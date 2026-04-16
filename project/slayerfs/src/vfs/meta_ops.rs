@@ -10,11 +10,15 @@ use crate::chunk::store::BlockStore;
 use crate::meta::MetaLayer;
 use crate::meta::file_lock::{FileLockInfo, FileLockQuery, FileLockRange, FileLockType};
 use crate::meta::store::{
-    AclRule, DirEntry, FileAttr, FileType, MetaError, SetAttrFlags, SetAttrRequest, StatFsSnapshot,
+    AclRule, DirEntry, FileAttr, FileType, SetAttrFlags, SetAttrRequest, StatFsSnapshot,
 };
 use crate::vfs::error::{PathHint, VfsError};
 use crate::vfs::fs::VFS;
 use crate::vfs::handles::DirHandle;
+
+fn meta_err_to_vfs(err: crate::meta::store::MetaError) -> VfsError {
+    VfsError::from_meta(PathHint::none(), err)
+}
 
 impl<S, M> VFS<S, M>
 where

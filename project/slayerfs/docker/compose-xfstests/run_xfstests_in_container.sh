@@ -21,7 +21,62 @@ artifact_root="${SLAYERFS_ARTIFACT_ROOT:-/artifacts}"
 artifact_dir="${SLAYERFS_ARTIFACT_DIR:-}"
 
 xfstests_cases="${XFSTESTS_CASES:-}"
+xfstests_skip_cases="${XFSTESTS_SKIP_CASES:-0}"
 xfstests_check_args="${XFSTESTS_CHECK_ARGS:-}"
+
+require_non_negative_integer() {
+    local option="$1"
+    local value="${2:-}"
+    if ! [[ "$value" =~ ^[0-9]+$ ]]; then
+        err "$option 需要提供非负整数，当前值: ${value:-<empty>}"
+        exit 1
+    fi
+}
+
+build_full_run_check_args() {
+    local -a all_cases=()
+    local -a filtered_cases=()
+    local -a discovery_args=(-n -fuse -E xfstests_slayer.exclude)
+    local skip_count=0
+    local i=0
+    local list_output=""
+
+    require_non_negative_integer "XFSTESTS_SKIP_CASES" "$xfstests_skip_cases"
+    skip_count="$xfstests_skip_cases"
+    if (( skip_count == 0 )); then
+        err "build_full_run_check_args 仅用于 skip-cases > 0 的场景"
+        exit 1
+    fi
+
+    info "解析默认全量测试序列，并跳过前 $skip_count 个用例" >&2
+    list_output="$(
+        cd "$xfstests_dir"
+        export PATH="$xfstests_dir:$PATH"
+        ./check "${discovery_args[@]}"
+    )"
+
+    mapfile -t all_cases < <(
+        printf '%s\n' "$list_output" \
+            | awk '/^[[:alnum:]_-]+\/[0-9]+([[:space:]]|$)/ && $2 != "[expunged]" { print $1 }'
+    )
+
+    if [[ "${#all_cases[@]}" -eq 0 ]]; then
+        err "无法解析默认全量测试序列"
+        exit 1
+    fi
+
+    if (( skip_count >= ${#all_cases[@]} )); then
+        err "XFSTESTS_SKIP_CASES=$skip_count 超过默认全量用例数 (${#all_cases[@]})"
+        exit 1
+    fi
+
+    for ((i = skip_count; i < ${#all_cases[@]}; i++)); do
+        filtered_cases+=("${all_cases[i]}")
+    done
+
+    info "默认全量测试共 ${#all_cases[@]} 个，用例跳过后剩余 ${#filtered_cases[@]} 个" >&2
+    printf '%s\n' "${filtered_cases[@]}"
+}
 
 write_config() {
     mkdir -p "$(dirname "$config_path")" "$mount_dir"
@@ -200,11 +255,27 @@ on_exit() {
 
 run_xfstests() {
     local -a check_args=()
+    local -a selected_cases=()
+    require_non_negative_integer "XFSTESTS_SKIP_CASES" "$xfstests_skip_cases"
+
+    if [[ "$xfstests_skip_cases" != "0" && -n "$xfstests_cases" ]]; then
+        err "XFSTESTS_SKIP_CASES 不能与 XFSTESTS_CASES 同时使用"
+        exit 1
+    fi
+
+    if [[ "$xfstests_skip_cases" != "0" && -n "$xfstests_check_args" ]]; then
+        err "XFSTESTS_SKIP_CASES 不能与 XFSTESTS_CHECK_ARGS 同时使用"
+        exit 1
+    fi
+
     if [[ -n "$xfstests_check_args" ]]; then
         read -r -a check_args <<<"$xfstests_check_args"
     elif [[ -n "$xfstests_cases" ]]; then
-        read -r -a check_args <<<"$xfstests_cases"
-        check_args=(-fuse -E xfstests_slayer.exclude "${check_args[@]}")
+        read -r -a selected_cases <<<"$xfstests_cases"
+        check_args=(-fuse -E xfstests_slayer.exclude "${selected_cases[@]}")
+    elif [[ "$xfstests_skip_cases" != "0" ]]; then
+        mapfile -t selected_cases < <(build_full_run_check_args)
+        check_args=(-fuse -E xfstests_slayer.exclude --exact-order "${selected_cases[@]}")
     else
         check_args=(-fuse -E xfstests_slayer.exclude)
     fi

@@ -1274,6 +1274,42 @@ async fn test_rename_lua_directory_to_missing_target_updates_parent_name() {
 #[serial]
 #[tokio::test]
 #[ignore]
+async fn test_rename_lua_cross_dir_directory_preserves_parent_nlink_after_cleanup() {
+    let store = new_test_store().await;
+    let root = store.root_ino();
+
+    let dir_x = store.mkdir(root, "x".to_string()).await.unwrap();
+    let dir_y = store.mkdir(root, "y".to_string()).await.unwrap();
+    store.mkdir(dir_x, "src".to_string()).await.unwrap();
+    store.mkdir(dir_y, "dst".to_string()).await.unwrap();
+
+    // Mirror the VFS overwrite flow: remove the empty destination first, then rename.
+    store.rmdir(dir_y, "dst").await.unwrap();
+    store
+        .rename(dir_x, "src", dir_y, "dst".to_string())
+        .await
+        .unwrap();
+
+    let y_attr = store.stat(dir_y).await.unwrap().unwrap();
+    assert_eq!(
+        y_attr.nlink, 3,
+        "moved subdir should increment new parent nlink"
+    );
+
+    store.rmdir(dir_y, "dst").await.unwrap();
+
+    let y_attr = store.stat(dir_y).await.unwrap().unwrap();
+    assert_eq!(y_attr.nlink, 2, "cleanup should restore parent nlink");
+    assert_eq!(store.lookup(root, "y").await.unwrap(), Some(dir_y));
+    assert_eq!(
+        store.get_paths(dir_y).await.unwrap(),
+        vec!["/y".to_string()]
+    );
+}
+
+#[serial]
+#[tokio::test]
+#[ignore]
 async fn test_rename_lua_directory_rejects_non_empty_directory_target() {
     let store = new_test_store().await;
     let root = store.root_ino();
