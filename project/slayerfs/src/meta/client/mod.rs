@@ -1249,6 +1249,17 @@ impl<T: MetaStore + ?Sized + 'static> MetaLayer for MetaClient<T> {
 
         trace!("MetaClient: Inode cache MISS for readdir inode {}", inode);
 
+        // Keep the directory node cached before taking a snapshot so we can detect
+        // concurrent child mutations and avoid marking a stale listing as complete.
+        self.inode_cache
+            .ensure_node_in_cache(inode, &&*self.store, None)
+            .await?;
+        let children_generation = self
+            .inode_cache
+            .children_generation(inode)
+            .await
+            .unwrap_or(0);
+
         let mut entries = self.store.readdir(inode).await?;
         // Sort once before caching so readops always return stable ordering by name.
         entries.sort_by(|a, b| a.name.cmp(&b.name));
@@ -1331,7 +1342,17 @@ impl<T: MetaStore + ?Sized + 'static> MetaLayer for MetaClient<T> {
 
         debug!("MetaClient: rmdir completed, updating cache");
 
-        self.inode_cache.remove_child(parent, name).await;
+        // Keep the deleted directory inode cached for a short time so open
+        // directory handles can still service getattr/fstat after replacement.
+        if let Some(child_ino) = self
+            .inode_cache
+            .remove_child_but_keep_inode(parent, name)
+            .await
+            && let Some(child_node) = self.inode_cache.get_node(child_ino).await
+        {
+            child_node.attr.write().await.nlink = 0;
+            child_node.clear_parent().await;
+        }
         self.invalidate_parent_path(parent).await;
 
         Ok(())

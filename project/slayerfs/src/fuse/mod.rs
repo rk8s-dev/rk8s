@@ -1053,21 +1053,7 @@ where
             return Err(libc::EINVAL.into());
         }
 
-        VFS::rename(self, &oldp, &newp).await.map_err(|e| {
-            match e {
-                VfsError::NotFound { .. } => libc::ENOENT,
-                VfsError::AlreadyExists { .. } => libc::EEXIST,
-                VfsError::NotADirectory { .. } => libc::ENOTDIR,
-                VfsError::IsADirectory { .. } => libc::EISDIR,
-                VfsError::DirectoryNotEmpty { .. } => libc::ENOTEMPTY,
-                VfsError::PermissionDenied { .. } => libc::EACCES,
-                VfsError::CircularRename { .. } => libc::EINVAL,
-                VfsError::InvalidRenameTarget { .. } => libc::EINVAL,
-                VfsError::CrossesDevices => libc::EXDEV,
-                _ => libc::EIO,
-            }
-            .into()
-        })
+        VFS::rename(self, &oldp, &newp).await.map_err(Errno::from)
     }
 
     // ===== Resource release & sync: stateless implementation, return success =====

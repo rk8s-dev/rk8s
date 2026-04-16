@@ -3,6 +3,80 @@
 use slayerfs::{ChunkLayout, InMemoryBlockStore, RenameFlags, VFS, create_meta_store_from_url};
 
 #[tokio::test]
+async fn test_rename_same_path_is_noop() {
+    let layout = ChunkLayout::default();
+    let store = InMemoryBlockStore::new();
+    let meta_handle = create_meta_store_from_url("sqlite::memory:").await.unwrap();
+    let meta_store = meta_handle.store();
+    let fs = VFS::new(layout, store, meta_store).await.unwrap();
+
+    fs.mkdir_p("/test").await.unwrap();
+    fs.create_file("/test/file.txt").await.unwrap();
+
+    let before = fs.stat("/test/file.txt").await.unwrap();
+    fs.rename("/test/file.txt", "/test/file.txt").await.unwrap();
+    let after = fs.stat("/test/file.txt").await.unwrap();
+
+    assert_eq!(before.ino, after.ino);
+    assert_eq!(before.size, after.size);
+}
+
+#[tokio::test]
+async fn test_rename_directory_over_non_empty_directory_fails() {
+    let layout = ChunkLayout::default();
+    let store = InMemoryBlockStore::new();
+    let meta_handle = create_meta_store_from_url("sqlite::memory:").await.unwrap();
+    let meta_store = meta_handle.store();
+    let fs = VFS::new(layout, store, meta_store).await.unwrap();
+
+    fs.mkdir_p("/test/src").await.unwrap();
+    fs.mkdir_p("/test/dst").await.unwrap();
+    fs.create_file("/test/dst/child.txt").await.unwrap();
+
+    let err = fs.rename("/test/src", "/test/dst").await.unwrap_err();
+    assert_eq!(
+        std::io::Error::from(err).kind(),
+        std::io::ErrorKind::DirectoryNotEmpty
+    );
+}
+
+#[tokio::test]
+async fn test_rename_directory_over_file_fails_with_not_directory() {
+    let layout = ChunkLayout::default();
+    let store = InMemoryBlockStore::new();
+    let meta_handle = create_meta_store_from_url("sqlite::memory:").await.unwrap();
+    let meta_store = meta_handle.store();
+    let fs = VFS::new(layout, store, meta_store).await.unwrap();
+
+    fs.mkdir_p("/test/src").await.unwrap();
+    fs.create_file("/test/dst.txt").await.unwrap();
+
+    let err = fs.rename("/test/src", "/test/dst.txt").await.unwrap_err();
+    assert_eq!(
+        std::io::Error::from(err).kind(),
+        std::io::ErrorKind::NotADirectory
+    );
+}
+
+#[tokio::test]
+async fn test_rename_file_over_directory_fails_with_is_directory() {
+    let layout = ChunkLayout::default();
+    let store = InMemoryBlockStore::new();
+    let meta_handle = create_meta_store_from_url("sqlite::memory:").await.unwrap();
+    let meta_store = meta_handle.store();
+    let fs = VFS::new(layout, store, meta_store).await.unwrap();
+
+    fs.create_file("/test-src.txt").await.unwrap();
+    fs.mkdir_p("/test-dst").await.unwrap();
+
+    let err = fs.rename("/test-src.txt", "/test-dst").await.unwrap_err();
+    assert_eq!(
+        std::io::Error::from(err).kind(),
+        std::io::ErrorKind::IsADirectory
+    );
+}
+
+#[tokio::test]
 async fn test_rename_comprehensive_scenarios() {
     let layout = ChunkLayout::default();
     let store = InMemoryBlockStore::new();

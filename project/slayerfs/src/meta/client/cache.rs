@@ -168,6 +168,9 @@ impl InodeCache {
             };
 
             *children_lock = new_map;
+            parent_node
+                .children_generation
+                .fetch_add(1, Ordering::AcqRel);
         }
     }
 
@@ -189,6 +192,9 @@ impl InodeCache {
                         ChildrenState::Complete(_) => ChildrenState::Complete(Arc::new(map)),
                         _ => ChildrenState::Partial(Arc::new(map)),
                     };
+                    parent_node
+                        .children_generation
+                        .fetch_add(1, Ordering::AcqRel);
 
                     self.ttl_manager.invalidate(&child_ino).await;
                     return Some(child_ino);
@@ -212,6 +218,9 @@ impl InodeCache {
                         ChildrenState::Complete(_) => ChildrenState::Complete(Arc::new(map)),
                         _ => ChildrenState::Partial(Arc::new(map)),
                     };
+                    parent_node
+                        .children_generation
+                        .fetch_add(1, Ordering::AcqRel);
                     return Some(child_ino);
                 }
             }
@@ -310,6 +319,9 @@ impl InodeCache {
             let mut children_lock = parent_node.children.write().await;
             let new_children = Arc::new(children.into_iter().collect::<BTreeMap<_, _>>());
             *children_lock = ChildrenState::Complete(new_children);
+            parent_node
+                .children_generation
+                .fetch_add(1, Ordering::AcqRel);
         }
     }
 }

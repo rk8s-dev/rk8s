@@ -95,8 +95,8 @@ jobs:
           rm -rf fuzz/.tmp*
 
   xfstests:
-    name: xfstests
     if: false
+    name: xfstests (${{ matrix.backend }})
     runs-on: [self-hosted]
     timeout-minutes: 240
     steps:

@@ -1,0 +1,66 @@
+name: slayerfs xfstests
+
+on:
+  pull_request:
+    paths:
+      - 'project/slayerfs/**'
+      - '.github/workflows/slayerfs-docker.yml'
+  push:
+    branches:
+      - main
+    paths:
+      - 'project/slayerfs/**'
+      - '.github/workflows/slayerfs-docker.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  xfstests:
+    name: slayerfs xfstests (redis + etcd)
+    runs-on: [self-hosted]
+    timeout-minutes: 240
+    env:
+      CARGO_TERM_COLOR: always
+      RUSTUP_TOOLCHAIN: stable
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Set up Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y --no-install-recommends \
+            binutils \
+            git-lfs \
+            fuse3 \
+            libfuse3-dev \
+            libsqlite3-dev \
+            libssl-dev \
+            pkg-config \
+            protobuf-compiler \
+            sqlite3
+          protoc --version
+
+      - name: Fetch LFS assets for xfstests
+        env:
+          LFS_ASSETS: project/slayerfs/tests/scripts/xfstests-prebuilt/*.tar.gz,project/slayerfs/tests/scripts/fuse3-bundle/fusermount3
+        run: |
+          git lfs install --local
+          git lfs pull --include="$LFS_ASSETS"
+
+      - name: Run redis xfstests
+        working-directory: project/slayerfs/docker
+        run: |
+          bash compose-xfstests/run_redis_xfstests.sh
+
+      - name: Run etcd xfstests
+        working-directory: project/slayerfs/docker
+        run: |
+          bash compose-xfstests/run_etcd_xfstests.sh

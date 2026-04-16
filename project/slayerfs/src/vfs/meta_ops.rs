@@ -10,7 +10,7 @@ use crate::chunk::store::BlockStore;
 use crate::meta::MetaLayer;
 use crate::meta::file_lock::{FileLockInfo, FileLockQuery, FileLockRange, FileLockType};
 use crate::meta::store::{
-    AclRule, DirEntry, FileAttr, FileType, SetAttrFlags, SetAttrRequest, StatFsSnapshot,
+    AclRule, DirEntry, FileAttr, FileType, MetaError, SetAttrFlags, SetAttrRequest, StatFsSnapshot,
 };
 use crate::vfs::error::{PathHint, VfsError};
 use crate::vfs::fs::VFS;
@@ -113,7 +113,10 @@ where
     }
 
     pub(super) async fn meta_readdir(&self, ino: i64) -> Result<Vec<DirEntry>, VfsError> {
-        self.meta_layer().readdir(ino).await.map_err(VfsError::from)
+        self.meta_layer()
+            .readdir(ino)
+            .await
+            .map_err(meta_err_to_vfs)
     }
 
     /// Open a directory handle for `ino`.

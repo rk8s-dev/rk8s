@@ -1052,8 +1052,8 @@ impl RedisMetaStore {
                     conn.hget(&plock_key, &field).await.map_err(redis_err)?;
 
                 // Get current locks for this owner/session
-                let current_records = if let Some(json) = current_json {
-                    serde_json::from_str(&json).unwrap_or_default()
+                let current_records = if let Some(json) = all_entries.get(&field) {
+                    serde_json::from_str(json).unwrap_or_default()
                 } else {
                     Vec::new()
                 };
@@ -1453,6 +1453,44 @@ impl MetaStore for RedisMetaStore {
         }
     }
 
+    #[tracing::instrument(level = "trace", skip(self), fields(parent, name, target))]
+    async fn symlink(
+        &self,
+        parent: i64,
+        name: &str,
+        target: &str,
+    ) -> Result<(i64, FileAttr), MetaError> {
+        let ino = self
+            .create_entry(parent, name.to_string(), FileType::Symlink)
+            .await?;
+        let now = current_time();
+
+        let mut node = self.get_node(ino).await?.ok_or(MetaError::NotFound(ino))?;
+        node.attr.size = target.len() as u64;
+        node.attr.atime = now;
+        node.attr.mtime = now;
+        node.attr.ctime = now;
+        node.symlink_target = Some(target.to_string());
+
+        self.save_node(&node).await?;
+
+        Ok((ino, node.as_file_attr()))
+    }
+
+    #[tracing::instrument(level = "trace", skip(self), fields(ino))]
+    async fn read_symlink(&self, ino: i64) -> Result<String, MetaError> {
+        let node = self.get_node(ino).await?.ok_or(MetaError::NotFound(ino))?;
+
+        if node.kind != NodeKind::Symlink {
+            return Err(MetaError::NotSupported(format!(
+                "inode {ino} is not a symbolic link"
+            )));
+        }
+
+        node.symlink_target
+            .ok_or_else(|| MetaError::Internal(format!("symlink target missing for inode {ino}")))
+    }
+
     #[tracing::instrument(level = "trace", skip(self), fields(parent, name))]
     async fn unlink(&self, parent: i64, name: &str) -> Result<(), MetaError> {
         let Some(child) = self.lookup(parent, name).await? else {
@@ -1587,10 +1625,15 @@ impl MetaStore for RedisMetaStore {
             Some("not_found") => Err(MetaError::NotFound(response.ino.unwrap_or(old_parent))),
             Some("parent_not_found") => Err(MetaError::ParentNotFound(new_parent)),
             Some("parent_not_directory") => Err(MetaError::NotDirectory(new_parent)),
-            Some("already_exists") => Err(MetaError::AlreadyExists {
-                parent: new_parent,
-                name: new_name,
-            }),
+            Some("target_dir_not_empty") => Err(MetaError::DirectoryNotEmpty(
+                response.ino.unwrap_or(new_parent),
+            )),
+            Some("target_is_directory") => Err(MetaError::Io(std::io::Error::from(
+                std::io::ErrorKind::IsADirectory,
+            ))),
+            Some("target_not_directory") => Err(MetaError::Io(std::io::Error::from(
+                std::io::ErrorKind::NotADirectory,
+            ))),
             Some("node_not_found") => Err(MetaError::NotFound(child)),
             Some("corrupt_node") => Err(MetaError::Internal("corrupt node data".into())),
             Some("link_parent_not_found") => Err(MetaError::Internal(format!(
@@ -2070,10 +2113,8 @@ impl MetaStore for RedisMetaStore {
             .ok_or_else(|| MetaError::Internal("sid not set".to_string()))?;
 
         // First, try to get locks from current session's field
-        let current_field = format!("{}:{}", sid, query.owner);
-        let records_json: Result<String, _> = conn.hget(&plock_key, &current_field).await;
-        if let Ok(records_json) = records_json {
-            let records: Vec<PlockRecord> = serde_json::from_str(&records_json).unwrap_or_default();
+        if let Some(records_json) = plock_entries.get(&current_field) {
+            let records: Vec<PlockRecord> = serde_json::from_str(records_json).unwrap_or_default();
             if let Some(v) = PlockRecord::get_plock(&records, query, sid, sid) {
                 return Ok(v);
             }
