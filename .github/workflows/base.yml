@@ -2,6 +2,9 @@ on:
   pull_request:
     paths:
       - 'project/**'
+      - 'third-party/**'
+      - 'platforms/**'
+      - 'toolchains/**'
       - '.buckconfig'
       - '.github/workflows/base.yml'
 
