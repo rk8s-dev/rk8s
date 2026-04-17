@@ -30,14 +30,13 @@ use crate::commands::compose::spec::ComposeSpec;
 use crate::commands::compose::spec::ServiceSpec;
 use crate::commands::container::ContainerRunner;
 use crate::commands::container::network::{bind_mount_netns, unbind_mount_netns};
+use crate::commands::network_paths::{default_aardvark_bin, default_netavark_config_dir};
 use anyhow::Result;
 use anyhow::anyhow;
 use tracing::{debug, warn};
 
 /// this path is container resolv.conf location
 const CONTAINER_RESOLV_PATH: &str = "/etc/resolv.conf";
-/// this path is used to save netavark config dir
-const DEAULT_NETAVARK_CONFIG_DIR: &str = "/run/containers/networks";
 
 #[derive(Debug)]
 struct NetworkSubnet {
@@ -544,32 +543,6 @@ fn first_host_in_subnet(subnet: &Ipv4Network) -> Ipv4Addr {
     let n = u32::from(base);
     let first_host = n.checked_add(1).unwrap_or(n);
     Ipv4Addr::from(first_host.to_be_bytes())
-}
-
-fn default_netavark_config_dir() -> OsString {
-    if let Some(v) = std::env::var_os("NETAVARK_CONFIG") {
-        return v;
-    }
-
-    OsString::from(DEAULT_NETAVARK_CONFIG_DIR)
-}
-
-fn default_aardvark_bin() -> Result<OsString> {
-    if let Some(v) = std::env::var_os("AARDVARK_DNS_BIN") {
-        return Ok(v);
-    }
-    if let Some(v) = std::env::var_os("AARDVARK_BIN") {
-        return Ok(v);
-    }
-
-    let candidates = ["/usr/libexec/podman/aardvark-dns", "/usr/bin/aardvark-dns"];
-    for c in candidates {
-        if Path::new(c).exists() {
-            return Ok(OsString::from(c));
-        }
-    }
-
-    Err(anyhow!("aardvark-dns not found"))
 }
 
 #[cfg(test)]
