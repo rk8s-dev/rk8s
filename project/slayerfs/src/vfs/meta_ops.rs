@@ -1,9 +1,7 @@
 //! Thin wrappers around [`MetaLayer`] methods used by the VFS.
 //!
-//! Every method here converts `MetaError` → `VfsError` via `VfsError::from_meta`,
-//! preserving filesystem-specific error semantics instead of collapsing them
-//! into a generic wrapper that later turns into `EIO`.
-//! This keeps the call sites in `fs.rs` free of repetitive boilerplate.
+//! Every method here converts `MetaError` → `VfsError` via `VfsError::from`,
+//! keeping the call sites in `fs.rs` free of repetitive boilerplate.
 //! The three composite helpers (`meta_lookup_required`, `meta_stat_required`,
 //! `meta_lookup_path_required`) that were previously at the bottom of `fs.rs` live
 //! here as well, since they are purely metadata-layer concerns.
@@ -33,7 +31,7 @@ where
 
     /// Fetch attributes for `ino`, returning `None` when the inode is absent.
     pub(super) async fn meta_stat(&self, ino: i64) -> Result<Option<FileAttr>, VfsError> {
-        self.meta_layer().stat(ino).await.map_err(meta_err_to_vfs)
+        self.meta_layer().stat(ino).await.map_err(VfsError::from)
     }
 
     /// Fetch fresh (uncached) attributes for `ino`, returning `None` when absent.
@@ -41,7 +39,7 @@ where
         self.meta_layer()
             .stat_fresh(ino)
             .await
-            .map_err(meta_err_to_vfs)
+            .map_err(VfsError::from)
     }
 
     // ------------------------------------------------------------------
@@ -57,7 +55,7 @@ where
         self.meta_layer()
             .lookup(parent, name)
             .await
-            .map_err(meta_err_to_vfs)
+            .map_err(VfsError::from)
     }
 
     pub(super) async fn meta_lookup_required(
@@ -69,7 +67,7 @@ where
         self.meta_layer()
             .lookup(parent, name)
             .await
-            .map_err(meta_err_to_vfs)?
+            .map_err(VfsError::from)?
             .ok_or_else(|| VfsError::NotFound { path: hint })
     }
 
@@ -81,7 +79,7 @@ where
         self.meta_layer()
             .lookup_path(path)
             .await
-            .map_err(meta_err_to_vfs)
+            .map_err(VfsError::from)
     }
 
     // ------------------------------------------------------------------
@@ -108,14 +106,14 @@ where
         self.meta_layer()
             .mkdir(parent, name)
             .await
-            .map_err(meta_err_to_vfs)
+            .map_err(VfsError::from)
     }
 
     pub(super) async fn meta_rmdir(&self, parent: i64, name: &str) -> Result<(), VfsError> {
         self.meta_layer()
             .rmdir(parent, name)
             .await
-            .map_err(meta_err_to_vfs)
+            .map_err(VfsError::from)
     }
 
     pub(super) async fn meta_readdir(&self, ino: i64) -> Result<Vec<DirEntry>, VfsError> {
@@ -145,7 +143,7 @@ where
         self.meta_layer()
             .create_file(parent, name)
             .await
-            .map_err(meta_err_to_vfs)
+            .map_err(VfsError::from)
     }
 
     pub(super) async fn meta_link(
@@ -157,7 +155,7 @@ where
         self.meta_layer()
             .link(ino, parent, name)
             .await
-            .map_err(meta_err_to_vfs)
+            .map_err(VfsError::from)
     }
 
     pub(super) async fn meta_symlink(
@@ -169,14 +167,14 @@ where
         self.meta_layer()
             .symlink(parent, name, target)
             .await
-            .map_err(meta_err_to_vfs)
+            .map_err(VfsError::from)
     }
 
     pub(super) async fn meta_unlink(&self, parent: i64, name: &str) -> Result<(), VfsError> {
         self.meta_layer()
             .unlink(parent, name)
             .await
-            .map_err(meta_err_to_vfs)
+            .map_err(VfsError::from)
     }
 
     // ------------------------------------------------------------------
@@ -193,7 +191,7 @@ where
         self.meta_layer()
             .rename(old_parent, old_name, new_parent, new_name)
             .await
-            .map_err(meta_err_to_vfs)
+            .map_err(VfsError::from)
     }
 
     pub(super) async fn meta_rename_exchange(
@@ -206,7 +204,7 @@ where
         self.meta_layer()
             .rename_exchange(old_parent, old_name, new_parent, new_name)
             .await
-            .map_err(meta_err_to_vfs)
+            .map_err(VfsError::from)
     }
 
     // ------------------------------------------------------------------
@@ -222,14 +220,14 @@ where
         self.meta_layer()
             .set_attr(ino, req, flags)
             .await
-            .map_err(meta_err_to_vfs)
+            .map_err(VfsError::from)
     }
 
     pub(super) async fn meta_chmod(&self, ino: i64, new_mode: u32) -> Result<FileAttr, VfsError> {
         self.meta_layer()
             .chmod(ino, new_mode)
             .await
-            .map_err(meta_err_to_vfs)
+            .map_err(VfsError::from)
     }
 
     pub(super) async fn meta_chown(
@@ -241,7 +239,7 @@ where
         self.meta_layer()
             .chown(ino, uid, gid)
             .await
-            .map_err(meta_err_to_vfs)
+            .map_err(VfsError::from)
     }
 
     pub(super) async fn meta_truncate(
@@ -253,7 +251,7 @@ where
         self.meta_layer()
             .truncate(ino, size, chunk_size)
             .await
-            .map_err(meta_err_to_vfs)
+            .map_err(VfsError::from)
     }
 
     // ------------------------------------------------------------------
@@ -264,21 +262,21 @@ where
         self.meta_layer()
             .read_symlink(ino)
             .await
-            .map_err(meta_err_to_vfs)
+            .map_err(VfsError::from)
     }
 
     pub(super) async fn meta_get_dir_parent(&self, ino: i64) -> Result<Option<i64>, VfsError> {
         self.meta_layer()
             .get_dir_parent(ino)
             .await
-            .map_err(meta_err_to_vfs)
+            .map_err(VfsError::from)
     }
 
     pub(super) async fn meta_get_paths(&self, ino: i64) -> Result<Vec<String>, VfsError> {
         self.meta_layer()
             .get_paths(ino)
             .await
-            .map_err(meta_err_to_vfs)
+            .map_err(VfsError::from)
     }
 
     // ------------------------------------------------------------------

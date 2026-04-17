@@ -312,20 +312,46 @@ impl InodeCache {
 
     pub(crate) async fn append_slice(&self, inode: i64, chunk_index: u64, desc: SliceDesc) {
         if let Some(node) = self.ttl_manager.get(&inode).await {
-            node.slices
-                .entry(chunk_index)
-                .and_modify(|slices| slices.push(desc))
-                .or_insert_with(|| vec![desc]);
+            // Only append to an EXISTING cached slice list that was populated
+            // from a full backend read (via get_slices → cache_slices_if_absent).
+            // Do NOT create a new entry from a single slice — that produces a
+            // partial list that get_slices would trust as authoritative, causing
+            // it to miss slices that exist in the backing store.  This matters
+            // after truncate: invalidate_inode clears the cache, insert_node
+            // recreates it with an empty slices map, and post-truncate writes
+            // would otherwise seed a partial entry that shadows the full list.
+            if let Some(mut slices) = node.slices.get_mut(&chunk_index) {
+                slices.push(desc);
+            }
         }
     }
 
+    #[allow(dead_code)]
     pub(crate) async fn replace_slices(&self, inode: i64, chunk_index: u64, desc: &[SliceDesc]) {
         if let Some(node) = self.ttl_manager.get(&inode).await {
-            node.slices
-                .entry(chunk_index)
-                .and_modify(|slices| *slices = desc.to_owned())
-                .or_insert_with(|| desc.to_owned());
+            // Same rationale as append_slice: only update an existing entry.
+            if let Some(mut slices) = node.slices.get_mut(&chunk_index) {
+                *slices = desc.to_owned();
+            }
         }
+    }
+
+    pub(crate) async fn cache_slices_if_absent(
+        &self,
+        inode: i64,
+        chunk_index: u64,
+        desc: &[SliceDesc],
+    ) -> Option<Vec<SliceDesc>> {
+        let node = self.ttl_manager.get(&inode).await?;
+        let entry = node.slices.entry(chunk_index);
+        Some(match entry {
+            Entry::Occupied(entry) => entry.get().clone(),
+            Entry::Vacant(entry) => {
+                let cached = desc.to_owned();
+                entry.insert(cached.clone());
+                cached
+            }
+        })
     }
 
     pub(crate) async fn invalidate_slices(&self, inode: i64, chunk_index: u64) {

@@ -21,6 +21,30 @@ bash compose-xfstests/run_redis_xfstests.sh --s3 --cases "generic/001"
 - `slayerfs.log`：SlayerFS 日志（按 run 独立保存）
 - `report.md`：汇总报告
 
+## 容器内跑 xfstests 压力工具 / perf
+
+入口：
+- `compose-xfstests/run_redis_perf.sh`
+- `compose-xfstests/run_etcd_perf.sh`
+
+```bash
+cd project/slayerfs/docker
+
+# 默认跑 dirstress + metaperf + looptest
+bash compose-xfstests/run_redis_perf.sh
+
+# 指定工具，并额外跑一次宿主机 slayerfs_bench
+bash compose-xfstests/run_etcd_perf.sh \
+  --tools "dirstress dirperf metaperf looptest" \
+  --slayerfs-bench
+```
+
+产物目录：`docker/compose-xfstests/artifacts/perf-run-*/`
+- `perf-summary.tsv`：每个压力工具的状态和耗时
+- `tools/*.log`：各工具原始输出
+- `slayerfs.log`：FUSE 挂载期 SlayerFS 日志
+- `slayerfs-bench/console.log`：可选的宿主机 Criterion bench 控制台输出
+
 ## 本地 KVM xfstests（旧路径）
 
 目录：`kvm-xfstests/`

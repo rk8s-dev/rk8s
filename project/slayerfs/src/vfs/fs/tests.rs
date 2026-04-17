@@ -635,6 +635,130 @@ mod io_tests {
         fs.close(fh).await.unwrap();
     }
 
+    #[tokio::test]
+    async fn test_fs_copy_file_range_same_file_preserves_recent_write_tail() {
+        let layout = ChunkLayout {
+            chunk_size: 512 * 1024,
+            block_size: 4 * 1024,
+        };
+        let store = InMemoryBlockStore::new();
+        let meta_handle = create_meta_store_from_url("sqlite::memory:").await.unwrap();
+        let meta_store = meta_handle.store();
+        let fs = VFS::new(layout, store, meta_store).await.unwrap();
+
+        fs.create_file("/copy.bin").await.unwrap();
+        let attr = fs.stat("/copy.bin").await.unwrap();
+        let fh = fs.open(attr.ino, attr.clone(), true, true).await.unwrap();
+
+        let mut expected = vec![0u8; 0x6f000];
+
+        let mut src = vec![0u8; 0xd000];
+        for (i, b) in src.iter_mut().enumerate() {
+            *b = (0x40u8).wrapping_add(i as u8);
+        }
+        fs.write(fh, 0x5d000, &src).await.unwrap();
+        expected[0x5d000..0x6a000].copy_from_slice(&src);
+
+        let mut tail = vec![0u8; 0xe000];
+        for (i, b) in tail.iter_mut().enumerate() {
+            *b = (0x90u8).wrapping_add((i * 3) as u8);
+        }
+        fs.write(fh, 0x2b000, &tail).await.unwrap();
+        expected[0x2b000..0x39000].copy_from_slice(&tail);
+
+        let copied = fs
+            .copy_file_range(fh, 0x5d000, fh, 0x24000, 0xd000)
+            .await
+            .unwrap();
+        assert_eq!(copied, 0xd000);
+        let copied_view = expected[0x5d000..0x6a000].to_vec();
+        expected[0x24000..0x31000].copy_from_slice(&copied_view);
+
+        let out = fs.read(fh, 0x2c000, 0xa000).await.unwrap();
+        assert_eq!(out, expected[0x2c000..0x36000].to_vec());
+
+        fs.close(fh).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_fs_truncate_then_rewrite_range_stays_visible() {
+        let layout = ChunkLayout {
+            chunk_size: 512 * 1024,
+            block_size: 4 * 1024,
+        };
+        let store = InMemoryBlockStore::new();
+        let meta_handle = create_meta_store_from_url("sqlite::memory:").await.unwrap();
+        let meta_store = meta_handle.store();
+        let fs = VFS::new(layout, store, meta_store).await.unwrap();
+
+        fs.create_file("/rewrite.bin").await.unwrap();
+        let attr = fs.stat("/rewrite.bin").await.unwrap();
+        let fh = fs.open(attr.ino, attr.clone(), true, true).await.unwrap();
+
+        fs.truncate_inode(attr.ino, 0x15000).await.unwrap();
+        fs.truncate_inode(attr.ino, 0x50000).await.unwrap();
+
+        let mut first = vec![0u8; 0xf000];
+        for (i, b) in first.iter_mut().enumerate() {
+            *b = (0x31u8).wrapping_add((i * 5) as u8);
+        }
+        fs.write(fh, 0x28000, &first).await.unwrap();
+
+        let mut second = vec![0u8; 0x9000];
+        for (i, b) in second.iter_mut().enumerate() {
+            *b = (0x79u8).wrapping_add((i * 7) as u8);
+        }
+        fs.write(fh, 0x32000, &second).await.unwrap();
+
+        fs.truncate_inode(attr.ino, 0x49000).await.unwrap();
+
+        let out = fs.read(fh, 0x34000, 0x7000).await.unwrap();
+        assert_eq!(out, second[0x2000..0x9000].to_vec());
+
+        fs.close(fh).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_fs_truncate_keeps_prefix_of_overlapping_slice() {
+        let layout = ChunkLayout {
+            chunk_size: 512 * 1024,
+            block_size: 4 * 1024,
+        };
+        let store = InMemoryBlockStore::new();
+        let meta_handle = create_meta_store_from_url("sqlite::memory:").await.unwrap();
+        let meta_store = meta_handle.store();
+        let fs = VFS::new(layout, store, meta_store).await.unwrap();
+
+        fs.create_file("/trimmed-prefix.bin").await.unwrap();
+        let attr = fs.stat("/trimmed-prefix.bin").await.unwrap();
+        let fh = fs.open(attr.ino, attr.clone(), true, true).await.unwrap();
+
+        fs.truncate_inode(attr.ino, 0x35063).await.unwrap();
+
+        let start = 0x1a352u64;
+        let len = 0xb944usize;
+        let mut payload = vec![0u8; len];
+        for (i, b) in payload.iter_mut().enumerate() {
+            *b = (0x55u8).wrapping_add((i * 11) as u8);
+        }
+        fs.write(fh, start, &payload).await.unwrap();
+
+        fs.truncate_inode(attr.ino, 0x1f76b).await.unwrap();
+        fs.truncate_inode(attr.ino, 0x40000).await.unwrap();
+        fs.truncate_inode(attr.ino, 0x2519b).await.unwrap();
+
+        let read_start = 0x1a593u64;
+        let read_len = 0x3ab1usize;
+        let out = fs.read(fh, read_start, read_len).await.unwrap();
+        let expected_offset = (read_start - start) as usize;
+        assert_eq!(
+            out,
+            payload[expected_offset..expected_offset + read_len].to_vec()
+        );
+
+        fs.close(fh).await.unwrap();
+    }
+
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn test_fs_parallel_writes_to_distinct_files() {
         let layout = ChunkLayout {

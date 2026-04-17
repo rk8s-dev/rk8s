@@ -48,6 +48,7 @@ const PLOCK_PREFIX: &str = "plock";
 const LOCKS_KEY: &str = "locks";
 const LOCKED_KEY: &str = "locked";
 const LINK_PARENT_KEY_PREFIX: &str = "lp:";
+const TRUNCATE_REWRITE_MAX_RETRIES: usize = 64;
 
 const CHUNK_ID_BASE: u64 = 1_000_000_000u64;
 
@@ -1194,17 +1195,53 @@ impl RedisMetaStore {
         }
     }
 
-    async fn rewrite_slices(&self, chunk_id: u64, slices: &[SliceDesc]) -> Result<(), MetaError> {
-        let mut conn = self.conn.clone();
+    async fn rewrite_trimmed_slices(
+        &self,
+        chunk_id: u64,
+        cutoff_offset: u64,
+    ) -> Result<(), MetaError> {
         let key = self.chunk_key(chunk_id);
-        let mut pipe = redis::pipe();
-        pipe.atomic().cmd("DEL").arg(&key);
-        for slice in slices {
-            let data = crate::meta::serialization::serialize_meta(slice)?;
-            pipe.cmd("RPUSH").arg(&key).arg(data);
+
+        for _ in 0..TRUNCATE_REWRITE_MAX_RETRIES {
+            let mut conn = Self::create_connection(&self._config).await?;
+
+            redis::cmd("WATCH")
+                .arg(&key)
+                .exec_async(&mut conn)
+                .await
+                .map_err(redis_err)?;
+
+            let raw: Vec<Vec<u8>> = redis::cmd("LRANGE")
+                .arg(&key)
+                .arg(0)
+                .arg(-1)
+                .query_async(&mut conn)
+                .await
+                .map_err(redis_err)?;
+
+            let mut slices = Vec::with_capacity(raw.len());
+            for entry in raw {
+                let desc: SliceDesc = crate::meta::serialization::deserialize_meta(&entry)?;
+                slices.push(desc);
+            }
+            trim_slices_in_place(&mut slices, cutoff_offset);
+
+            let mut pipe = redis::pipe();
+            pipe.atomic().cmd("DEL").arg(&key).ignore();
+            for slice in &slices {
+                let data = crate::meta::serialization::serialize_meta(slice)?;
+                pipe.cmd("RPUSH").arg(&key).arg(data).ignore();
+            }
+
+            let rewritten: Option<()> = pipe.query_async(&mut conn).await.map_err(redis_err)?;
+            if rewritten.is_some() {
+                return Ok(());
+            }
         }
-        pipe.query_async::<()>(&mut conn).await.map_err(redis_err)?;
-        Ok(())
+
+        Err(MetaError::Internal(format!(
+            "truncate rewrite retried too many times for chunk {chunk_id}"
+        )))
     }
 
     async fn shutdown_session_by_id(&self, session_id: Uuid) -> Result<(), MetaError> {
@@ -1268,9 +1305,7 @@ impl RedisMetaStore {
             chunk_size,
             |cutoff_chunk, cutoff_offset| async move {
                 let chunk_id = self.chunk_id(ino, cutoff_chunk);
-                let mut slices = self.get_slices(chunk_id).await?;
-                trim_slices_in_place(&mut slices, cutoff_offset);
-                self.rewrite_slices(chunk_id, &slices).await?;
+                self.rewrite_trimmed_slices(chunk_id, cutoff_offset).await?;
                 Ok(())
             },
             |start, end| async move {
