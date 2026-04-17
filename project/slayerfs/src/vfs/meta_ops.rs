@@ -16,6 +16,10 @@ use crate::vfs::error::{PathHint, VfsError};
 use crate::vfs::fs::VFS;
 use crate::vfs::handles::DirHandle;
 
+fn meta_err_to_vfs(err: crate::meta::store::MetaError) -> VfsError {
+    VfsError::from_meta(PathHint::none(), err)
+}
+
 impl<S, M> VFS<S, M>
 where
     S: BlockStore + Send + Sync + 'static,
@@ -113,7 +117,10 @@ where
     }
 
     pub(super) async fn meta_readdir(&self, ino: i64) -> Result<Vec<DirEntry>, VfsError> {
-        self.meta_layer().readdir(ino).await.map_err(VfsError::from)
+        self.meta_layer()
+            .readdir(ino)
+            .await
+            .map_err(meta_err_to_vfs)
     }
 
     /// Open a directory handle for `ino`.

@@ -13,7 +13,6 @@ use crate::{
 };
 use clippy_utilities::OverflowArithmetic;
 use tokio::time::{Duration, sleep};
-use tonic::transport::ClientTlsConfig;
 use tracing::debug;
 use xlineapi::{
     AuthInfo,
@@ -46,7 +45,6 @@ impl LockServer {
         auth_store: Arc<AuthStore>,
         id_gen: Arc<IdGenerator>,
         _addrs: &[String],
-        _client_tls_config: Option<&ClientTlsConfig>,
     ) -> Self {
         Self {
             client,

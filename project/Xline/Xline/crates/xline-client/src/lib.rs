@@ -158,16 +158,15 @@
         clippy::arithmetic_side_effects
     )
 )]
-use std::{fmt::Debug, sync::Arc};
-
 use curp::{
     client::ClientBuilder as CurpClientBuilder,
     rpc::{FetchClusterRequest, FetchClusterResponse, MethodId},
 };
 use rustls;
-use tonic::transport::ClientTlsConfig;
+use std::{fmt::Debug, sync::Arc};
 use utils::config::ClientConfig;
 use xlineapi::command::CurpClient;
+use xlinerpc::QuicTlsConfig;
 
 use crate::{
     clients::{
@@ -191,8 +190,6 @@ pub mod error;
 mod h3_pool;
 mod transport;
 
-/// Perform a FetchCluster unary RPC via tonic's low-level Grpc client.
-///
 /// Xline client
 #[derive(Clone, Debug)]
 pub struct Client {
@@ -217,7 +214,7 @@ pub struct Client {
 impl Client {
     /// New `Client`
     ///
-    /// Connects to the cluster by first performing a `FetchCluster` RPC via tonic
+    /// Connects to the cluster by first performing a `FetchCluster` RPC
     /// to discover peer URLs, then building a QUIC-based curp client for peer
     /// communication. This means the cluster must be reachable at construction time;
     /// a transient network failure will cause `connect()` to return an error.
@@ -314,8 +311,11 @@ impl Client {
     ) -> Result<gm_quic::prelude::QuicClient, XlineClientBuildError> {
         let mut root_store = rustls::RootCertStore::empty();
 
-        if let Some(ca_pem) = &options.quic_peer_ca_cert {
-            let certs: Vec<_> = rustls_pemfile::certs(&mut ca_pem.as_slice())
+        let quic_tls = options.quic_tls_config.as_ref();
+
+        if let Some(ca_pem) = quic_tls.and_then(QuicTlsConfig::peer_ca_cert_pem) {
+            let mut ca_reader = std::io::Cursor::new(ca_pem);
+            let certs: Vec<_> = rustls_pemfile::certs(&mut ca_reader)
                 .collect::<Result<Vec<_>, _>>()
                 .map_err(|e| {
                     XlineClientBuildError::InvalidArguments(format!(
@@ -333,11 +333,26 @@ impl Client {
             tracing::warn!("No QUIC peer CA certificate configured; peer identity is not verified");
         }
 
-        Ok(gm_quic::prelude::QuicClient::builder()
-            .with_root_certificates(root_store)
-            .without_cert()
-            .with_alpns(["h3"])
-            .build())
+        let builder = gm_quic::prelude::QuicClient::builder().with_root_certificates(root_store);
+
+        if let Some(tls) = quic_tls {
+            match (tls.client_cert_path(), tls.client_key_path()) {
+                (Some(cert_path), Some(key_path)) => {
+                    return Ok(builder
+                        .with_cert(cert_path, key_path)
+                        .with_alpns(["h3"])
+                        .build());
+                }
+                (None, None) => {}
+                _ => {
+                    return Err(XlineClientBuildError::InvalidArguments(
+                        "quic client cert and key paths must be both set".to_owned(),
+                    ));
+                }
+            }
+        }
+
+        Ok(builder.without_cert().with_alpns(["h3"]).build())
     }
 
     /// Fetch peer URLs from the public client endpoints before switching to QUIC.
@@ -426,14 +441,10 @@ impl Client {
 pub struct ClientOptions {
     /// User is a pair values of name and password
     user: Option<(String, String)>,
-    /// Client tls config
-    tls_config: Option<ClientTlsConfig>,
+    /// QUIC TLS config
+    quic_tls_config: Option<QuicTlsConfig>,
     /// config for the curp client
     client_config: ClientConfig,
-    /// Peer CA certificate (PEM bytes) for QUIC peer identity verification.
-    /// When set, the QUIC client will verify the server's certificate against
-    /// this CA. When `None`, an empty trust store is used (no verification).
-    quic_peer_ca_cert: Option<Vec<u8>>,
 }
 
 impl ClientOptions {
@@ -442,14 +453,13 @@ impl ClientOptions {
     #[must_use]
     pub fn new(
         user: Option<(String, String)>,
-        tls_config: Option<ClientTlsConfig>,
+        quic_tls_config: Option<QuicTlsConfig>,
         client_config: ClientConfig,
     ) -> Self {
         Self {
             user,
-            tls_config,
+            quic_tls_config,
             client_config,
-            quic_peer_ca_cert: None,
         }
     }
 
@@ -460,11 +470,11 @@ impl ClientOptions {
         self.user.clone()
     }
 
-    /// Get `tls_config`
+    /// Get QUIC TLS config
     #[inline]
     #[must_use]
-    pub fn tls_config(&self) -> Option<&ClientTlsConfig> {
-        self.tls_config.as_ref()
+    pub fn quic_tls_config(&self) -> Option<&QuicTlsConfig> {
+        self.quic_tls_config.as_ref()
     }
 
     /// Get `client_config`
@@ -494,12 +504,12 @@ impl ClientOptions {
         }
     }
 
-    /// Set `tls_config`
+    /// Set QUIC TLS config
     #[inline]
     #[must_use]
-    pub fn with_tls_config(self, tls_config: ClientTlsConfig) -> Self {
+    pub fn with_quic_tls_config(self, quic_tls_config: QuicTlsConfig) -> Self {
         Self {
-            tls_config: Some(tls_config),
+            quic_tls_config: Some(quic_tls_config),
             ..self
         }
     }
@@ -511,9 +521,41 @@ impl ClientOptions {
     #[inline]
     #[must_use]
     pub fn with_quic_peer_ca_cert(self, ca_cert_pem: Vec<u8>) -> Self {
+        let Self {
+            user,
+            quic_tls_config,
+            client_config,
+        } = self;
+        let quic_tls_config = quic_tls_config
+            .unwrap_or_default()
+            .with_peer_ca_cert_pem(ca_cert_pem);
         Self {
-            quic_peer_ca_cert: Some(ca_cert_pem),
-            ..self
+            user,
+            quic_tls_config: Some(quic_tls_config),
+            client_config,
+        }
+    }
+
+    /// Set QUIC mTLS identity file paths.
+    #[inline]
+    #[must_use]
+    pub fn with_quic_client_identity(
+        self,
+        cert_path: std::path::PathBuf,
+        key_path: std::path::PathBuf,
+    ) -> Self {
+        let Self {
+            user,
+            quic_tls_config,
+            client_config,
+        } = self;
+        let quic_tls_config = quic_tls_config
+            .unwrap_or_default()
+            .with_client_identity_paths(cert_path, key_path);
+        Self {
+            user,
+            quic_tls_config: Some(quic_tls_config),
+            client_config,
         }
     }
 }

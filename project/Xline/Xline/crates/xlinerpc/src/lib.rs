@@ -2,7 +2,7 @@
 //!
 //! Provides Request/Response wrappers with metadata support and binary encoding.
 
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, path::Path, path::PathBuf};
 
 pub mod codec;
 pub mod envelope;
@@ -57,13 +57,86 @@ impl IntoMetadataBytes for Vec<u8> {
 }
 
 /// Metadata for RPC requests and responses
-/// Similar to tonic::MetadataMap but uses binary data internally
+/// Metadata map for xlinerpc requests and responses, backed by binary data
 /// In fact, the entry number is usually less than ten, and the key/value size is usually less than 128 bytes.
 /// Uses `BTreeMap` internally to guarantee deterministic iteration order during encoding.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct MetaData {
     /// Key-value pairs for metadata (both binary)
     headers: BTreeMap<Vec<u8>, Vec<u8>>,
+}
+
+/// QUIC TLS configuration shared across transport layers.
+///
+/// This is intentionally a plain data object so higher-level crates can map it
+/// to concrete QUIC client builders without depending on transport-specific types.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct QuicTlsConfig {
+    /// Optional CA certificate PEM bytes used to verify peer certificates.
+    peer_ca_cert_pem: Option<Vec<u8>>,
+    /// Optional client certificate path for mTLS.
+    client_cert_path: Option<PathBuf>,
+    /// Optional client private key path for mTLS.
+    client_key_path: Option<PathBuf>,
+}
+
+impl QuicTlsConfig {
+    /// Create a new QUIC TLS config.
+    #[must_use]
+    #[inline]
+    pub fn new(
+        peer_ca_cert_pem: Option<Vec<u8>>,
+        client_cert_path: Option<PathBuf>,
+        client_key_path: Option<PathBuf>,
+    ) -> Self {
+        Self {
+            peer_ca_cert_pem,
+            client_cert_path,
+            client_key_path,
+        }
+    }
+
+    /// Get peer CA certificate PEM bytes.
+    #[must_use]
+    #[inline]
+    pub fn peer_ca_cert_pem(&self) -> Option<&[u8]> {
+        self.peer_ca_cert_pem.as_deref()
+    }
+
+    /// Get client certificate path.
+    #[must_use]
+    #[inline]
+    pub fn client_cert_path(&self) -> Option<&Path> {
+        self.client_cert_path.as_deref()
+    }
+
+    /// Get client private key path.
+    #[must_use]
+    #[inline]
+    pub fn client_key_path(&self) -> Option<&Path> {
+        self.client_key_path.as_deref()
+    }
+
+    /// Set peer CA certificate PEM bytes.
+    #[must_use]
+    #[inline]
+    pub fn with_peer_ca_cert_pem(self, peer_ca_cert_pem: Vec<u8>) -> Self {
+        Self {
+            peer_ca_cert_pem: Some(peer_ca_cert_pem),
+            ..self
+        }
+    }
+
+    /// Set client certificate and key paths used for mTLS.
+    #[must_use]
+    #[inline]
+    pub fn with_client_identity_paths(self, cert_path: PathBuf, key_path: PathBuf) -> Self {
+        Self {
+            client_cert_path: Some(cert_path),
+            client_key_path: Some(key_path),
+            ..self
+        }
+    }
 }
 
 impl MetaData {

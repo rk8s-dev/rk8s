@@ -409,11 +409,11 @@ where
     ) -> FuseResult<ReplyDirectory<BoxStream<'a, FuseResult<DirectoryEntry>>>> {
         debug!(ino, fh, offset, "fuse.readdir");
         // Try to use handle first
-        let entries = if fh != 0 {
-            let entries_offset = offset.saturating_sub(3) as u64;
-            self.readdir(fh, entries_offset)
+        let (entries, entries_offset, includes_dot_entries) = if fh != 0 {
+            let entries_offset = (offset as u64).saturating_sub(2);
+            (self.readdir(fh, entries_offset), entries_offset, true)
         } else {
-            None
+            (None, offset.max(0) as u64, false)
         };
 
         // Fallback to stateless mode if handle not found
@@ -463,7 +463,8 @@ where
                 inode: e.ino as u64,
                 kind: vfs_kind_to_fuse(e.kind),
                 name: OsString::from(e.name.clone()),
-                offset: (offset.max(0) as u64 + i as u64 + if fh != 0 { 3 } else { 0 }) as i64,
+                offset: (entries_offset + i as u64 + if includes_dot_entries { 3 } else { 1 })
+                    as i64,
             });
         }
 
@@ -1543,6 +1544,7 @@ fn attr_request_is_empty(req: &SetAttrRequest) -> bool {
 #[cfg(test)]
 mod mode_sanitization_tests {
     use super::{apply_creation_umask, sanitize_special_mode_bits};
+    use std::collections::BTreeSet;
 
     #[test]
     fn sanitize_special_mode_bits_drops_setuid_setgid_and_sticky() {
@@ -1556,5 +1558,32 @@ mod mode_sanitization_tests {
         assert_eq!(apply_creation_umask(0o1777, 0), 0o777);
         assert_eq!(apply_creation_umask(0o1777, 0o022), 0o755);
         assert_eq!(apply_creation_umask(0o4755, 0o022), 0o755);
+    }
+
+    #[test]
+    fn handle_readdir_offsets_do_not_skip_children_between_pages() {
+        const TOTAL_CHILDREN: usize = 4096;
+        const PAGE_SIZE: usize = 50;
+
+        let mut seen = BTreeSet::new();
+        let mut offset = 0u64;
+
+        loop {
+            let batch_start = offset.saturating_sub(2);
+            if batch_start as usize >= TOTAL_CHILDREN {
+                break;
+            }
+
+            let batch_len = PAGE_SIZE.min(TOTAL_CHILDREN - batch_start as usize);
+            for i in 0..batch_len {
+                let child_index = batch_start as usize + i;
+                seen.insert(child_index);
+                offset = batch_start + i as u64 + 3;
+            }
+        }
+
+        assert_eq!(seen.len(), TOTAL_CHILDREN);
+        assert_eq!(seen.first().copied(), Some(0));
+        assert_eq!(seen.last().copied(), Some(TOTAL_CHILDREN - 1));
     }
 }

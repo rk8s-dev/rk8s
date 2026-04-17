@@ -1249,6 +1249,17 @@ impl<T: MetaStore + ?Sized + 'static> MetaLayer for MetaClient<T> {
 
         trace!("MetaClient: Inode cache MISS for readdir inode {}", inode);
 
+        // Keep the directory node cached before taking a snapshot so we can detect
+        // concurrent child mutations and avoid marking a stale listing as complete.
+        self.inode_cache
+            .ensure_node_in_cache(inode, &&*self.store, None)
+            .await?;
+        let children_generation = self
+            .inode_cache
+            .children_generation(inode)
+            .await
+            .unwrap_or(0);
+
         let mut entries = self.store.readdir(inode).await?;
         // Sort once before caching so readops always return stable ordering by name.
         entries.sort_by(|a, b| a.name.cmp(&b.name));
@@ -1267,7 +1278,16 @@ impl<T: MetaStore + ?Sized + 'static> MetaLayer for MetaClient<T> {
         // Load all children from database into cache, replacing any stale data
         let children_data: Vec<(String, i64)> =
             entries.iter().map(|e| (e.name.clone(), e.ino)).collect();
-        self.inode_cache.load_children(inode, children_data).await;
+        if !self
+            .inode_cache
+            .load_children_if_fresh(inode, children_data, children_generation)
+            .await
+        {
+            trace!(
+                "MetaClient: skipped stale readdir cache write for inode {}",
+                inode
+            );
+        }
 
         // Note: We shouldn't pre-fetch attributes here; use batch prefetch instead.
         Ok(entries)
@@ -1331,7 +1351,17 @@ impl<T: MetaStore + ?Sized + 'static> MetaLayer for MetaClient<T> {
 
         debug!("MetaClient: rmdir completed, updating cache");
 
-        self.inode_cache.remove_child(parent, name).await;
+        // Keep the deleted directory inode cached for a short time so open
+        // directory handles can still service getattr/fstat after replacement.
+        if let Some(child_ino) = self
+            .inode_cache
+            .remove_child_but_keep_inode(parent, name)
+            .await
+            && let Some(child_node) = self.inode_cache.get_node(child_ino).await
+        {
+            child_node.attr.write().await.nlink = 0;
+            child_node.clear_parent().await;
+        }
         self.invalidate_parent_path(parent).await;
 
         Ok(())
@@ -1533,18 +1563,14 @@ impl<T: MetaStore + ?Sized + 'static> MetaLayer for MetaClient<T> {
                     .add_child(new_parent, new_name.clone(), child_ino)
                     .await;
 
-                // Step 5: Update parent-child relationship based on hard link count
+                // Directories keep their inline parent even though nlink is >= 2.
                 if let Some(attr) = &src_attr {
-                    if attr.nlink <= 1 {
-                        // Single link: update parent directly
+                    if attr.kind == FileType::Dir || attr.nlink <= 1 {
                         if let Some(child_node) = self.inode_cache.get_node(child_ino).await {
                             child_node.set_parent(new_parent).await;
                         }
-                    } else {
-                        // Multiple links: clear parent (use LinkParentMeta instead)
-                        if let Some(child_node) = self.inode_cache.get_node(child_ino).await {
-                            child_node.clear_parent().await;
-                        }
+                    } else if let Some(child_node) = self.inode_cache.get_node(child_ino).await {
+                        child_node.clear_parent().await;
                     }
                 }
             }

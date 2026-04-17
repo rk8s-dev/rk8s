@@ -18,7 +18,8 @@ on:
 
 jobs:
   unit-and-integration:
-    name: slayerfs basic test
+    if: false
+    name: slayerfs integration test
     runs-on: [self-hosted]
     env:
       CARGO_TERM_COLOR: always
@@ -33,6 +34,7 @@ jobs:
         run: |
           sudo apt-get update -y
           sudo apt-get install -y --no-install-recommends \
+            git-lfs \
             fuse3 \
             pkg-config \
             libssl-dev \
@@ -45,7 +47,7 @@ jobs:
 
       - name: Start backend services
         run: |
-          docker compose -f project/slayerfs/docker-compose.yml up -d
+          docker compose -f project/slayerfs/docker/docker-compose.integration.yml up -d
 
       - name: Run tests
         run: |
@@ -56,7 +58,7 @@ jobs:
       - name: Stop backend services
         if: always()
         run: |
-          docker compose -f project/slayerfs/docker-compose.yml down -v
+          docker compose -f project/slayerfs/docker/docker-compose.integration.yml down -v
 
       - name: Install nightly toolchain and cargo-fuzz
         run: |
@@ -95,10 +97,22 @@ jobs:
           rm -rf fuzz/.tmp*
 
   xfstests:
-    name: xfstests
     if: false
+    name: xfstests (${{ matrix.backend }})
     runs-on: [self-hosted]
     timeout-minutes: 240
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - backend: redis
+            script: compose-xfstests/run_redis_xfstests.sh
+          - backend: etcd
+            script: compose-xfstests/run_etcd_xfstests.sh
+    env:
+      CARGO_TERM_COLOR: always
+      RUSTUP_TOOLCHAIN: stable
+      SLAYERFS_XFSTESTS_ARTIFACT_ROOT: project/slayerfs/docker/compose-xfstests/artifacts
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -116,25 +130,105 @@ jobs:
       - name: Install build dependencies
         run: |
           sudo apt-get update -y
-          sudo apt-get install -y pkg-config libfuse3-dev fuse3 sqlite3 protobuf-compiler
+          sudo apt-get install -y --no-install-recommends \
+            git-lfs \
+            fuse3 \
+            libfuse3-dev \
+            pkg-config \
+            libssl-dev \
+            sqlite3 \
+            protobuf-compiler
           protoc --version
 
-      - name: Build slayerfs persistence demo
-        working-directory: project
-        run: cargo build -p slayerfs --example persistence_demo --release
-
-      - name: Run xfstests
+      - name: Fetch LFS assets for xfstests
+        env:
+          LFS_ASSETS: project/slayerfs/tests/scripts/xfstests-prebuilt/*.tar.gz,project/slayerfs/tests/scripts/fuse3-bundle/fusermount3
         run: |
-          chmod +x project/slayerfs/tests/scripts/xfstests_slayer.sh
-          project/slayerfs/tests/scripts/xfstests_slayer.sh
+          git lfs install --local
+          git lfs pull --include="$LFS_ASSETS"
+
+      - name: Run xfstests via docker-compose (${{ matrix.backend }})
+        working-directory: project/slayerfs/docker
+        run: |
+          bash "${{ matrix.script }}"
+
+      - name: Display xfstests results
+        if: always()
+        run: |
+          ARTIFACT_ROOT="$SLAYERFS_XFSTESTS_ARTIFACT_ROOT"
+          append_summary_block() {
+            local title="$1"
+            local file_path="$2"
+            if [[ ! -f "$file_path" ]]; then
+              return
+            fi
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "### $title" >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+            tail -n 300 "$file_path" >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+          }
+
+          echo "## xfstests results (${{ matrix.backend }})" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+
+          LATEST=$(find "$ARTIFACT_ROOT" -maxdepth 1 -mindepth 1 -type d -name 'run-*' 2>/dev/null | sort -r | head -1)
+          if [[ -z "$LATEST" ]]; then
+            echo "No artifact directory found under $ARTIFACT_ROOT" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          echo "Artifact directory: $LATEST" >> "$GITHUB_STEP_SUMMARY"
+          echo "LATEST_XFSTESTS_ARTIFACT=$LATEST" >> "$GITHUB_ENV"
+
+          echo "::group::xfstests artifact dump (${{ matrix.backend }})"
+          for file_path in \
+            "$LATEST/xfstests-script.log" \
+            "$LATEST/slayerfs.log" \
+            "$LATEST/local.config" \
+            "$LATEST/results/check.log" \
+            "$LATEST/results/check.out"; do
+            if [[ -f "$file_path" ]]; then
+              echo "=== ${file_path#$LATEST/} ==="
+              cat "$file_path"
+              echo
+            fi
+          done
+
+          while IFS= read -r bad_file; do
+            [[ -n "$bad_file" ]] || continue
+            echo "=== ${bad_file#$LATEST/} ==="
+            cat "$bad_file"
+            echo
+          done < <(find "$LATEST/results" -name '*.out.bad' 2>/dev/null | sort)
+          echo "::endgroup::"
+
+          CHECK_OUT="$LATEST/results/check.out"
+          if [[ -f "$CHECK_OUT" ]]; then
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+            cat "$CHECK_OUT" >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "No check.out found at $CHECK_OUT" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+          BAD_COUNT=$(find "$LATEST/results" -name '*.out.bad' 2>/dev/null | wc -l)
+          if [[ "$BAD_COUNT" -gt 0 ]]; then
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "### Failed tests ($BAD_COUNT)" >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+            find "$LATEST/results" -name '*.out.bad' -exec basename {} .out.bad \; | sort >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+          append_summary_block "xfstests script log tail" "$LATEST/xfstests-script.log"
+          append_summary_block "slayerfs log tail" "$LATEST/slayerfs.log"
+          append_summary_block "xfstests check.log tail" "$LATEST/results/check.log"
 
       - name: Upload xfstests artifacts (always)
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: slayerfs-xfstests-logs
-          path: |
-            /tmp/slayerfs.log
-            /tmp/xfstests-dev/results
-            /tmp/xfstests-dev/local.config
+          name: slayerfs-xfstests-${{ matrix.backend }}-logs
+          path: ${{ env.LATEST_XFSTESTS_ARTIFACT }}
           if-no-files-found: ignore

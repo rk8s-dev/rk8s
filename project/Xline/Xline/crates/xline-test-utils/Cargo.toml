@@ -14,10 +14,10 @@ readme = "README.md"
 futures = { workspace = true }
 rand = { workspace = true }
 tokio = { workspace = true }
-tonic = { workspace = true }
 utils = { path = "../utils" }
 xline = { path = "../xline" }
 xline-client = { path = "../xline-client" }
+xlinerpc = { path = "../xlinerpc" }
 
 [lints]
 workspace = true

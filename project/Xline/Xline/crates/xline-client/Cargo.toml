@@ -28,7 +28,6 @@ rustls = { version = "0.23", default-features = false, features = ["std", "ring"
 rustls-pemfile = "2"
 thiserror = { workspace = true }
 tokio = { workspace = true }
-tonic = { workspace = true }
 tower = { version = "0.4", features = ["discover"] }
 tracing = { workspace = true }
 utils = { path = "../utils" }

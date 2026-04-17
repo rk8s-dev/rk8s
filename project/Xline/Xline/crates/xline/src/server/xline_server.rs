@@ -14,7 +14,6 @@ use curp::{
 use dashmap::DashMap;
 use engine::{MemorySnapshotAllocator, RocksSnapshotAllocator, SnapshotAllocator};
 use jsonwebtoken::{DecodingKey, EncodingKey};
-use tonic::transport::{Certificate, ClientTlsConfig, Identity, ServerTlsConfig};
 use tracing::{info, warn};
 
 use utils::{
@@ -73,10 +72,6 @@ pub struct XlineServer {
     compact_config: CompactConfig,
     /// Auth config
     auth_config: AuthConfig,
-    /// Client tls config
-    client_tls_config: Option<ClientTlsConfig>,
-    /// Server tls config
-    _server_tls_config: Option<ServerTlsConfig>,
     /// QUIC client for curp peer communication
     quic_client: Arc<gm_quic::prelude::QuicClient>,
     /// Peer TLS certificate (DER) for QUIC server, None = self-signed fallback
@@ -120,7 +115,6 @@ impl XlineServer {
         auth_config: AuthConfig,
         tls_config: TlsConfig,
     ) -> Result<Self> {
-        let (client_tls_config, server_tls_config) = Self::read_tls_config(&tls_config).await?;
         let curp_storage = Arc::new(CurpDB::open(&cluster_config.curp_config().engine_cfg)?);
 
         // Read peer TLS certs for QUIC server (DER format)
@@ -149,8 +143,6 @@ impl XlineServer {
             storage_config,
             compact_config,
             auth_config,
-            client_tls_config,
-            _server_tls_config: server_tls_config,
             quic_client,
             peer_cert_der,
             peer_key_der,
@@ -394,14 +386,6 @@ impl XlineServer {
                 watch_server,
             ));
 
-        let xline_router = {
-            let (mut reporter, health_server) = tonic_health::server::health_reporter();
-            reporter
-                .set_service_status("", tonic_health::ServingStatus::Serving)
-                .await;
-            xline_router.add_service("/*path", health_server)
-        };
-
         Ok((xline_router, curp_client, quic_server))
     }
 
@@ -409,7 +393,7 @@ impl XlineServer {
     ///
     /// # Errors
     ///
-    /// Will return `Err` when `tonic::Server` serve return an error
+    /// Will return `Err` when the QUIC server returns an error
     #[inline]
     pub async fn start_with_quic(&self) -> Result<()> {
         // Start QUIC server for curp peer communication
@@ -594,7 +578,6 @@ impl XlineServer {
                 Arc::clone(&auth_storage),
                 Arc::clone(&id_gen),
                 &self.cluster_info.self_peer_urls(),
-                self.client_tls_config.as_ref(),
             ),
             LeaseServer::new(
                 lease_storage,
@@ -663,64 +646,6 @@ impl XlineServer {
                 "private key path and public key path must be both set or both unset"
             )),
         }
-    }
-
-    /// Read tls cert and key from file
-    async fn read_tls_config(
-        tls_config: &TlsConfig,
-    ) -> Result<(Option<ClientTlsConfig>, Option<ServerTlsConfig>)> {
-        let client_tls_config = match (
-            tls_config.client_ca_cert_path().as_ref(),
-            tls_config.client_cert_path().as_ref(),
-            tls_config.client_key_path().as_ref(),
-        ) {
-            (Some(ca_path), Some(cert_path), Some(key_path)) => {
-                let ca = fs::read(ca_path).await?;
-                let cert = fs::read(cert_path).await?;
-                let key = fs::read(key_path).await?;
-                Some(
-                    ClientTlsConfig::new()
-                        .ca_certificate(Certificate::from_pem(ca))
-                        .identity(Identity::from_pem(cert, key)),
-                )
-            }
-            (Some(ca_path), None, None) => {
-                let ca = fs::read(ca_path).await?;
-                Some(ClientTlsConfig::new().ca_certificate(Certificate::from_pem(ca)))
-            }
-            (_, Some(_), None) | (_, None, Some(_)) => {
-                return Err(anyhow!(
-                    "client_cert_path and client_key_path must be both set"
-                ));
-            }
-            _ => None,
-        };
-        let server_tls_config = match (
-            tls_config.peer_ca_cert_path().as_ref(),
-            tls_config.peer_cert_path().as_ref(),
-            tls_config.peer_key_path().as_ref(),
-        ) {
-            (Some(ca_path), Some(cert_path), Some(key_path)) => {
-                let ca = fs::read(ca_path).await?;
-                let cert = fs::read_to_string(cert_path).await?;
-                let key = fs::read_to_string(key_path).await?;
-                Some(
-                    ServerTlsConfig::new()
-                        .client_ca_root(Certificate::from_pem(ca))
-                        .identity(Identity::from_pem(cert, key)),
-                )
-            }
-            (None, Some(cert_path), Some(key_path)) => {
-                let cert = fs::read_to_string(cert_path).await?;
-                let key = fs::read_to_string(key_path).await?;
-                Some(ServerTlsConfig::new().identity(Identity::from_pem(cert, key)))
-            }
-            (_, Some(_), None) | (_, None, Some(_)) => {
-                return Err(anyhow!("peer_cert_path and peer_key_path must be both set"));
-            }
-            _ => None,
-        };
-        Ok((client_tls_config, server_tls_config))
     }
 
     /// Build a QUIC client with proper TLS configuration from `TlsConfig`.

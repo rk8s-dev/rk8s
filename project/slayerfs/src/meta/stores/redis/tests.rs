@@ -144,6 +144,28 @@ impl TestSessionManager {
 #[serial]
 #[tokio::test]
 #[ignore]
+async fn test_symlink_roundtrip_and_unlink() {
+    let store = new_test_store().await;
+    let root = store.root_ino();
+
+    let dir = store.mkdir(root, "links".to_string()).await.unwrap();
+    let (ino, attr) = store
+        .symlink(dir, "link.txt", "/target/path")
+        .await
+        .unwrap();
+
+    assert_eq!(attr.kind, crate::meta::store::FileType::Symlink);
+    assert_eq!(attr.size, "/target/path".len() as u64);
+    assert_eq!(store.lookup(dir, "link.txt").await.unwrap(), Some(ino));
+    assert_eq!(store.read_symlink(ino).await.unwrap(), "/target/path");
+
+    store.unlink(dir, "link.txt").await.unwrap();
+    assert_eq!(store.lookup(dir, "link.txt").await.unwrap(), None);
+}
+
+#[serial]
+#[tokio::test]
+#[ignore]
 async fn test_hardlink_dentry_binding_cross_dir_rename_unlink() {
     let store = new_test_store().await;
     let root = store.root_ino();
@@ -1164,6 +1186,200 @@ async fn test_rename_lua_target_exists() {
 #[serial]
 #[tokio::test]
 #[ignore]
+async fn test_rename_lua_overwrite_file() {
+    let store = new_test_store().await;
+    let root = store.root_ino();
+
+    let src_ino = store
+        .create_file(root, "src.txt".to_string())
+        .await
+        .unwrap();
+    let dst_ino = store
+        .create_file(root, "dst.txt".to_string())
+        .await
+        .unwrap();
+
+    store
+        .rename(root, "src.txt", root, "dst.txt".to_string())
+        .await
+        .unwrap();
+
+    assert_eq!(store.lookup(root, "src.txt").await.unwrap(), None);
+    assert_eq!(store.lookup(root, "dst.txt").await.unwrap(), Some(src_ino));
+
+    let overwritten = store.get_node(dst_ino).await.unwrap().unwrap();
+    assert!(
+        overwritten.deleted,
+        "overwritten inode should be tombstoned"
+    );
+    assert_eq!(
+        overwritten.attr.nlink, 0,
+        "overwritten inode should have nlink=0"
+    );
+    assert!(
+        store.stat(dst_ino).await.unwrap().is_some(),
+        "tombstoned inode should remain until GC"
+    );
+
+    let deleted = store.get_deleted_files().await.unwrap();
+    assert!(
+        deleted.contains(&dst_ino),
+        "overwritten inode should be queued for cleanup"
+    );
+}
+
+#[serial]
+#[tokio::test]
+#[ignore]
+async fn test_rename_lua_directory_replaces_empty_directory() {
+    let store = new_test_store().await;
+    let root = store.root_ino();
+
+    let src_ino = store.mkdir(root, "src".to_string()).await.unwrap();
+    let dst_ino = store.mkdir(root, "dst".to_string()).await.unwrap();
+
+    store
+        .rename(root, "src", root, "dst".to_string())
+        .await
+        .unwrap();
+
+    assert_eq!(store.lookup(root, "src").await.unwrap(), None);
+    assert_eq!(store.lookup(root, "dst").await.unwrap(), Some(src_ino));
+    assert!(store.get_node(dst_ino).await.unwrap().is_none());
+    assert!(store.get_node(src_ino).await.unwrap().is_some());
+}
+
+#[serial]
+#[tokio::test]
+#[ignore]
+async fn test_rename_lua_directory_to_missing_target_updates_parent_name() {
+    let store = new_test_store().await;
+    let root = store.root_ino();
+
+    let src_ino = store.mkdir(root, "src".to_string()).await.unwrap();
+
+    store
+        .rename(root, "src", root, "dst".to_string())
+        .await
+        .unwrap();
+
+    assert_eq!(store.lookup(root, "src").await.unwrap(), None);
+    assert_eq!(store.lookup(root, "dst").await.unwrap(), Some(src_ino));
+
+    let renamed = store.get_node(src_ino).await.unwrap().unwrap();
+    assert_eq!(renamed.parent, root);
+    assert_eq!(renamed.name, "dst");
+}
+
+#[serial]
+#[tokio::test]
+#[ignore]
+async fn test_rename_lua_cross_dir_directory_preserves_parent_nlink_after_cleanup() {
+    let store = new_test_store().await;
+    let root = store.root_ino();
+
+    let dir_x = store.mkdir(root, "x".to_string()).await.unwrap();
+    let dir_y = store.mkdir(root, "y".to_string()).await.unwrap();
+    store.mkdir(dir_x, "src".to_string()).await.unwrap();
+    store.mkdir(dir_y, "dst".to_string()).await.unwrap();
+
+    // Mirror the VFS overwrite flow: remove the empty destination first, then rename.
+    store.rmdir(dir_y, "dst").await.unwrap();
+    store
+        .rename(dir_x, "src", dir_y, "dst".to_string())
+        .await
+        .unwrap();
+
+    let y_attr = store.stat(dir_y).await.unwrap().unwrap();
+    assert_eq!(
+        y_attr.nlink, 3,
+        "moved subdir should increment new parent nlink"
+    );
+
+    store.rmdir(dir_y, "dst").await.unwrap();
+
+    let y_attr = store.stat(dir_y).await.unwrap().unwrap();
+    assert_eq!(y_attr.nlink, 2, "cleanup should restore parent nlink");
+    assert_eq!(store.lookup(root, "y").await.unwrap(), Some(dir_y));
+    assert_eq!(
+        store.get_paths(dir_y).await.unwrap(),
+        vec!["/y".to_string()]
+    );
+}
+
+#[serial]
+#[tokio::test]
+#[ignore]
+async fn test_rename_lua_directory_rejects_non_empty_directory_target() {
+    let store = new_test_store().await;
+    let root = store.root_ino();
+
+    let src_ino = store.mkdir(root, "src".to_string()).await.unwrap();
+    let dst_ino = store.mkdir(root, "dst".to_string()).await.unwrap();
+    store
+        .create_file(dst_ino, "child.txt".to_string())
+        .await
+        .unwrap();
+
+    let result = store.rename(root, "src", root, "dst".to_string()).await;
+    match result.unwrap_err() {
+        MetaError::DirectoryNotEmpty(ino) => assert_eq!(ino, dst_ino),
+        other => panic!("expected DirectoryNotEmpty error, got {:?}", other),
+    }
+
+    assert_eq!(store.lookup(root, "src").await.unwrap(), Some(src_ino));
+    assert_eq!(store.lookup(root, "dst").await.unwrap(), Some(dst_ino));
+}
+
+#[serial]
+#[tokio::test]
+#[ignore]
+async fn test_rename_lua_directory_rejects_file_target() {
+    let store = new_test_store().await;
+    let root = store.root_ino();
+
+    let src_ino = store.mkdir(root, "src".to_string()).await.unwrap();
+    let dst_ino = store
+        .create_file(root, "dst.txt".to_string())
+        .await
+        .unwrap();
+
+    let result = store.rename(root, "src", root, "dst.txt".to_string()).await;
+    match result.unwrap_err() {
+        MetaError::Io(err) => assert_eq!(err.kind(), std::io::ErrorKind::NotADirectory),
+        other => panic!("expected NotADirectory IO error, got {:?}", other),
+    }
+
+    assert_eq!(store.lookup(root, "src").await.unwrap(), Some(src_ino));
+    assert_eq!(store.lookup(root, "dst.txt").await.unwrap(), Some(dst_ino));
+}
+
+#[serial]
+#[tokio::test]
+#[ignore]
+async fn test_rename_lua_file_rejects_directory_target() {
+    let store = new_test_store().await;
+    let root = store.root_ino();
+
+    let src_ino = store
+        .create_file(root, "src.txt".to_string())
+        .await
+        .unwrap();
+    let dst_ino = store.mkdir(root, "dst".to_string()).await.unwrap();
+
+    let result = store.rename(root, "src.txt", root, "dst".to_string()).await;
+    match result.unwrap_err() {
+        MetaError::Io(err) => assert_eq!(err.kind(), std::io::ErrorKind::IsADirectory),
+        other => panic!("expected IsADirectory IO error, got {:?}", other),
+    }
+
+    assert_eq!(store.lookup(root, "src.txt").await.unwrap(), Some(src_ino));
+    assert_eq!(store.lookup(root, "dst").await.unwrap(), Some(dst_ino));
+}
+
+#[serial]
+#[tokio::test]
+#[ignore]
 async fn test_rename_lua_same_name() {
     let store = new_test_store().await;
     let root = store.root_ino();
@@ -1451,6 +1667,95 @@ fn test_deserialize_i64_from_number() {
     let json = r#"{"value": 0}"#;
     let result: TestStruct = serde_json::from_str(json).unwrap();
     assert_eq!(result.value, 0);
+}
+
+#[serial]
+#[tokio::test]
+#[ignore]
+async fn test_truncate_rewrite_is_atomic_for_partial_chunk() {
+    let store = new_test_store().await;
+    let root = store.root_ino();
+    let ino = store
+        .create_file(root, "truncate_race.bin".to_string())
+        .await
+        .unwrap();
+    let chunk_size = 8 * 1024u64;
+    let chunk_id = crate::vfs::chunk_id_for(ino, 0).unwrap();
+
+    let base = [
+        crate::chunk::SliceDesc {
+            slice_id: 11,
+            chunk_id,
+            offset: 0,
+            length: chunk_size,
+        },
+        crate::chunk::SliceDesc {
+            slice_id: 12,
+            chunk_id,
+            offset: 0,
+            length: chunk_size,
+        },
+    ];
+    for desc in base {
+        store.append_slice(chunk_id, desc).await.unwrap();
+    }
+    store.extend_file_size(ino, chunk_size).await.unwrap();
+
+    store.truncate(ino, 1024, chunk_size).await.unwrap();
+    let after = store.get_slices(chunk_id).await.unwrap();
+    assert_eq!(after.len(), 2);
+    assert!(after.iter().all(|s| s.length == 1024));
+}
+
+#[serial]
+#[tokio::test]
+#[ignore]
+async fn test_truncate_rewrite_never_exposes_empty_chunk_list() {
+    use tokio::task::yield_now;
+
+    let store = Arc::new(new_test_store().await);
+    let root = store.root_ino();
+    let ino = store
+        .create_file(root, "truncate_visibility.bin".to_string())
+        .await
+        .unwrap();
+    let chunk_size = 8 * 1024u64;
+    let chunk_id = crate::vfs::chunk_id_for(ino, 0).unwrap();
+
+    store
+        .append_slice(
+            chunk_id,
+            crate::chunk::SliceDesc {
+                slice_id: 21,
+                chunk_id,
+                offset: 0,
+                length: chunk_size,
+            },
+        )
+        .await
+        .unwrap();
+    store.extend_file_size(ino, chunk_size).await.unwrap();
+
+    let writer = store.clone();
+    let trunc = tokio::spawn(async move {
+        writer.truncate(ino, 1024, chunk_size).await.unwrap();
+    });
+
+    let reader = store.clone();
+    let observer = tokio::spawn(async move {
+        for _ in 0..512 {
+            let slices = reader.get_slices(chunk_id).await.unwrap();
+            if slices.is_empty() {
+                return true;
+            }
+            yield_now().await;
+        }
+        false
+    });
+
+    trunc.await.unwrap();
+    let saw_empty = observer.await.unwrap();
+    assert!(!saw_empty, "truncate rewrite exposed an empty slice list");
 }
 
 #[serial]

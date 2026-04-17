@@ -59,6 +59,10 @@ impl<M: MetaStore + ?Sized + 'static> SessionManager<M> {
     }
 
     pub async fn start(&self, session_info: SessionInfo) -> Result<(), MetaError> {
+        if self.session_id.read().await.is_some() {
+            return Ok(());
+        }
+
         let session = self
             .store
             .start_session(session_info, self.shutdown_token.clone())

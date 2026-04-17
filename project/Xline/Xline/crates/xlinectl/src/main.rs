@@ -162,8 +162,8 @@ use clap::{Command, arg, value_parser};
 use command::compaction;
 use ext_utils::config::ClientConfig;
 use tokio::fs;
-use tonic::transport::{Certificate, ClientTlsConfig};
 use xline_client::{Client, ClientOptions};
+use xlinerpc::QuicTlsConfig;
 
 use crate::{
     command::{auth, delete, get, lease, lock, member, put, role, snapshot, txn, user, watch},
@@ -277,15 +277,14 @@ async fn main() -> Result<()> {
         Duration::from_millis(*matches.get_one("keep_alive_interval").expect("Required")),
     );
     let ca_path: Option<PathBuf> = matches.get_one("ca_cert_pem_path").cloned();
-    let tls_config = match ca_path {
+    let quic_tls_config = match ca_path {
         Some(path) => {
-            let ca = Certificate::from_pem(fs::read_to_string(path).await?);
-            let tls_config = ClientTlsConfig::new().ca_certificate(ca);
-            Some(tls_config)
+            let ca_pem = fs::read(path).await?;
+            Some(QuicTlsConfig::default().with_peer_ca_cert_pem(ca_pem))
         }
         None => None,
     };
-    let options = ClientOptions::new(user_opt, tls_config, client_config);
+    let options = ClientOptions::new(user_opt, quic_tls_config, client_config);
     let printer_type = match matches
         .get_one::<String>("printer_type")
         .expect("Required")

@@ -47,7 +47,6 @@ xlinerpc = { path = "../xlinerpc"}
 
 # QUIC dependencies
 gm-quic = { workspace = true }
-tonic.workspace = true
 
 [dev-dependencies]
 anyhow = { workspace = true }

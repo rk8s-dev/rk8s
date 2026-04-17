@@ -741,7 +741,6 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "tokio-util",
- "tonic",
  "tracing",
  "tracing-opentelemetry",
  "tracing-subscriber",
@@ -3800,19 +3799,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "tonic-health"
-version = "0.12.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1eaf34ddb812120f5c601162d5429933c9b527d901ab0e7f930d3147e33a09b2"
-dependencies = [
- "async-stream",
- "prost",
- "tokio",
- "tokio-stream",
- "tonic",
-]
-
-[[package]]
 name = "tower"
 version = "0.4.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4082,7 +4068,6 @@ dependencies = [
  "thiserror 1.0.69",
  "tokio",
  "toml",
- "tonic",
  "tracing",
  "tracing-appender",
  "tracing-opentelemetry",
@@ -4780,8 +4765,6 @@ dependencies = [
  "tokio-stream",
  "tokio-util",
  "toml",
- "tonic",
- "tonic-health",
  "tower 0.5.3",
  "tracing",
  "tracing-appender",
@@ -4819,7 +4802,6 @@ dependencies = [
  "test-macros",
  "thiserror 1.0.69",
  "tokio",
- "tonic",
  "tower 0.4.13",
  "tracing",
  "utils",
@@ -4835,10 +4817,10 @@ dependencies = [
  "futures",
  "rand 0.8.5",
  "tokio",
- "tonic",
  "utils",
  "xline",
  "xline-client",
+ "xlinerpc",
 ]
 
 [[package]]
@@ -4855,7 +4837,6 @@ dependencies = [
  "strum",
  "strum_macros",
  "thiserror 1.0.69",
- "tonic",
  "utils",
  "xlinerpc",
 ]
@@ -4871,10 +4852,10 @@ dependencies = [
  "serde_json",
  "shlex",
  "tokio",
- "tonic",
  "utils",
  "xline-client",
  "xlineapi",
+ "xlinerpc",
 ]
 
 [[package]]

@@ -276,8 +276,8 @@ fn encode_grpc_message_header(message: &str) -> String {
 
 fn grpc_frame_encode<M: Message>(msg: &M) -> Result<Bytes, XlineStatus> {
     let body = msg.encode_to_vec();
-    let len = u32::try_from(body.len())
-        .map_err(|_| XlineStatus::internal("gRPC message too large"))?;
+    let len =
+        u32::try_from(body.len()).map_err(|_| XlineStatus::internal("gRPC message too large"))?;
     let mut out = Vec::with_capacity(GRPC_HEADER_SIZE + body.len());
     out.push(0); // uncompressed
     out.extend_from_slice(&len.to_be_bytes());
@@ -491,7 +491,10 @@ where
             let rpc_req = XlineRequest::new(reqs.remove(0), meta);
             match svc.call(rpc_req).await {
                 Ok(resp) => {
-                    let framed = grpc_frame_encode(resp.data());
+                    let framed = match grpc_frame_encode(resp.data()) {
+                        Ok(framed) => framed,
+                        Err(e) => return Ok(grpc_error_response(e)),
+                    };
                     Ok(grpc_ok_response(axum::body::Body::from(framed)))
                 }
                 Err(e) => Ok(grpc_error_response(e)),
@@ -559,7 +562,7 @@ where
                 Ok(resp) => {
                     let out = resp
                         .into_inner()
-                        .map(|item| item.map(|msg| grpc_frame_encode(&msg)));
+                        .map(|item| item.and_then(|msg| grpc_frame_encode(&msg)));
                     let body = axum::body::Body::new(GrpcStreamingBody::new(Box::pin(out)));
                     Ok(grpc_ok_response(body))
                 }
@@ -641,7 +644,7 @@ where
                 Ok(resp) => {
                     let out = resp
                         .into_inner()
-                        .map(|item| item.map(|msg| grpc_frame_encode(&msg)));
+                        .map(|item| item.and_then(|msg| grpc_frame_encode(&msg)));
                     let body = axum::body::Body::new(GrpcStreamingBody::new(Box::pin(out)));
                     Ok(grpc_ok_response(body))
                 }
@@ -707,7 +710,10 @@ where
 
             match svc.call(rpc_req).await {
                 Ok(resp) => {
-                    let framed = grpc_frame_encode(resp.data());
+                    let framed = match grpc_frame_encode(resp.data()) {
+                        Ok(framed) => framed,
+                        Err(e) => return Ok(grpc_error_response(e)),
+                    };
                     Ok(grpc_ok_response(axum::body::Body::from(framed)))
                 }
                 Err(e) => Ok(grpc_error_response(e)),

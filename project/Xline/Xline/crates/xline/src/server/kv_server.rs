@@ -298,7 +298,7 @@ impl KvServer {
 mod test {
     use super::*;
     use crate::rpc::{Request, RequestOp};
-    use tonic::Code;
+    use xlinerpc::Code;
     #[test]
     fn txn_check() {
         let txn_req = TxnRequest {
@@ -353,12 +353,12 @@ mod test {
             ..Default::default()
         };
 
-        let expected_tonic_status = Status::from(
+        let expected_status = Status::from(
             range_request_with_future_rev
                 .check_revision(compacted_revision, current_revision)
                 .unwrap_err(),
         );
-        assert_eq!(expected_tonic_status.code(), Code::OutOfRange);
+        assert_eq!(expected_status.code(), Code::OutOfRange);
 
         let range_request_with_compacted_rev = RangeRequest {
             key: b"foo".to_vec(),
@@ -366,13 +366,13 @@ mod test {
             ..Default::default()
         };
 
-        let expected_tonic_status = Status::from(
+        let expected_status = Status::from(
             range_request_with_compacted_rev
                 .check_revision(compacted_revision, current_revision)
                 .unwrap_err(),
         );
 
-        assert_eq!(expected_tonic_status.code(), Code::OutOfRange);
+        assert_eq!(expected_status.code(), Code::OutOfRange);
     }
 
     #[tokio::test]
@@ -391,13 +391,13 @@ mod test {
             failure: vec![],
         };
 
-        let expected_tonic_status = Status::from(
+        let expected_status = Status::from(
             txn_request_with_future_revision
                 .check_revision(compacted_revision, current_revision)
                 .unwrap_err(),
         );
 
-        assert_eq!(expected_tonic_status.code(), Code::OutOfRange);
+        assert_eq!(expected_status.code(), Code::OutOfRange);
 
         let txn_request_with_compacted_revision = TxnRequest {
             compare: vec![],
@@ -411,13 +411,13 @@ mod test {
             failure: vec![],
         };
 
-        let expected_tonic_status = Status::from(
+        let expected_status = Status::from(
             txn_request_with_compacted_revision
                 .check_revision(compacted_revision, current_revision)
                 .unwrap_err(),
         );
 
-        assert_eq!(expected_tonic_status.code(), Code::OutOfRange);
+        assert_eq!(expected_status.code(), Code::OutOfRange);
     }
 
     #[tokio::test]
@@ -427,12 +427,11 @@ mod test {
             ..Default::default()
         };
 
-        let expected_tonic_status = Status::from(compact_request.check_revision(3, 8).unwrap_err());
-        assert_eq!(expected_tonic_status.code(), Code::OutOfRange);
+        let expected_status = Status::from(compact_request.check_revision(3, 8).unwrap_err());
+        assert_eq!(expected_status.code(), Code::OutOfRange);
 
-        let expected_tonic_status =
-            Status::from(compact_request.check_revision(13, 18).unwrap_err());
-        assert_eq!(expected_tonic_status.code(), Code::OutOfRange);
+        let expected_status = Status::from(compact_request.check_revision(13, 18).unwrap_err());
+        assert_eq!(expected_status.code(), Code::OutOfRange);
     }
 }
 

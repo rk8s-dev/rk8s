@@ -15,6 +15,7 @@ use crate::meta::file_lock::{
 };
 use crate::meta::store::{
     DirEntry, FileAttr, FileType, LockName, MetaError, MetaStore, SetAttrFlags, SetAttrRequest,
+    StatFsSnapshot,
 };
 use crate::meta::{INODE_ID_KEY, SLICE_ID_KEY};
 use async_trait::async_trait;
@@ -23,9 +24,11 @@ use redis::AsyncCommands;
 use redis::aio::ConnectionManager;
 use serde::{Deserialize, Serialize};
 use std::any::Any;
+use std::net::IpAddr;
 use std::path::Path;
 use std::str::FromStr;
 use std::time::Duration;
+use tokio::net::lookup_host;
 use tokio::select;
 use tokio::time::MissedTickBehavior;
 use tokio_util::sync::CancellationToken;
@@ -386,8 +389,9 @@ const RENAME_LUA: &str = r#"
         return cjson.encode({ok=false, error="corrupt_node"})
     end
 
-    -- 5. Update node parent/name OR link_parents based on nlink
-    if child_node.attr.nlink <= 1 then
+    -- 5. Update node parent/name OR link_parents based on node kind/nlink
+    -- Directories always track parent/name inline even though their nlink is >= 2.
+    if child_node.kind == "Dir" or child_node.attr.nlink <= 1 then
         -- Single parent: update node directly
         child_node.parent = new_parent_ino
         child_node.name = new_name
@@ -441,17 +445,23 @@ const RENAME_LUA: &str = r#"
     -- 8. Save updated child node
     redis.call('SET', child_node_key, cjson.encode(child_node))
 
-    -- 9. Update both parent directory times (but NOT nlink)
+    -- 9. Update parent directory timestamps and directory link counts
     local old_parent_json = redis.call('GET', old_parent_node_key)
     if old_parent_json then
         local ok_op, old_parent_node = pcall(cjson.decode, old_parent_json)
         if ok_op and old_parent_node and old_parent_node.attr then
+            if child_node.kind == "Dir" and old_parent_ino ~= new_parent_ino then
+                old_parent_node.attr.nlink = old_parent_node.attr.nlink - 1
+            end
             old_parent_node.attr.mtime = timestamp
             old_parent_node.attr.ctime = timestamp
             redis.call('SET', old_parent_node_key, cjson.encode(old_parent_node))
         end
     end
 
+    if child_node.kind == "Dir" and old_parent_ino ~= new_parent_ino then
+        new_parent_node.attr.nlink = new_parent_node.attr.nlink + 1
+    end
     new_parent_node.attr.mtime = timestamp
     new_parent_node.attr.ctime = timestamp
     redis.call('SET', new_parent_node_key, cjson.encode(new_parent_node))
@@ -510,8 +520,8 @@ const RENAME_EXCHANGE_LUA: &str = r#"
     redis.call('HSET', old_parent_dir_key, old_name, new_dentry_ino)
     redis.call('HSET', new_parent_dir_key, new_name, old_dentry_ino)
 
-    -- 4. Update old_node (nlink>1: update link_parents, nlink<=1: update parent/name)
-    if old_node.attr.nlink > 1 then
+    -- 4. Update old_node (hardlinked files use link_parents; directories keep parent/name)
+    if old_node.kind ~= "Dir" and old_node.attr.nlink > 1 then
         local old_members = redis.call('SMEMBERS', old_link_parents_key)
         local new_old_members = {}
 
@@ -544,8 +554,8 @@ const RENAME_EXCHANGE_LUA: &str = r#"
         old_node.name = new_name
     end
 
-    -- 5. Update new_node (nlink>1: update link_parents, nlink<=1: update parent/name)
-    if new_node.attr.nlink > 1 then
+    -- 5. Update new_node (hardlinked files use link_parents; directories keep parent/name)
+    if new_node.kind ~= "Dir" and new_node.attr.nlink > 1 then
         local new_members = redis.call('SMEMBERS', new_link_parents_key)
         local new_new_members = {}
 
@@ -644,6 +654,83 @@ pub struct RedisMetaStore {
 }
 
 impl RedisMetaStore {
+    async fn resolve_redis_url(url: &str) -> Result<String, MetaError> {
+        let Some((scheme, rest)) = url.split_once("://") else {
+            return Ok(url.to_string());
+        };
+        if scheme != "redis" && scheme != "rediss" {
+            return Ok(url.to_string());
+        }
+
+        let (authority, suffix) = match rest.split_once('/') {
+            Some((authority, suffix)) => (authority, format!("/{suffix}")),
+            None => (rest, String::new()),
+        };
+        let (userinfo, hostport) = match authority.rsplit_once('@') {
+            Some((userinfo, hostport)) => (Some(userinfo), hostport),
+            None => (None, authority),
+        };
+
+        if hostport.is_empty() {
+            return Ok(url.to_string());
+        }
+
+        let (host, port, had_explicit_port) = if let Some(stripped) = hostport.strip_prefix('[') {
+            let Some(end_bracket) = stripped.find(']') else {
+                return Ok(url.to_string());
+            };
+            let host = &stripped[..end_bracket];
+            let remainder = &stripped[end_bracket + 1..];
+            let port = remainder.strip_prefix(':').unwrap_or("6379");
+            (host, port, remainder.starts_with(':'))
+        } else if hostport.matches(':').count() <= 1 {
+            match hostport.split_once(':') {
+                Some((host, port)) => (host, port, true),
+                None => (hostport, "6379", false),
+            }
+        } else {
+            return Ok(url.to_string());
+        };
+
+        if host.is_empty()
+            || host.parse::<IpAddr>().is_ok()
+            || host.eq_ignore_ascii_case("localhost")
+        {
+            return Ok(url.to_string());
+        }
+
+        let port_num = port.parse::<u16>().map_err(|e| {
+            MetaError::Config(format!("Failed to parse Redis URL port in {url}: {e}"))
+        })?;
+
+        let resolved_ip = lookup_host((host, port_num))
+            .await
+            .map_err(|e| MetaError::Config(format!("Failed to resolve Redis host '{host}': {e}")))?
+            .next()
+            .ok_or_else(|| {
+                MetaError::Config(format!("Redis host '{host}' resolved to no addresses"))
+            })?
+            .ip();
+
+        let resolved_host = match resolved_ip {
+            IpAddr::V4(ip) => ip.to_string(),
+            IpAddr::V6(ip) => format!("[{ip}]"),
+        };
+
+        let mut resolved_authority = String::new();
+        if let Some(userinfo) = userinfo {
+            resolved_authority.push_str(userinfo);
+            resolved_authority.push('@');
+        }
+        resolved_authority.push_str(&resolved_host);
+        if had_explicit_port || port_num != 6379 {
+            resolved_authority.push(':');
+            resolved_authority.push_str(&port_num.to_string());
+        }
+
+        Ok(format!("{scheme}://{resolved_authority}{suffix}"))
+    }
+
     async fn from_config_inner(config: Config) -> Result<Self, MetaError> {
         let conn = Self::create_connection(&config).await?;
         let store = Self {
@@ -673,11 +760,16 @@ impl RedisMetaStore {
     async fn create_connection(config: &Config) -> Result<ConnectionManager, MetaError> {
         match &config.database.db_config {
             DatabaseType::Redis { url } => {
-                let client = redis::Client::open(url.as_str()).map_err(|e| {
-                    MetaError::Config(format!("Failed to parse Redis URL {url}: {e}"))
+                let resolved_url = Self::resolve_redis_url(url).await?;
+                let client = redis::Client::open(resolved_url.as_str()).map_err(|e| {
+                    MetaError::Config(format!(
+                        "Failed to parse Redis URL {resolved_url} (from {url}): {e}"
+                    ))
                 })?;
                 ConnectionManager::new(client).await.map_err(|e| {
-                    MetaError::Config(format!("Failed to connect to Redis backend: {e}"))
+                    MetaError::Config(format!(
+                        "Failed to connect to Redis backend using {resolved_url}: {e}"
+                    ))
                 })
             }
             _ => Err(MetaError::Config(
@@ -762,6 +854,7 @@ impl RedisMetaStore {
             name: "/".to_string(),
             kind: NodeKind::Dir,
             attr,
+            symlink_target: None,
             deleted: false,
         };
 
@@ -1048,29 +1141,24 @@ impl RedisMetaStore {
             }
             _ => {
                 // Handle lock request (ReadLock or WriteLock)
-                let current_json: Option<String> =
-                    conn.hget(&plock_key, &field).await.map_err(redis_err)?;
+                let all_entries: std::collections::HashMap<String, String> =
+                    conn.hgetall(&plock_key).await.map_err(redis_err)?;
 
                 // Get current locks for this owner/session
-                let current_records = if let Some(json) = current_json {
-                    serde_json::from_str(&json).unwrap_or_default()
+                let current_records = if let Some(json) = all_entries.get(&field) {
+                    serde_json::from_str(json).unwrap_or_default()
                 } else {
                     Vec::new()
                 };
 
                 // Check for conflicts with other locks
-                let all_fields: Vec<String> = conn.hkeys(&plock_key).await.map_err(redis_err)?;
                 let mut conflict_found = false;
 
-                for other_field in all_fields {
+                for (other_field, other_records_json) in all_entries {
                     if other_field == field {
                         continue;
                     }
 
-                    let other_records_json: String = conn
-                        .hget(&plock_key, &other_field)
-                        .await
-                        .map_err(redis_err)?;
                     let other_records: Vec<PlockRecord> =
                         serde_json::from_str(&other_records_json).unwrap_or_default();
 
@@ -1110,7 +1198,7 @@ impl RedisMetaStore {
         let mut conn = self.conn.clone();
         let key = self.chunk_key(chunk_id);
         let mut pipe = redis::pipe();
-        pipe.cmd("DEL").arg(&key);
+        pipe.atomic().cmd("DEL").arg(&key);
         for slice in slices {
             let data = crate::meta::serialization::serialize_meta(slice)?;
             pipe.cmd("RPUSH").arg(&key).arg(data);
@@ -1453,6 +1541,44 @@ impl MetaStore for RedisMetaStore {
         }
     }
 
+    #[tracing::instrument(level = "trace", skip(self), fields(parent, name, target))]
+    async fn symlink(
+        &self,
+        parent: i64,
+        name: &str,
+        target: &str,
+    ) -> Result<(i64, FileAttr), MetaError> {
+        let ino = self
+            .create_entry(parent, name.to_string(), FileType::Symlink)
+            .await?;
+        let now = current_time();
+
+        let mut node = self.get_node(ino).await?.ok_or(MetaError::NotFound(ino))?;
+        node.attr.size = target.len() as u64;
+        node.attr.atime = now;
+        node.attr.mtime = now;
+        node.attr.ctime = now;
+        node.symlink_target = Some(target.to_string());
+
+        self.save_node(&node).await?;
+
+        Ok((ino, node.as_file_attr()))
+    }
+
+    #[tracing::instrument(level = "trace", skip(self), fields(ino))]
+    async fn read_symlink(&self, ino: i64) -> Result<String, MetaError> {
+        let node = self.get_node(ino).await?.ok_or(MetaError::NotFound(ino))?;
+
+        if node.kind != NodeKind::Symlink {
+            return Err(MetaError::NotSupported(format!(
+                "inode {ino} is not a symbolic link"
+            )));
+        }
+
+        node.symlink_target
+            .ok_or_else(|| MetaError::Internal(format!("symlink target missing for inode {ino}")))
+    }
+
     #[tracing::instrument(level = "trace", skip(self), fields(parent, name))]
     async fn unlink(&self, parent: i64, name: &str) -> Result<(), MetaError> {
         let Some(child) = self.lookup(parent, name).await? else {
@@ -1463,8 +1589,10 @@ impl MetaStore for RedisMetaStore {
             .get_node(child)
             .await?
             .ok_or(MetaError::NotFound(child))?;
-        if node.kind != NodeKind::File {
-            return Err(MetaError::NotSupported(format!("{child} is not a file")));
+        if !matches!(node.kind, NodeKind::File | NodeKind::Symlink) {
+            return Err(MetaError::NotSupported(format!(
+                "{child} is not unlinkable"
+            )));
         }
 
         let node_key = self.node_key(child);
@@ -1587,10 +1715,15 @@ impl MetaStore for RedisMetaStore {
             Some("not_found") => Err(MetaError::NotFound(response.ino.unwrap_or(old_parent))),
             Some("parent_not_found") => Err(MetaError::ParentNotFound(new_parent)),
             Some("parent_not_directory") => Err(MetaError::NotDirectory(new_parent)),
-            Some("already_exists") => Err(MetaError::AlreadyExists {
-                parent: new_parent,
-                name: new_name,
-            }),
+            Some("target_dir_not_empty") => Err(MetaError::DirectoryNotEmpty(
+                response.ino.unwrap_or(new_parent),
+            )),
+            Some("target_is_directory") => Err(MetaError::Io(std::io::Error::from(
+                std::io::ErrorKind::IsADirectory,
+            ))),
+            Some("target_not_directory") => Err(MetaError::Io(std::io::Error::from(
+                std::io::ErrorKind::NotADirectory,
+            ))),
             Some("node_not_found") => Err(MetaError::NotFound(child)),
             Some("corrupt_node") => Err(MetaError::Internal("corrupt node data".into())),
             Some("link_parent_not_found") => Err(MetaError::Internal(format!(
@@ -1850,6 +1983,43 @@ impl MetaStore for RedisMetaStore {
     }
 
     #[tracing::instrument(level = "trace", skip(self))]
+    async fn stat_fs(&self) -> Result<StatFsSnapshot, MetaError> {
+        let mut conn = self.conn.clone();
+        let keys: Vec<String> = redis::cmd("KEYS")
+            .arg(format!("{NODE_KEY_PREFIX}*"))
+            .query_async(&mut conn)
+            .await
+            .map_err(redis_err)?;
+
+        let mut used_space = 0u64;
+        let mut used_inodes = 0u64;
+
+        for key in keys {
+            let data: Option<Vec<u8>> = conn.get(&key).await.map_err(redis_err)?;
+            let Some(bytes) = data else {
+                continue;
+            };
+
+            let node: StoredNode = serde_json::from_slice(&bytes)
+                .map_err(|e| MetaError::Internal(format!("Failed to parse node {key}: {e}")))?;
+
+            if node.deleted || node.attr.nlink == 0 {
+                continue;
+            }
+
+            used_space = used_space.saturating_add(node.attr.size);
+            used_inodes = used_inodes.saturating_add(1);
+        }
+
+        Ok(StatFsSnapshot {
+            total_space: used_space,
+            available_space: 0,
+            used_inodes,
+            available_inodes: 0,
+        })
+    }
+
+    #[tracing::instrument(level = "trace", skip(self))]
     async fn get_deleted_files(&self) -> Result<Vec<i64>, MetaError> {
         let mut conn = self.conn.clone();
         let raw: Vec<String> = conn
@@ -1866,6 +2036,18 @@ impl MetaStore for RedisMetaStore {
             }
         }
         Ok(inodes)
+    }
+
+    async fn process_delayed_slices(
+        &self,
+        _batch_size: usize,
+        _max_age_secs: i64,
+    ) -> Result<Vec<(u64, u64, u64, i64)>, MetaError> {
+        Ok(Vec::new())
+    }
+
+    async fn confirm_delayed_deleted(&self, _delayed_ids: &[i64]) -> Result<(), MetaError> {
+        Ok(())
     }
 
     #[tracing::instrument(level = "trace", skip(self), fields(ino))]
@@ -2018,14 +2200,14 @@ impl MetaStore for RedisMetaStore {
             local last_updated = redis.call("HGET",key,field)
 
             if last_updated == false then
-                redis.call("HSET",key,field,new_value)
+                redis.call("HSET", key, field, now_time)
                 return true
             else
                 last_updated = tonumber(last_updated)
                 if now_time < last_updated + diff then
                     return false
                 else
-                    redis.call('HSET', key,field, new_value)
+                    redis.call("HSET", key, field, now_time)
                     return true
                 end
             end
@@ -2068,12 +2250,13 @@ impl MetaStore for RedisMetaStore {
             .sid
             .get()
             .ok_or_else(|| MetaError::Internal("sid not set".to_string()))?;
+        let current_field = format!("{}:{}", sid, query.owner);
+        let plock_entries: std::collections::HashMap<String, String> =
+            conn.hgetall(&plock_key).await.map_err(redis_err)?;
 
         // First, try to get locks from current session's field
-        let current_field = format!("{}:{}", sid, query.owner);
-        let records_json: Result<String, _> = conn.hget(&plock_key, &current_field).await;
-        if let Ok(records_json) = records_json {
-            let records: Vec<PlockRecord> = serde_json::from_str(&records_json).unwrap_or_default();
+        if let Some(records_json) = plock_entries.get(&current_field) {
+            let records: Vec<PlockRecord> = serde_json::from_str(records_json).unwrap_or_default();
             if let Some(v) = PlockRecord::get_plock(&records, query, sid, sid) {
                 return Ok(v);
             }
@@ -2159,6 +2342,8 @@ struct StoredNode {
     name: String,
     kind: NodeKind,
     attr: StoredAttr,
+    #[serde(default)]
+    symlink_target: Option<String>,
     deleted: bool,
 }
 

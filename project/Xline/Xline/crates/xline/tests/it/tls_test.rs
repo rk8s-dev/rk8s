@@ -1,13 +1,12 @@
 use std::{fs, iter, path::PathBuf};
 
-use etcd_client::ConnectOptions;
 use test_macros::abort_on_panic;
-use tonic::transport::{Certificate, ClientTlsConfig, Identity};
 use utils::config::{
     AuthConfig, ClusterConfig, CompactConfig, LogConfig, MetricsConfig, StorageConfig, TlsConfig,
     TraceConfig, XlineServerConfig,
 };
 use xline_test_utils::{Cluster, enable_auth, set_user};
+use xlinerpc::QuicTlsConfig;
 
 #[tokio::test(flavor = "multi_thread")]
 #[abort_on_panic]
@@ -16,7 +15,7 @@ async fn test_basic_tls() {
     cluster.start().await;
 
     let client = cluster
-        .client_with_tls_config(basic_tls_client_config())
+        .client_with_quic_tls_config(basic_quic_tls_config())
         .await;
     let res = client.kv_client().put("foo", "bar", None).await;
     assert!(res.is_ok());
@@ -29,7 +28,7 @@ async fn test_mtls() {
     cluster.start().await;
 
     let client = cluster
-        .client_with_tls_config(mtls_client_config("root"))
+        .client_with_quic_tls_config(mtls_quic_tls_config("root"))
         .await;
     let res = client.kv_client().put("foo", "bar", None).await;
     assert!(res.is_ok());
@@ -42,21 +41,17 @@ async fn test_certificate_authenticate() {
     cluster.start().await;
 
     let root_client = cluster
-        .client_with_tls_config(mtls_client_config("root"))
+        .client_with_quic_tls_config(mtls_quic_tls_config("root"))
         .await;
     enable_auth(&root_client).await.unwrap();
 
-    let addr = cluster.get_client_url(0);
-    let mut etcd_u2_client = etcd_client::Client::connect(
-        [addr],
-        Some(ConnectOptions::new().with_tls(mtls_client_config("u2"))),
-    )
-    .await
-    .unwrap();
-    let res = etcd_u2_client.put("foa", "bar", None).await;
+    let u2_client = cluster
+        .client_with_quic_tls_config(mtls_quic_tls_config("u2"))
+        .await;
+    let res = u2_client.kv_client().put("foa", "bar", None).await;
     assert!(res.is_err());
     let u1_client = cluster
-        .client_with_tls_config(mtls_client_config("u1"))
+        .client_with_quic_tls_config(mtls_quic_tls_config("u1"))
         .await;
     let res = u1_client.kv_client().put("foo", "bar", None).await;
     assert!(res.is_err());
@@ -68,7 +63,7 @@ async fn test_certificate_authenticate() {
         .await
         .unwrap();
 
-    let res = etcd_u2_client.put("foa", "bar", None).await;
+    let res = u2_client.kv_client().put("foa", "bar", None).await;
     assert!(res.is_ok());
     let res = u1_client.kv_client().put("foo", "bar", None).await;
     assert!(res.is_ok());
@@ -92,10 +87,8 @@ fn configs_with_tls_config(size: usize, tls_config: TlsConfig) -> Vec<XlineServe
         .collect()
 }
 
-fn basic_tls_client_config() -> ClientTlsConfig {
-    ClientTlsConfig::default().ca_certificate(Certificate::from_pem(
-        fs::read("../../fixtures/ca.crt").unwrap(),
-    ))
+fn basic_quic_tls_config() -> QuicTlsConfig {
+    QuicTlsConfig::default().with_peer_ca_cert_pem(fs::read("../../fixtures/ca.crt").unwrap())
 }
 
 fn basic_tls_configs(size: usize) -> Vec<XlineServerConfig> {
@@ -112,15 +105,13 @@ fn basic_tls_configs(size: usize) -> Vec<XlineServerConfig> {
     )
 }
 
-fn mtls_client_config(name: &str) -> ClientTlsConfig {
-    ClientTlsConfig::default()
-        .ca_certificate(Certificate::from_pem(
-            fs::read("../../fixtures/ca.crt").unwrap(),
-        ))
-        .identity(Identity::from_pem(
-            fs::read(format!("../../fixtures/{name}_client.crt")).unwrap(),
-            fs::read(format!("../../fixtures/{name}_client.key")).unwrap(),
-        ))
+fn mtls_quic_tls_config(name: &str) -> QuicTlsConfig {
+    QuicTlsConfig::default()
+        .with_peer_ca_cert_pem(fs::read("../../fixtures/ca.crt").unwrap())
+        .with_client_identity_paths(
+            PathBuf::from(format!("../../fixtures/{name}_client.crt")),
+            PathBuf::from(format!("../../fixtures/{name}_client.key")),
+        )
 }
 
 fn mtls_configs(size: usize) -> Vec<XlineServerConfig> {

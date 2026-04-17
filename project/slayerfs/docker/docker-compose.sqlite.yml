@@ -1,0 +1,105 @@
+x-slayerfs-image: &slayerfs-image
+  image: slayerfs:local
+  build:
+    context: ../..
+    dockerfile: slayerfs/docker/Dockerfile
+
+x-slayerfs-rustfs-env: &slayerfs-rustfs-env
+  AWS_ACCESS_KEY_ID: rustfsadmin
+  AWS_SECRET_ACCESS_KEY: rustfsadmin
+  AWS_DEFAULT_REGION: us-east-1
+  AWS_EC2_METADATA_DISABLED: "true"
+  SLAYERFS_DATA_BACKEND: s3
+  SLAYERFS_S3_BUCKET: slayerfs-data
+  SLAYERFS_S3_ENDPOINT: http://rustfs:9000
+  SLAYERFS_S3_REGION: us-east-1
+  SLAYERFS_S3_FORCE_PATH_STYLE: "true"
+
+services:
+  slayerfs-image:
+    <<: *slayerfs-image
+    profiles:
+      - image-maintenance
+    entrypoint: ["bash", "-lc", "true"]
+    environment:
+      <<: *slayerfs-rustfs-env
+      SLAYERFS_META_BACKEND: sqlite
+      SLAYERFS_SQLITE_PATH: /var/lib/slayerfs/metadata.db
+    networks:
+      - slayerfs-network
+
+  rustfs:
+    profiles:
+      - s3-stack
+    image: rustfs/rustfs:latest
+    container_name: rustfs-slayerfs-sqlite
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    command: ["/data"]
+    environment:
+      - RUSTFS_ADDRESS=:9000
+      - RUSTFS_CONSOLE_ENABLE=true
+      - RUSTFS_ACCESS_KEY=rustfsadmin
+      - RUSTFS_SECRET_KEY=rustfsadmin
+    volumes:
+      - rustfs-data-sqlite:/data
+    networks:
+      - slayerfs-network
+
+  rustfs-init:
+    profiles:
+      - s3-stack
+    image: amazon/aws-cli:2
+    depends_on:
+      rustfs:
+        condition: service_started
+    entrypoint: ["/bin/sh", "-ec"]
+    command: |
+      mkdir -p /root/.aws
+      printf '[default]\ns3 =\n  addressing_style = path\n' > /root/.aws/config
+      until aws --endpoint-url http://rustfs:9000 s3api list-buckets >/dev/null 2>&1; do
+        sleep 2
+      done
+      aws --endpoint-url http://rustfs:9000 s3api head-bucket --bucket slayerfs-data >/dev/null 2>&1 || \
+        aws --endpoint-url http://rustfs:9000 s3api create-bucket --bucket slayerfs-data
+    environment:
+      - AWS_ACCESS_KEY_ID=rustfsadmin
+      - AWS_SECRET_ACCESS_KEY=rustfsadmin
+      - AWS_DEFAULT_REGION=us-east-1
+      - AWS_EC2_METADATA_DISABLED=true
+    networks:
+      - slayerfs-network
+
+  slayerfs:
+    <<: *slayerfs-image
+    profiles:
+      - s3-stack
+    container_name: slayerfs-rustfs-sqlite
+    depends_on:
+      rustfs-init:
+        condition: service_completed_successfully
+    environment:
+      <<: *slayerfs-rustfs-env
+      SLAYERFS_META_BACKEND: sqlite
+      SLAYERFS_SQLITE_PATH: /var/lib/slayerfs/metadata.db
+    devices:
+      - /dev/fuse:/dev/fuse
+    cap_add:
+      - SYS_ADMIN
+    security_opt:
+      - apparmor=unconfined
+    volumes:
+      - slayerfs-state-sqlite:/var/lib/slayerfs
+      - slayerfs-mount-sqlite:/mnt/slayerfs
+    networks:
+      - slayerfs-network
+
+networks:
+  slayerfs-network:
+    driver: bridge
+
+volumes:
+  rustfs-data-sqlite:
+  slayerfs-state-sqlite:
+  slayerfs-mount-sqlite:

@@ -1146,16 +1146,13 @@ where
         new_name: &str,
     ) -> Result<(), VfsError> {
         let parent_ino = self.resolve_parent_inode(dir).await?;
+        let old_path = format!("{}{}{}", dir, if dir == "/" { "" } else { "/" }, old_name);
+        let new_path = format!("{}{}{}", dir, if dir == "/" { "" } else { "/" }, new_name);
 
         // Validate the rename operation
         let (_src_ino, src_attr) = self
             .validate_rename_operation(
-                &format!("{}{}{}", dir, if dir == "/" { "" } else { "/" }, old_name),
-                &format!("{}{}{}", dir, if dir == "/" { "" } else { "/" }, new_name),
-                parent_ino,
-                old_name,
-                parent_ino,
-                new_name,
+                &old_path, &new_path, parent_ino, old_name, parent_ino, new_name,
             )
             .await?;
 
@@ -1563,8 +1560,29 @@ where
         flags: SetAttrFlags,
     ) -> Result<FileAttr, VfsError> {
         if let Some(size) = req.size {
+            let handles = self.file_handles_for_inode(ino);
+            let mut guards = Vec::with_capacity(handles.len());
+            for handle in handles {
+                guards.push(handle.lock_write().await);
+            }
+
+            self.state.writer.flush_if_exists(ino as u64).await;
             self.meta_truncate(ino, size, self.core.layout.chunk_size)
                 .await?;
+            self.state.reader.invalidate_all(ino as u64).await;
+            self.state.writer.clear(ino as u64).await;
+
+            let guard = self
+                .lock_inode(ino)
+                .or_insert_with(|| Inode::new(ino, size));
+            guard.update_size(size);
+
+            if let Some(mut attr) = self.state.handles.attr_for_inode(ino) {
+                attr.size = size;
+                self.state.handles.update_attr_for_inode(ino, &attr);
+            }
+
+            drop(guards);
         }
 
         let mut filtered = *req;

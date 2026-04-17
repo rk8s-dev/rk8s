@@ -36,7 +36,7 @@ impl RouterBuilder {
             tls_config: TlsConfig::default(),
         }
     }
-
+    #[allow(unused)]
     pub(crate) fn add_service<S>(mut self, name: &str, svc: S) -> Self
     where
         S: Service<axum::extract::Request, Error = Infallible> + Clone + Send + 'static,
@@ -287,11 +287,16 @@ where
 async fn unimplemented() -> impl axum::response::IntoResponse {
     tracing::error!("unimplemented");
     let status = http::StatusCode::OK;
+    let grpc_unimplemented_code = i32::from(xlinerpc::Code::Unimplemented).to_string();
     let headers = [
-        (tonic::Status::GRPC_STATUS, HeaderValue::from_static("12")),
+        (
+            http::header::HeaderName::from_static("grpc-status"),
+            HeaderValue::from_str(&grpc_unimplemented_code)
+                .unwrap_or_else(|_| HeaderValue::from_static("12")),
+        ),
         (
             http::header::CONTENT_TYPE,
-            tonic::metadata::GRPC_CONTENT_TYPE,
+            HeaderValue::from_static("application/grpc"),
         ),
     ];
     (status, headers)

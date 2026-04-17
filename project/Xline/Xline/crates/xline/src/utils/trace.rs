@@ -36,7 +36,7 @@ pub fn init_subscriber(
     let jaeger_online_layer = trace_config
         .online()
         .then(|| {
-            let otlp_exporter = opentelemetry_otlp::new_exporter().tonic();
+            let otlp_exporter = opentelemetry_otlp::new_exporter().http();
             opentelemetry_otlp::new_pipeline()
                 .tracing()
                 .with_exporter(otlp_exporter)

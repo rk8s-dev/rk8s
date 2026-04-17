@@ -142,11 +142,10 @@ where
         Ok(CompactResult::Skipped)
     }
 
-    // Wrapper, TODO:
+    #[allow(dead_code)]
     pub async fn compact_chunk(&self, chunk_id: u64) -> Result<CompactResult, CompactorError> {
         self.compact_sequential(chunk_id).await
     }
-
     #[allow(dead_code)]
     pub async fn compact_light(&self, chunk_id: u64) -> Result<Option<usize>, CompactorError> {
         let slices = self.meta_store.get_slices(chunk_id).await?;

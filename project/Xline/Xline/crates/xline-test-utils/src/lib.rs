@@ -8,7 +8,6 @@ use tokio::{
     task::block_in_place,
     time::{self, Duration},
 };
-use tonic::transport::ClientTlsConfig;
 use utils::config::{
     AuthConfig, ClusterConfig, CompactConfig, EngineConfig, InitialClusterState, LogConfig,
     MetricsConfig, StorageConfig, TlsConfig, TraceConfig, XlineServerConfig, default_quota,
@@ -16,6 +15,7 @@ use utils::config::{
 use xline::server::XlineServer;
 use xline_client::types::{auth::PermissionType, range_end::RangeOption};
 pub use xline_client::{Client, ClientOptions, clients, types};
+use xlinerpc::QuicTlsConfig;
 
 /// Cluster
 pub struct Cluster {
@@ -207,8 +207,8 @@ impl Cluster {
     }
 
     /// Create or get the client with the specified index
-    pub async fn client_with_tls_config(&mut self, client_tls_config: ClientTlsConfig) -> Client {
-        let opts = ClientOptions::default().with_tls_config(client_tls_config);
+    pub async fn client_with_quic_tls_config(&mut self, quic_tls_config: QuicTlsConfig) -> Client {
+        let opts = ClientOptions::default().with_quic_tls_config(quic_tls_config);
         Client::connect(self.all_members_client_urls.clone(), opts)
             .await
             .unwrap_or_else(|e| {
