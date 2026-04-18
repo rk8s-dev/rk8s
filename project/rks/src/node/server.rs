@@ -205,42 +205,60 @@ impl AuthConnection<Verified> {
         }
     }
 
-    async fn dispatch_loop(self: Arc<Self>, is_worker: bool) -> anyhow::Result<()> {
+    async fn run_user_uni_dispatch(self: Arc<Self>) -> anyhow::Result<()> {
+        loop {
+            let msg = self.conn.fetch_msg().await?;
+            info!("fetched message: {msg}");
+            log_error!(dispatch_user(msg, &self.conn, &self.shared).await)
+        }
+        #[allow(unreachable_code)]
+        Ok::<(), anyhow::Error>(())
+    }
+
+    async fn run_worker_uni_dispatch(self: Arc<Self>) -> anyhow::Result<()> {
+        loop {
+            let msg = self.conn.fetch_msg().await?;
+            info!("fetched message: {msg}");
+            log_error!(dispatch_worker(msg, &self.conn, &self.shared).await);
+        }
+        #[allow(unreachable_code)]
+        Ok::<(), anyhow::Error>(())
+    }
+
+    async fn run_worker_bi_dispatch(self: Arc<Self>) -> anyhow::Result<()> {
+        loop {
+            let mut stream = self.conn.accept_bi().await?;
+            let msg = stream.fetch_msg().await?;
+            info!("fetched bi stream message: {msg}");
+            log_error!(dispatch_worker_bi(msg, &mut stream, &self.shared).await);
+        }
+        #[allow(unreachable_code)]
+        Ok::<(), anyhow::Error>(())
+    }
+
+    async fn run_worker_dispatch(self: Arc<Self>) -> anyhow::Result<()> {
         let self_cloned = self.clone();
-        let uni_stream_task = tokio::spawn(async move {
-            // Main loop: accept application messages for ongoing communication
-            loop {
-                let msg = self_cloned.conn.fetch_msg().await?;
-                info!("fetched message: {msg}");
-
-                if is_worker {
-                    log_error!(dispatch_worker(msg, &self_cloned.conn, &self_cloned.shared).await);
-                    continue;
-                }
-
-                log_error!(dispatch_user(msg, &self_cloned.conn, &self_cloned.shared).await)
-            }
-            #[allow(unreachable_code)]
-            Ok::<(), anyhow::Error>(())
-        });
+        let mut uni_stream_task =
+            tokio::spawn(async move { self_cloned.run_worker_uni_dispatch().await });
 
         let self_cloned = self.clone();
-        let bi_stream_task = tokio::spawn(async move {
-            // Main loop: accept bi-directional stream application messages for ongoing communication
-            loop {
-                let mut stream = self_cloned.conn.accept_bi().await?;
-                let msg = stream.fetch_msg().await?;
-                info!("fetched bi stream message: {msg}");
-                if is_worker {
-                    log_error!(dispatch_worker_bi(msg, &mut stream, &self_cloned.shared).await);
-                }
-            }
-            #[allow(unreachable_code)]
-            Ok::<(), anyhow::Error>(())
-        });
+        let mut bi_stream_task =
+            tokio::spawn(async move { self_cloned.run_worker_bi_dispatch().await });
 
-        uni_stream_task.await??;
-        bi_stream_task.await??;
+        let first_result = tokio::select! {
+            uni_result = &mut uni_stream_task => {
+                bi_stream_task.abort();
+                let _ = bi_stream_task.await;
+                uni_result
+            }
+            bi_result = &mut bi_stream_task => {
+                uni_stream_task.abort();
+                let _ = uni_stream_task.await;
+                bi_result
+            }
+        };
+
+        first_result??;
         Ok(())
     }
 
@@ -329,7 +347,11 @@ impl ConnectionState for Verified {
             watcher.spawn()?;
         }
 
-        let dispatch_result = conn.clone().dispatch_loop(is_worker).await;
+        let dispatch_result = if is_worker {
+            conn.clone().run_worker_dispatch().await
+        } else {
+            conn.clone().run_user_uni_dispatch().await
+        };
 
         if is_worker
             && let (Some(node_id), Some(worker_session)) =
@@ -348,5 +370,86 @@ impl ConnectionState for Verified {
         }
 
         dispatch_result
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    };
+
+    struct DropFlag(Arc<AtomicBool>);
+
+    impl Drop for DropFlag {
+        fn drop(&mut self) {
+            self.0.store(true, Ordering::SeqCst);
+        }
+    }
+
+    async fn select_worker_tasks_for_test(
+        mut uni_stream_task: tokio::task::JoinHandle<anyhow::Result<()>>,
+        mut bi_stream_task: tokio::task::JoinHandle<anyhow::Result<()>>,
+    ) -> anyhow::Result<()> {
+        let first_result = tokio::select! {
+            uni_result = &mut uni_stream_task => {
+                bi_stream_task.abort();
+                let _ = bi_stream_task.await;
+                uni_result
+            }
+            bi_result = &mut bi_stream_task => {
+                uni_stream_task.abort();
+                let _ = uni_stream_task.await;
+                bi_result
+            }
+        };
+
+        first_result??;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn worker_dispatch_returns_uni_error_and_aborts_bi_task() {
+        let bi_task_dropped = Arc::new(AtomicBool::new(false));
+        let bi_task_flag = DropFlag(bi_task_dropped.clone());
+
+        let uni_stream_task =
+            tokio::spawn(async { Err::<(), _>(anyhow::anyhow!("uni dispatch failed")) });
+        let bi_stream_task = tokio::spawn(async move {
+            let _guard = bi_task_flag;
+            std::future::pending::<()>().await;
+            #[allow(unreachable_code)]
+            Ok::<(), anyhow::Error>(())
+        });
+
+        let err = select_worker_tasks_for_test(uni_stream_task, bi_stream_task)
+            .await
+            .expect_err("worker dispatch should return the first task error");
+
+        assert!(err.to_string().contains("uni dispatch failed"));
+        assert!(bi_task_dropped.load(Ordering::SeqCst));
+    }
+
+    #[tokio::test]
+    async fn worker_dispatch_returns_bi_error_and_aborts_uni_task() {
+        let uni_task_dropped = Arc::new(AtomicBool::new(false));
+        let uni_task_flag = DropFlag(uni_task_dropped.clone());
+
+        let uni_stream_task = tokio::spawn(async move {
+            let _guard = uni_task_flag;
+            std::future::pending::<()>().await;
+            #[allow(unreachable_code)]
+            Ok::<(), anyhow::Error>(())
+        });
+        let bi_stream_task =
+            tokio::spawn(async { Err::<(), _>(anyhow::anyhow!("bi dispatch failed")) });
+
+        let err = select_worker_tasks_for_test(uni_stream_task, bi_stream_task)
+            .await
+            .expect_err("worker dispatch should return the first task error");
+
+        assert!(err.to_string().contains("bi dispatch failed"));
+        assert!(uni_task_dropped.load(Ordering::SeqCst));
     }
 }

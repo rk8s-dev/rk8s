@@ -5,7 +5,7 @@
 //! Results flow through [`ProbeResultManager`] which caches the latest result per container and
 //! broadcasts changes to subscribers (typically the [`crate::daemon::pod_worker::PodWorker`]).
 
-use std::{sync::Arc, time::Duration};
+use std::{future::Future, path::Path, sync::Arc, time::Duration};
 
 use anyhow::anyhow;
 use common::{ExecAction, HttpGetAction, PodTask, ProbeAction, RksMessage, TcpSocketAction};
@@ -26,6 +26,26 @@ use crate::{
 
 /// Global singleton [`ProbeManager`], initialized once by the daemon.
 pub static PROBE_MANAGER: OnceCell<Arc<ProbeManager>> = OnceCell::const_new();
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+struct ProbeRestoreSummary {
+    discovered: usize,
+    restored: usize,
+    skipped_no_local_runtime: usize,
+    skipped_missing_pod_ip: usize,
+    failed_add_pod: usize,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct ProbeRestoreRetryPolicy {
+    initial_delay: Duration,
+    max_delay: Duration,
+}
+
+const PROBE_RESTORE_RETRY_POLICY: ProbeRestoreRetryPolicy = ProbeRestoreRetryPolicy {
+    initial_delay: Duration::from_millis(200),
+    max_delay: Duration::from_secs(5),
+};
 
 /// Classifies a probe as liveness, readiness, or startup.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -544,25 +564,65 @@ impl Drop for ProbeWorker {
 
 /// Re-registers probes for pods that already exist on the server (called on daemon restart).
 pub async fn restore_existing_probes(probe_manager: Arc<ProbeManager>) -> anyhow::Result<()> {
+    let summary = retry_restore_existing_probes(
+        || {
+            let probe_manager = probe_manager.clone();
+            async move { restore_existing_probes_once(probe_manager).await }
+        },
+        PROBE_RESTORE_RETRY_POLICY,
+    )
+    .await?;
+
+    info!(
+        discovered = summary.discovered,
+        restored = summary.restored,
+        skipped_no_local_runtime = summary.skipped_no_local_runtime,
+        skipped_missing_pod_ip = summary.skipped_missing_pod_ip,
+        failed_add_pod = summary.failed_add_pod,
+        "[daemon] completed probe restoration"
+    );
+
+    Ok(())
+}
+
+async fn restore_existing_probes_once(
+    probe_manager: Arc<ProbeManager>,
+) -> anyhow::Result<ProbeRestoreSummary> {
     debug!("[daemon] Restoring existing probes from rks pod list");
+    let root_path = rootpath::determine(None, &*create_syscall())?;
+    let pods = fetch_existing_probe_pods().await?;
+    Ok(restore_existing_probes_from_pods(probe_manager.as_ref(), &root_path, pods).await)
+}
+
+async fn fetch_existing_probe_pods() -> anyhow::Result<Vec<PodTask>> {
     let client = try_get_daemon_client().await?;
     let mut stream = client.open_bi().await?;
     stream.send_msg(&RksMessage::ListPod).await?;
     stream.sender().finish()?;
-    let pods = match stream.fetch_msg().await? {
+    Ok(match stream.fetch_msg().await? {
         RksMessage::ListPodRes(pods) => pods,
         msg => anyhow::bail!("unexpected response {msg:?}"),
-    };
+    })
+}
+
+async fn restore_existing_probes_from_pods(
+    probe_manager: &ProbeManager,
+    root_path: &Path,
+    pods: Vec<PodTask>,
+) -> ProbeRestoreSummary {
     debug!(
         pod_count = pods.len(),
         "[daemon] Loaded pods for probe restoration"
     );
 
-    let root_path = rootpath::determine(None, &*create_syscall())?;
-    let mut restored = 0usize;
+    let mut summary = ProbeRestoreSummary {
+        discovered: pods.len(),
+        ..Default::default()
+    };
 
     for pod in pods {
-        if PodInfo::load(&root_path, &pod.metadata.name).is_err() {
+        if PodInfo::load(root_path, &pod.metadata.name).is_err() {
+            summary.skipped_no_local_runtime += 1;
             debug!(
                 pod = %pod.metadata.name,
                 namespace = %pod.metadata.namespace,
@@ -574,6 +634,7 @@ pub async fn restore_existing_probes(probe_manager: Arc<ProbeManager>) -> anyhow
         let pod_ip = match pod.status.pod_ip.clone() {
             Some(ip) if !ip.is_empty() => ip,
             _ => {
+                summary.skipped_missing_pod_ip += 1;
                 warn!(
                     pod = %pod.metadata.name,
                     "[daemon] skipping probe restore: missing pod IP"
@@ -583,13 +644,14 @@ pub async fn restore_existing_probes(probe_manager: Arc<ProbeManager>) -> anyhow
         };
 
         if let Err(e) = probe_manager.add_pod(&pod, &pod_ip).await {
+            summary.failed_add_pod += 1;
             warn!(
                 pod = %pod.metadata.name,
                 error = %e,
                 "[daemon] failed to restore probes for pod"
             );
         } else {
-            restored += 1;
+            summary.restored += 1;
             debug!(
                 pod = %pod.metadata.name,
                 namespace = %pod.metadata.namespace,
@@ -598,15 +660,54 @@ pub async fn restore_existing_probes(probe_manager: Arc<ProbeManager>) -> anyhow
         }
     }
 
-    if restored > 0 {
-        info!("[daemon] restored probes for {restored} pods");
-    }
+    summary
+}
 
-    Ok(())
+async fn retry_restore_existing_probes<F, Fut>(
+    mut restore_once: F,
+    policy: ProbeRestoreRetryPolicy,
+) -> anyhow::Result<ProbeRestoreSummary>
+where
+    F: FnMut() -> Fut,
+    Fut: Future<Output = anyhow::Result<ProbeRestoreSummary>>,
+{
+    let mut attempt = 1usize;
+    let mut delay = policy.initial_delay;
+
+    loop {
+        match restore_once().await {
+            Ok(summary) => return Ok(summary),
+            Err(error) => {
+                if attempt == 1 {
+                    warn!(
+                        attempt,
+                        error = %error,
+                        "[daemon] failed to restore probes, retrying in background"
+                    );
+                } else {
+                    debug!(
+                        attempt,
+                        error = %error,
+                        "[daemon] probe restore retry failed"
+                    );
+                }
+
+                tokio::time::sleep(delay).await;
+                delay = std::cmp::min(delay.saturating_mul(2), policy.max_delay);
+                attempt += 1;
+            }
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    };
+
+    use crate::commands::pod::PodInfo;
     use crate::daemon::status::probe::prober::{ProbeConfig, ProbeKind};
 
     use super::*;
@@ -614,7 +715,7 @@ mod tests {
         ContainerSpec, ExecAction, HttpGetAction, ObjectMeta, PodSpec, PodStatus, PodTask, Probe,
         ProbeAction, RestartPolicy, TcpSocketAction,
     };
-    use std::sync::Arc;
+    use tempfile::tempdir;
     use tokio::time::{Duration, timeout};
     use uuid::Uuid;
 
@@ -953,5 +1054,94 @@ mod tests {
         )
         .expect("prober");
         assert_eq!(prober.config().period, Duration::from_secs(1));
+    }
+
+    #[tokio::test]
+    async fn restore_existing_probes_from_pods_tracks_summary_and_restores_local_pods() {
+        let manager = ProbeManager::new();
+        let root = tempdir().expect("tempdir");
+
+        let mut local_pod = test_pod_task("local-pod");
+        local_pod.status.pod_ip = Some("10.0.0.10".to_string());
+        PodInfo {
+            pod_sandbox_id: "sandbox-local".to_string(),
+            container_names: vec!["app".to_string()],
+        }
+        .save(root.path(), &local_pod.metadata.name)
+        .expect("save local pod info");
+
+        let mut remote_only_pod = test_pod_task("remote-only-pod");
+        remote_only_pod.status.pod_ip = Some("10.0.0.11".to_string());
+
+        let mut missing_ip_pod = test_pod_task("missing-ip-pod");
+        PodInfo {
+            pod_sandbox_id: "sandbox-missing-ip".to_string(),
+            container_names: vec!["app".to_string()],
+        }
+        .save(root.path(), &missing_ip_pod.metadata.name)
+        .expect("save missing-ip pod info");
+        missing_ip_pod.status.pod_ip = None;
+
+        let summary = restore_existing_probes_from_pods(
+            &manager,
+            root.path(),
+            vec![local_pod, remote_only_pod, missing_ip_pod],
+        )
+        .await;
+
+        assert_eq!(
+            summary,
+            ProbeRestoreSummary {
+                discovered: 3,
+                restored: 1,
+                skipped_no_local_runtime: 1,
+                skipped_missing_pod_ip: 1,
+                failed_add_pod: 0,
+            }
+        );
+        assert_eq!(
+            manager
+                .probe_workers
+                .get("local-pod")
+                .expect("local pod workers")
+                .len(),
+            3
+        );
+        manager.remove_pod("local-pod").await;
+    }
+
+    #[tokio::test]
+    async fn retry_restore_existing_probes_retries_until_success() {
+        let attempts = Arc::new(AtomicUsize::new(0));
+
+        let summary = retry_restore_existing_probes(
+            {
+                let attempts = attempts.clone();
+                move || {
+                    let attempts = attempts.clone();
+                    async move {
+                        let attempt = attempts.fetch_add(1, Ordering::SeqCst);
+                        if attempt < 2 {
+                            Err(anyhow!("daemon client not ready"))
+                        } else {
+                            Ok(ProbeRestoreSummary {
+                                discovered: 1,
+                                restored: 1,
+                                ..Default::default()
+                            })
+                        }
+                    }
+                }
+            },
+            ProbeRestoreRetryPolicy {
+                initial_delay: Duration::ZERO,
+                max_delay: Duration::ZERO,
+            },
+        )
+        .await
+        .expect("retry should eventually succeed");
+
+        assert_eq!(attempts.load(Ordering::SeqCst), 3);
+        assert_eq!(summary.restored, 1);
     }
 }

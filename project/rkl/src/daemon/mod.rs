@@ -59,9 +59,12 @@ pub fn main(tls_cfg: TLSConnectionArgs) -> Result<(), anyhow::Error> {
                     PodWorker::new(pleg_event_rx, probe_manager.clone(), status_manager.clone());
                 pod_worker.run();
 
-                if let Err(e) = restore_existing_probes(probe_manager.clone()).await {
-                    warn!("[daemon] failed to restore probes: {e}");
-                }
+                let probe_restore_manager = probe_manager.clone();
+                tokio::spawn(async move {
+                    if let Err(e) = restore_existing_probes(probe_restore_manager).await {
+                        warn!("[daemon] failed to restore probes: {e}");
+                    }
+                });
 
                 let sync_loop = SyncLoop::default().register_event(static_pods::handler);
                 sync_loop.run().await;
