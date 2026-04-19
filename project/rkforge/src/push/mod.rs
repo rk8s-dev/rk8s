@@ -3,34 +3,25 @@ mod pusher;
 use crate::config::auth::AuthConfig;
 use crate::push::pusher::{PushTask, Pusher};
 use crate::registry::{
-    parse_registry_host, parse_registry_host_arg, resolve_client_ref_auth as resolve_ref_with_auth,
+    RegistryScheme, effective_skip_tls_verify, parse_registry_host, parse_registry_host_arg,
+    resolve_client_ref_auth as resolve_ref_with_auth,
 };
 use crate::rt::block_on;
 use crate::storage::{DigestExt, parse_image_ref};
 use anyhow::{Context, bail};
 use clap::Parser;
-use oci_client::client::ImageLayer;
+use futures::{StreamExt, TryStreamExt, stream};
+use oci_client::Client;
+use oci_client::client::PushResponse;
 use oci_client::manifest::{OciImageIndex, OciManifest};
 use oci_client::secrets::RegistryAuth;
-use oci_client::{Client, client};
 use oci_spec::distribution::Reference;
+use reqwest::{StatusCode, Url};
 use std::collections::HashMap;
-use std::path::Path;
-use tokio::io::AsyncReadExt;
-
-macro_rules! from_oci_blob {
-    ($output:ty, $path:expr, $descriptor:expr) => {{
-        let mut buffer = Vec::new();
-        let mut file = tokio::fs::File::open($path).await?;
-        file.read_to_end(&mut buffer).await?;
-
-        <$output>::new(
-            buffer,
-            $descriptor.media_type.clone(),
-            $descriptor.annotations.clone(),
-        )
-    }};
-}
+use std::io::SeekFrom;
+use std::path::{Path, PathBuf};
+use tokio::io::{AsyncReadExt, AsyncSeekExt};
+use tokio_util::io::ReaderStream;
 
 #[derive(Parser, Debug)]
 pub struct PushArgs {
@@ -88,36 +79,374 @@ fn push_from_layout_with_tls(
     } else {
         requested_repo.clone()
     };
+    let registry_scheme = auth_config.registry_scheme(&url);
     let (client, image_ref, auth_method) =
         resolve_ref_with_auth(&auth_config, &url, &normalized_image_ref, skip_tls_verify)?;
     let registry_url = image_ref.registry().to_string();
+    let blob_uploader = BlobUploader::new(
+        registry_scheme,
+        &registry_url,
+        auth_method.clone(),
+        skip_tls_verify,
+    )?;
 
     block_on(async move {
-        push_image(
-            &client,
-            &image_ref,
-            &auth_method,
-            &path,
-            &registry_url,
-            &requested_repo,
+        push_image(PushImageContext {
+            client: &client,
+            blob_uploader: &blob_uploader,
+            image_ref: &image_ref,
+            auth_method: &auth_method,
+            path: &path,
+            registry_url: &registry_url,
+            requested_repo: &requested_repo,
             requested_has_explicit_tag,
-        )
+        })
         .await
     })?
 }
 
-pub async fn push_image(
-    client: &Client,
-    image_ref: &Reference,
-    auth_method: &RegistryAuth,
-    path: impl AsRef<Path>,
-    registry_url: impl AsRef<str>,
-    requested_repo: impl AsRef<str>,
+#[derive(Clone)]
+struct BlobUploader {
+    http: reqwest::Client,
+    scheme: RegistryScheme,
+    registry: String,
+    auth: RegistryAuth,
+}
+
+struct PushImageContext<'a> {
+    client: &'a Client,
+    blob_uploader: &'a BlobUploader,
+    image_ref: &'a Reference,
+    auth_method: &'a RegistryAuth,
+    path: &'a Path,
+    registry_url: &'a str,
+    requested_repo: &'a str,
     requested_has_explicit_tag: bool,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum BlobUploadStrategy {
+    Monolithic,
+    Chunked,
+}
+
+const SMALL_BLOB_UPLOAD_THRESHOLD_BYTES: u64 = 16 * 1024 * 1024;
+const CHUNKED_BLOB_UPLOAD_SIZE_BYTES: usize = 32 * 1024 * 1024;
+const MAX_CONCURRENT_BLOB_UPLOADS: usize = 4;
+const STREAM_READ_BUFFER_BYTES: usize = 1024 * 1024;
+
+fn blob_upload_strategy(size: u64) -> BlobUploadStrategy {
+    if size <= SMALL_BLOB_UPLOAD_THRESHOLD_BYTES {
+        BlobUploadStrategy::Monolithic
+    } else {
+        BlobUploadStrategy::Chunked
+    }
+}
+
+impl BlobUploader {
+    fn new(
+        scheme: RegistryScheme,
+        registry: impl Into<String>,
+        auth: RegistryAuth,
+        skip_tls_verify: bool,
+    ) -> anyhow::Result<Self> {
+        let registry = registry.into();
+        let http = reqwest::Client::builder()
+            .danger_accept_invalid_certs(effective_skip_tls_verify(
+                skip_tls_verify,
+                scheme,
+                &registry,
+            ))
+            .build()
+            .context("failed to create blob upload HTTP client")?;
+        Ok(Self {
+            http,
+            scheme,
+            registry,
+            auth,
+        })
+    }
+
+    fn apply_auth(&self, builder: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
+        match &self.auth {
+            RegistryAuth::Anonymous => builder,
+            RegistryAuth::Basic(username, password) => builder.basic_auth(username, Some(password)),
+            RegistryAuth::Bearer(token) => builder.bearer_auth(token),
+        }
+    }
+
+    fn uploads_url(&self, target_ref: &Reference) -> String {
+        format!(
+            "{}://{}/v2/{}/blobs/uploads/",
+            self.scheme.as_str(),
+            self.registry,
+            target_ref.repository()
+        )
+    }
+
+    fn blob_url(&self, target_ref: &Reference, digest: &str) -> String {
+        format!(
+            "{}://{}/v2/{}/blobs/{}",
+            self.scheme.as_str(),
+            self.registry,
+            target_ref.repository(),
+            digest
+        )
+    }
+
+    fn location_header_to_url(&self, location: &str) -> anyhow::Result<Url> {
+        if location.starts_with('/') {
+            Ok(Url::parse(&format!(
+                "{}://{}{}",
+                self.scheme.as_str(),
+                self.registry,
+                location
+            ))?)
+        } else {
+            Ok(Url::parse(location)?)
+        }
+    }
+
+    async fn begin_upload(&self, target_ref: &Reference) -> anyhow::Result<Url> {
+        let url = self.uploads_url(target_ref);
+        let response = self
+            .apply_auth(self.http.post(&url))
+            .header("Content-Length", 0)
+            .send()
+            .await
+            .with_context(|| {
+                format!("failed to begin upload session for {}", target_ref.whole())
+            })?;
+
+        self.extract_location(response, StatusCode::ACCEPTED)
+            .await
+            .with_context(|| format!("failed to open upload session for {}", target_ref.whole()))
+    }
+
+    async fn blob_exists(&self, target_ref: &Reference, digest: &str) -> anyhow::Result<bool> {
+        let response = self
+            .apply_auth(self.http.head(self.blob_url(target_ref, digest)))
+            .send()
+            .await
+            .with_context(|| format!("failed to check remote blob {digest}"))?;
+
+        match response.status() {
+            StatusCode::OK => Ok(true),
+            StatusCode::NOT_FOUND => Ok(false),
+            status => {
+                let url = response.url().to_string();
+                let body = response.text().await.unwrap_or_default();
+                bail!("registry returned {status} for {url}: {body}");
+            }
+        }
+    }
+
+    async fn extract_location(
+        &self,
+        response: reqwest::Response,
+        expected_status: StatusCode,
+    ) -> anyhow::Result<Url> {
+        if response.status() != expected_status {
+            let status = response.status();
+            let url = response.url().to_string();
+            let body = response.text().await.unwrap_or_default();
+            bail!("registry returned {status} for {url}: {body}");
+        }
+
+        let location = response
+            .headers()
+            .get("Location")
+            .context("registry response missing Location header")?
+            .to_str()
+            .context("registry Location header is not valid UTF-8")?;
+        self.location_header_to_url(location)
+    }
+
+    async fn push_blob_from_path(
+        &self,
+        target_ref: &Reference,
+        blob_path: &Path,
+        digest: &str,
+    ) -> anyhow::Result<String> {
+        if self.blob_exists(target_ref, digest).await? {
+            return Ok(self.blob_url(target_ref, digest));
+        }
+
+        let size = tokio::fs::metadata(blob_path)
+            .await
+            .with_context(|| format!("failed to stat {}", blob_path.display()))?
+            .len();
+
+        match blob_upload_strategy(size) {
+            BlobUploadStrategy::Monolithic => {
+                self.push_blob_monolithically_from_path(target_ref, blob_path, digest, size)
+                    .await
+            }
+            BlobUploadStrategy::Chunked => {
+                self.push_blob_chunked_from_path(target_ref, blob_path, digest, size)
+                    .await
+            }
+        }
+    }
+
+    async fn push_blob_monolithically_from_path(
+        &self,
+        target_ref: &Reference,
+        blob_path: &Path,
+        digest: &str,
+        size: u64,
+    ) -> anyhow::Result<String> {
+        let mut location = self.begin_upload(target_ref).await?;
+        location.query_pairs_mut().append_pair("digest", digest);
+
+        let file = tokio::fs::File::open(blob_path)
+            .await
+            .with_context(|| format!("failed to open {}", blob_path.display()))?;
+        let body =
+            reqwest::Body::wrap_stream(ReaderStream::with_capacity(file, STREAM_READ_BUFFER_BYTES));
+
+        let response = self
+            .apply_auth(self.http.put(location.clone()))
+            .header("Content-Length", size)
+            .header("Content-Type", "application/octet-stream")
+            .body(body)
+            .send()
+            .await
+            .with_context(|| format!("failed to upload {}", blob_path.display()))?;
+
+        Ok(self
+            .extract_location(response, StatusCode::CREATED)
+            .await?
+            .to_string())
+    }
+
+    async fn push_blob_chunked_from_path(
+        &self,
+        target_ref: &Reference,
+        blob_path: &Path,
+        digest: &str,
+        size: u64,
+    ) -> anyhow::Result<String> {
+        let mut location = self.begin_upload(target_ref).await?;
+
+        let mut start: u64 = 0;
+        while start < size {
+            let chunk_size = (size - start).min(CHUNKED_BLOB_UPLOAD_SIZE_BYTES as u64);
+            let end = start + chunk_size - 1;
+            let mut chunk_file = tokio::fs::File::open(blob_path)
+                .await
+                .with_context(|| format!("failed to open {}", blob_path.display()))?;
+            chunk_file
+                .seek(SeekFrom::Start(start))
+                .await
+                .with_context(|| {
+                    format!(
+                        "failed to seek {} to chunk offset {start}",
+                        blob_path.display()
+                    )
+                })?;
+            let body = reqwest::Body::wrap_stream(ReaderStream::with_capacity(
+                chunk_file.take(chunk_size),
+                STREAM_READ_BUFFER_BYTES,
+            ));
+
+            let response = self
+                .apply_auth(self.http.patch(location.clone()))
+                .header("Content-Range", format!("{start}-{end}"))
+                .header("Content-Length", chunk_size)
+                .header("Content-Type", "application/octet-stream")
+                .body(body)
+                .send()
+                .await
+                .with_context(|| format!("failed to upload chunk for {}", blob_path.display()))?;
+
+            location = self
+                .extract_location(response, StatusCode::ACCEPTED)
+                .await
+                .with_context(|| format!("failed to update upload session for {digest}"))?;
+            start = end + 1;
+        }
+
+        let mut finalize_url = location;
+        finalize_url.query_pairs_mut().append_pair("digest", digest);
+        let response = self
+            .apply_auth(self.http.put(finalize_url))
+            .header("Content-Length", 0)
+            .send()
+            .await
+            .with_context(|| format!("failed to finalize chunked upload for {digest}"))?;
+
+        Ok(self
+            .extract_location(response, StatusCode::CREATED)
+            .await?
+            .to_string())
+    }
+}
+
+async fn push_layer_descriptor(
+    blob_uploader: BlobUploader,
+    target_ref: Reference,
+    blobs_dir: PathBuf,
+    descriptor: oci_client::manifest::OciDescriptor,
 ) -> anyhow::Result<()> {
-    let dir = path.as_ref();
-    let registry_url = registry_url.as_ref();
-    let requested_repo = requested_repo.as_ref();
+    let layer_path = blobs_dir.join(descriptor.digest.split_digest()?);
+    blob_uploader
+        .push_blob_from_path(&target_ref, &layer_path, &descriptor.digest)
+        .await
+        .with_context(|| format!("failed to push layer {}", descriptor.digest))?;
+    Ok(())
+}
+
+async fn push_target_ref(
+    client: &Client,
+    blob_uploader: &BlobUploader,
+    target_ref: &Reference,
+    auth_method: &RegistryAuth,
+    blobs_dir: &Path,
+    manifest: &oci_client::manifest::OciImageManifest,
+) -> anyhow::Result<PushResponse> {
+    client
+        .store_auth_if_needed(target_ref.resolve_registry(), auth_method)
+        .await;
+
+    stream::iter(manifest.layers.iter().cloned())
+        .map(|descriptor| {
+            let blob_uploader = blob_uploader.clone();
+            let target_ref = target_ref.clone();
+            let blobs_dir = blobs_dir.to_path_buf();
+            async move { push_layer_descriptor(blob_uploader, target_ref, blobs_dir, descriptor).await }
+        })
+        .buffer_unordered(MAX_CONCURRENT_BLOB_UPLOADS)
+        .try_collect::<Vec<_>>()
+        .await?;
+
+    let config_path = blobs_dir.join(manifest.config.digest.split_digest()?);
+    let config_url = blob_uploader
+        .push_blob_from_path(target_ref, &config_path, &manifest.config.digest)
+        .await
+        .with_context(|| format!("failed to push config {}", manifest.config.digest))?;
+
+    Ok(PushResponse {
+        config_url,
+        manifest_url: client
+            .push_manifest(target_ref, &OciManifest::Image(manifest.clone()))
+            .await
+            .with_context(|| format!("failed to push manifest for {}", target_ref.whole()))?,
+    })
+}
+
+async fn push_image(ctx: PushImageContext<'_>) -> anyhow::Result<()> {
+    let PushImageContext {
+        client,
+        blob_uploader,
+        image_ref,
+        auth_method,
+        path,
+        registry_url,
+        requested_repo,
+        requested_has_explicit_tag,
+    } = ctx;
+    let dir = path;
 
     let image_index_path = dir.join("index.json");
     let image_index = serde_json::from_str::<OciImageIndex>(
@@ -182,28 +511,24 @@ pub async fn push_image(
         };
 
         for target_ref in target_refs {
-            let descriptors = &manifest.layers;
-            let mut layers = Vec::new();
-
-            for descriptor in descriptors {
-                let layer_path = dir.join(descriptor.digest.split_digest()?);
-                let layer = from_oci_blob!(ImageLayer, layer_path, descriptor);
-                layers.push(layer);
-            }
-
-            let config_path = dir.join(manifest.config.digest.split_digest()?);
-            let config = from_oci_blob!(client::Config, config_path, manifest.config);
-
             let auth_method = auth_method.clone();
+            let blob_uploader = blob_uploader.clone();
             let client = client.clone();
             let digest_with_ref = format!("{digest}@{}", target_ref.whole());
+            let blobs_dir = dir.clone();
             let manifest = manifest.clone();
             let task = PushTask::new(
                 digest_with_ref,
                 Box::pin(async move {
-                    client
-                        .push(&target_ref, &layers, config, &auth_method, Some(manifest))
-                        .await
+                    push_target_ref(
+                        &client,
+                        &blob_uploader,
+                        &target_ref,
+                        &auth_method,
+                        &blobs_dir,
+                        &manifest,
+                    )
+                    .await
                 }),
             );
             tasks.push(task);
@@ -272,7 +597,8 @@ mod tests {
     use crate::storage::parse_image_ref;
 
     use super::{
-        has_explicit_registry, has_explicit_tag, should_include_digest, strip_explicit_tag,
+        BlobUploadStrategy, blob_upload_strategy, has_explicit_registry, has_explicit_tag,
+        should_include_digest, strip_explicit_tag,
     };
 
     #[test]
@@ -341,5 +667,26 @@ mod tests {
         let normalized = format!("{}:{}", parsed.repository(), parsed.tag().unwrap());
         let target = parse_image_ref(parsed.registry(), normalized, None::<String>).unwrap();
         assert_eq!(target.whole(), "ghcr.io/acme/app:v1");
+    }
+
+    #[test]
+    fn test_blob_upload_strategy_prefers_monolithic_for_small_blobs() {
+        assert_eq!(blob_upload_strategy(0), BlobUploadStrategy::Monolithic);
+        assert_eq!(
+            blob_upload_strategy(16 * 1024 * 1024),
+            BlobUploadStrategy::Monolithic
+        );
+    }
+
+    #[test]
+    fn test_blob_upload_strategy_uses_chunked_for_large_blobs() {
+        assert_eq!(
+            blob_upload_strategy(16 * 1024 * 1024 + 1),
+            BlobUploadStrategy::Chunked
+        );
+        assert_eq!(
+            blob_upload_strategy(3 * 1024 * 1024 * 1024),
+            BlobUploadStrategy::Chunked
+        );
     }
 }
