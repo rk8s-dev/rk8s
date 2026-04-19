@@ -4,7 +4,7 @@ set -euo pipefail
 
 current_dir=$(dirname "$(realpath "$0")")
 workspace_dir=$(realpath "$current_dir/../../..")
-redis_config="$workspace_dir/slayerfs/slayerfs-sqlite.yml"
+slayerfs_config="${SLAYERFS_CONFIG:-$workspace_dir/slayerfs/redis.yml}"
 backend_dir=/tmp/data
 mount_dir=/tmp/mount
 log_file=/tmp/slayerfs.log
@@ -34,7 +34,7 @@ sudo apt-get update
 sudo apt-get install -y acl attr automake bc dbench dump e2fsprogs fio gawk \
     gcc git indent libacl1-dev libaio-dev libcap-dev libgdbm-dev libtool \
     libtool-bin liburing-dev libuuid1 lvm2 make psmisc python3 quota sed \
-    uuid-dev uuid-runtime xfsprogs sqlite3 \
+    uuid-dev uuid-runtime xfsprogs sqlite3 redis-server \
     fuse3
 sudo apt-get install -y exfatprogs f2fs-tools ocfs2-tools udftools xfsdump \
     xfslibs-dev
@@ -68,7 +68,7 @@ set -euo pipefail
 export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:\$PATH"
 
 ulimit -n 1048576
-CONFIG_PATH="$redis_config"
+CONFIG_PATH="$slayerfs_config"
 LOG_FILE="$log_file"
 PERSISTENCE_BIN="$persistence_bin"
 
@@ -88,6 +88,12 @@ fi
 sleep 1
 EOF
 sudo chmod +x /usr/sbin/mount.fuse.slayerfs
+
+# Start Redis when config uses Redis backend.
+if grep -qE '^\s*type:\s*redis\b' "$slayerfs_config"; then
+    sudo redis-cli ping >/dev/null 2>&1 || sudo redis-server --daemonize yes
+    sudo redis-cli ping >/dev/null
+fi
 
 echo "====> Start to run xfstests."
 # Copy exclude list

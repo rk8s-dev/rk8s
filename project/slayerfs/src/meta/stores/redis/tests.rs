@@ -1139,26 +1139,127 @@ async fn test_rename_lua_target_exists() {
     let store = new_test_store().await;
     let root = store.root_ino();
 
-    store
+    let src_ino = store
         .create_file(root, "file1.txt".to_string())
         .await
         .unwrap();
-    store
+    let dst_ino = store
         .create_file(root, "file2.txt".to_string())
         .await
         .unwrap();
 
-    let result = store
+    store
         .rename(root, "file1.txt", root, "file2.txt".to_string())
-        .await;
+        .await
+        .unwrap();
+
+    // Destination should now point to source inode and old source name must disappear.
+    assert_eq!(store.lookup(root, "file1.txt").await.unwrap(), None);
+    assert_eq!(store.lookup(root, "file2.txt").await.unwrap(), Some(src_ino));
+
+    // Old destination inode should be deleted.
+    assert!(store.stat(dst_ino).await.unwrap().is_none());
+}
+
+#[serial]
+#[tokio::test]
+#[ignore]
+async fn test_rename_lua_replace_is_atomic_against_concurrent_create() {
+    let store = Arc::new(new_test_store().await);
+    let root = store.root_ino();
+
+    let src_ino = store
+        .create_file(root, "src.txt".to_string())
+        .await
+        .unwrap();
+    let dst_ino = store
+        .create_file(root, "dst.txt".to_string())
+        .await
+        .unwrap();
+
+    let rename_store = store.clone();
+    let create_store = store.clone();
+
+    let rename_task = tokio::spawn(async move {
+        rename_store
+            .rename(root, "src.txt", root, "dst.txt".to_string())
+            .await
+    });
+
+    // Try to create the destination repeatedly while rename is in flight.
+    let create_task = tokio::spawn(async move {
+        let mut already_exists = 0usize;
+        for _ in 0..32 {
+            match create_store.create_file(root, "dst.txt".to_string()).await {
+                Ok(_) => return Err("create unexpectedly succeeded during rename".to_string()),
+                Err(MetaError::AlreadyExists { .. }) => already_exists += 1,
+                Err(other) => {
+                    return Err(format!(
+                        "create returned unexpected error during rename: {:?}",
+                        other
+                    ));
+                }
+            }
+        }
+        Ok(already_exists)
+    });
+
+    rename_task.await.unwrap().unwrap();
+    let create_attempts = create_task.await.unwrap().unwrap();
+    assert!(create_attempts > 0, "expected concurrent create attempts");
+
+    // Destination now points to source inode and old destination inode is removed.
+    assert_eq!(store.lookup(root, "src.txt").await.unwrap(), None);
+    assert_eq!(store.lookup(root, "dst.txt").await.unwrap(), Some(src_ino));
+    assert!(store.stat(dst_ino).await.unwrap().is_none());
+}
+
+#[serial]
+#[tokio::test]
+#[ignore]
+async fn test_unlink_lua_missing_entry_returns_not_found() {
+    let store = new_test_store().await;
+    let root = store.root_ino();
+
+    let result = store.unlink(root, "missing.txt").await;
     assert!(result.is_err());
     match result.unwrap_err() {
-        MetaError::AlreadyExists { parent, name } => {
-            assert_eq!(parent, root);
-            assert_eq!(name, "file2.txt");
-        }
-        other => panic!("expected AlreadyExists error, got {:?}", other),
+        MetaError::NotFound(ino) => assert_eq!(ino, root),
+        other => panic!("expected NotFound(parent) error, got {:?}", other),
     }
+}
+
+#[serial]
+#[tokio::test]
+#[ignore]
+async fn test_unlink_lua_concurrent_double_delete_returns_not_found_for_second() {
+    let store = Arc::new(new_test_store().await);
+    let root = store.root_ino();
+
+    store
+        .create_file(root, "victim.txt".to_string())
+        .await
+        .unwrap();
+
+    let s1 = store.clone();
+    let s2 = store.clone();
+
+    let h1 = tokio::spawn(async move { s1.unlink(root, "victim.txt").await });
+    let h2 = tokio::spawn(async move { s2.unlink(root, "victim.txt").await });
+
+    let r1 = h1.await.unwrap();
+    let r2 = h2.await.unwrap();
+
+    let success_count = [&r1, &r2].iter().filter(|r| r.is_ok()).count();
+    assert_eq!(success_count, 1, "exactly one unlink should succeed");
+
+    let not_found_count = [&r1, &r2]
+        .iter()
+        .filter(|r| matches!(r, Err(MetaError::NotFound(ino)) if *ino == root))
+        .count();
+    assert_eq!(not_found_count, 1, "second unlink should return NotFound(parent)");
+
+    assert_eq!(store.lookup(root, "victim.txt").await.unwrap(), None);
 }
 
 #[serial]

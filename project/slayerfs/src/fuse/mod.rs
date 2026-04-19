@@ -4,7 +4,6 @@
 //! to the operating system via the FUSE protocol.
 //!
 //! Main components:
-//! - `adapter`: Contains the FUSE adapter implementation.
 //! - `mount`: Handles mounting the virtual filesystem using FUSE.
 //! - Implementation of the `Filesystem` trait for `VFS`, enabling translation of FUSE requests
 //!   into virtual filesystem operations.
@@ -12,7 +11,6 @@
 //!
 //! The module also includes platform-specific tests for mounting and basic operations,
 //! and provides utilities for mapping VFS metadata to FUSE attributes.
-pub(crate) mod adapter;
 pub mod mount;
 use crate::chunk::store::BlockStore;
 use crate::meta::MetaLayer;
@@ -97,6 +95,9 @@ mod mount_tests {
         }
         let content = fs::read(&file_path).expect("read back");
         assert_eq!(content, b"abc");
+
+        // POSIX: rename(path, path) is a no-op and must succeed.
+        fs::rename(&file_path, &file_path).expect("rename same path no-op");
 
         // List the directory
         let list = fs::read_dir(&dir)
@@ -1008,9 +1009,9 @@ where
             return Err(libc::EINVAL.into());
         }
 
-        // Prevent renaming to the same location
+        // POSIX allows same-path rename as a no-op.
         if parent == new_parent && name == new_name {
-            return Err(libc::EINVAL.into());
+            return Ok(());
         }
 
         // Ensure the source exists

@@ -1160,6 +1160,7 @@ where
             .await?;
 
         // Handle destination existence and replacement semantics
+        let should_predelete_destination = self.meta_layer().name() != "redis-meta-store";
         let dst_path = format!("{}{}{}", dir, if dir == "/" { "" } else { "/" }, new_name);
         if let Some((dest_ino, dest_kind)) = self.meta_lookup_path(&dst_path).await? {
             // Handle replacement logic (same as in main rename function)
@@ -1175,7 +1176,9 @@ where
                             )),
                         });
                     }
-                    self.meta_rmdir(parent_ino, new_name).await?;
+                    if should_predelete_destination {
+                        self.meta_rmdir(parent_ino, new_name).await?;
+                    }
                 }
                 // Directory replacing file/symlink - not allowed
                 (FileType::Dir, FileType::File) | (FileType::Dir, FileType::Symlink) => {
@@ -1197,7 +1200,9 @@ where
                 }
                 // File/symlink replacing file/symlink - allowed
                 _ => {
-                    self.meta_unlink(parent_ino, new_name).await?;
+                    if should_predelete_destination {
+                        self.meta_unlink(parent_ino, new_name).await?;
+                    }
                 }
             }
         }
@@ -1238,6 +1243,11 @@ where
         new_parent_ino: i64,
         new_name: &str,
     ) -> Result<(), VfsError> {
+        // Redis backend performs destination replacement atomically in store-level rename.
+        // Keep VFS-level validation, but avoid pre-deleting destination to prevent
+        // delete-then-rename races under concurrent updates.
+        let should_predelete_destination = self.meta_layer().name() != "redis-meta-store";
+
         if let Some((dest_ino, dest_kind)) = self.meta_lookup_path(new_path).await? {
             match (src_kind, dest_kind) {
                 // Directory → Directory: only if destination is empty
@@ -1253,7 +1263,9 @@ where
                         });
                     }
 
-                    self.meta_rmdir(new_parent_ino, new_name).await?;
+                    if should_predelete_destination {
+                        self.meta_rmdir(new_parent_ino, new_name).await?;
+                    }
                 }
 
                 // Directory → File/Symlink: not allowed
@@ -1281,7 +1293,9 @@ where
                 | (FileType::File, FileType::Symlink)
                 | (FileType::Symlink, FileType::File)
                 | (FileType::Symlink, FileType::Symlink) => {
-                    self.meta_unlink(new_parent_ino, new_name).await?;
+                    if should_predelete_destination {
+                        self.meta_unlink(new_parent_ino, new_name).await?;
+                    }
                 }
             }
         }
