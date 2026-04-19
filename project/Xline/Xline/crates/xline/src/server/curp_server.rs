@@ -1,8 +1,6 @@
 use std::sync::Arc;
 
-use crate::{
-    router::endpoint::EndPoint as RouterEndpoint, server::auth_wrapper::metadata_from_rpc,
-};
+use crate::server::auth_wrapper::metadata_from_rpc;
 use curp::rpc::{
     CurpError, CurpService, FetchClusterRequest, FetchReadStateRequest, LeaseKeepAliveMsg,
     MoveLeaderRequest, ProposeConfChangeRequest, ProposeRequest, PublishRequest, ReadIndexRequest,
@@ -10,6 +8,7 @@ use curp::rpc::{
 };
 use futures::{Stream, StreamExt};
 use xlinerpc::Status;
+use xlinerpc::server::EndPoint as RouterEndpoint;
 
 #[allow(unused)]
 pub(crate) struct Server<T> {

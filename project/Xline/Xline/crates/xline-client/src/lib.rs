@@ -160,13 +160,13 @@
 )]
 use curp::{
     client::ClientBuilder as CurpClientBuilder,
-    rpc::{FetchClusterRequest, FetchClusterResponse, MethodId},
+    rpc::{FetchClusterRequest, FetchClusterResponse},
 };
 use rustls;
 use std::{fmt::Debug, sync::Arc};
 use utils::config::ClientConfig;
 use xlineapi::command::CurpClient;
-use xlinerpc::QuicTlsConfig;
+use xlinerpc::{MethodId, QuicTlsConfig};
 
 use crate::{
     clients::{
@@ -187,7 +187,6 @@ pub use transport::Streaming;
 
 /// Error definitions for `xline-client`.
 pub mod error;
-mod h3_pool;
 mod transport;
 
 /// Xline client
@@ -309,6 +308,9 @@ impl Client {
     fn build_quic_client(
         options: &ClientOptions,
     ) -> Result<gm_quic::prelude::QuicClient, XlineClientBuildError> {
+        // Install the default crypto provider for rustls if not already installed.
+        let _ = rustls::crypto::ring::default_provider().install_default();
+
         let mut root_store = rustls::RootCertStore::empty();
 
         let quic_tls = options.quic_tls_config.as_ref();
@@ -333,26 +335,40 @@ impl Client {
             tracing::warn!("No QUIC peer CA certificate configured; peer identity is not verified");
         }
 
-        let builder = gm_quic::prelude::QuicClient::builder().with_root_certificates(root_store);
-
-        if let Some(tls) = quic_tls {
+        // Build client with proper interface binding
+        let client = if let Some(tls) = quic_tls {
             match (tls.client_cert_path(), tls.client_key_path()) {
                 (Some(cert_path), Some(key_path)) => {
-                    return Ok(builder
+                    tracing::debug!(?cert_path, "using client cert for QUIC");
+                    gm_quic::prelude::QuicClient::builder()
+                        .with_root_certificates(root_store)
                         .with_cert(cert_path, key_path)
+                        .bind(["inet://0.0.0.0:0"])
                         .with_alpns(["h3"])
-                        .build());
+                        .build()
                 }
-                (None, None) => {}
+                (None, None) => gm_quic::prelude::QuicClient::builder()
+                    .with_root_certificates(root_store)
+                    .without_cert()
+                    .bind(["inet://0.0.0.0:0"])
+                    .with_alpns(["h3"])
+                    .build(),
                 _ => {
                     return Err(XlineClientBuildError::InvalidArguments(
                         "quic client cert and key paths must be both set".to_owned(),
                     ));
                 }
             }
-        }
+        } else {
+            gm_quic::prelude::QuicClient::builder()
+                .with_root_certificates(root_store)
+                .without_cert()
+                .bind(["inet://0.0.0.0:0"])
+                .with_alpns(["h3"])
+                .build()
+        };
 
-        Ok(builder.without_cert().with_alpns(["h3"]).build())
+        Ok(client)
     }
 
     /// Fetch peer URLs from the public client endpoints before switching to QUIC.
@@ -362,11 +378,18 @@ impl Client {
             .unary::<FetchClusterRequest, FetchClusterResponse>(MethodId::FetchCluster, request)
             .await?;
 
-        let addrs = response
+        tracing::debug!(
+            members_count = response.members.len(),
+            "discovered cluster members"
+        );
+
+        let addrs: Vec<String> = response
             .members
             .into_iter()
             .flat_map(|member| member.peer_urls.into_iter())
             .collect();
+
+        tracing::debug!(addrs_count = addrs.len(), "peer addresses discovered");
         Ok(addrs)
     }
 

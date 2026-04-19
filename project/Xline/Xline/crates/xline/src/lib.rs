@@ -180,10 +180,15 @@ pub mod metrics;
 pub mod restore;
 /// Revision check
 mod revision_check;
-/// Router Layer
-mod router;
 /// Xline server
 pub mod server;
+
+/// Reset the shared QUIC listeners state (for test teardown).
+/// Must be called after all servers are stopped so the next test
+/// can create a fresh QuicListeners instance.
+pub fn reset_shared_quic() {
+    server::h3_server::reset_shared_quic();
+}
 /// State of current node
 mod state;
 /// Storage module

@@ -2,7 +2,6 @@ use std::sync::Arc;
 
 use crate::{
     id_gen::IdGenerator,
-    router::endpoint::EndPoint as RouterEndpoint,
     rpc::{
         Compare, CompareResult, CompareTarget, DeleteRangeRequest, DeleteRangeResponse,
         LeaseGrantRequest, LeaseGrantResponse, LockRequest, LockResponse, PutRequest, RangeRequest,
@@ -20,6 +19,7 @@ use xlineapi::{
     execute_error::ExecuteError,
 };
 use xlinerpc::Status;
+use xlinerpc::server::EndPoint as RouterEndpoint;
 
 /// Default session ttl
 const DEFAULT_SESSION_TTL: i64 = 60;

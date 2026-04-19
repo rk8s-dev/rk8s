@@ -14,9 +14,10 @@ use xlineapi::{
     MemberPromoteRequest, MemberPromoteResponse, MemberRemoveRequest, MemberRemoveResponse,
     MemberUpdateRequest, MemberUpdateResponse, command::CurpClient,
 };
+use xlinerpc::server::EndPoint as RouterEndpoint;
 use xlinerpc::{Request, Response, Status};
 
-use crate::{header_gen::HeaderGenerator, router::endpoint::EndPoint as RouterEndpoint};
+use crate::header_gen::HeaderGenerator;
 
 /// Cluster Server
 #[derive(Clone)]

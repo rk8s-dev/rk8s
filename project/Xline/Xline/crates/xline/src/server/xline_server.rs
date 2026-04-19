@@ -31,6 +31,7 @@ use super::{
     auth_wrapper::{AuthWrapper, Server as AuthWrapperEndpointServer},
     cluster_server::{ClusterServer, Server as ClusterEndpointServer},
     command::{Alarmer, CommandExecutor},
+    h3_server::{RouterBuilder as H3RouterBuilder, XlineH3Server},
     kv_server::{KvServer, Server as KvEndpointServer},
     lease_server::{LeaseServer, Server as LeaseEndpointServer},
     lock_server::{LockServer, Server as LockEndPointServer},
@@ -43,7 +44,6 @@ use crate::{
     header_gen::HeaderGenerator,
     id_gen::IdGenerator,
     metrics::Metrics,
-    router::{RouterBuilder, Server},
     state::State,
     storage::{
         AlarmStore, AuthStore, KvStore, LeaseStore,
@@ -131,7 +131,7 @@ impl XlineServer {
         let quic_client = Arc::new(Self::build_quic_client(&tls_config).await?);
         let transport = TransportConfig {
             client: Arc::clone(&quic_client),
-            dns_fallback: curp::rpc::DnsFallback::Disabled,
+            dns_fallback: curp::rpc::DnsFallback::LocalhostForTest,
         };
 
         let cluster_info = Arc::new(
@@ -308,7 +308,7 @@ impl XlineServer {
         db: Arc<DB>,
         key_pair: Option<(EncodingKey, DecodingKey)>,
     ) -> Result<(
-        RouterBuilder,
+        H3RouterBuilder,
         Arc<CurpClient>,
         QuicGrpcServer<Command, CommandExecutor, State<Arc<CurpClient>>, XlineQuicService>,
     )> {
@@ -324,9 +324,9 @@ impl XlineServer {
             auth_wrapper,
             curp_client,
         ) = self.init_servers(db, key_pair).await?;
-        let mut builder = RouterBuilder::new();
+        let mut builder = H3RouterBuilder::new();
 
-        builder = builder.tls_config(&self.tls_config);
+        builder = builder.set_tls_config(&self.tls_config);
 
         let xline_router = builder
             .clone()
@@ -406,34 +406,78 @@ impl XlineServer {
         let key_pair = Self::read_key_pair(&self.auth_config).await?;
         let (xline_router, curp_client, quic_server) = self.init_routers(db, key_pair).await?;
         let server_name = self.cluster_config.name().clone();
-        let server = Server::new_with_grpc_server(
-            quic_server,
-            client_listen_urls.clone(),
-            peer_listen_urls.clone(),
-        )
-        .map_err(|e| anyhow::anyhow!(e))?
-        .add_server(
-            &server_name,
-            xline_router,
-            peer_listen_urls
-                .into_iter()
-                .chain(client_listen_urls.into_iter()),
-        );
+        let client_ports = self
+            .cluster_config
+            .client_listen_urls()
+            .iter()
+            .filter_map(|url| {
+                url.strip_prefix("https://")
+                    .or_else(|| url.strip_prefix("http://"))
+                    .and_then(|host_port| host_port.rsplit(':').next())
+                    .and_then(|p| p.parse().ok())
+            })
+            .collect();
+        let peer_ports = self
+            .cluster_config
+            .peer_listen_urls()
+            .iter()
+            .filter_map(|url| {
+                url.strip_prefix("https://")
+                    .or_else(|| url.strip_prefix("http://"))
+                    .and_then(|host_port| host_port.rsplit(':').next())
+                    .and_then(|p| p.parse().ok())
+            })
+            .collect();
+        let server = XlineH3Server::new()
+            .with_client_ports(client_ports)
+            .with_peer_ports(peer_ports)
+            .add_server(
+                &server_name,
+                xline_router,
+                peer_listen_urls
+                    .into_iter()
+                    .chain(client_listen_urls.into_iter()),
+            );
 
         self.task_manager
             .spawn(TaskName::CurpServer, |n| async move {
+                let it_debug = std::env::var("XLINE_IT_DEBUG")
+                    .map(|v| v != "0" && !v.eq_ignore_ascii_case("false"))
+                    .unwrap_or(false);
                 tokio::select! {
-                    res = server.serve() => {
+                    res = server.serve(quic_server) => {
                         if let Err(e) = res {
+                            if it_debug {
+                                panic!("quic server serve failed: {e}");
+                            }
                             tracing::error!("{e}");
                         }
                     },
                     _ = n.wait() => {},
                 }
             });
-        if let Err(e) = self.publish(curp_client).await {
-            warn!("publish name to cluster failed: {e:?}");
-        }
+        // Publish in background so start_with_quic can return immediately
+        // The server is ready to accept connections even before publish completes
+        let publish_handle = tokio::spawn({
+            let curp_client = Arc::clone(&curp_client);
+            let self_id = self.cluster_info.self_id().clone();
+            let self_name = self.cluster_info.self_name().clone();
+            let self_client_urls = self.cluster_info.self_client_urls().clone();
+            async move {
+                if let Err(e) = curp_client
+                    .propose_publish(self_id, self_name, self_client_urls)
+                    .await
+                {
+                    warn!("publish name to cluster failed: {e:?}");
+                }
+            }
+        });
+        // Detach the publish handle - we don't need to wait for it
+        let _ = tokio::spawn(async move {
+            if let Err(e) = publish_handle.await {
+                warn!("publish task panicked: {e}");
+            }
+        });
         Ok(())
     }
 
@@ -529,7 +573,7 @@ impl XlineServer {
 
         let curp_config = Arc::new(self.cluster_config.curp_config().clone());
 
-        let curp_server = CurpServer::new(
+        let curp_server = Rpc::new(
             Arc::clone(&self.cluster_info),
             *self.cluster_config.is_leader(),
             Arc::clone(&ce),
@@ -613,17 +657,6 @@ impl XlineServer {
         ))
     }
 
-    /// Publish the name of current node to cluster
-    async fn publish(&self, curp_client: Arc<CurpClient>) -> Result<(), xlinerpc::Status> {
-        curp_client
-            .propose_publish(
-                self.cluster_info.self_id(),
-                self.cluster_info.self_name(),
-                self.cluster_info.self_client_urls(),
-            )
-            .await
-    }
-
     /// Stop `XlineServer`
     #[inline]
     pub async fn stop(&self) {
@@ -656,9 +689,20 @@ impl XlineServer {
     /// Without any peer TLS config, the client uses an empty trust store (no
     /// verification) and logs a warning.
     async fn build_quic_client(tls_config: &TlsConfig) -> Result<gm_quic::prelude::QuicClient> {
+        // Install the default crypto provider for rustls if not already installed.
+        // This is required before any TLS operations (e.g., creating a QuicClient).
+        let _ = rustls::crypto::ring::default_provider().install_default();
+
         let mut root_store = rustls::RootCertStore::empty();
 
-        if let Some(ca_path) = tls_config.peer_ca_cert_path() {
+        // Try peer_ca_cert_path first (for mTLS), then fall back to client_ca_cert_path
+        // (for one-way TLS where the client needs to verify the server's cert).
+        let ca_path = tls_config
+            .peer_ca_cert_path()
+            .as_ref()
+            .or_else(|| tls_config.client_ca_cert_path().as_ref());
+
+        if let Some(ca_path) = ca_path {
             let ca_pem = fs::read(ca_path).await?;
             let certs: Vec<_> =
                 rustls_pemfile::certs(&mut &ca_pem[..]).collect::<Result<Vec<_>, _>>()?;
@@ -673,16 +717,19 @@ impl XlineServer {
             );
         }
 
-        let builder = gm_quic::prelude::QuicClient::builder().with_root_certificates(root_store);
+        let builder = gm_quic::prelude::QuicClient::builder()
+            .with_root_certificates(root_store)
+            .bind(["inet://0.0.0.0:0"]);
 
         let client = match (tls_config.peer_cert_path(), tls_config.peer_key_path()) {
             (Some(cert_path), Some(key_path)) => {
                 // gm-quic's with_cert accepts &Path directly (handles PEM/DER parsing)
                 builder
                     .with_cert(cert_path.as_path(), key_path.as_path())
+                    .with_alpns(["h3"])
                     .build()
             }
-            _ => builder.without_cert().build(),
+            _ => builder.without_cert().with_alpns(["h3"]).build(),
         };
 
         Ok(client)

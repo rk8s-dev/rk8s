@@ -36,6 +36,7 @@ xlinerpc = { path = "../xlinerpc" }
 
 [dev-dependencies]
 rand = "0.8.5"
+serial_test = "3"
 test-macros = { path = "../test-macros" }
 xline-test-utils = { path = "../xline-test-utils" }
 

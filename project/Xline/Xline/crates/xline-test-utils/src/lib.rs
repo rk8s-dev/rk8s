@@ -17,6 +17,101 @@ use xline_client::types::{auth::PermissionType, range_end::RangeOption};
 pub use xline_client::{Client, ClientOptions, clients, types};
 use xlinerpc::QuicTlsConfig;
 
+#[inline]
+fn fixture_path(name: &str) -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../fixtures")
+        .join(name)
+}
+
+/// Get server-specific certificate path based on server index
+fn server_cert_path(server_idx: usize) -> PathBuf {
+    let server_name = format!("server{}", server_idx);
+    fixture_path(&format!("{}.crt", server_name))
+}
+
+fn server_key_path(server_idx: usize) -> PathBuf {
+    let server_name = format!("server{}", server_idx);
+    fixture_path(&format!("{}.key", server_name))
+}
+
+#[inline]
+fn default_quic_tls_config_for_tests() -> TlsConfig {
+    TlsConfig::new(
+        None,
+        Some(fixture_path("server.crt")),
+        Some(fixture_path("server.key")),
+        Some(fixture_path("ca.crt")),
+        None,
+        None,
+    )
+}
+
+/// Create QUIC TLS config for a specific server with its own certificate
+fn server_quic_tls_config_for_tests(server_idx: usize) -> TlsConfig {
+    let cert_path = server_cert_path(server_idx);
+    let key_path = server_key_path(server_idx);
+
+    // If server-specific certs don't exist, fall back to default
+    if cert_path.exists() && key_path.exists() {
+        TlsConfig::new(
+            None,
+            Some(cert_path),
+            Some(key_path),
+            Some(fixture_path("ca.crt")),
+            None,
+            None,
+        )
+    } else {
+        default_quic_tls_config_for_tests()
+    }
+}
+
+#[inline]
+fn ensure_quic_tls(config: XlineServerConfig, server_idx: usize) -> XlineServerConfig {
+    if config.tls().server_tls_enabled() {
+        return config;
+    }
+
+    // Always use per-server TLS certificates so that the server name (e.g., "server0")
+    // matches the certificate's SAN. The default server.crt only has "localhost" in SAN,
+    // which won't match the DNS-based server names required for QUIC SNI.
+    let tls_config = server_quic_tls_config_for_tests(server_idx);
+
+    XlineServerConfig::new(
+        config.cluster().clone(),
+        config.storage().clone(),
+        config.log().clone(),
+        config.trace().clone(),
+        config.auth().clone(),
+        *config.compact(),
+        tls_config,
+        config.metrics().clone(),
+    )
+}
+
+#[inline]
+fn normalize_connect_addr(addr: std::net::SocketAddr) -> std::net::SocketAddr {
+    match addr {
+        std::net::SocketAddr::V4(v4) => {
+            let ip = if v4.ip().is_unspecified() {
+                std::net::Ipv4Addr::LOCALHOST
+            } else {
+                *v4.ip()
+            };
+            std::net::SocketAddr::new(ip.into(), v4.port())
+        }
+        std::net::SocketAddr::V6(v6) => {
+            let ip = if v6.ip().is_unspecified() {
+                std::net::Ipv6Addr::LOCALHOST
+            } else {
+                *v6.ip()
+            };
+            std::net::SocketAddr::new(ip.into(), v6.port())
+        }
+    }
+}
+
 /// Cluster
 pub struct Cluster {
     /// client and peer listeners of members
@@ -36,7 +131,9 @@ pub struct Cluster {
 impl Cluster {
     /// New `Cluster`
     pub async fn new(size: usize) -> Self {
-        let configs = iter::repeat_with(XlineServerConfig::default)
+        let configs = iter::repeat_with(|| XlineServerConfig::default())
+            .enumerate()
+            .map(|(i, c)| ensure_quic_tls(c, i))
             .take(size)
             .collect();
         Self::new_with_configs(configs).await
@@ -48,29 +145,51 @@ impl Cluster {
             let path = temp_dir().join(random_id());
             Self::default_rocks_config_with_path(path)
         })
+        .enumerate()
+        .map(|(i, c)| ensure_quic_tls(c, i))
         .take(size)
         .collect();
         Self::new_with_configs(configs).await
     }
 
     pub async fn new_with_configs(configs: Vec<XlineServerConfig>) -> Self {
+        let configs = configs
+            .into_iter()
+            .enumerate()
+            .map(|(i, c)| ensure_quic_tls(c, i))
+            .collect::<Vec<_>>();
         let size = configs.len();
         let mut listeners = Vec::new();
         for _i in 0..size {
+            // Bind to 127.0.0.1 for all servers
+            let bind_addr = "127.0.0.1".to_string();
+
+            let client_addr = format!("{}:0", bind_addr);
+            let peer_addr = format!("{}:0", bind_addr);
+
             listeners.push((
-                TcpListener::bind("0.0.0.0:0").await.unwrap(),
-                TcpListener::bind("0.0.0.0:0").await.unwrap(),
+                TcpListener::bind(&client_addr).await.unwrap(),
+                TcpListener::bind(&peer_addr).await.unwrap(),
             ));
         }
         let server_tls_enabled = configs.iter().any(|c| c.tls().server_tls_enabled());
         let scheme = if server_tls_enabled { "https" } else { "http" };
         let all_members_client_urls = listeners
             .iter()
-            .map(|l| format!("{scheme}://{}", l.0.local_addr().unwrap()))
+            .enumerate()
+            .map(|(i, l)| {
+                let port = l.0.local_addr().unwrap().port();
+                // Use DNS name for SNI matching - servers are registered with DNS names
+                format!("{scheme}://server{i}:{port}")
+            })
             .collect();
         let all_members_peer_urls = listeners
             .iter()
-            .map(|l| format!("{scheme}://{}", l.1.local_addr().unwrap()))
+            .enumerate()
+            .map(|(i, l)| {
+                let port = l.1.local_addr().unwrap().port();
+                format!("{scheme}://server{i}:{port}")
+            })
             .collect();
         Self {
             listeners,
@@ -86,20 +205,38 @@ impl Cluster {
     pub async fn start(&mut self) {
         let mut futs = Vec::new();
         for (i, config) in self.configs.iter().enumerate() {
+            // Always use DNS name as server name (e.g., "server0") for TLS SNI matching.
+            // IP addresses cannot be used as SNI per RFC 6066, so the server must
+            // be registered with a DNS name that the certificate's SAN includes.
             let name = format!("server{}", i);
             let (xline_listener, curp_listener) = self.listeners.remove(0);
+            let scheme = if config.tls().server_tls_enabled() {
+                "https"
+            } else {
+                "http"
+            };
             let self_client_url = self.get_client_url(i);
             let self_peer_url = self.get_peer_url(i);
+            let self_client_listen_url =
+                format!("{scheme}://{}", xline_listener.local_addr().unwrap());
+            let self_peer_listen_url =
+                format!("{scheme}://{}", curp_listener.local_addr().unwrap());
+
             let config = Self::merge_config(
                 config,
-                name,
+                name.clone(),
+                self_client_listen_url,
                 self_client_url,
+                self_peer_listen_url,
                 self_peer_url,
                 self.all_members_peer_urls
                     .clone()
                     .into_iter()
                     .enumerate()
-                    .map(|(i, addr)| (format!("server{}", i), vec![addr]))
+                    .map(|(j, addr)| {
+                        let member_name = format!("server{}", j);
+                        (member_name, vec![addr])
+                    })
                     .collect(),
                 i == 0,
                 InitialClusterState::New,
@@ -128,8 +265,8 @@ impl Cluster {
             });
         }
         join_all(futs).await;
-        // Sleep 30ms, wait for the server to start
-        time::sleep(Duration::from_millis(300)).await;
+        // Wait for async server tasks to finish binding and accepting connections.
+        time::sleep(Duration::from_millis(1500)).await;
     }
 
     pub async fn run_node(&mut self, xline_listener: TcpListener, curp_listener: TcpListener) {
@@ -146,10 +283,27 @@ impl Cluster {
     ) {
         let idx = self.all_members_peer_urls.len();
         let name = format!("server{}", idx);
-        let server_tls_enabled = base_config.tls().server_tls_enabled();
+        // Ensure TLS is configured for the new node so it can communicate with existing cluster
+        let tls_config = base_config.tls();
+        let server_tls_enabled = tls_config.server_tls_enabled();
+        let tls_config = if server_tls_enabled {
+            tls_config.clone()
+        } else {
+            // Use per-server TLS certificates so that the server name (e.g., "server3")
+            // matches the certificate's SAN
+            server_quic_tls_config_for_tests(idx)
+        };
         let scheme = if server_tls_enabled { "https" } else { "http" };
-        let self_client_url = format!("{scheme}://{}", xline_listener.local_addr().unwrap());
-        let self_peer_url = format!("{scheme}://{}", curp_listener.local_addr().unwrap());
+        let self_client_listen_url = format!("{scheme}://{}", xline_listener.local_addr().unwrap());
+        let self_peer_listen_url = format!("{scheme}://{}", curp_listener.local_addr().unwrap());
+        let self_client_url = format!(
+            "{scheme}://{}",
+            normalize_connect_addr(xline_listener.local_addr().unwrap())
+        );
+        let self_peer_url = format!(
+            "{scheme}://{}",
+            normalize_connect_addr(curp_listener.local_addr().unwrap())
+        );
         self.all_members_client_urls.push(self_client_url.clone());
         self.all_members_peer_urls.push(self_peer_url.clone());
 
@@ -166,11 +320,25 @@ impl Cluster {
         let config = Self::merge_config(
             base_config,
             name,
+            self_client_listen_url,
             self_client_url,
+            self_peer_listen_url,
             self_peer_url,
             peers,
             false,
             InitialClusterState::Existing,
+        );
+
+        // Override TLS config to ensure it matches the cluster
+        let config = XlineServerConfig::new(
+            config.cluster().clone(),
+            config.storage().clone(),
+            config.log().clone(),
+            config.trace().clone(),
+            config.auth().clone(),
+            *config.compact(),
+            tls_config,
+            config.metrics().clone(),
         );
 
         let server = XlineServer::new(
@@ -193,14 +361,21 @@ impl Cluster {
     /// Create or get the client with the specified index
     pub async fn client(&mut self) -> &mut Client {
         if self.client.is_none() {
-            let client = Client::connect(
-                self.all_members_client_urls.clone(),
-                ClientOptions::default(),
-            )
-            .await
-            .unwrap_or_else(|e| {
-                panic!("Client connect error: {:?}", e);
-            });
+            // Use include_bytes! to embed CA certificate at compile time
+            // This avoids runtime file I/O and file descriptor leaks
+            let ca_cert_bytes = include_bytes!("../../../fixtures/ca.crt");
+
+            // Configure QUIC TLS with CA certificate for server verification
+            let quic_tls_config =
+                QuicTlsConfig::default().with_peer_ca_cert_pem(ca_cert_bytes.to_vec());
+
+            let options = ClientOptions::default().with_quic_tls_config(quic_tls_config);
+
+            let client = Client::connect(self.all_members_client_urls.clone(), options)
+                .await
+                .unwrap_or_else(|e| {
+                    panic!("Client connect error: {:?}", e);
+                });
             self.client = Some(client);
         }
         self.client.as_mut().unwrap()
@@ -230,6 +405,12 @@ impl Cluster {
 
     pub fn get_peer_url(&self, idx: usize) -> String {
         self.all_members_peer_urls[idx].clone()
+    }
+
+    /// Create a QuicTlsConfig for test clients (with CA cert for server verification)
+    pub fn create_quic_tls_config() -> xlinerpc::QuicTlsConfig {
+        let ca_cert_bytes = include_bytes!("../../../fixtures/ca.crt");
+        xlinerpc::QuicTlsConfig::default().with_peer_ca_cert_pem(ca_cert_bytes.to_vec())
     }
 
     pub fn all_client_addrs(&self) -> Vec<String> {
@@ -268,8 +449,10 @@ impl Cluster {
     fn merge_config(
         base_config: &XlineServerConfig,
         name: String,
-        client_url: String,
-        peer_url: String,
+        client_listen_url: String,
+        client_advertise_url: String,
+        peer_listen_url: String,
+        peer_advertise_url: String,
         peers: HashMap<String, Vec<String>>,
         is_leader: bool,
         initial_cluster_state: InitialClusterState,
@@ -277,10 +460,10 @@ impl Cluster {
         let old_cluster = base_config.cluster();
         let new_cluster = ClusterConfig::new(
             name,
-            vec![peer_url.clone()],
-            vec![peer_url],
-            vec![client_url.clone()],
-            vec![client_url],
+            vec![peer_listen_url],
+            vec![peer_advertise_url],
+            vec![client_listen_url],
+            vec![client_advertise_url],
             peers,
             is_leader,
             old_cluster.curp_config().clone(),
@@ -323,6 +506,9 @@ impl Drop for Cluster {
                         let _ignore = tokio::fs::remove_dir_all(path).await;
                     }
                 }
+                // Reset the shared QUIC listeners so the next test
+                // can create a fresh QuicListeners instance.
+                xline::reset_shared_quic();
             });
         });
     }
