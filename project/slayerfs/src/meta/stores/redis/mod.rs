@@ -136,22 +136,26 @@ const UNLINK_LUA: &str = r#"
     local name = ARGV[2]
     local timestamp = tonumber(ARGV[3])
 
-    -- Remove from directory (idempotent)
-    redis.call('HDEL', dir_key, name)
+    local dentry_ino = redis.call('HGET', dir_key, name)
+    if not dentry_ino then
+        return cjson.encode({ok=false, error="not_found"})
+    end
 
-    -- Remove from link_parents (idempotent)
-    local member = parent_ino .. ":" .. name
-    redis.call('SREM', lp_key, member)
-
-    -- Try to get node
+    -- Node must exist; otherwise we are in inconsistent or raced state.
     local node_json = redis.call('GET', node_key)
     if not node_json then
-        return cjson.encode({ok=true, nlink=0, deleted=true})
+        return cjson.encode({ok=false, error="node_not_found"})
     end
     local ok, node = pcall(cjson.decode, node_json)
     if not ok or not node or not node.attr then
-        return cjson.encode({ok=true, nlink=0, deleted=true})
+        return cjson.encode({ok=false, error="corrupt_node"})
     end
+
+    -- Remove from directory and link_parents once validation passes.
+    redis.call('HDEL', dir_key, name)
+
+    local member = parent_ino .. ":" .. name
+    redis.call('SREM', lp_key, member)
 
     -- Decrement nlink
     if node.attr.nlink > 0 then
@@ -338,7 +342,7 @@ const CREATE_ENTRY_LUA: &str = r#"
     return cjson.encode({ok=true, ino=new_ino})
 "#;
 
-// Lua script for atomically renaming file or directory (no overwrite)
+// Lua script for atomically renaming file or directory (with replacement)
 const RENAME_LUA: &str = r#"
     local cjson = cjson
 
@@ -373,13 +377,7 @@ const RENAME_LUA: &str = r#"
         return cjson.encode({ok=false, error="parent_not_directory", ino=new_parent_ino})
     end
 
-    -- 3. Check target doesn't exist
-    local target_exists = redis.call('HEXISTS', new_parent_dir_key, new_name)
-    if target_exists == 1 then
-        return cjson.encode({ok=false, error="already_exists"})
-    end
-
-    -- 4. Get child node
+    -- 3. Get child node
     local child_json = redis.call('GET', child_node_key)
     if not child_json then
         return cjson.encode({ok=false, error="node_not_found", ino=tonumber(dentry_ino)})
@@ -387,6 +385,93 @@ const RENAME_LUA: &str = r#"
     local ok_child, child_node = pcall(cjson.decode, child_json)
     if not ok_child or not child_node or not child_node.attr then
         return cjson.encode({ok=false, error="corrupt_node"})
+    end
+
+    -- 4. Resolve target entry. Replacement is handled in this script atomically.
+    local target_ino = redis.call('HGET', new_parent_dir_key, new_name)
+    if target_ino then
+        local src_ino_num = tonumber(dentry_ino)
+        local target_ino_num = tonumber(target_ino)
+
+        -- If source and destination already point to the same inode, treat as no-op.
+        if src_ino_num == target_ino_num then
+            return cjson.encode({ok=true})
+        end
+
+        local target_node_key = 'i' .. target_ino_num
+        local target_json = redis.call('GET', target_node_key)
+        if not target_json then
+            return cjson.encode({ok=false, error="node_not_found", ino=target_ino_num})
+        end
+
+        local ok_target, target_node = pcall(cjson.decode, target_json)
+        if not ok_target or not target_node or not target_node.attr then
+            return cjson.encode({ok=false, error="corrupt_node"})
+        end
+
+        local src_is_dir = child_node.kind == 'Dir'
+        local dst_is_dir = target_node.kind == 'Dir'
+
+        if src_is_dir and not dst_is_dir then
+            return cjson.encode({ok=false, error="target_not_directory", ino=target_ino_num})
+        end
+
+        if (not src_is_dir) and dst_is_dir then
+            return cjson.encode({ok=false, error="target_is_directory", ino=target_ino_num})
+        end
+
+        if src_is_dir and dst_is_dir then
+            local target_dir_key = 'd' .. target_ino_num
+            local target_children = redis.call('HLEN', target_dir_key)
+            if target_children > 0 then
+                return cjson.encode({ok=false, error="target_dir_not_empty", ino=target_ino_num})
+            end
+
+            redis.call('HDEL', new_parent_dir_key, new_name)
+            redis.call('DEL', target_node_key)
+            redis.call('DEL', target_dir_key)
+
+            if new_parent_node.attr and new_parent_node.attr.nlink then
+                new_parent_node.attr.nlink = new_parent_node.attr.nlink - 1
+            end
+        else
+            redis.call('HDEL', new_parent_dir_key, new_name)
+
+            local target_lp_key = 'lp:' .. target_ino_num
+            local target_member = new_parent_ino .. ':' .. new_name
+            redis.call('SREM', target_lp_key, target_member)
+
+            if target_node.attr.nlink and target_node.attr.nlink > 0 then
+                target_node.attr.nlink = target_node.attr.nlink - 1
+            end
+            target_node.attr.ctime = timestamp
+
+            if target_node.attr.nlink == 0 then
+                target_node.deleted = true
+                target_node.attr.ctime = timestamp
+                redis.call('SET', target_node_key, cjson.encode(target_node))
+                redis.call('HSET', 'delslices', tostring(target_ino_num), 1)
+                redis.call('DEL', target_lp_key)
+            else
+                if target_node.attr.nlink == 1 then
+                    local remaining_members = redis.call('SMEMBERS', target_lp_key)
+                    if #remaining_members == 1 then
+                        local sep_pos = string.find(remaining_members[1], ':', 1, true)
+                        if sep_pos and sep_pos > 1 and sep_pos < #remaining_members[1] then
+                            local parent_str = string.sub(remaining_members[1], 1, sep_pos - 1)
+                            local name_str = string.sub(remaining_members[1], sep_pos + 1)
+                            local parent_num = tonumber(parent_str)
+                            if parent_num then
+                                target_node.parent = parent_num
+                                target_node.name = name_str
+                            end
+                        end
+                    end
+                    redis.call('DEL', target_lp_key)
+                end
+                redis.call('SET', target_node_key, cjson.encode(target_node))
+            end
+        end
     end
 
     -- 5. Update node parent/name OR link_parents based on node kind/nlink
@@ -1616,10 +1701,13 @@ impl MetaStore for RedisMetaStore {
             .map_err(|e| MetaError::Internal(format!("Lua response parse error: {e}")))?;
 
         if !response.ok {
-            let err = response
-                .error
-                .unwrap_or_else(|| "unknown error".to_string());
-            return Err(MetaError::Internal(format!("Lua error: {err}")));
+            return match response.error.as_deref() {
+                Some("not_found") => Err(MetaError::NotFound(parent)),
+                Some("node_not_found") => Err(MetaError::NotFound(child)),
+                Some("corrupt_node") => Err(MetaError::Internal("corrupt node data".into())),
+                Some(other) => Err(MetaError::Internal(format!("Lua error: {other}"))),
+                None => Err(MetaError::Internal("unexpected Lua response".into())),
+            };
         }
 
         let nlink = response.nlink.unwrap_or(0);

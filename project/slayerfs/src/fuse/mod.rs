@@ -4,7 +4,7 @@
 //! to the operating system via the FUSE protocol.
 //!
 //! Main components:
-//! - `adapter`: Contains the FUSE adapter implementation.
+//! - `adapter`: Shared validation and translation helpers used by FUSE handlers.
 //! - `mount`: Handles mounting the virtual filesystem using FUSE.
 //! - Implementation of the `Filesystem` trait for `VFS`, enabling translation of FUSE requests
 //!   into virtual filesystem operations.
@@ -97,6 +97,9 @@ mod mount_tests {
         }
         let content = fs::read(&file_path).expect("read back");
         assert_eq!(content, b"abc");
+
+        // POSIX: rename(path, path) is a no-op and must succeed.
+        fs::rename(&file_path, &file_path).expect("rename same path no-op");
 
         // List the directory
         let list = fs::read_dir(&dir)
@@ -995,23 +998,11 @@ where
         let name = name.to_string_lossy();
         let new_name = new_name.to_string_lossy();
 
-        // Validate input parameters
-        if name.is_empty() || new_name.is_empty() {
-            return Err(libc::EINVAL.into());
-        }
+        adapter::validate_rename_names(name.as_ref(), new_name.as_ref())?;
 
-        // Check for invalid characters in names
-        if name.contains('/')
-            || name.contains('\0')
-            || new_name.contains('/')
-            || new_name.contains('\0')
-        {
-            return Err(libc::EINVAL.into());
-        }
-
-        // Prevent renaming to the same location
-        if parent == new_parent && name == new_name {
-            return Err(libc::EINVAL.into());
+        // POSIX allows same-path rename as a no-op.
+        if adapter::is_same_rename(parent, name.as_ref(), new_parent, new_name.as_ref()) {
+            return Ok(());
         }
 
         // Ensure the source exists
