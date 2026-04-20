@@ -7,11 +7,12 @@ use crate::storage::driver::s3::S3Storage;
 use anyhow::{Context, bail};
 use sqlx::PgPool;
 use std::{collections::HashMap, sync::Arc};
-use tokio::sync::RwLock;
+use tokio::sync::{Mutex, RwLock};
 
 #[derive(Clone, Debug)]
 pub struct UploadSession {
     pub uploaded: u64,
+    pub operation_lock: Arc<Mutex<()>>,
 }
 
 #[derive(Clone)]
@@ -57,10 +58,23 @@ impl AppState {
         sessions.get(id).cloned()
     }
 
+    pub async fn get_session_lock(&self, id: &str) -> Option<Arc<Mutex<()>>> {
+        let sessions = self.sessions.read().await;
+        sessions
+            .get(id)
+            .map(|session| session.operation_lock.clone())
+    }
+
     pub async fn create_session(&self) -> String {
         let mut sessions = self.sessions.write().await;
         let session_id = uuid::Uuid::new_v4().to_string();
-        sessions.insert(session_id.clone(), UploadSession { uploaded: 0 });
+        sessions.insert(
+            session_id.clone(),
+            UploadSession {
+                uploaded: 0,
+                operation_lock: Arc::new(Mutex::new(())),
+            },
+        );
         session_id
     }
 

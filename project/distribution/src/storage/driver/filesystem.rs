@@ -29,6 +29,15 @@ impl FilesystemStorage {
         }
         Ok(file_path)
     }
+
+    async fn cleanup_upload_dir(&self, session_id: &str) {
+        let upload_path = self.path_manager.upload_path(session_id);
+        if let Err(error) = remove_dir_all(&upload_path).await
+            && error.kind() != io::ErrorKind::NotFound
+        {
+            tracing::warn!("failed to clean up upload dir {upload_path}: {error}");
+        }
+    }
 }
 
 type Result<T> = std::result::Result<T, AppError>;
@@ -91,17 +100,28 @@ impl Storage for FilesystemStorage {
         let body_with_io_error = stream.map_err(io::Error::other);
         let mut body_reader = StreamReader::new(body_with_io_error);
 
-        let file_path = self
-            .ensure_parent_dir(&self.path_manager.blob_data_path(digest))
-            .await?;
+        let session_id = uuid::Uuid::new_v4().to_string();
+        let upload_data_path = self.path_manager.upload_data_path(&session_id);
+        let file_path = self.ensure_parent_dir(&upload_data_path).await?;
 
         let file = File::create(file_path).await.map_to_internal()?;
         let mut file_writer = BufWriter::new(file);
 
-        let size = io::copy(&mut body_reader, &mut file_writer)
-            .await
-            .map_to_internal()?;
-        file_writer.shutdown().await.map_to_internal()?;
+        let size = match io::copy(&mut body_reader, &mut file_writer).await {
+            Ok(size) => size,
+            Err(error) => {
+                drop(file_writer.into_inner());
+                self.cleanup_upload_dir(&session_id).await;
+                return Err(InternalError::from(error).into());
+            }
+        };
+        if let Err(error) = file_writer.shutdown().await {
+            drop(file_writer.into_inner());
+            self.cleanup_upload_dir(&session_id).await;
+            return Err(InternalError::from(error).into());
+        }
+
+        self.finalize_upload(&session_id, digest).await?;
 
         Ok(size)
     }
@@ -120,13 +140,25 @@ impl Storage for FilesystemStorage {
             .open(file_path)
             .await
             .map_to_internal()?;
+        // Preserve chunks accepted before this PATCH; only roll back bytes
+        // appended by the current request if its body stream fails.
+        let original_len = file.metadata().await.map_to_internal()?.len();
 
         let mut file_writer = BufWriter::new(file);
 
-        let size = io::copy(&mut body_reader, &mut file_writer)
-            .await
-            .map_to_internal()?;
-        file_writer.shutdown().await.map_to_internal()?;
+        let size = match io::copy(&mut body_reader, &mut file_writer).await {
+            Ok(size) => size,
+            Err(error) => {
+                let file = file_writer.into_inner();
+                file.set_len(original_len).await.map_to_internal()?;
+                return Err(InternalError::from(error).into());
+            }
+        };
+        if let Err(error) = file_writer.shutdown().await {
+            let file = file_writer.into_inner();
+            file.set_len(original_len).await.map_to_internal()?;
+            return Err(InternalError::from(error).into());
+        }
 
         Ok(size)
     }
@@ -135,27 +167,34 @@ impl Storage for FilesystemStorage {
         let upload_data_path = self.path_manager.upload_data_path(session_id);
         let blob_data_path = self.path_manager.blob_data_path(digest);
 
-        verify_file_digest(&upload_data_path, digest).await?;
+        let result = async {
+            verify_file_digest(&upload_data_path, digest).await?;
 
-        self.ensure_parent_dir(&blob_data_path).await?;
+            self.ensure_parent_dir(&blob_data_path).await?;
 
-        const EXDEV: i32 = 18;
-        if let Err(e) = tokio::fs::rename(&upload_data_path, &blob_data_path).await {
-            if e.raw_os_error() == Some(EXDEV) {
-                tracing::warn!(
-                    "rename across mount points (EXDEV), falling back to copy+delete: {} -> {}",
-                    upload_data_path,
-                    blob_data_path
-                );
-                tokio::fs::copy(&upload_data_path, &blob_data_path)
-                    .await
-                    .map_to_internal()?;
-                tokio::fs::remove_file(&upload_data_path).await.ok();
-            } else {
-                return Err(InternalError::from(e).into());
+            const EXDEV: i32 = 18;
+            if let Err(e) = tokio::fs::rename(&upload_data_path, &blob_data_path).await {
+                if e.raw_os_error() == Some(EXDEV) {
+                    tracing::warn!(
+                        "rename across mount points (EXDEV), falling back to copy+delete: {} -> {}",
+                        upload_data_path,
+                        blob_data_path
+                    );
+                    tokio::fs::copy(&upload_data_path, &blob_data_path)
+                        .await
+                        .map_to_internal()?;
+                    tokio::fs::remove_file(&upload_data_path).await.ok();
+                } else {
+                    return Err(InternalError::from(e).into());
+                }
             }
+
+            Ok(())
         }
-        Ok(())
+        .await;
+
+        self.cleanup_upload_dir(session_id).await;
+        result
     }
 
     async fn put_tag(&self, name: &str, tag: &str, digest: &Digest) -> Result<()> {

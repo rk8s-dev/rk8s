@@ -145,6 +145,12 @@ pub async fn patch_blob_handler(
         return Err(OciError::NameInvalid(name).into());
     }
 
+    let session_lock = state
+        .get_session_lock(&session_id)
+        .await
+        .ok_or_else(|| OciError::BlobUploadUnknown(session_id.clone()))?;
+    let _session_guard = session_lock.lock().await;
+
     let session = state
         .get_session(&session_id)
         .await
@@ -174,15 +180,16 @@ pub async fn patch_blob_handler(
         .ok_or_else(|| OciError::BlobUploadUnknown(session_id.clone()))?;
 
     let location = format!("/v2/{name}/blobs/uploads/{session_id}");
-    let end_of_range = new_total_size.saturating_sub(1);
+    let range = upload_range_header(new_total_size);
 
-    Ok(Response::builder()
+    let mut builder = Response::builder()
         .status(StatusCode::ACCEPTED)
         .header(LOCATION, location)
-        .header(RANGE, format!("0-{end_of_range}"))
-        .header("Docker-Upload-UUID", &session_id)
-        .body(Body::empty())
-        .unwrap())
+        .header("Docker-Upload-UUID", &session_id);
+    if let Some(range) = range {
+        builder = builder.header(RANGE, range);
+    }
+    Ok(builder.body(Body::empty()).unwrap())
 }
 
 pub async fn put_blob_handler(
@@ -191,6 +198,12 @@ pub async fn put_blob_handler(
     Query(params): Query<HashMap<String, String>>,
     request: Request,
 ) -> Result<impl IntoResponse, AppError> {
+    let session_lock = state
+        .get_session_lock(&session_id)
+        .await
+        .ok_or_else(|| OciError::BlobUploadUnknown(session_id.clone()))?;
+    let _session_guard = session_lock.lock().await;
+
     state
         .get_session(&session_id)
         .await
@@ -206,8 +219,9 @@ pub async fn put_blob_handler(
     let body = request.into_body().into_data_stream();
 
     state.storage.write_upload_chunk(&session_id, body).await?;
-    state.storage.finalize_upload(&session_id, &digest).await?;
+    let finalize_result = state.storage.finalize_upload(&session_id, &digest).await;
     state.close_session(&session_id).await;
+    finalize_result?;
 
     let location = format!("/v2/{name}/blobs/{digest}");
     Ok(Response::builder()
@@ -222,17 +236,24 @@ pub async fn get_blob_status_handler(
     State(state): State<Arc<AppState>>,
     Path((name, session_id)): Path<(String, String)>,
 ) -> Result<impl IntoResponse, AppError> {
+    let session_lock = state
+        .get_session_lock(&session_id)
+        .await
+        .ok_or_else(|| OciError::BlobUploadUnknown(session_id.clone()))?;
+    let _session_guard = session_lock.lock().await;
+
     if let Some(session) = state.get_session(&session_id).await {
         let location = format!("/v2/{name}/blobs/uploads/{session_id}");
-        let end_of_range = session.uploaded.saturating_sub(1);
+        let range = upload_range_header(session.uploaded);
 
-        Ok(Response::builder()
+        let mut builder = Response::builder()
             .status(StatusCode::NO_CONTENT)
             .header(LOCATION, location)
-            .header(RANGE, format!("0-{end_of_range}"))
-            .header("Docker-Upload-UUID", &session_id)
-            .body(Body::empty())
-            .unwrap())
+            .header("Docker-Upload-UUID", &session_id);
+        if let Some(range) = range {
+            builder = builder.header(RANGE, range);
+        }
+        Ok(builder.body(Body::empty()).unwrap())
     } else {
         Err(OciError::BlobUploadUnknown(session_id).into())
     }
@@ -307,4 +328,12 @@ fn parse_content_range(headers: &HeaderMap) -> Result<(u64, u64), AppError> {
         OciError::SizeInvalid("Content-Length or Content-Range header is required".to_string())
             .into(),
     )
+}
+
+fn upload_range_header(uploaded: u64) -> Option<String> {
+    if uploaded == 0 {
+        None
+    } else {
+        Some(format!("0-{}", uploaded - 1))
+    }
 }

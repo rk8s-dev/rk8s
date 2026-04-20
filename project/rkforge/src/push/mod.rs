@@ -8,7 +8,7 @@ use crate::registry::{
 };
 use crate::rt::block_on;
 use crate::storage::{DigestExt, parse_image_ref};
-use anyhow::{Context, bail};
+use anyhow::{Context, anyhow, bail};
 use clap::Parser;
 use futures::{StreamExt, TryStreamExt, stream};
 use oci_client::Client;
@@ -16,10 +16,12 @@ use oci_client::client::PushResponse;
 use oci_client::manifest::{OciImageIndex, OciManifest};
 use oci_client::secrets::RegistryAuth;
 use oci_spec::distribution::Reference;
+use reqwest::header::RANGE;
 use reqwest::{StatusCode, Url};
 use std::collections::HashMap;
 use std::io::SeekFrom;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncSeekExt};
 use tokio_util::io::ReaderStream;
 
@@ -130,10 +132,30 @@ enum BlobUploadStrategy {
     Chunked,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum RemoteBlobStatus {
+    Exists,
+    Missing,
+    Unknown,
+}
+
+enum PatchChunkOutcome {
+    Accepted(Url),
+    NeedsReconcile,
+}
+
+struct UploadStatus {
+    location: Url,
+    uploaded: u64,
+}
+
 const SMALL_BLOB_UPLOAD_THRESHOLD_BYTES: u64 = 16 * 1024 * 1024;
 const CHUNKED_BLOB_UPLOAD_SIZE_BYTES: usize = 32 * 1024 * 1024;
 const MAX_CONCURRENT_BLOB_UPLOADS: usize = 4;
 const STREAM_READ_BUFFER_BYTES: usize = 1024 * 1024;
+const BLOB_UPLOAD_MAX_ATTEMPTS: usize = 5;
+const BLOB_UPLOAD_RETRY_BASE_DELAY_MS: u64 = 300;
+const BLOB_UPLOAD_RETRY_MAX_DELAY_MS: u64 = 5_000;
 
 fn blob_upload_strategy(size: u64) -> BlobUploadStrategy {
     if size <= SMALL_BLOB_UPLOAD_THRESHOLD_BYTES {
@@ -141,6 +163,44 @@ fn blob_upload_strategy(size: u64) -> BlobUploadStrategy {
     } else {
         BlobUploadStrategy::Chunked
     }
+}
+
+fn retry_delay(attempt: usize) -> Duration {
+    let shift = attempt.saturating_sub(1).min(16) as u32;
+    let multiplier = 1_u64 << shift;
+    Duration::from_millis(
+        (BLOB_UPLOAD_RETRY_BASE_DELAY_MS * multiplier).min(BLOB_UPLOAD_RETRY_MAX_DELAY_MS),
+    )
+}
+
+fn should_retry_status(status: StatusCode) -> bool {
+    status.is_server_error()
+        || matches!(
+            status,
+            StatusCode::REQUEST_TIMEOUT | StatusCode::TOO_MANY_REQUESTS
+        )
+}
+
+fn should_retry_reqwest_error(error: &reqwest::Error) -> bool {
+    !error.is_builder() && !error.is_status()
+}
+
+fn parse_uploaded_from_range(range: Option<&reqwest::header::HeaderValue>) -> anyhow::Result<u64> {
+    let Some(range) = range else {
+        return Ok(0);
+    };
+    let range = range
+        .to_str()
+        .context("registry Range header is not valid UTF-8")?;
+    let range = range.strip_prefix("bytes=").unwrap_or(range);
+    let (_, end) = range
+        .split_once('-')
+        .ok_or_else(|| anyhow!("registry Range header has invalid format: {range}"))?;
+    let end = end
+        .parse::<u64>()
+        .with_context(|| format!("registry Range header has invalid end offset: {range}"))?;
+
+    Ok(end + 1)
 }
 
 impl BlobUploader {
@@ -207,52 +267,7 @@ impl BlobUploader {
         }
     }
 
-    async fn begin_upload(&self, target_ref: &Reference) -> anyhow::Result<Url> {
-        let url = self.uploads_url(target_ref);
-        let response = self
-            .apply_auth(self.http.post(&url))
-            .header("Content-Length", 0)
-            .send()
-            .await
-            .with_context(|| {
-                format!("failed to begin upload session for {}", target_ref.whole())
-            })?;
-
-        self.extract_location(response, StatusCode::ACCEPTED)
-            .await
-            .with_context(|| format!("failed to open upload session for {}", target_ref.whole()))
-    }
-
-    async fn blob_exists(&self, target_ref: &Reference, digest: &str) -> anyhow::Result<bool> {
-        let response = self
-            .apply_auth(self.http.head(self.blob_url(target_ref, digest)))
-            .send()
-            .await
-            .with_context(|| format!("failed to check remote blob {digest}"))?;
-
-        match response.status() {
-            StatusCode::OK => Ok(true),
-            StatusCode::NOT_FOUND => Ok(false),
-            status => {
-                let url = response.url().to_string();
-                let body = response.text().await.unwrap_or_default();
-                bail!("registry returned {status} for {url}: {body}");
-            }
-        }
-    }
-
-    async fn extract_location(
-        &self,
-        response: reqwest::Response,
-        expected_status: StatusCode,
-    ) -> anyhow::Result<Url> {
-        if response.status() != expected_status {
-            let status = response.status();
-            let url = response.url().to_string();
-            let body = response.text().await.unwrap_or_default();
-            bail!("registry returned {status} for {url}: {body}");
-        }
-
+    fn extract_location_header(&self, response: &reqwest::Response) -> anyhow::Result<Url> {
         let location = response
             .headers()
             .get("Location")
@@ -262,13 +277,114 @@ impl BlobUploader {
         self.location_header_to_url(location)
     }
 
+    async fn status_error(
+        response: reqwest::Response,
+        expected_status: StatusCode,
+    ) -> anyhow::Error {
+        let status = response.status();
+        let url = response.url().to_string();
+        let body = response.text().await.unwrap_or_default();
+        anyhow!("registry returned {status} for {url}, expected {expected_status}: {body}")
+    }
+
+    async fn send_with_retries(
+        &self,
+        operation: &str,
+        expected_status: StatusCode,
+        mut build_request: impl FnMut() -> reqwest::RequestBuilder,
+    ) -> anyhow::Result<reqwest::Response> {
+        for attempt in 1..=BLOB_UPLOAD_MAX_ATTEMPTS {
+            match build_request().send().await {
+                Ok(response) if response.status() == expected_status => return Ok(response),
+                Ok(response) if should_retry_status(response.status()) => {
+                    let error = Self::status_error(response, expected_status).await;
+                    if attempt == BLOB_UPLOAD_MAX_ATTEMPTS {
+                        return Err(error).with_context(|| format!("failed to {operation}"));
+                    }
+                }
+                Ok(response) => {
+                    return Err(Self::status_error(response, expected_status).await)
+                        .with_context(|| format!("failed to {operation}"));
+                }
+                Err(error) if should_retry_reqwest_error(&error) => {
+                    if attempt == BLOB_UPLOAD_MAX_ATTEMPTS {
+                        return Err(error).with_context(|| format!("failed to {operation}"));
+                    }
+                }
+                Err(error) => {
+                    return Err(error).with_context(|| format!("failed to {operation}"));
+                }
+            }
+
+            tokio::time::sleep(retry_delay(attempt)).await;
+        }
+
+        unreachable!("retry loop always returns before exhausting attempts")
+    }
+
+    async fn begin_upload(&self, target_ref: &Reference) -> anyhow::Result<Url> {
+        let url = self.uploads_url(target_ref);
+        let response = self
+            .send_with_retries(
+                &format!("begin upload session for {}", target_ref.whole()),
+                StatusCode::ACCEPTED,
+                || {
+                    self.apply_auth(self.http.post(&url))
+                        .header("Content-Length", 0)
+                },
+            )
+            .await?;
+
+        self.extract_location_header(&response)
+            .with_context(|| format!("failed to open upload session for {}", target_ref.whole()))
+    }
+
+    async fn remote_blob_status(
+        &self,
+        target_ref: &Reference,
+        digest: &str,
+    ) -> anyhow::Result<RemoteBlobStatus> {
+        let response = match self
+            .apply_auth(self.http.head(self.blob_url(target_ref, digest)))
+            .send()
+            .await
+        {
+            Ok(response) => response,
+            Err(error) if should_retry_reqwest_error(&error) => {
+                return Ok(RemoteBlobStatus::Unknown);
+            }
+            Err(error) => {
+                return Err(error).with_context(|| format!("failed to check remote blob {digest}"));
+            }
+        };
+
+        match response.status() {
+            StatusCode::OK => Ok(RemoteBlobStatus::Exists),
+            StatusCode::NOT_FOUND => Ok(RemoteBlobStatus::Missing),
+            _ => Ok(RemoteBlobStatus::Unknown),
+        }
+    }
+
+    async fn upload_status(&self, location: &Url) -> anyhow::Result<UploadStatus> {
+        let response = self
+            .send_with_retries("query upload status", StatusCode::NO_CONTENT, || {
+                self.apply_auth(self.http.get(location.clone()))
+            })
+            .await?;
+
+        Ok(UploadStatus {
+            location: self.extract_location_header(&response)?,
+            uploaded: parse_uploaded_from_range(response.headers().get(RANGE))?,
+        })
+    }
+
     async fn push_blob_from_path(
         &self,
         target_ref: &Reference,
         blob_path: &Path,
         digest: &str,
     ) -> anyhow::Result<String> {
-        if self.blob_exists(target_ref, digest).await? {
+        if self.remote_blob_status(target_ref, digest).await? == RemoteBlobStatus::Exists {
             return Ok(self.blob_url(target_ref, digest));
         }
 
@@ -296,31 +412,105 @@ impl BlobUploader {
         digest: &str,
         size: u64,
     ) -> anyhow::Result<String> {
-        let mut location = self.begin_upload(target_ref).await?;
-        location.query_pairs_mut().append_pair("digest", digest);
+        for attempt in 1..=BLOB_UPLOAD_MAX_ATTEMPTS {
+            let mut location = self.begin_upload(target_ref).await?;
+            location.query_pairs_mut().append_pair("digest", digest);
 
-        let file = tokio::fs::File::open(blob_path)
-            .await
-            .with_context(|| format!("failed to open {}", blob_path.display()))?;
-        let body =
-            reqwest::Body::wrap_stream(ReaderStream::with_capacity(file, STREAM_READ_BUFFER_BYTES));
+            let file = tokio::fs::File::open(blob_path)
+                .await
+                .with_context(|| format!("failed to open {}", blob_path.display()))?;
+            let body = reqwest::Body::wrap_stream(ReaderStream::with_capacity(
+                file,
+                STREAM_READ_BUFFER_BYTES,
+            ));
 
-        let response = self
-            .apply_auth(self.http.put(location.clone()))
-            .header("Content-Length", size)
-            .header("Content-Type", "application/octet-stream")
-            .body(body)
-            .send()
-            .await
-            .with_context(|| format!("failed to upload {}", blob_path.display()))?;
+            let response = self
+                .apply_auth(self.http.put(location.clone()))
+                .header("Content-Length", size)
+                .header("Content-Type", "application/octet-stream")
+                .body(body)
+                .send()
+                .await;
 
-        Ok(self
-            .extract_location(response, StatusCode::CREATED)
-            .await?
-            .to_string())
+            match response {
+                Ok(response) if response.status() == StatusCode::CREATED => {
+                    return Ok(self.extract_location_header(&response)?.to_string());
+                }
+                Ok(response) if should_retry_status(response.status()) => {
+                    if self.remote_blob_status(target_ref, digest).await?
+                        == RemoteBlobStatus::Exists
+                    {
+                        return Ok(self.blob_url(target_ref, digest));
+                    }
+
+                    let error = Self::status_error(response, StatusCode::CREATED).await;
+                    if attempt == BLOB_UPLOAD_MAX_ATTEMPTS {
+                        return Err(error)
+                            .with_context(|| format!("failed to upload {}", blob_path.display()));
+                    }
+                }
+                Ok(response) => {
+                    return Err(Self::status_error(response, StatusCode::CREATED).await)
+                        .with_context(|| format!("failed to upload {}", blob_path.display()));
+                }
+                Err(error) if should_retry_reqwest_error(&error) => {
+                    if self.remote_blob_status(target_ref, digest).await?
+                        == RemoteBlobStatus::Exists
+                    {
+                        return Ok(self.blob_url(target_ref, digest));
+                    }
+
+                    if attempt == BLOB_UPLOAD_MAX_ATTEMPTS {
+                        return Err(error)
+                            .with_context(|| format!("failed to upload {}", blob_path.display()));
+                    }
+                }
+                Err(error) => {
+                    return Err(error)
+                        .with_context(|| format!("failed to upload {}", blob_path.display()));
+                }
+            }
+
+            tokio::time::sleep(retry_delay(attempt)).await;
+        }
+
+        unreachable!("retry loop always returns before exhausting attempts")
     }
 
     async fn push_blob_chunked_from_path(
+        &self,
+        target_ref: &Reference,
+        blob_path: &Path,
+        digest: &str,
+        size: u64,
+    ) -> anyhow::Result<String> {
+        for attempt in 1..=BLOB_UPLOAD_MAX_ATTEMPTS {
+            match self
+                .push_blob_chunked_upload_session(target_ref, blob_path, digest, size)
+                .await
+            {
+                Ok(blob_url) => return Ok(blob_url),
+                Err(error) => {
+                    if self.remote_blob_status(target_ref, digest).await?
+                        == RemoteBlobStatus::Exists
+                    {
+                        return Ok(self.blob_url(target_ref, digest));
+                    }
+
+                    if attempt == BLOB_UPLOAD_MAX_ATTEMPTS {
+                        return Err(error)
+                            .with_context(|| format!("failed to push chunked blob {digest}"));
+                    }
+
+                    tokio::time::sleep(retry_delay(attempt)).await;
+                }
+            }
+        }
+
+        unreachable!("retry loop always returns before exhausting attempts")
+    }
+
+    async fn push_blob_chunked_upload_session(
         &self,
         target_ref: &Reference,
         blob_path: &Path,
@@ -331,55 +521,202 @@ impl BlobUploader {
 
         let mut start: u64 = 0;
         while start < size {
-            let chunk_size = (size - start).min(CHUNKED_BLOB_UPLOAD_SIZE_BYTES as u64);
-            let end = start + chunk_size - 1;
-            let mut chunk_file = tokio::fs::File::open(blob_path)
-                .await
-                .with_context(|| format!("failed to open {}", blob_path.display()))?;
-            chunk_file
-                .seek(SeekFrom::Start(start))
-                .await
-                .with_context(|| {
-                    format!(
-                        "failed to seek {} to chunk offset {start}",
-                        blob_path.display()
-                    )
-                })?;
-            let body = reqwest::Body::wrap_stream(ReaderStream::with_capacity(
-                chunk_file.take(chunk_size),
-                STREAM_READ_BUFFER_BYTES,
-            ));
-
-            let response = self
-                .apply_auth(self.http.patch(location.clone()))
-                .header("Content-Range", format!("{start}-{end}"))
-                .header("Content-Length", chunk_size)
-                .header("Content-Type", "application/octet-stream")
-                .body(body)
-                .send()
-                .await
-                .with_context(|| format!("failed to upload chunk for {}", blob_path.display()))?;
-
-            location = self
-                .extract_location(response, StatusCode::ACCEPTED)
-                .await
-                .with_context(|| format!("failed to update upload session for {digest}"))?;
-            start = end + 1;
+            start = self
+                .push_blob_chunk_with_retries(&mut location, blob_path, digest, start, size)
+                .await?;
         }
 
-        let mut finalize_url = location;
-        finalize_url.query_pairs_mut().append_pair("digest", digest);
-        let response = self
-            .apply_auth(self.http.put(finalize_url))
-            .header("Content-Length", 0)
-            .send()
+        self.finalize_chunked_upload(target_ref, location, digest)
             .await
-            .with_context(|| format!("failed to finalize chunked upload for {digest}"))?;
+    }
 
-        Ok(self
-            .extract_location(response, StatusCode::CREATED)
-            .await?
-            .to_string())
+    async fn push_blob_chunk_with_retries(
+        &self,
+        location: &mut Url,
+        blob_path: &Path,
+        digest: &str,
+        start: u64,
+        size: u64,
+    ) -> anyhow::Result<u64> {
+        let mut current_start = start;
+
+        for attempt in 1..=BLOB_UPLOAD_MAX_ATTEMPTS {
+            let chunk_size = (size - current_start).min(CHUNKED_BLOB_UPLOAD_SIZE_BYTES as u64);
+            match self
+                .patch_blob_chunk(location.clone(), blob_path, current_start, chunk_size)
+                .await?
+            {
+                PatchChunkOutcome::Accepted(next_location) => {
+                    *location = next_location;
+                    return Ok(current_start + chunk_size);
+                }
+                PatchChunkOutcome::NeedsReconcile => {
+                    let status = self.upload_status(location).await.with_context(|| {
+                        format!("failed to reconcile upload session after chunk error for {digest}")
+                    })?;
+                    *location = status.location;
+
+                    if status.uploaded > size {
+                        bail!(
+                            "registry upload session for {digest} reported {} bytes, larger than blob size {size}",
+                            status.uploaded
+                        );
+                    }
+                    if status.uploaded < current_start {
+                        bail!(
+                            "registry upload session for {digest} moved backwards from {current_start} to {} bytes",
+                            status.uploaded
+                        );
+                    }
+                    if status.uploaded > current_start {
+                        return Ok(status.uploaded);
+                    }
+                }
+            }
+
+            if attempt == BLOB_UPLOAD_MAX_ATTEMPTS {
+                bail!(
+                    "failed to upload chunk for {} after {BLOB_UPLOAD_MAX_ATTEMPTS} attempts",
+                    blob_path.display()
+                );
+            }
+
+            tokio::time::sleep(retry_delay(attempt)).await;
+            current_start = start;
+        }
+
+        unreachable!("retry loop always returns before exhausting attempts")
+    }
+
+    async fn patch_blob_chunk(
+        &self,
+        location: Url,
+        blob_path: &Path,
+        start: u64,
+        chunk_size: u64,
+    ) -> anyhow::Result<PatchChunkOutcome> {
+        let end = start + chunk_size - 1;
+        let mut chunk_file = tokio::fs::File::open(blob_path)
+            .await
+            .with_context(|| format!("failed to open {}", blob_path.display()))?;
+        chunk_file
+            .seek(SeekFrom::Start(start))
+            .await
+            .with_context(|| {
+                format!(
+                    "failed to seek {} to chunk offset {start}",
+                    blob_path.display()
+                )
+            })?;
+        let body = reqwest::Body::wrap_stream(ReaderStream::with_capacity(
+            chunk_file.take(chunk_size),
+            STREAM_READ_BUFFER_BYTES,
+        ));
+
+        let response = self
+            .apply_auth(self.http.patch(location))
+            .header("Content-Range", format!("{start}-{end}"))
+            .header("Content-Length", chunk_size)
+            .header("Content-Type", "application/octet-stream")
+            .body(body)
+            .send()
+            .await;
+
+        let response = match response {
+            Ok(response) => response,
+            Err(error) if should_retry_reqwest_error(&error) => {
+                return Ok(PatchChunkOutcome::NeedsReconcile);
+            }
+            Err(error) => {
+                return Err(error).with_context(|| {
+                    format!("failed to upload chunk for {}", blob_path.display())
+                });
+            }
+        };
+
+        match response.status() {
+            StatusCode::ACCEPTED => Ok(PatchChunkOutcome::Accepted(
+                self.extract_location_header(&response)?,
+            )),
+            StatusCode::RANGE_NOT_SATISFIABLE => Ok(PatchChunkOutcome::NeedsReconcile),
+            status if should_retry_status(status) => Ok(PatchChunkOutcome::NeedsReconcile),
+            _ => Err(Self::status_error(response, StatusCode::ACCEPTED)
+                .await
+                .context("failed to update upload session")),
+        }
+    }
+
+    async fn finalize_chunked_upload(
+        &self,
+        target_ref: &Reference,
+        location: Url,
+        digest: &str,
+    ) -> anyhow::Result<String> {
+        for attempt in 1..=BLOB_UPLOAD_MAX_ATTEMPTS {
+            let mut finalize_url = location.clone();
+            finalize_url.query_pairs_mut().append_pair("digest", digest);
+
+            let response = self
+                .apply_auth(self.http.put(finalize_url))
+                .header("Content-Length", 0)
+                .send()
+                .await;
+
+            match response {
+                Ok(response) if response.status() == StatusCode::CREATED => {
+                    return Ok(self.extract_location_header(&response)?.to_string());
+                }
+                Ok(response) if should_retry_status(response.status()) => {
+                    if self.remote_blob_status(target_ref, digest).await?
+                        == RemoteBlobStatus::Exists
+                    {
+                        return Ok(self.blob_url(target_ref, digest));
+                    }
+
+                    let error = Self::status_error(response, StatusCode::CREATED).await;
+                    if attempt == BLOB_UPLOAD_MAX_ATTEMPTS {
+                        return Err(error).with_context(|| {
+                            format!("failed to finalize chunked upload for {digest}")
+                        });
+                    }
+                }
+                Ok(response) => {
+                    if response.status() == StatusCode::NOT_FOUND
+                        && self.remote_blob_status(target_ref, digest).await?
+                            == RemoteBlobStatus::Exists
+                    {
+                        return Ok(self.blob_url(target_ref, digest));
+                    }
+
+                    return Err(Self::status_error(response, StatusCode::CREATED).await)
+                        .with_context(|| {
+                            format!("failed to finalize chunked upload for {digest}")
+                        });
+                }
+                Err(error) if should_retry_reqwest_error(&error) => {
+                    if self.remote_blob_status(target_ref, digest).await?
+                        == RemoteBlobStatus::Exists
+                    {
+                        return Ok(self.blob_url(target_ref, digest));
+                    }
+
+                    if attempt == BLOB_UPLOAD_MAX_ATTEMPTS {
+                        return Err(error).with_context(|| {
+                            format!("failed to finalize chunked upload for {digest}")
+                        });
+                    }
+                }
+                Err(error) => {
+                    return Err(error).with_context(|| {
+                        format!("failed to finalize chunked upload for {digest}")
+                    });
+                }
+            }
+
+            tokio::time::sleep(retry_delay(attempt)).await;
+        }
+
+        unreachable!("retry loop always returns before exhausting attempts")
     }
 }
 
@@ -595,10 +932,11 @@ fn strip_explicit_tag(raw: &str) -> &str {
 #[cfg(test)]
 mod tests {
     use crate::storage::parse_image_ref;
+    use reqwest::header::HeaderValue;
 
     use super::{
         BlobUploadStrategy, blob_upload_strategy, has_explicit_registry, has_explicit_tag,
-        should_include_digest, strip_explicit_tag,
+        parse_uploaded_from_range, should_include_digest, strip_explicit_tag,
     };
 
     #[test]
@@ -687,6 +1025,23 @@ mod tests {
         assert_eq!(
             blob_upload_strategy(3 * 1024 * 1024 * 1024),
             BlobUploadStrategy::Chunked
+        );
+    }
+
+    #[test]
+    fn test_parse_uploaded_from_range() {
+        assert_eq!(parse_uploaded_from_range(None).unwrap(), 0);
+        assert_eq!(
+            parse_uploaded_from_range(Some(&HeaderValue::from_static("0-0"))).unwrap(),
+            1
+        );
+        assert_eq!(
+            parse_uploaded_from_range(Some(&HeaderValue::from_static("0-33554431"))).unwrap(),
+            32 * 1024 * 1024
+        );
+        assert_eq!(
+            parse_uploaded_from_range(Some(&HeaderValue::from_static("bytes=0-33554431"))).unwrap(),
+            32 * 1024 * 1024
         );
     }
 }

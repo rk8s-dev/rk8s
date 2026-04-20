@@ -263,17 +263,21 @@ impl Storage for S3Storage {
 
         let file = File::create(&temp_path).await.map_to_internal()?;
         let mut file_writer = BufWriter::new(file);
-        let size = io::copy(&mut body_reader, &mut file_writer)
-            .await
-            .map_to_internal()?;
-        file_writer.shutdown().await.map_to_internal()?;
+        let size = match io::copy(&mut body_reader, &mut file_writer).await {
+            Ok(size) => size,
+            Err(error) => {
+                drop(file_writer.into_inner());
+                self.cleanup_temp_files(&session_id, &temp_path).await;
+                return Err(InternalError::from(error).into());
+            }
+        };
+        if let Err(error) = file_writer.shutdown().await {
+            drop(file_writer.into_inner());
+            self.cleanup_temp_files(&session_id, &temp_path).await;
+            return Err(InternalError::from(error).into());
+        }
 
-        let key = self.path_manager.blob_data_path(digest);
-        let s3_path = self.to_object_path(&key);
-
-        let result = self.do_finalize_upload(&temp_path, &s3_path).await;
-        self.cleanup_temp_files(&session_id, &temp_path).await;
-        result?;
+        self.finalize_upload(&session_id, digest).await?;
 
         Ok(size)
     }
@@ -295,13 +299,25 @@ impl Storage for S3Storage {
             .open(&temp_path)
             .await
             .map_to_internal()?;
+        // Preserve chunks accepted before this PATCH; only roll back bytes
+        // appended by the current request if its body stream fails.
+        let original_len = file.metadata().await.map_to_internal()?.len();
 
         let mut file_writer = BufWriter::new(file);
 
-        let size = io::copy(&mut body_reader, &mut file_writer)
-            .await
-            .map_to_internal()?;
-        file_writer.shutdown().await.map_to_internal()?;
+        let size = match io::copy(&mut body_reader, &mut file_writer).await {
+            Ok(size) => size,
+            Err(error) => {
+                let file = file_writer.into_inner();
+                file.set_len(original_len).await.map_to_internal()?;
+                return Err(InternalError::from(error).into());
+            }
+        };
+        if let Err(error) = file_writer.shutdown().await {
+            let file = file_writer.into_inner();
+            file.set_len(original_len).await.map_to_internal()?;
+            return Err(InternalError::from(error).into());
+        }
 
         Ok(size)
     }
