@@ -52,6 +52,8 @@ pub trait RepoRepository: Send + Sync {
 
     async fn mark_repo_pushed(&self, repo_id: Uuid, pushed_at: DateTime<Utc>) -> Result<()>;
 
+    async fn refresh_repo_last_pushed_at(&self, repo_id: Uuid) -> Result<()>;
+
     async fn change_visibility(&self, identifier: &RepoIdentifier, is_public: bool) -> Result<()>;
 }
 
@@ -227,6 +229,23 @@ impl RepoRepository for PgRepoRepository {
         )
         .bind(repo_id)
         .bind(pushed_at)
+        .execute(self.pool.as_ref())
+        .await
+        .map_to_internal()?;
+        Ok(())
+    }
+
+    async fn refresh_repo_last_pushed_at(&self, repo_id: Uuid) -> Result<()> {
+        sqlx::query(
+            "UPDATE repos
+             SET last_pushed_at = (
+                 SELECT MAX(pushed_at)
+                 FROM repo_tags
+                 WHERE repo_id = $1
+             )
+             WHERE id = $1",
+        )
+        .bind(repo_id)
         .execute(self.pool.as_ref())
         .await
         .map_to_internal()?;

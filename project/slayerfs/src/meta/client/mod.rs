@@ -1979,11 +1979,13 @@ impl<T: MetaStore + ?Sized + 'static> MetaLayer for MetaClient<T> {
             .get_slices(chunk_id)
             .instrument(tracing::trace_span!("get_slices.store", chunk_id))
             .await?;
-        self.inode_cache
-            .replace_slices(inode, chunk_index, &slices)
-            .await;
-        tracing::Span::current().record("slice_count", slices.len());
-        Ok(slices)
+        let cached = self
+            .inode_cache
+            .cache_slices_if_absent(inode, chunk_index, &slices)
+            .await
+            .unwrap_or(slices);
+        tracing::Span::current().record("slice_count", cached.len());
+        Ok(cached)
     }
 
     #[tracing::instrument(
@@ -2110,6 +2112,7 @@ mod tests {
             },
             cache: CacheConfig::default(),
             client: ClientOptions::default(),
+            compact: CompactConfig::default(),
         };
 
         let store = Arc::new(DatabaseMetaStore::from_config(config).await.unwrap());

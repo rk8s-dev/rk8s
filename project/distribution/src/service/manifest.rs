@@ -71,6 +71,10 @@ pub(crate) async fn purge_repo_tags_for_digest(
         .repo_storage
         .delete_repo_tags_by_digest(repo.id, digest.as_ref())
         .await?;
+    state
+        .repo_storage
+        .refresh_repo_last_pushed_at(repo.id)
+        .await?;
 
     Ok(())
 }
@@ -394,6 +398,10 @@ pub async fn delete_manifest_handler(
             state
                 .repo_storage
                 .delete_repo_tag(repo.id, &reference)
+                .await?;
+            state
+                .repo_storage
+                .refresh_repo_last_pushed_at(repo.id)
                 .await?;
         }
     }

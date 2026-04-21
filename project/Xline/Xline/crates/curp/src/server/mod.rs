@@ -1,5 +1,3 @@
-use std::{fmt::Debug, sync::Arc};
-
 use self::curp_node::CurpNode;
 pub use self::{
     conflict::{spec_pool_new::SpObject, uncommitted_pool::UcpObject},
@@ -11,6 +9,7 @@ use crate::{
     role_change::RoleChange,
 };
 use engine::SnapshotAllocator;
+use std::{fmt::Debug, sync::Arc};
 use tokio::sync::broadcast;
 use utils::{config::CurpConfig, task_manager::TaskManager};
 

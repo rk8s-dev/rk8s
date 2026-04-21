@@ -9,7 +9,7 @@ use std::{collections::HashMap, sync::Arc, time::Duration};
 use curp::{
     client::{ClientApi, ClientBuilder},
     members::{ClusterInfo, ServerId},
-    rpc::{FetchClusterRequest, FetchClusterResponse, MethodId, QuicChannel, QuicGrpcServer},
+    rpc::{FetchClusterRequest, FetchClusterResponse, QuicChannel, QuicGrpcServer},
     server::{
         DB, Rpc,
         conflict::test_pools::{TestSpecPool, TestUncomPool},
@@ -29,6 +29,7 @@ use utils::{
     config::{ClientConfig, CurpConfig, EngineConfig},
     task_manager::TaskManager,
 };
+use xlinerpc::MethodId;
 
 /// A QUIC-based test node
 pub struct QuicCurpNode {
@@ -139,6 +140,8 @@ impl QuicCurpGroup {
             QuicClient::builder()
                 .with_root_certificates(root_store)
                 .without_cert()
+                .bind(["inet://0.0.0.0:0"])
+                .with_alpns(["h3"])
                 .build(),
         );
 

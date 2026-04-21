@@ -3,7 +3,6 @@ use std::{pin::Pin, sync::Arc, time::Duration};
 use crate::{
     id_gen::IdGenerator,
     metrics,
-    router::endpoint::EndPoint as RouterEndpoint,
     rpc::{
         LeaseGrantRequest, LeaseGrantResponse, LeaseKeepAliveRequest, LeaseKeepAliveResponse,
         LeaseLeasesRequest, LeaseLeasesResponse, LeaseRevokeRequest, LeaseRevokeResponse,
@@ -15,7 +14,7 @@ use async_stream::{stream, try_stream};
 use clippy_utilities::NumericCast;
 use curp::{
     members::ClusterInfo,
-    rpc::{DnsFallback, MethodId, QuicChannel},
+    rpc::{DnsFallback, QuicChannel},
 };
 use futures::{StreamExt, stream::Stream};
 use tokio::time;
@@ -25,7 +24,8 @@ use xlineapi::{
     command::{Command, CommandResponse, CurpClient, SyncResponse},
     execute_error::ExecuteError,
 };
-use xlinerpc::{Status, Streaming};
+use xlinerpc::server::EndPoint as RouterEndpoint;
+use xlinerpc::{MethodId, Status, Streaming};
 
 /// Default Lease Request Time
 const DEFAULT_LEASE_REQUEST_TIME: Duration = Duration::from_millis(500);

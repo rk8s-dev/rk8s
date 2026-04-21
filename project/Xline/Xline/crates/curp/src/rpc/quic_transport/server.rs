@@ -118,6 +118,24 @@ where
     }
 }
 
+impl<C, CE, RC, XH> Clone for QuicGrpcServer<C, CE, RC, XH>
+where
+    C: Command,
+    CE: CommandExecutor<C>,
+    RC: RoleChange,
+    XH: QuicServiceExt,
+{
+    #[inline]
+    fn clone(&self) -> Self {
+        Self {
+            service: Arc::clone(&self.service),
+            inner_service: Arc::clone(&self.inner_service),
+            ext_service: self.ext_service.clone(),
+            _phantom: PhantomData,
+        }
+    }
+}
+
 impl<C, CE, RC, XH> QuicGrpcServer<C, CE, RC, XH>
 where
     C: Command,

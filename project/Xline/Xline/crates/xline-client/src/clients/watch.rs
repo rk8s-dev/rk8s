@@ -2,11 +2,12 @@ use std::fmt::Debug;
 
 use futures::channel::mpsc::channel;
 use xlineapi::{RequestUnion, WatchResponse};
+use xlinerpc::MethodId;
 
 use crate::{
     Client, ClientOptions,
     error::{Result, XlineClientBuildError, XlineClientError},
-    transport::{Channel, MethodId, Streaming},
+    transport::{Channel, Streaming},
     types::watch::{WatchOptions, WatchStreaming, Watcher},
 };
 

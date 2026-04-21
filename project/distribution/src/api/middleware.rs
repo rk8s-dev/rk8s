@@ -34,6 +34,26 @@ struct VerifyUser {
     username: String,
 }
 
+fn claims_can_access_namespace(claims: &Claims, namespace: &str) -> bool {
+    claims.sub.eq_ignore_ascii_case(namespace)
+}
+
+fn authorize_verified_claims(
+    claims: &Claims,
+    namespace: &str,
+    action: &str,
+) -> Result<(), AppError> {
+    if !matches!(action, "push" | "pull") {
+        return Err(OciError::Forbidden("unsupported_action".to_string()).into());
+    }
+
+    if !claims_can_access_namespace(claims, namespace) {
+        return Err(OciError::Forbidden("namespace_mismatch".to_string()).into());
+    }
+
+    Ok(())
+}
+
 async fn verify_with_web_app(
     state: &Arc<AppState>,
     token: String,
@@ -227,6 +247,7 @@ pub async fn authorize_repository_access(
 
     let identifier = identifier_from_full_name(identifier.unwrap());
     let namespace = &identifier.namespace;
+    let existing_claims = req.extensions().get::<Claims>().cloned();
     match *req.method() {
         // for read, we can read others' public repos.
         Method::GET | Method::HEAD => {
@@ -236,6 +257,39 @@ pub async fn authorize_repository_access(
                 .await
                 && !repo.is_public
             {
+                if let Some(claims) = existing_claims.as_ref() {
+                    authorize_verified_claims(claims, namespace, "pull")?;
+                } else {
+                    let token = match auth.as_ref() {
+                        Some(AuthHeader::Bearer(bearer)) => bearer.token().to_string(),
+                        _ => {
+                            return Err(OciError::Unauthorized {
+                                msg: "unauthorized".to_string(),
+                                auth_url: Some(state.config.registry_url.clone()),
+                            }
+                            .into());
+                        }
+                    };
+
+                    let _claims = verify_with_web_app(
+                        &state,
+                        token,
+                        Some(namespace.clone()),
+                        Some(identifier.name.clone()),
+                        Some("pull".to_string()),
+                    )
+                    .await?;
+                }
+            }
+        }
+        // for write, we cannot write others' all repos.
+        Method::POST | Method::PUT | Method::PATCH | Method::DELETE => {
+            if let Some(claims) = existing_claims.as_ref() {
+                // `populate_oci_claims` already validated the token with the web app.
+                // Reuse those claims here so chunked uploads do not re-verify every
+                // PATCH/PUT request against the Next.js app.
+                authorize_verified_claims(claims, namespace, "push")?;
+            } else {
                 let token = match auth.as_ref() {
                     Some(AuthHeader::Bearer(bearer)) => bearer.token().to_string(),
                     _ => {
@@ -252,32 +306,10 @@ pub async fn authorize_repository_access(
                     token,
                     Some(namespace.clone()),
                     Some(identifier.name.clone()),
-                    Some("pull".to_string()),
+                    Some("push".to_string()),
                 )
                 .await?;
             }
-        }
-        // for write, we cannot write others' all repos.
-        Method::POST | Method::PUT | Method::PATCH | Method::DELETE => {
-            let token = match auth.as_ref() {
-                Some(AuthHeader::Bearer(bearer)) => bearer.token().to_string(),
-                _ => {
-                    return Err(OciError::Unauthorized {
-                        msg: "unauthorized".to_string(),
-                        auth_url: Some(state.config.registry_url.clone()),
-                    }
-                    .into());
-                }
-            };
-
-            let _claims = verify_with_web_app(
-                &state,
-                token,
-                Some(namespace.clone()),
-                Some(identifier.name.clone()),
-                Some("push".to_string()),
-            )
-            .await?;
         }
         _ => unreachable!(),
     }
@@ -310,12 +342,40 @@ fn extract_full_repo_name(url: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::is_anonymous_subject;
+    use super::{
+        Claims, authorize_verified_claims, claims_can_access_namespace, is_anonymous_subject,
+    };
 
     #[test]
     fn anonymous_subject_match_is_case_insensitive() {
         assert!(is_anonymous_subject("anonymous"));
         assert!(is_anonymous_subject("Anonymous"));
         assert!(!is_anonymous_subject("lingbou"));
+    }
+
+    #[test]
+    fn claims_namespace_match_is_case_insensitive() {
+        let claims = Claims {
+            sub: "LingBou".to_string(),
+            exp: 0,
+            iss: None,
+            iat: None,
+        };
+
+        assert!(claims_can_access_namespace(&claims, "lingbou"));
+        assert!(claims_can_access_namespace(&claims, "LINGBOU"));
+        assert!(!claims_can_access_namespace(&claims, "someone-else"));
+    }
+
+    #[test]
+    fn authorize_verified_claims_rejects_namespace_mismatch() {
+        let claims = Claims {
+            sub: "lingbou".to_string(),
+            exp: 0,
+            iss: None,
+            iat: None,
+        };
+
+        assert!(authorize_verified_claims(&claims, "someone-else", "push").is_err());
     }
 }

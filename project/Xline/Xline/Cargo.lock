@@ -4799,6 +4799,7 @@ dependencies = [
  "rand 0.8.5",
  "rustls",
  "rustls-pemfile",
+ "serial_test",
  "test-macros",
  "thiserror 1.0.69",
  "tokio",
@@ -4862,10 +4863,21 @@ dependencies = [
 name = "xlinerpc"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
+ "axum",
  "bytes",
  "futures",
+ "gm-quic",
+ "h3",
+ "h3-shim",
+ "http",
+ "http-body",
  "prost",
  "thiserror 1.0.69",
+ "tokio",
+ "tokio-stream",
+ "tower 0.5.3",
+ "tracing",
 ]
 
 [[package]]

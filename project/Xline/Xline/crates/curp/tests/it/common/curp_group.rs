@@ -180,6 +180,8 @@ impl CurpGroup {
             QuicClient::builder()
                 .with_root_certificates(root_store)
                 .without_cert()
+                .bind(["inet://0.0.0.0:0"])
+                .with_alpns(["h3"])
                 .build(),
         );
 

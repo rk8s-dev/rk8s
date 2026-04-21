@@ -9,6 +9,11 @@ use xline_test_utils::{
     Client, ClientOptions, Cluster, enable_auth, set_user, types::kv::RangeOptions,
 };
 
+/// Create ClientOptions with proper TLS for auth tests
+fn auth_client_options() -> ClientOptions {
+    ClientOptions::default().with_quic_tls_config(Cluster::create_quic_tls_config())
+}
+
 #[tokio::test(flavor = "multi_thread")]
 #[abort_on_panic]
 async fn test_auth_empty_user_get() -> Result<(), Box<dyn Error>> {
@@ -47,7 +52,7 @@ async fn test_auth_token_with_disable() -> Result<(), Box<dyn Error>> {
     enable_auth(client).await?;
     let authed_client = Client::connect(
         vec![cluster.get_client_url(0)],
-        ClientOptions::default().with_user("root", "123"),
+        auth_client_options().with_user("root", "123"),
     )
     .await?;
     let kv_client = authed_client.kv_client();
@@ -105,13 +110,13 @@ async fn test_kv_authorization() -> Result<(), Box<dyn Error>> {
 
     let u1_client = Client::connect(
         vec![cluster.get_client_url(0)],
-        ClientOptions::default().with_user("u1", "123"),
+        auth_client_options().with_user("u1", "123"),
     )
     .await?
     .kv_client();
     let u2_client = Client::connect(
         vec![cluster.get_client_url(0)],
-        ClientOptions::default().with_user("u2", "123"),
+        auth_client_options().with_user("u2", "123"),
     )
     .await?
     .kv_client();
@@ -161,13 +166,13 @@ async fn test_no_root_user_do_admin_ops() -> Result<(), Box<dyn Error>> {
     enable_auth(client).await?;
     let user_client = Client::connect(
         vec![cluster.get_client_url(0)],
-        ClientOptions::default().with_user("u", "123"),
+        auth_client_options().with_user("u", "123"),
     )
     .await?
     .auth_client();
     let root_client = Client::connect(
         vec![cluster.get_client_url(0)],
-        ClientOptions::default().with_user("root", "123"),
+        auth_client_options().with_user("root", "123"),
     )
     .await?
     .auth_client();
@@ -194,14 +199,14 @@ async fn test_auth_wrong_password() -> Result<(), Box<dyn Error>> {
 
     let result = Client::connect(
         vec![cluster.get_client_url(0)],
-        ClientOptions::default().with_user("root", "456"),
+        auth_client_options().with_user("root", "456"),
     )
     .await;
     assert!(result.is_err());
 
     let result = Client::connect(
         vec![cluster.get_client_url(0)],
-        ClientOptions::default().with_user("root", "123"),
+        auth_client_options().with_user("root", "123"),
     )
     .await;
     assert!(result.is_ok());

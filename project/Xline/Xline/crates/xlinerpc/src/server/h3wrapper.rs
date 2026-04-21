@@ -5,11 +5,16 @@
 //! The design patterns (state machine, trailer polling, size hint enforcement) draw from Scuffle's approach.
 //!
 //! See the original repository for more context: <https://github.com/ScuffleCloud/scuffle>
+
 use std::convert::Infallible;
 use std::future::Future;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
+use crate::{
+    MetaData, Request as XlineRequest, Response as XlineResponse, Status as XlineStatus,
+    Streaming as XlineStreaming, grpc,
+};
 use anyhow::{Error, anyhow};
 use bytes::{Buf, Bytes};
 use futures::StreamExt;
@@ -18,34 +23,35 @@ use http::Request;
 use prost::Message;
 use tokio_stream::Stream;
 use tower::Service;
-use xlinerpc::{
-    MetaData, Request as XlineRequest, Response as XlineResponse, Status as XlineStatus,
-    Streaming as XlineStreaming,
-};
 
 type RpcFuture<T, E> = Pin<Box<dyn Future<Output = Result<T, E>> + Send>>;
 
 /// An incoming HTTP/3 body.
 ///
 /// Implements [`http_body::Body`].
-pub(crate) struct QuicIncomingBody<S> {
+pub struct QuicIncomingBody<S> {
     stream: RequestStream<S, Bytes>,
-    state: State,
+    /// Body parsing state
+    state: BodyState,
 }
 
+/// Body parsing state machine
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum State {
+enum BodyState {
+    /// Receiving data, optionally with remaining size hint
     Data(Option<u64>),
+    /// Receiving trailers
     Trailers,
+    /// Terminal state
     Done,
 }
 
 impl<S> QuicIncomingBody<S> {
     /// Create a new incoming HTTP/3 body.
-    pub(crate) fn new(stream: RequestStream<S, Bytes>, size_hint: Option<u64>) -> Self {
+    pub fn new(stream: RequestStream<S, Bytes>, size_hint: Option<u64>) -> Self {
         Self {
             stream,
-            state: State::Data(size_hint),
+            state: BodyState::Data(size_hint),
         }
     }
 }
@@ -60,18 +66,18 @@ impl<S: h3::quic::RecvStream> http_body::Body for QuicIncomingBody<S> {
     ) -> Poll<Option<Result<http_body::Frame<Self::Data>, Self::Error>>> {
         let QuicIncomingBody { stream, state } = self.as_mut().get_mut();
 
-        if *state == State::Done {
+        if *state == BodyState::Done {
             return Poll::Ready(None);
         }
 
-        if let State::Data(remaining) = state {
+        if let BodyState::Data(remaining) = state {
             match stream.poll_recv_data(cx) {
                 Poll::Ready(Ok(Some(mut buf))) => {
                     let buf_size = buf.remaining() as u64;
 
                     if let Some(remaining) = remaining {
                         if buf_size > *remaining {
-                            *state = State::Done;
+                            *state = BodyState::Done;
                             return Poll::Ready(Some(Err(anyhow!(
                                 "the given buffer size hint was exceeded"
                             ))));
@@ -85,10 +91,10 @@ impl<S: h3::quic::RecvStream> http_body::Body for QuicIncomingBody<S> {
                     ))));
                 }
                 Poll::Ready(Ok(None)) => {
-                    *state = State::Trailers;
+                    *state = BodyState::Trailers;
                 }
                 Poll::Ready(Err(err)) => {
-                    *state = State::Done;
+                    *state = BodyState::Done;
                     return Poll::Ready(Some(Err(Error::from(err))));
                 }
                 Poll::Pending => {
@@ -97,55 +103,38 @@ impl<S: h3::quic::RecvStream> http_body::Body for QuicIncomingBody<S> {
             }
         }
 
-        // We poll the recv data again even though we already got the None
-        // because we want to make sure there is not a frame after the trailers
-        // This is a workaround because h3 does not allow us to poll the trailer
-        // directly, so we need to make sure the future recv_trailers is going to be
-        // ready after a single poll We avoid pinning to the heap.
-        let resp = match stream.poll_recv_data(cx) {
-            Poll::Ready(Ok(None)) => match std::pin::pin!(stream.recv_trailers()).poll(cx) {
-                Poll::Ready(Ok(Some(trailers))) => {
-                    Poll::Ready(Some(Ok(http_body::Frame::trailers(trailers))))
-                }
-                // We will only poll the recv_trailers once so if pending is returned we are done.
-                Poll::Pending => {
-                    // #[cfg(feature = "debug")]
-                    // tracing::warn!("recv_trailers is pending");
-                    Poll::Ready(None)
-                }
-                Poll::Ready(Ok(None)) => Poll::Ready(None),
-                Poll::Ready(Err(err)) => Poll::Ready(Some(Err(Error::from(err)))),
-            },
-            // We are not expecting any data after the previous poll returned None
-            Poll::Ready(Ok(Some(_))) => {
-                Poll::Ready(Some(Err(anyhow!("unexpected data after trailers"))))
+        match std::pin::pin!(stream.recv_trailers()).poll(cx) {
+            Poll::Ready(Ok(Some(trailers))) => {
+                *state = BodyState::Done;
+                Poll::Ready(Some(Ok(http_body::Frame::trailers(trailers))))
             }
-            Poll::Ready(Err(err)) => Poll::Ready(Some(Err(Error::from(err)))),
-            Poll::Pending => return Poll::Pending,
-        };
-
-        *state = State::Done;
-
-        resp
+            Poll::Ready(Ok(None)) => {
+                *state = BodyState::Done;
+                Poll::Ready(None)
+            }
+            Poll::Ready(Err(err)) => {
+                *state = BodyState::Done;
+                Poll::Ready(Some(Err(Error::from(err))))
+            }
+            Poll::Pending => Poll::Pending,
+        }
     }
 
     fn size_hint(&self) -> http_body::SizeHint {
         match self.state {
-            State::Data(Some(remaining)) => http_body::SizeHint::with_exact(remaining),
-            State::Data(None) => http_body::SizeHint::default(),
-            State::Trailers | State::Done => http_body::SizeHint::with_exact(0),
+            BodyState::Data(Some(remaining)) => http_body::SizeHint::with_exact(remaining),
+            BodyState::Data(None) => http_body::SizeHint::default(),
+            BodyState::Trailers | BodyState::Done => http_body::SizeHint::with_exact(0),
         }
     }
 
     fn is_end_stream(&self) -> bool {
         match self.state {
-            State::Data(Some(0)) | State::Trailers | State::Done => true,
-            State::Data(_) => false,
+            BodyState::Data(Some(0)) | BodyState::Trailers | BodyState::Done => true,
+            BodyState::Data(_) => false,
         }
     }
 }
-
-const GRPC_HEADER_SIZE: usize = 5;
 
 fn grpc_ok_response(body: axum::body::Body) -> http::Response<axum::body::Body> {
     let mut response = http::Response::new(body);
@@ -162,34 +151,10 @@ fn grpc_ok_response(body: axum::body::Body) -> http::Response<axum::body::Body> 
 }
 
 fn grpc_trailers_from_status(status: Option<XlineStatus>) -> http::HeaderMap {
-    let mut trailers = http::HeaderMap::new();
-    let code = status
-        .as_ref()
-        .map(|s| i32::from(s.code()).to_string())
-        .unwrap_or_else(|| "0".to_string());
-    let grpc_status =
-        http::HeaderValue::from_str(&code).unwrap_or_else(|_| http::HeaderValue::from_static("2"));
-    let _ = trailers.insert(
-        http::header::HeaderName::from_static("grpc-status"),
-        grpc_status,
-    );
-
-    if let Some(status) = status {
-        let msg = status.message();
-        if !msg.is_empty() {
-            let encoded = encode_grpc_message_header(msg);
-            let grpc_message = http::HeaderValue::from_str(&encoded)
-                .unwrap_or_else(|_| http::HeaderValue::from_static("rpc error"));
-            let _ = trailers.insert(
-                http::header::HeaderName::from_static("grpc-message"),
-                grpc_message,
-            );
-        }
-    }
-
-    trailers
+    grpc::trailers_from_status(status.as_ref())
 }
 
+/// Body for gRPC streaming responses
 struct GrpcStreamingBody {
     inner: Pin<Box<dyn Stream<Item = Result<Bytes, XlineStatus>> + Send>>,
     finished: bool,
@@ -249,7 +214,7 @@ fn grpc_error_response(status: XlineStatus) -> http::Response<axum::body::Body> 
         grpc_status,
     );
 
-    let encoded_message = encode_grpc_message_header(status.message());
+    let encoded_message = grpc::encode_message_header(status.message());
     let grpc_message = http::HeaderValue::from_str(&encoded_message)
         .unwrap_or_else(|_| http::HeaderValue::from_static("rpc error"));
     let _ = headers.insert(
@@ -261,58 +226,16 @@ fn grpc_error_response(status: XlineStatus) -> http::Response<axum::body::Body> 
     response
 }
 
-fn encode_grpc_message_header(message: &str) -> String {
-    let mut out = String::with_capacity(message.len());
-    for b in message.bytes() {
-        if (0x20..=0x7e).contains(&b) && b != b'%' {
-            out.push(char::from(b));
-        } else {
-            out.push('%');
-            let _ = std::fmt::Write::write_fmt(&mut out, format_args!("{b:02X}"));
-        }
-    }
-    out
-}
-
 fn grpc_frame_encode<M: Message>(msg: &M) -> Result<Bytes, XlineStatus> {
-    let body = msg.encode_to_vec();
-    let len =
-        u32::try_from(body.len()).map_err(|_| XlineStatus::internal("gRPC message too large"))?;
-    let mut out = Vec::with_capacity(GRPC_HEADER_SIZE + body.len());
-    out.push(0); // uncompressed
-    out.extend_from_slice(&len.to_be_bytes());
-    out.extend_from_slice(&body);
-    Ok(Bytes::from(out))
+    grpc::frame_encode(msg)
 }
 
 fn grpc_frame_decode<M: Message + Default>(buf: &[u8]) -> Result<(M, usize), XlineStatus> {
-    if buf.len() < GRPC_HEADER_SIZE {
-        return Err(XlineStatus::internal("gRPC frame header too short"));
-    }
-    if buf[0] != 0 {
-        return Err(XlineStatus::internal(
-            "compressed gRPC frames are not supported",
-        ));
-    }
-    let len = u32::from_be_bytes([buf[1], buf[2], buf[3], buf[4]]) as usize;
-    let total = GRPC_HEADER_SIZE + len;
-    if buf.len() < total {
-        return Err(XlineStatus::internal("gRPC frame body too short"));
-    }
-    let msg = M::decode(&buf[GRPC_HEADER_SIZE..total])
-        .map_err(|e| XlineStatus::internal(format!("protobuf decode error: {e}")))?;
-    Ok((msg, total))
+    grpc::frame_decode(buf)
 }
 
 fn decode_all_grpc_frames<M: Message + Default>(buf: &[u8]) -> Result<Vec<M>, XlineStatus> {
-    let mut msgs = Vec::new();
-    let mut offset = 0;
-    while offset < buf.len() {
-        let (msg, consumed) = grpc_frame_decode::<M>(&buf[offset..])?;
-        msgs.push(msg);
-        offset += consumed;
-    }
-    Ok(msgs)
+    grpc::decode_all_frames(buf)
 }
 
 fn metadata_from_headers(headers: &http::HeaderMap) -> MetaData {
@@ -328,7 +251,7 @@ fn metadata_from_headers(headers: &http::HeaderMap) -> MetaData {
 async fn read_body_bytes<B>(body: B) -> Result<Vec<u8>, XlineStatus>
 where
     B: http_body::Body<Data = Bytes> + Send + 'static,
-    B::Error: Into<crate::router::Error> + Send + 'static,
+    B::Error: Into<anyhow::Error> + Send + 'static,
 {
     let mut bytes = Vec::new();
     let mut body = std::pin::pin!(body);
@@ -346,12 +269,12 @@ where
 fn spawn_grpc_request_stream<B, M>(body: B) -> XlineStreaming<M>
 where
     B: http_body::Body<Data = Bytes> + Send + 'static,
-    B::Error: Into<crate::router::Error> + Send + 'static,
+    B::Error: Into<anyhow::Error> + Send + 'static,
     M: Message + Default + Send + 'static,
 {
     let (tx, rx) = tokio::sync::mpsc::channel::<Result<M, XlineStatus>>(128);
 
-    let _ = tokio::spawn(async move {
+    let handle = tokio::spawn(async move {
         let mut body = std::pin::pin!(body);
         let mut buf = Vec::new();
         let mut read_pos = 0usize;
@@ -372,7 +295,7 @@ where
 
                 loop {
                     let available = buf.len().saturating_sub(read_pos);
-                    if available < GRPC_HEADER_SIZE {
+                    if available < grpc::HEADER_SIZE {
                         break;
                     }
 
@@ -383,7 +306,7 @@ where
                         buf[base + 3],
                         buf[base + 4],
                     ]) as usize;
-                    let total = GRPC_HEADER_SIZE + len;
+                    let total = grpc::HEADER_SIZE + len;
                     if available < total {
                         break;
                     }
@@ -421,11 +344,19 @@ where
         }
     });
 
+    // Log if the spawned task panics
+    let _watcher = tokio::spawn(async move {
+        if let Err(e) = handle.await {
+            tracing::error!("gRPC request stream task panicked: {}", e);
+        }
+    });
+
     XlineStreaming::new(Box::pin(tokio_stream::wrappers::ReceiverStream::new(rx)))
 }
 
+/// Service adapter for unary RPC calls
 #[derive(Clone)]
-pub(crate) struct MakeUnarySVC<SVC, Input, Output> {
+pub struct MakeUnarySVC<SVC, Input, Output> {
     inner: SVC,
     _1: std::marker::PhantomData<Input>,
     _2: std::marker::PhantomData<Output>,
@@ -435,7 +366,7 @@ impl<SVC, Input, Output> MakeUnarySVC<SVC, Input, Output>
 where
     SVC: Clone,
 {
-    pub(crate) fn new(service: SVC) -> Self {
+    pub fn new(service: SVC) -> Self {
         Self {
             inner: service,
             _1: std::marker::PhantomData,
@@ -455,7 +386,7 @@ where
         + Sync,
     SVC::Future: Send,
     B: http_body::Body<Data = Bytes> + Send + 'static,
-    B::Error: Into<crate::router::Error> + Send + 'static,
+    B::Error: Into<anyhow::Error> + Send + 'static,
 {
     type Response = http::Response<axum::body::Body>;
     type Error = Infallible;
@@ -504,8 +435,9 @@ where
     }
 }
 
+/// Service adapter for bidirectional streaming RPC calls
 #[derive(Clone)]
-pub(crate) struct MakeStreamingSvc<SVC, Input, Output> {
+pub struct MakeStreamingSvc<SVC, Input, Output> {
     inner: SVC,
     _1: std::marker::PhantomData<Input>,
     _2: std::marker::PhantomData<Output>,
@@ -515,7 +447,7 @@ impl<SVC, Input, Output> MakeStreamingSvc<SVC, Input, Output>
 where
     SVC: Clone,
 {
-    pub(crate) fn new(service: SVC) -> Self {
+    pub fn new(service: SVC) -> Self {
         Self {
             inner: service,
             _1: std::marker::PhantomData,
@@ -540,7 +472,7 @@ where
         + Sync,
     SVC::Future: Send,
     B: http_body::Body<Data = Bytes> + Send + 'static,
-    B::Error: Into<crate::router::Error> + Send + 'static,
+    B::Error: Into<anyhow::Error> + Send + 'static,
 {
     type Response = http::Response<axum::body::Body>;
     type Error = Infallible;
@@ -573,8 +505,9 @@ where
     }
 }
 
+/// Service adapter for server-side streaming RPC calls
 #[derive(Clone)]
-pub(crate) struct MakeServerStreamingSvc<SVC, Input, Output> {
+pub struct MakeServerStreamingSvc<SVC, Input, Output> {
     inner: SVC,
     _1: std::marker::PhantomData<Input>,
     _2: std::marker::PhantomData<Output>,
@@ -584,7 +517,7 @@ impl<SVC, Input, Output> MakeServerStreamingSvc<SVC, Input, Output>
 where
     SVC: Clone,
 {
-    pub(crate) fn new(service: SVC) -> Self {
+    pub fn new(service: SVC) -> Self {
         Self {
             inner: service,
             _1: std::marker::PhantomData,
@@ -606,7 +539,7 @@ where
         + Sync,
     SVC::Future: Send,
     B: http_body::Body<Data = Bytes> + Send + 'static,
-    B::Error: Into<crate::router::Error> + Send + 'static,
+    B::Error: Into<anyhow::Error> + Send + 'static,
 {
     type Response = http::Response<axum::body::Body>;
     type Error = Infallible;
@@ -655,8 +588,9 @@ where
     }
 }
 
+/// Service adapter for client-side streaming RPC calls
 #[derive(Clone)]
-pub(crate) struct MakeClientStreamingSvc<SVC, Input, Output> {
+pub struct MakeClientStreamingSvc<SVC, Input, Output> {
     inner: SVC,
     _1: std::marker::PhantomData<Input>,
     _2: std::marker::PhantomData<Output>,
@@ -666,7 +600,7 @@ impl<SVC, Input, Output> MakeClientStreamingSvc<SVC, Input, Output>
 where
     SVC: Clone,
 {
-    pub(crate) fn new(service: SVC) -> Self {
+    pub fn new(service: SVC) -> Self {
         Self {
             inner: service,
             _1: std::marker::PhantomData,
@@ -690,7 +624,7 @@ where
         + Sync,
     SVC::Future: Send,
     B: http_body::Body<Data = Bytes> + Send + 'static,
-    B::Error: Into<crate::router::Error> + Send + 'static,
+    B::Error: Into<anyhow::Error> + Send + 'static,
 {
     type Response = http::Response<axum::body::Body>;
     type Error = Infallible;

@@ -10,9 +10,12 @@ use xline_test_utils::Cluster;
 async fn xline_remove_node() -> Result<(), Box<dyn Error>> {
     let mut cluster = Cluster::new(5).await;
     cluster.start().await;
-    let mut cluster_client = Client::connect(cluster.all_client_addrs(), ClientOptions::default())
-        .await?
-        .cluster_client();
+    let mut cluster_client = Client::connect(
+        cluster.all_client_addrs(),
+        ClientOptions::default().with_quic_tls_config(Cluster::create_quic_tls_config()),
+    )
+    .await?
+    .cluster_client();
     let list_res = cluster_client.member_list(false).await?;
     assert_eq!(list_res.members.len(), 5);
     let remove_id = list_res.members[0].id;
@@ -27,7 +30,11 @@ async fn xline_remove_node() -> Result<(), Box<dyn Error>> {
 async fn xline_add_node() -> Result<(), Box<dyn Error>> {
     let mut cluster = Cluster::new(3).await;
     cluster.start().await;
-    let client = Client::connect(cluster.all_client_addrs(), ClientOptions::default()).await?;
+    let client = Client::connect(
+        cluster.all_client_addrs(),
+        ClientOptions::default().with_quic_tls_config(Cluster::create_quic_tls_config()),
+    )
+    .await?;
     let mut cluster_client = client.cluster_client();
     let kv_client = client.kv_client();
     _ = kv_client.put("key", "value", None).await?;
