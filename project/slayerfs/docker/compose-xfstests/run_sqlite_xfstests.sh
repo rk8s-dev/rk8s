@@ -86,6 +86,8 @@ ts="$(date +%s)-$RANDOM"
 export SLAYERFS_ARTIFACT_DIR="/artifacts/run-${ts}"
 export XFSTESTS_CASES="$XFSTESTS_CASES_VALUE"
 export XFSTESTS_CHECK_ARGS="$XFSTESTS_CHECK_ARGS_VALUE"
+export SLAYERFS_META_BACKEND="sqlite"
+export SLAYERFS_META_URL=""
 if [[ "$USE_S3" == true ]]; then
     export SLAYERFS_DATA_BACKEND="s3"
 else

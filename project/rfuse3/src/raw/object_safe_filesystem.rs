@@ -429,6 +429,22 @@ pub trait ObjectSafeFilesystem: Send + Sync {
         Err(libc::ENOSYS.into())
     }
 
+    #[allow(clippy::too_many_arguments)]
+    async fn ioctl(
+        &self,
+        req: Request,
+        inode: Inode,
+        fh: u64,
+        flags: u32,
+        cmd: u32,
+        arg: u64,
+        in_size: u32,
+        out_size: u32,
+        data: &[u8],
+    ) -> Result<ReplyIoctl> {
+        Err(libc::ENOSYS.into())
+    }
+
     /// poll for IO readiness events.
     #[allow(clippy::too_many_arguments)]
     async fn poll(
@@ -810,6 +826,24 @@ where
         idx: u64,
     ) -> Result<ReplyBmap> {
         Filesystem::bmap(self, req, inode, blocksize, idx).await
+    }
+
+    async fn ioctl(
+        &self,
+        req: Request,
+        inode: Inode,
+        fh: u64,
+        flags: u32,
+        cmd: u32,
+        arg: u64,
+        in_size: u32,
+        out_size: u32,
+        data: &[u8],
+    ) -> Result<ReplyIoctl> {
+        Filesystem::ioctl(
+            self, req, inode, fh, flags, cmd, arg, in_size, out_size, data,
+        )
+        .await
     }
 
     async fn poll(

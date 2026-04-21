@@ -9,7 +9,7 @@ use crate::meta::config::MetaClientConfig;
 use crate::meta::file_lock::{FileLockInfo, FileLockQuery, FileLockRange, FileLockType};
 use crate::meta::store::{AclRule, MetaStore, SetAttrFlags, SetAttrRequest, StatFsSnapshot};
 use dashmap::{DashMap, Entry};
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
@@ -1807,38 +1807,44 @@ where
             });
         }
 
-        let mut locked = Vec::new();
-        let mut unique = BTreeMap::new();
-        for handle in self.file_handles_for_inode(src.ino) {
-            unique.insert(handle.fh, handle);
-        }
-        for handle in self.file_handles_for_inode(dst.ino) {
-            unique.insert(handle.fh, handle);
-        }
-        for handle in unique.into_values() {
-            locked.push(handle.lock_write().await);
-        }
-
-        self.state.writer.flush_if_exists(src.ino as u64).await;
-        if dst.ino != src.ino {
-            self.state.writer.flush_if_exists(dst.ino as u64).await;
-        }
-
-        let src_attr = self.meta_stat_required(src.ino, PathHint::none()).await?;
-        let dst_attr = self.meta_stat_required(dst.ino, PathHint::none()).await?;
-        let src_guard = self.open_guard(src.ino, src_attr, true, false).await?;
-        let dst_guard = self.open_guard(dst.ino, dst_attr, false, true).await?;
-
-        // Read the full source snapshot before writing so same-file overlap keeps
-        // copy_file_range semantics close to a memmove-style copy.
-        let data = src_guard.read(off_in, len).await?;
-        let written = dst_guard.write(off_out, &data).await?;
-
-        drop(dst_guard);
-        drop(src_guard);
-        drop(locked);
-
+        // Snapshot source first so overlap on the same file behaves like memmove.
+        // Reusing existing fh read/write paths keeps flush/invalidate/mtime logic
+        // consistent and avoids temporary guard handles under heavy fsx COPY load.
+        let data = self.read(fh_in, off_in, len).await?;
+        let written = self.write(fh_out, off_out, &data).await?;
         Ok(written)
+    }
+
+    /// Exchange two byte ranges inside the same opened file handle.
+    ///
+    /// The source snapshots are read first and then written back swapped,
+    /// so overlap behaves like exchanging two immutable views.
+    pub async fn exchange_file_range(
+        &self,
+        fh: u64,
+        off_a: u64,
+        off_b: u64,
+        length: u64,
+    ) -> Result<(), VfsError> {
+        if length == 0 || off_a == off_b {
+            return Ok(());
+        }
+
+        let len = usize::try_from(length).map_err(|_| VfsError::InvalidInput)?;
+        let handle = self.file_handle_required(fh)?;
+
+        if !handle.flags.read || !handle.flags.write {
+            return Err(VfsError::PermissionDenied {
+                path: PathHint::none(),
+            });
+        }
+
+        let src_a = self.read(fh, off_a, len).await?;
+        let src_b = self.read(fh, off_b, len).await?;
+        self.write(fh, off_a, &src_b).await?;
+        self.write(fh, off_b, &src_a).await?;
+
+        Ok(())
     }
 
     /// Allocate a per-file handle, returning the opaque fh id.

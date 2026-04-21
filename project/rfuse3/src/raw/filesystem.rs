@@ -408,7 +408,8 @@ pub trait Filesystem {
         Err(libc::ENOSYS.into())
     }
 
-    /*async fn ioctl(
+    #[allow(clippy::too_many_arguments)]
+    async fn ioctl(
         &self,
         req: Request,
         inode: Inode,
@@ -418,9 +419,10 @@ pub trait Filesystem {
         arg: u64,
         in_size: u32,
         out_size: u32,
+        data: &[u8],
     ) -> Result<ReplyIoctl> {
         Err(libc::ENOSYS.into())
-    }*/
+    }
 
     /// poll for IO readiness events.
     #[allow(clippy::too_many_arguments)]

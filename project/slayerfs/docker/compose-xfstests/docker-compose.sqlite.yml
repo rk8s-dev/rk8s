@@ -61,6 +61,8 @@ services:
         condition: service_completed_successfully
     environment:
       SLAYERFS_META_BACKEND: sqlite
+      SLAYERFS_META_URL: ""
+      SLAYERFS_NO_BACKGROUND_JOBS: ${SLAYERFS_NO_BACKGROUND_JOBS:-true}
       SLAYERFS_SQLITE_PATH: /var/lib/slayerfs/metadata.db
       SLAYERFS_DATA_BACKEND: ${SLAYERFS_DATA_BACKEND:-local-fs}
       SLAYERFS_DATA_DIR: /var/lib/slayerfs/data

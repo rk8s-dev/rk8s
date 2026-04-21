@@ -237,8 +237,10 @@ impl DatabaseMetaStore {
                     // Anonymous in-memory databases can use multiple connections for tests
                     opts.max_connections(5).min_connections(1);
                 } else {
-                    // File-based databases can use more connections
-                    opts.max_connections(10).min_connections(1);
+                    // File-based SQLite under fsx-heavy mixed metadata updates is
+                    // lock-sensitive; a single pooled connection avoids cross-
+                    // connection write contention surfacing as EIO to FUSE clients.
+                    opts.max_connections(1).min_connections(1);
                 }
                 opts.connect_timeout(Duration::from_secs(30))
                     .idle_timeout(Duration::from_secs(30))

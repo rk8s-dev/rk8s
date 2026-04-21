@@ -28,8 +28,8 @@ use rfuse3::raw::Request;
 use rfuse3::raw::flags::FUSE_WRITE_CACHE;
 use rfuse3::raw::reply::{
     DirectoryEntry, DirectoryEntryPlus, ReplyAttr, ReplyCopyFileRange, ReplyCreated, ReplyData,
-    ReplyDirectory, ReplyDirectoryPlus, ReplyEntry, ReplyInit, ReplyLock, ReplyOpen, ReplyStatFs,
-    ReplyWrite, ReplyXAttr,
+    ReplyDirectory, ReplyDirectoryPlus, ReplyEntry, ReplyInit, ReplyIoctl, ReplyLock, ReplyOpen,
+    ReplyStatFs, ReplyWrite, ReplyXAttr,
 };
 use std::ffi::{OsStr, OsString};
 use std::time::Duration;
@@ -38,6 +38,41 @@ use futures_util::stream::{self, BoxStream};
 use rfuse3::raw::Filesystem;
 use rfuse3::{FileType as FuseFileType, SetAttr, Timestamp};
 use tracing::{debug, error};
+
+const XFS_IOC_EXCHANGE_RANGE: u32 = 0x40285881;
+const XFS_EXCHANGE_RANGE_IN_SIZE: usize = 40;
+
+#[derive(Debug, Clone, Copy)]
+struct XfsExchangeRangeIn {
+    file1_fd: i32,
+    _pad: u32,
+    file1_offset: u64,
+    file2_offset: u64,
+    length: u64,
+    flags: u64,
+}
+
+fn parse_xfs_exchange_range_in(data: &[u8]) -> Result<XfsExchangeRangeIn, Errno> {
+    if data.len() < XFS_EXCHANGE_RANGE_IN_SIZE {
+        return Err(libc::EINVAL.into());
+    }
+
+    let file1_fd = i32::from_ne_bytes(data[0..4].try_into().map_err(|_| Errno::from(libc::EINVAL))?);
+    let pad = u32::from_ne_bytes(data[4..8].try_into().map_err(|_| Errno::from(libc::EINVAL))?);
+    let file1_offset = u64::from_ne_bytes(data[8..16].try_into().map_err(|_| Errno::from(libc::EINVAL))?);
+    let file2_offset = u64::from_ne_bytes(data[16..24].try_into().map_err(|_| Errno::from(libc::EINVAL))?);
+    let length = u64::from_ne_bytes(data[24..32].try_into().map_err(|_| Errno::from(libc::EINVAL))?);
+    let flags = u64::from_ne_bytes(data[32..40].try_into().map_err(|_| Errno::from(libc::EINVAL))?);
+
+    Ok(XfsExchangeRangeIn {
+        file1_fd,
+        _pad: pad,
+        file1_offset,
+        file2_offset,
+        length,
+        flags,
+    })
+}
 #[cfg(all(test, target_os = "linux"))]
 mod mount_tests {
     use super::*;
@@ -1154,6 +1189,52 @@ where
         Ok(ReplyCopyFileRange { copied })
     }
 
+    #[allow(clippy::too_many_arguments)]
+    async fn ioctl(
+        &self,
+        _req: Request,
+        _inode: u64,
+        fh: u64,
+        _flags: u32,
+        cmd: u32,
+        _arg: u64,
+        _in_size: u32,
+        out_size: u32,
+        data: &[u8],
+    ) -> FuseResult<ReplyIoctl> {
+        debug!(fh, cmd, out_size, in_size = data.len(), "fuse.ioctl");
+
+        if cmd != XFS_IOC_EXCHANGE_RANGE {
+            return Err(libc::ENOTTY.into());
+        }
+
+        let args = parse_xfs_exchange_range_in(data)?;
+        if args.flags != 0 {
+            return Err(libc::EINVAL.into());
+        }
+        if args.file1_fd < 0 {
+            return Err(libc::EBADF.into());
+        }
+
+        self.exchange_file_range(
+            fh,
+            args.file1_offset,
+            args.file2_offset,
+            args.length,
+        )
+        .await
+        .map_err(Errno::from)?;
+
+        let mut out = Bytes::new();
+        if out_size > 0 {
+            out = Bytes::from(vec![0u8; out_size as usize]);
+        }
+
+        Ok(ReplyIoctl {
+            result: 0,
+            data: out,
+        })
+    }
     async fn setxattr(
         &self,
         _req: Request,

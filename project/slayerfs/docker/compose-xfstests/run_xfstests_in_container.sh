@@ -19,6 +19,7 @@ log_file="${SLAYERFS_LOG_FILE:-/artifacts/slayerfs.log}"
 xfstests_dir="${XFSTESTS_DIR:-/opt/xfstests-dev}"
 artifact_root="${SLAYERFS_ARTIFACT_ROOT:-/artifacts}"
 artifact_dir="${SLAYERFS_ARTIFACT_DIR:-}"
+no_background_jobs="${SLAYERFS_NO_BACKGROUND_JOBS:-true}"
 
 xfstests_cases="${XFSTESTS_CASES:-}"
 xfstests_skip_cases="${XFSTESTS_SKIP_CASES:-0}"
@@ -120,6 +121,12 @@ EOF
                 exit 1
                 ;;
         esac
+        echo
+
+        cat <<EOF
+client:
+    no_background_jobs: ${no_background_jobs}
+EOF
         echo
 
         case "$meta_backend" in

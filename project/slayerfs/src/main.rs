@@ -392,9 +392,17 @@ fn shutdown_chrome() {
 fn shutdown_chrome() {}
 
 async fn create_meta_store(args: &MountConfig) -> anyhow::Result<Arc<dyn MetaStore>> {
+    let no_background_jobs_env = std::env::var("SLAYERFS_NO_BACKGROUND_JOBS")
+        .ok()
+        .map(|v| matches!(v.to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on"))
+        .unwrap_or(false);
+
     match args.meta_backend {
         MetaBackendKind::Sqlx => {
-            let client = ClientOptions::default();
+            let mut client = ClientOptions::default();
+            if no_background_jobs_env {
+                client.no_background_jobs = true;
+            }
             let compact = CompactConfig::default();
 
             let config = Config {
@@ -413,7 +421,10 @@ async fn create_meta_store(args: &MountConfig) -> anyhow::Result<Arc<dyn MetaSto
                 anyhow::bail!("etcd urls must be set when meta backend is etcd");
             }
 
-            let client = ClientOptions::default();
+            let mut client = ClientOptions::default();
+            if no_background_jobs_env {
+                client.no_background_jobs = true;
+            }
             let compact = CompactConfig::default();
 
             let config = Config {
@@ -430,7 +441,10 @@ async fn create_meta_store(args: &MountConfig) -> anyhow::Result<Arc<dyn MetaSto
             Ok(handle.store() as Arc<dyn MetaStore>)
         }
         MetaBackendKind::Redis => {
-            let client = ClientOptions::default();
+            let mut client = ClientOptions::default();
+            if no_background_jobs_env {
+                client.no_background_jobs = true;
+            }
             let compact = CompactConfig::default();
 
             let config = Config {

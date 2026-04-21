@@ -1801,6 +1801,94 @@ pub(super) async fn worker_bmap<FS: Filesystem + Send + Sync + 'static>(
     });
 }
 
+pub(super) async fn worker_ioctl<FS: Filesystem + Send + Sync + 'static>(
+    ctx: &Arc<DispatchCtx<FS>>,
+    item: WorkItem,
+) {
+    if item.data.len() < FUSE_IOCTL_IN_SIZE {
+        let data =
+            reply_error_in_worker(libc::EINVAL.into(), item.unique).expect("serialize out_header");
+        let _ = ctx.resp.unbounded_send(Either::Left(data));
+        return;
+    }
+
+    let ioctl_in = match get_bincode_config().deserialize::<fuse_ioctl_in>(&item.data) {
+        Err(err) => {
+            debug!(
+                unique = item.unique,
+                "deserialize fuse_ioctl_in failed {}",
+                err
+            );
+            let data =
+                reply_error_in_worker(libc::EINVAL.into(), item.unique).expect("serialize out_header");
+            let _ = ctx.resp.unbounded_send(Either::Left(data));
+            return;
+        }
+        Ok(v) => v,
+    };
+
+    let ioctl_data = item.data[FUSE_IOCTL_IN_SIZE..].to_vec();
+    let fs = ctx.fs.clone();
+    let resp_sender = ctx.resp.clone();
+
+    spawn(debug_span!("fuse_ioctl_worker"), async move {
+        debug!(
+            unique = item.unique,
+            inode = item.in_header.nodeid,
+            fh = ioctl_in.fh,
+            cmd = ioctl_in.cmd,
+            in_size = ioctl_in.in_size,
+            out_size = ioctl_in.out_size,
+            "ioctl (worker)"
+        );
+
+        match fs
+            .ioctl(
+                Request::from(&item),
+                item.in_header.nodeid,
+                ioctl_in.fh,
+                ioctl_in.flags,
+                ioctl_in.cmd,
+                ioctl_in.arg,
+                ioctl_in.in_size,
+                ioctl_in.out_size,
+                &ioctl_data,
+            )
+            .await
+        {
+            Err(err) => {
+                let data = reply_error_in_worker(err, item.unique).expect("serialize out_header");
+                let _ = resp_sender.unbounded_send(Either::Left(data));
+            }
+            Ok(reply_ioctl) => {
+                let ioctl_out = fuse_ioctl_out {
+                    result: reply_ioctl.result,
+                    flags: 0,
+                    in_iovs: 0,
+                    out_iovs: 0,
+                };
+                let out_header = fuse_out_header {
+                    len: (FUSE_OUT_HEADER_SIZE + FUSE_IOCTL_OUT_SIZE + reply_ioctl.data.len())
+                        as u32,
+                    error: 0,
+                    unique: item.unique,
+                };
+                let mut data = Vec::with_capacity(
+                    FUSE_OUT_HEADER_SIZE + FUSE_IOCTL_OUT_SIZE + reply_ioctl.data.len(),
+                );
+                get_bincode_config()
+                    .serialize_into(&mut data, &out_header)
+                    .expect("serialize header");
+                get_bincode_config()
+                    .serialize_into(&mut data, &ioctl_out)
+                    .expect("serialize ioctl_out");
+                data.extend_from_slice(&reply_ioctl.data);
+                let _ = resp_sender.unbounded_send(Either::Left(data));
+            }
+        }
+    });
+}
+
 pub(super) async fn worker_fallocate<FS: Filesystem + Send + Sync + 'static>(
     ctx: &Arc<DispatchCtx<FS>>,
     item: WorkItem,

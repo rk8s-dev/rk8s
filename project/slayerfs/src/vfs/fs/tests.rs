@@ -681,6 +681,45 @@ mod io_tests {
     }
 
     #[tokio::test]
+    async fn test_fs_exchange_file_range_same_file_swaps_content() {
+        let layout = ChunkLayout {
+            chunk_size: 512 * 1024,
+            block_size: 4 * 1024,
+        };
+        let store = InMemoryBlockStore::new();
+        let meta_handle = create_meta_store_from_url("sqlite::memory:").await.unwrap();
+        let meta_store = meta_handle.store();
+        let fs = VFS::new(layout, store, meta_store).await.unwrap();
+
+        fs.create_file("/xchg.bin").await.unwrap();
+        let attr = fs.stat("/xchg.bin").await.unwrap();
+        let fh = fs.open(attr.ino, attr.clone(), true, true).await.unwrap();
+
+        let mut expected = vec![0u8; 0x70000];
+        for (i, b) in expected.iter_mut().enumerate() {
+            *b = (i % 251) as u8;
+        }
+        fs.write(fh, 0, &expected).await.unwrap();
+
+        let off_a = 0xd000usize;
+        let off_b = 0x45000usize;
+        let len = 0xd000usize;
+        fs.exchange_file_range(fh, off_a as u64, off_b as u64, len as u64)
+            .await
+            .unwrap();
+
+        let src_a = expected[off_a..off_a + len].to_vec();
+        let src_b = expected[off_b..off_b + len].to_vec();
+        expected[off_a..off_a + len].copy_from_slice(&src_b);
+        expected[off_b..off_b + len].copy_from_slice(&src_a);
+
+        let out = fs.read(fh, 0, expected.len()).await.unwrap();
+        assert_eq!(out, expected);
+
+        fs.close(fh).await.unwrap();
+    }
+
+    #[tokio::test]
     async fn test_fs_truncate_then_rewrite_range_stays_visible() {
         let layout = ChunkLayout {
             chunk_size: 512 * 1024,

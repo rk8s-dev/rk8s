@@ -166,6 +166,7 @@ async fn process_work_item<FS: Filesystem + Send + Sync + 'static>(
             FUSE_ACCESS  => worker_access,
             FUSE_CREATE  => worker_create,
             FUSE_BMAP    => worker_bmap,
+            FUSE_IOCTL => worker_ioctl,
             FUSE_FALLOCATE => worker_fallocate,
             FUSE_READDIRPLUS => worker_readdirplus,
             FUSE_RENAME2 => worker_rename2,
