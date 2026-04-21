@@ -34,7 +34,9 @@ cargo bench --bench slayerfs_bench
 | `SLAYERFS_BENCH_S3_REGION`（空）           | 可选，S3 区域                                     |
 | `SLAYERFS_BENCH_S3_ENDPOINT`（空）         | 可选，自定义兼容端点/MinIO                             |
 | `SLAYERFS_BENCH_S3_FORCE_PATH_STYLE`（未设置） | 可选布尔值，设为 `true` 可强制 path-style 访问            |
-| `SLAYERFS_BENCH_META_URL`（`sqlite::memory:`） | 元数据后端 URL，兼容 SQLite/PostgreSQL/Redis/Etcd 等 |
+| `SLAYERFS_BENCH_META_BACKEND`（sqlx）          | 元数据后端类型：`sqlx`、`redis` 或 `etcd`            |
+| `SLAYERFS_BENCH_META_URL`（`sqlite::memory:`） | 当后端为 `sqlx` / `redis` 时使用的元数据 URL         |
+| `SLAYERFS_BENCH_META_ETCD_URLS`（空）          | 当 `META_BACKEND=etcd` 时必须指定的 etcd endpoints   |
 
 SLAYERFS_BENCH_BIG_FILE_MB=256 \
 cargo bench --bench slayerfs_bench -- --warm-up-time 1 --profile-time 5
@@ -64,4 +66,3 @@ inferno-flamegraph out.folded > flame.svg
 ```
 
 wrap 模式会捕获进程的所有线程，并覆盖从启动到关闭的完整生命周期；如果服务器需要长时间常驻，可以在 wrap 命令中配合 `timeout` 或 `sleep` 控制采样窗口，避免生成过大的 `perf.data`。同样务必开启 `debug = true` 与 `RUSTFLAGS="-C force-frame-pointers=yes"`，以免火焰图里充满 `unknown`。最终得到的 `flame.svg` 可以与 `slayerfs_bench` 的结果互相印证，帮助你在真实 FUSE 负载下定位瓶颈如果缺少`inferno-flamegraph`请使用`cargo install inferno`，并确保`~/.cargo/bin`已经加入了PATH。
-

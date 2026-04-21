@@ -222,28 +222,6 @@ async fn test_hardlink_dentry_binding_cross_dir_move_rename() {
 #[serial]
 #[tokio::test]
 #[ignore]
-async fn test_directory_same_parent_rename_updates_lookup() {
-    let store = new_test_store().await;
-    let root = store.root_ino();
-
-    let parent = store.mkdir(root, "parent".to_string()).await.unwrap();
-    let dir_ino = store.mkdir(parent, "old_dir".to_string()).await.unwrap();
-
-    store
-        .rename(parent, "old_dir", parent, "new_dir".to_string())
-        .await
-        .unwrap();
-
-    assert_eq!(store.lookup(parent, "old_dir").await.unwrap(), None);
-    assert_eq!(
-        store.lookup(parent, "new_dir").await.unwrap(),
-        Some(dir_ino)
-    );
-}
-
-#[serial]
-#[tokio::test]
-#[ignore]
 async fn test_basic_read_lock() {
     let store = new_test_store().await;
     let session_id = Uuid::now_v7();

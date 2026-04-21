@@ -2008,7 +2008,7 @@ impl MetaStore for EtcdMetaStore {
                         .await?
                         .ok_or(MetaError::NotFound(entry_ino))?;
 
-                    if !entry_info.is_file || entry_info.nlink <= 1 {
+                    if entry_info.nlink <= 1 {
                         entry_info.parent_inode = new_parent;
                         entry_info.entry_name = new_name.clone();
                     } else {

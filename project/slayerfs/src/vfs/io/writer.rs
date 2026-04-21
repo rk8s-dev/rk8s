@@ -1273,6 +1273,18 @@ where
         }
     }
 
+    /// Like `flush_if_exists` but propagates errors.  Used in truncate paths
+    /// where a failed flush means data would be silently lost.
+    pub(crate) async fn flush_required(&self, ino: u64) -> anyhow::Result<()> {
+        let writer = self.files.get(&ino).map(|entry| entry.value().clone());
+        if let Some(writer) = writer
+            && writer.has_pending().await
+        {
+            writer.flush().await?;
+        }
+        Ok(())
+    }
+
     pub(crate) async fn clear(&self, ino: u64) {
         let writer = self.files.get(&ino).map(|entry| entry.value().clone());
         if let Some(writer) = writer {
