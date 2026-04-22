@@ -7,14 +7,8 @@ on:
       - "project/rfuse3/**"
       - "project/Cargo.toml"
       - "project/Cargo.lock"
-  push:
-    branches:
-      - main
-    paths:
-      - "project/slayerfs/**"
-      - "project/rfuse3/**"
-      - "project/Cargo.toml"
-      - "project/Cargo.lock"
+  # Just run on pull requests as the main branch is protected and requires CI to pass before merging.
+  # This avoids redundant runs on pushes to main.
 
 jobs:
   unit-and-integration:
@@ -26,24 +20,9 @@ jobs:
       RUSTUP_TOOLCHAIN: stable
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           submodules: recursive
-
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update -y
-          sudo apt-get install -y --no-install-recommends \
-            git-lfs \
-            fuse3 \
-            pkg-config \
-            libssl-dev \
-            protobuf-compiler \
-            qemu-system-x86 \
-            qemu-utils \
-            libvirt-clients \
-            guestfish \
-            xorriso
 
       - name: Start backend services
         run: |
@@ -115,7 +94,7 @@ jobs:
       SLAYERFS_XFSTESTS_ARTIFACT_ROOT: project/slayerfs/docker/compose-xfstests/artifacts
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 1
 
