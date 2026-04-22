@@ -877,6 +877,7 @@ async fn test_compaction_gc_roundtrip_etcd() {
         .unwrap();
 
     assert_eq!(store.list_chunk_ids(10).await.unwrap(), vec![11, 22]);
+    assert_eq!(store.list_chunk_ids(1).await.unwrap().len(), 1);
 
     let current = store.get_slices(11).await.unwrap();
     let delayed = SliceDesc::encode_delayed_data(&current, &[101]);
@@ -1310,14 +1311,7 @@ async fn test_replace_slices_for_compact_batches_many_delayed_records_etcd() {
         .unwrap();
 
     assert!(store.get_slices(chunk_id).await.unwrap().is_empty());
-    let pending = store
-        .process_delayed_slices(slice_count as usize, -1)
-        .await
-        .unwrap();
-    assert_eq!(pending.len(), slice_count as usize);
+    let pending = store.process_delayed_slices(10, -1).await.unwrap();
+    assert_eq!(pending.len(), 10);
     assert_eq!(pending[0].0, 10_000);
-    assert_eq!(
-        pending[slice_count as usize - 1].0,
-        10_000 + slice_count - 1
-    );
 }

@@ -169,14 +169,21 @@ impl EtcdMetaStore {
             .and_then(|rest| rest.parse::<u64>().ok())
     }
 
-    async fn scan_prefix_keys(&self, prefix: &str) -> Result<Vec<String>, MetaError> {
+    async fn scan_prefix_keys_limited(
+        &self,
+        prefix: &str,
+        limit: Option<usize>,
+    ) -> Result<Vec<String>, MetaError> {
         let mut client = self.client.clone();
-        let resp = client
-            .get(prefix, Some(GetOptions::new().with_prefix()))
-            .await
-            .map_err(|e| {
-                MetaError::Internal(format!("Etcd prefix scan failed for {prefix}: {e}"))
-            })?;
+        let mut options = GetOptions::new().with_prefix();
+        if let Some(limit) = limit {
+            let limit = i64::try_from(limit)
+                .map_err(|_| MetaError::Internal("etcd scan limit overflow".to_string()))?;
+            options = options.with_limit(limit);
+        }
+        let resp = client.get(prefix, Some(options)).await.map_err(|e| {
+            MetaError::Internal(format!("Etcd prefix scan failed for {prefix}: {e}"))
+        })?;
 
         resp.kvs()
             .iter()
@@ -190,21 +197,29 @@ impl EtcdMetaStore {
             .collect()
     }
 
+    async fn scan_prefix_keys(&self, prefix: &str) -> Result<Vec<String>, MetaError> {
+        self.scan_prefix_keys_limited(prefix, None).await
+    }
+
     fn max_chunk_compact_lock_ttl_secs(&self) -> u64 {
         self._config.compact.lock_ttl.max_ttl_secs
     }
 
-    async fn scan_json_prefix_serde_only<T: DeserializeOwned>(
+    async fn scan_json_prefix_limited_serde_only<T: DeserializeOwned>(
         &self,
         prefix: &str,
+        limit: Option<usize>,
     ) -> Result<Vec<(String, T)>, MetaError> {
         let mut client = self.client.clone();
-        let resp = client
-            .get(prefix, Some(GetOptions::new().with_prefix()))
-            .await
-            .map_err(|e| {
-                MetaError::Internal(format!("Etcd prefix scan failed for {prefix}: {e}"))
-            })?;
+        let mut options = GetOptions::new().with_prefix();
+        if let Some(limit) = limit {
+            let limit = i64::try_from(limit)
+                .map_err(|_| MetaError::Internal("etcd scan limit overflow".to_string()))?;
+            options = options.with_limit(limit);
+        }
+        let resp = client.get(prefix, Some(options)).await.map_err(|e| {
+            MetaError::Internal(format!("Etcd prefix scan failed for {prefix}: {e}"))
+        })?;
 
         let mut out = Vec::new();
         for kv in resp.kvs() {
@@ -216,6 +231,13 @@ impl EtcdMetaStore {
             out.push((key, value));
         }
         Ok(out)
+    }
+
+    async fn scan_json_prefix_serde_only<T: DeserializeOwned>(
+        &self,
+        prefix: &str,
+    ) -> Result<Vec<(String, T)>, MetaError> {
+        self.scan_json_prefix_limited_serde_only(prefix, None).await
     }
 
     /// Etcd helper method: generate link parent key for multi-hardlink files
@@ -3072,7 +3094,7 @@ impl MetaStore for EtcdMetaStore {
         }
 
         let mut chunk_ids: Vec<u64> = self
-            .scan_prefix_keys(SLICE_KEY_PREFIX)
+            .scan_prefix_keys_limited(SLICE_KEY_PREFIX, Some(limit))
             .await?
             .into_iter()
             .filter_map(|key| Self::parse_chunk_id_from_slice_key(&key))
@@ -3271,16 +3293,22 @@ impl MetaStore for EtcdMetaStore {
         let cutoff_time = Utc::now().timestamp() - max_age_secs;
         let mut delayed_records = Vec::new();
         delayed_records.extend(
-            self.scan_json_prefix_serde_only::<EtcdDelayedSliceRecord>(DELAYED_PENDING_PREFIX)
-                .await?
-                .into_iter()
-                .map(|(_, record)| record),
+            self.scan_json_prefix_limited_serde_only::<EtcdDelayedSliceRecord>(
+                DELAYED_PENDING_PREFIX,
+                Some(batch_size),
+            )
+            .await?
+            .into_iter()
+            .map(|(_, record)| record),
         );
         delayed_records.extend(
-            self.scan_json_prefix_serde_only::<EtcdDelayedSliceRecord>(DELAYED_META_DELETED_PREFIX)
-                .await?
-                .into_iter()
-                .map(|(_, record)| record),
+            self.scan_json_prefix_limited_serde_only::<EtcdDelayedSliceRecord>(
+                DELAYED_META_DELETED_PREFIX,
+                Some(batch_size),
+            )
+            .await?
+            .into_iter()
+            .map(|(_, record)| record),
         );
 
         delayed_records.retain(|record| {
