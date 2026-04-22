@@ -1241,3 +1241,83 @@ async fn test_truncate_updates_size_and_prunes_slices_etcd() {
     );
     assert!(store.get_slices(chunk1).await.unwrap().is_empty());
 }
+
+#[serial]
+#[tokio::test]
+#[ignore]
+async fn test_truncate_batches_large_chunk_deletes_etcd() {
+    let store = new_test_store().await;
+    let ino = store
+        .create_file(store.root_ino(), "truncate_large.txt".to_string())
+        .await
+        .unwrap();
+    let chunk_size = 1024;
+    let chunk_count = 60;
+
+    for idx in 0..chunk_count {
+        let chunk_id = chunk_id_for(ino, idx).unwrap();
+        store
+            .write(
+                ino,
+                chunk_id,
+                SliceDesc {
+                    slice_id: 9000 + idx,
+                    chunk_id,
+                    offset: 0,
+                    length: chunk_size,
+                },
+                (idx + 1) * chunk_size,
+            )
+            .await
+            .unwrap();
+    }
+
+    store.truncate(ino, 0, chunk_size).await.unwrap();
+
+    assert_eq!(store.stat(ino).await.unwrap().unwrap().size, 0);
+    for idx in 0..chunk_count {
+        let chunk_id = chunk_id_for(ino, idx).unwrap();
+        assert!(store.get_slices(chunk_id).await.unwrap().is_empty());
+    }
+}
+
+#[serial]
+#[tokio::test]
+#[ignore]
+async fn test_replace_slices_for_compact_batches_many_delayed_records_etcd() {
+    let store = new_test_store().await;
+    let chunk_id = 88;
+    let slice_count = 60;
+    let mut slices = Vec::new();
+    let mut replaced_ids = Vec::new();
+
+    for idx in 0..slice_count {
+        let slice = SliceDesc {
+            slice_id: 10_000 + idx,
+            chunk_id,
+            offset: idx * 1024,
+            length: 1024,
+        };
+        store.append_slice(chunk_id, slice).await.unwrap();
+        slices.push(slice);
+        replaced_ids.push(slice.slice_id);
+    }
+
+    let delayed = SliceDesc::encode_delayed_data(&slices, &replaced_ids);
+    store
+        .replace_slices_for_compact(chunk_id, &[], &delayed)
+        .await
+        .unwrap();
+
+    assert!(store.get_slices(chunk_id).await.unwrap().is_empty());
+    let pending = store
+        .process_delayed_slices(slice_count as usize, -1)
+        .await
+        .unwrap();
+    assert_eq!(pending.len(), slice_count as usize);
+    assert_eq!(pending[0].0, 10_000);
+    assert_eq!(
+        pending[slice_count as usize - 1].0,
+        10_000 + slice_count - 1
+    );
+}
