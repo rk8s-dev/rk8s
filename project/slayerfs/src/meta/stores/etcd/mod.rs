@@ -3203,8 +3203,18 @@ impl MetaStore for EtcdMetaStore {
             })
             .await?;
 
-        self.append_delayed_slice_records(chunk_id, delayed_slices, now)
+        if let Err(err) = self
+            .append_delayed_slice_records(chunk_id, delayed_slices, now)
             .await
+        {
+            warn!(
+                chunk_id,
+                error = %err,
+                "Failed to enqueue delayed GC records after versioned compact metadata update"
+            );
+        }
+
+        Ok(())
     }
 
     async fn record_uncommitted_slice(
