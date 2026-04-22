@@ -54,4 +54,4 @@ jobs:
       # If the runner environment changes in the future, don't forget to add a step to check for qlean prerequisites and set up the environment accordingly.
       - run: |
           cd project
-          cargo test -p rkforge --test test_container_lifecycle_qlean -- --nocapture
+          RUST_LOG=qlean=info cargo test -p rkforge --test test_container_lifecycle_qlean -- --nocapture

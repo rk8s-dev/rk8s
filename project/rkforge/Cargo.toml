@@ -78,3 +78,4 @@ netavark = "1.17.1"
 trust-dns-resolver = "0.23.2"
 [dev-dependencies]
 qlean = { workspace = true }
+tracing-subscriber = { workspace = true, features = ["env-filter", "local-time"] }
