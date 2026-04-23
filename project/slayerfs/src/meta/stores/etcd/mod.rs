@@ -62,6 +62,7 @@ pub struct EtcdMetaStore {
     /// Local ID pools keyed by counter key (inode, slice, etc.)
     id_pools: IdPool,
     global_lock_tokens: Mutex<HashMap<String, i64>>,
+    chunk_scan_cursor: Mutex<Option<String>>,
     sid: OnceLock<Uuid>,
     lease: OnceLock<i64>,
 }
@@ -99,6 +100,7 @@ impl EtcdMetaStore {
             _config: config,
             id_pools: IdPool::default(),
             global_lock_tokens: Mutex::new(HashMap::new()),
+            chunk_scan_cursor: Mutex::new(None),
             sid: OnceLock::new(),
             lease: OnceLock::new(),
         };
@@ -169,21 +171,28 @@ impl EtcdMetaStore {
             .and_then(|rest| rest.parse::<u64>().ok())
     }
 
-    async fn scan_prefix_keys_limited(
+    async fn scan_prefix_keys_page(
         &self,
         prefix: &str,
-        limit: Option<usize>,
+        start_key: Option<&str>,
+        limit: usize,
     ) -> Result<Vec<String>, MetaError> {
-        let mut client = self.client.clone();
-        let mut options = GetOptions::new().with_prefix();
-        if let Some(limit) = limit {
-            let limit = i64::try_from(limit)
-                .map_err(|_| MetaError::Internal("etcd scan limit overflow".to_string()))?;
-            options = options.with_limit(limit);
+        if limit == 0 {
+            return Ok(vec![]);
         }
-        let resp = client.get(prefix, Some(options)).await.map_err(|e| {
-            MetaError::Internal(format!("Etcd prefix scan failed for {prefix}: {e}"))
-        })?;
+
+        let limit = i64::try_from(limit)
+            .map_err(|_| MetaError::Internal("etcd scan limit overflow".to_string()))?;
+        let mut client = self.client.clone();
+        let options = GetOptions::new()
+            .with_range(Self::prefix_range_end(prefix))
+            .with_limit(limit);
+        let resp = client
+            .get(start_key.unwrap_or(prefix), Some(options))
+            .await
+            .map_err(|e| {
+                MetaError::Internal(format!("Etcd prefix scan failed for {prefix}: {e}"))
+            })?;
 
         resp.kvs()
             .iter()
@@ -613,7 +622,7 @@ impl EtcdMetaStore {
         status: &str,
         cutoff_time: Option<i64>,
     ) -> Result<Vec<EtcdUncommittedSliceRecord>, MetaError> {
-        let page_size = batch_size.max(64).min(256);
+        let page_size = batch_size.clamp(64, 256);
         let mut selected = Vec::new();
         let mut start_key: Option<String> = None;
 
@@ -636,10 +645,10 @@ impl EtcdMetaStore {
                 if record.status != status {
                     continue;
                 }
-                if let Some(cutoff_time) = cutoff_time {
-                    if record.created_at >= cutoff_time {
-                        continue;
-                    }
+                if let Some(cutoff_time) = cutoff_time
+                    && record.created_at >= cutoff_time
+                {
+                    continue;
                 }
                 selected.push(record);
             }
@@ -660,6 +669,109 @@ impl EtcdMetaStore {
         }
 
         Ok(selected)
+    }
+
+    async fn collect_delayed_records_for_processing(
+        &self,
+        prefix: &str,
+        batch_size: usize,
+        status: &str,
+        cutoff_time: i64,
+    ) -> Result<Vec<EtcdDelayedSliceRecord>, MetaError> {
+        let page_size = batch_size.clamp(64, 256);
+        let mut selected = Vec::new();
+        let mut start_key: Option<String> = None;
+
+        loop {
+            let page = self
+                .scan_json_prefix_page_serde_only::<EtcdDelayedSliceRecord>(
+                    prefix,
+                    start_key.as_deref(),
+                    page_size,
+                )
+                .await?;
+            if page.is_empty() {
+                break;
+            }
+
+            let page_len = page.len();
+            let last_key = page.last().map(|(key, _)| key.clone());
+
+            for (_, record) in page {
+                if record.status != status || record.created_at >= cutoff_time {
+                    continue;
+                }
+                selected.push(record);
+            }
+
+            selected.sort_by_key(|record| record.id);
+            if selected.len() > batch_size {
+                selected.truncate(batch_size);
+            }
+
+            if page_len < page_size {
+                break;
+            }
+
+            let Some(last_key) = last_key else {
+                break;
+            };
+            start_key = Some(Self::next_scan_key(&last_key));
+        }
+
+        Ok(selected)
+    }
+
+    async fn list_chunk_ids_rotating(&self, limit: usize) -> Result<Vec<u64>, MetaError> {
+        let page_size = limit.clamp(64, 256);
+        let mut start_key = self.chunk_scan_cursor.lock().unwrap().clone();
+        let mut chunk_ids = Vec::new();
+        let mut wrapped = false;
+
+        loop {
+            let page = self
+                .scan_prefix_keys_page(SLICE_KEY_PREFIX, start_key.as_deref(), page_size)
+                .await?;
+            if page.is_empty() {
+                if wrapped || start_key.is_none() {
+                    let mut cursor = self.chunk_scan_cursor.lock().unwrap();
+                    *cursor = None;
+                    break;
+                }
+                start_key = None;
+                wrapped = true;
+                continue;
+            }
+
+            let page_len = page.len();
+            let last_key = page.last().cloned();
+
+            for key in page {
+                if let Some(chunk_id) = Self::parse_chunk_id_from_slice_key(&key) {
+                    chunk_ids.push(chunk_id);
+                    if chunk_ids.len() == limit {
+                        let mut cursor = self.chunk_scan_cursor.lock().unwrap();
+                        *cursor = Some(Self::next_scan_key(&key));
+                        return Ok(chunk_ids);
+                    }
+                }
+            }
+
+            if page_len < page_size {
+                if wrapped {
+                    let mut cursor = self.chunk_scan_cursor.lock().unwrap();
+                    *cursor = None;
+                    break;
+                }
+                start_key = None;
+                wrapped = true;
+                continue;
+            }
+
+            start_key = last_key.map(|key| Self::next_scan_key(&key));
+        }
+
+        Ok(chunk_ids)
     }
 
     #[cfg(feature = "rkyv-serialization")]
@@ -3185,15 +3297,7 @@ impl MetaStore for EtcdMetaStore {
             return Ok(vec![]);
         }
 
-        let mut chunk_ids: Vec<u64> = self
-            .scan_prefix_keys_limited(SLICE_KEY_PREFIX, Some(limit))
-            .await?
-            .into_iter()
-            .filter_map(|key| Self::parse_chunk_id_from_slice_key(&key))
-            .collect();
-        chunk_ids.sort_unstable();
-        chunk_ids.truncate(limit);
-        Ok(chunk_ids)
+        self.list_chunk_ids_rotating(limit).await
     }
 
     async fn replace_slices_for_compact(
@@ -3387,30 +3491,23 @@ impl MetaStore for EtcdMetaStore {
         }
 
         let cutoff_time = Utc::now().timestamp() - max_age_secs;
-        let mut delayed_records = Vec::new();
-        delayed_records.extend(
-            self.scan_json_prefix_limited_serde_only::<EtcdDelayedSliceRecord>(
+        let mut delayed_records = self
+            .collect_delayed_records_for_processing(
                 DELAYED_PENDING_PREFIX,
-                Some(batch_size),
+                batch_size,
+                "pending",
+                cutoff_time,
             )
-            .await?
-            .into_iter()
-            .map(|(_, record)| record),
-        );
+            .await?;
         delayed_records.extend(
-            self.scan_json_prefix_limited_serde_only::<EtcdDelayedSliceRecord>(
+            self.collect_delayed_records_for_processing(
                 DELAYED_META_DELETED_PREFIX,
-                Some(batch_size),
+                batch_size,
+                "meta_deleted",
+                cutoff_time,
             )
-            .await?
-            .into_iter()
-            .map(|(_, record)| record),
+            .await?,
         );
-
-        delayed_records.retain(|record| {
-            record.created_at < cutoff_time
-                && (record.status == "pending" || record.status == "meta_deleted")
-        });
         delayed_records.sort_by_key(|record| record.id);
         delayed_records.truncate(batch_size);
 

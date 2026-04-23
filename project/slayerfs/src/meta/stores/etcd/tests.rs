@@ -1343,3 +1343,58 @@ async fn test_cleanup_orphan_uncommitted_slices_pages_and_keeps_oldest_ids_etcd(
         .unwrap();
     assert_eq!(cleaned, vec![(20_000, 512), (20_001, 513), (20_002, 514)]);
 }
+
+#[serial]
+#[tokio::test]
+#[ignore]
+async fn test_list_chunk_ids_rotates_scan_window_etcd() {
+    let store = new_test_store().await;
+
+    for chunk_id in [1u64, 2, 3, 4] {
+        store
+            .append_slice(
+                chunk_id,
+                SliceDesc {
+                    slice_id: 30_000 + chunk_id,
+                    chunk_id,
+                    offset: 0,
+                    length: 512,
+                },
+            )
+            .await
+            .unwrap();
+    }
+
+    assert_eq!(store.list_chunk_ids(2).await.unwrap(), vec![1, 2]);
+    assert_eq!(store.list_chunk_ids(2).await.unwrap(), vec![3, 4]);
+    assert_eq!(store.list_chunk_ids(2).await.unwrap(), vec![1, 2]);
+}
+
+#[serial]
+#[tokio::test]
+#[ignore]
+async fn test_process_delayed_slices_filters_by_age_before_limit_etcd() {
+    let store = new_test_store().await;
+    let chunk_id = 90;
+
+    for idx in 0..130u64 {
+        let slice = SliceDesc {
+            slice_id: 40_000 + idx,
+            chunk_id,
+            offset: idx * 10,
+            length: 64,
+        };
+        store.append_slice(chunk_id, slice).await.unwrap();
+        let delayed = SliceDesc::encode_delayed_data(&[slice], &[slice.slice_id]);
+        store
+            .replace_slices_for_compact(chunk_id, &[], &delayed)
+            .await
+            .unwrap();
+    }
+
+    let ready = store.process_delayed_slices(3, -1).await.unwrap();
+    assert_eq!(ready.len(), 3);
+    assert_eq!(ready[0].0, 40_000);
+    assert_eq!(ready[1].0, 40_001);
+    assert_eq!(ready[2].0, 40_002);
+}
