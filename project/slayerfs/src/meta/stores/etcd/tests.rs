@@ -1189,6 +1189,47 @@ async fn test_stale_compact_lock_release_does_not_delete_reacquired_lock_etcd() 
 #[serial]
 #[tokio::test]
 #[ignore]
+async fn test_expired_compact_lock_does_not_block_write_etcd() {
+    let store = new_test_store().await;
+    let ino = store
+        .create_file(store.root_ino(), "expired_lock_write.txt".to_string())
+        .await
+        .unwrap();
+    let expired_at =
+        chrono::Utc::now().timestamp_millis() - chrono::Duration::days(1).num_milliseconds();
+
+    store
+        .etcd_put_json_serde_only(
+            LockName::ChunkCompactLock(91).to_string(),
+            &expired_at,
+            None,
+        )
+        .await
+        .unwrap();
+
+    store
+        .write(
+            ino,
+            91,
+            SliceDesc {
+                slice_id: 7101,
+                chunk_id: 91,
+                offset: 0,
+                length: 128,
+            },
+            128,
+        )
+        .await
+        .unwrap();
+
+    let slices = store.get_slices(91).await.unwrap();
+    assert_eq!(slices.len(), 1);
+    assert_eq!(slices[0].slice_id, 7101);
+}
+
+#[serial]
+#[tokio::test]
+#[ignore]
 async fn test_truncate_updates_size_and_prunes_slices_etcd() {
     let store = new_test_store().await;
     let ino = store

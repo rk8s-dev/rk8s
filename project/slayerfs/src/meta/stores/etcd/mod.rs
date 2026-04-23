@@ -210,34 +210,6 @@ impl EtcdMetaStore {
         self._config.compact.lock_ttl.max_ttl_secs
     }
 
-    async fn scan_json_prefix_limited_serde_only<T: DeserializeOwned>(
-        &self,
-        prefix: &str,
-        limit: Option<usize>,
-    ) -> Result<Vec<(String, T)>, MetaError> {
-        let mut client = self.client.clone();
-        let mut options = GetOptions::new().with_prefix();
-        if let Some(limit) = limit {
-            let limit = i64::try_from(limit)
-                .map_err(|_| MetaError::Internal("etcd scan limit overflow".to_string()))?;
-            options = options.with_limit(limit);
-        }
-        let resp = client.get(prefix, Some(options)).await.map_err(|e| {
-            MetaError::Internal(format!("Etcd prefix scan failed for {prefix}: {e}"))
-        })?;
-
-        let mut out = Vec::new();
-        for kv in resp.kvs() {
-            let key = std::str::from_utf8(kv.key())
-                .map_err(|e| MetaError::Internal(format!("Invalid UTF-8 key under {prefix}: {e}")))?
-                .to_string();
-            let value = serde_json::from_slice::<T>(kv.value())
-                .map_err(|e| MetaError::Internal(format!("Failed to parse JSON at {key}: {e}")))?;
-            out.push((key, value));
-        }
-        Ok(out)
-    }
-
     /// Etcd helper method: generate link parent key for multi-hardlink files
     fn etcd_link_parent_key(inode: i64) -> String {
         format!("l:{}", inode)
@@ -2949,26 +2921,27 @@ impl MetaStore for EtcdMetaStore {
         slice: SliceDesc,
         new_size: u64,
     ) -> Result<(), MetaError> {
-        if self
-            .is_global_lock_held(
-                LockName::ChunkCompactLock(chunk_id),
-                self.max_chunk_compact_lock_ttl_secs(),
-            )
-            .await
-        {
-            return Err(MetaError::ContinueRetry);
-        }
-
         let slice_key = key_for_slice(chunk_id);
         let inode_key = Self::etcd_reverse_key(ino);
+        let lock_key = LockName::ChunkCompactLock(chunk_id).to_string();
+        let lock_ttl_millis =
+            Duration::seconds(self.max_chunk_compact_lock_ttl_secs() as i64).num_milliseconds();
 
         EtcdTxn::new(&self.client)
             .max_retries(10)
             .run(|tx| {
                 let slice_key = slice_key.clone();
                 let inode_key = inode_key.clone();
+                let lock_key = lock_key.clone();
 
                 Box::pin(async move {
+                    let now = Utc::now().timestamp_millis();
+                    if let Some(locked_at) = tx.get_typed_json::<i64>(&lock_key).await?
+                        && now <= locked_at + lock_ttl_millis
+                    {
+                        return Err(MetaError::ContinueRetry);
+                    }
+
                     let mut slices: Vec<SliceDesc> =
                         tx.get_typed(&slice_key).await?.unwrap_or_default();
                     slices.push(slice);
