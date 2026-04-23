@@ -10,8 +10,6 @@ use std::path::Path;
 use rfuse3::MountOptions;
 #[cfg(target_os = "linux")]
 use rfuse3::raw::logfs::LoggingFileSystem;
-#[cfg(target_os = "linux")]
-use tracing::info;
 
 use crate::chunk::store::BlockStore;
 use crate::meta::MetaLayer;
@@ -56,7 +54,6 @@ where
     let mount_point = mount_point.as_ref();
     // Prefer unprivileged mount on Linux (requires fusermount3 in PATH)
     if fuse_op_log_enabled() {
-        info!("SLAYERFS_FUSE_OP_LOG enabled, mounting with FUSE operation log wrapper");
         rfuse3::raw::Session::new(default_mount_options())
             .mount_with_unprivileged(LoggingFileSystem::new(fs), mount_point)
             .await

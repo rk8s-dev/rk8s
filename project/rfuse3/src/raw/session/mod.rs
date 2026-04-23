@@ -1107,25 +1107,9 @@ impl<FS: Filesystem + Send + Sync + 'static> Session<FS> {
                         self.handle_bmap(request, in_header, data_ref, &fs).await;
                     }
 
-                    /*fuse_opcode::FUSE_IOCTL => {
-                        let mut resp_sender = self.response_sender.clone();
-
-                        let ioctl_in = match get_bincode_config().deserialize::<fuse_ioctl_in>(data) {
-                            Err(err) => {
-                                error!("deserialize fuse_ioctl_in failed {}", err);
-
-                                 reply_error_in_place(libc::EINVAL.into(), request, &self.response_sender).await;
-
-                                continue;
-                            }
-
-                            Ok(ioctl_in) => ioctl_in,
-                        };
-
-                        let ioctl_data = (&data[FUSE_IOCTL_IN_SIZE..]).to_vec();
-
-                        let fs = fs.clone();
-                    }*/
+                    fuse_opcode::FUSE_IOCTL => {
+                        self.handle_ioctl(request, in_header, data_ref, &fs).await;
+                    }
                     fuse_opcode::FUSE_POLL => {
                         self.handle_poll(request, in_header, data_ref, &fs).await;
                     }
@@ -3863,6 +3847,100 @@ impl<FS: Filesystem + Send + Sync + 'static> Session<FS> {
                 .expect("won't happened");
 
             let _ = resp_sender.send(Either::Left(data)).await;
+        });
+    }
+
+    #[instrument(skip(self, data, fs))]
+    async fn handle_ioctl(
+        &mut self,
+        request: Request,
+        in_header: fuse_in_header,
+        data: &[u8],
+        fs: &Arc<FS>,
+    ) {
+        let ioctl_in = match get_bincode_config().deserialize::<fuse_ioctl_in>(data) {
+            Err(err) => {
+                error!(
+                    "deserialize fuse_ioctl_in failed {}, request unique {}",
+                    err, request.unique
+                );
+
+                reply_error_in_place(libc::EINVAL.into(), request, &self.response_sender).await;
+
+                return;
+            }
+
+            Ok(ioctl_in) => ioctl_in,
+        };
+
+        let payload_end = FUSE_IOCTL_IN_SIZE.saturating_add(ioctl_in.in_size as usize);
+        if data.len() < payload_end {
+            reply_error_in_place(libc::EINVAL.into(), request, &self.response_sender).await;
+            return;
+        }
+        let ioctl_data = data[FUSE_IOCTL_IN_SIZE..payload_end].to_vec();
+
+        let mut resp_sender = self.response_sender.clone();
+        let fs = fs.clone();
+
+        spawn(debug_span!("fuse_ioctl"), async move {
+            debug!(
+                "ioctl unique {} inode {} fh {} flags {} cmd {} arg {} in_size {} out_size {}",
+                request.unique,
+                in_header.nodeid,
+                ioctl_in.fh,
+                ioctl_in.flags,
+                ioctl_in.cmd,
+                ioctl_in.arg,
+                ioctl_in.in_size,
+                ioctl_in.out_size
+            );
+
+            let reply_ioctl = match fs
+                .ioctl(
+                    request,
+                    in_header.nodeid,
+                    ioctl_in.fh,
+                    ioctl_in.flags,
+                    ioctl_in.cmd,
+                    ioctl_in.arg,
+                    &ioctl_data,
+                    ioctl_in.out_size,
+                )
+                .await
+            {
+                Err(err) => {
+                    reply_error_in_place(err, request, resp_sender).await;
+                    return;
+                }
+
+                Ok(reply_ioctl) => reply_ioctl,
+            };
+
+            let ioctl_out = fuse_ioctl_out {
+                result: reply_ioctl.result,
+                flags: reply_ioctl.flags,
+                in_iovs: reply_ioctl.in_iovs,
+                out_iovs: reply_ioctl.out_iovs,
+            };
+
+            let out_len = FUSE_OUT_HEADER_SIZE + FUSE_IOCTL_OUT_SIZE + reply_ioctl.data.len();
+            let out_header = fuse_out_header {
+                len: out_len as u32,
+                error: 0,
+                unique: request.unique,
+            };
+
+            let mut payload = Vec::with_capacity(out_len);
+            get_bincode_config()
+                .serialize_into(&mut payload, &out_header)
+                .expect("won't happened");
+            get_bincode_config()
+                .serialize_into(&mut payload, &ioctl_out)
+                .expect("won't happened");
+            payload.extend_from_slice(&reply_ioctl.data);
+
+            let _ = resp_sender.send(Either::Left(payload)).await;
         });
     }
 

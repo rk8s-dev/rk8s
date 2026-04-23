@@ -88,97 +88,79 @@ impl PlockRecord {
     }
 
     pub fn update_locks(mut ls: Vec<PlockRecord>, nl: PlockRecord) -> Vec<PlockRecord> {
-        let mut i = 0;
-        let mut nl = nl;
-        let mut new_records = Vec::new(); // records need to insert
+        let mut result = Vec::with_capacity(ls.len() + 1);
+        let mut inserted = false;
 
-        while i < ls.len() && nl.lock_range.end > nl.lock_range.start {
-            let l = ls[i];
-
-            match () {
-                _ if l.lock_range.end < nl.lock_range.start => {
-                    // skip
-                }
-                _ if l.lock_range.start < nl.lock_range.start => {
-                    // split the current lock
-                    let mut left = ls[i];
-                    left.lock_range.end = nl.lock_range.start;
-
-                    let middle = PlockRecord::new(
-                        nl.lock_type,
-                        nl.pid,
-                        nl.lock_range.start,
-                        l.lock_range.end,
-                    );
-                    new_records.push((i + 1, middle));
-
-                    ls[i] = left;
-                    nl.lock_range.start = l.lock_range.end;
-                    i += 1;
-                }
-                _ if l.lock_range.end > nl.lock_range.end
-                    && l.lock_range.start >= nl.lock_range.start =>
-                {
-                    // Exact or partial overlap from the right - shrink the current lock
-                    ls[i].lock_range.start = nl.lock_range.end;
-                    nl.lock_range.start = l.lock_range.end;
-                }
-                _ if l.lock_range.start < nl.lock_range.start
-                    && l.lock_range.end > nl.lock_range.end =>
-                {
-                    // Unlock range is inside current lock - split into two locks
-                    let mut left_part = ls[i];
-                    left_part.lock_range.end = nl.lock_range.start;
-
-                    let right_part =
-                        PlockRecord::new(l.lock_type, l.pid, nl.lock_range.end, l.lock_range.end);
-
-                    ls[i] = left_part;
-                    new_records.push((i + 1, right_part));
-                    i += 1;
-                }
-                _ => {
-                    // Exact match or unlock covers the current lock
-                    // Remove this lock completely
-                    ls.remove(i);
-                    nl.lock_range.start = l.lock_range.end;
-                    // Don't increment i since we want to process the next element (which shifted to current position)
-                    continue; // Skip the i += 1 at the end of this iteration
-                }
+        for lock in ls.drain(..) {
+            if lock.lock_range.end <= nl.lock_range.start {
+                result.push(lock);
+                continue;
             }
 
-            i += 1;
+            if lock.lock_range.start >= nl.lock_range.end {
+                if !inserted
+                    && nl.lock_type != FileLockType::UnLock
+                    && nl.lock_range.start < nl.lock_range.end
+                {
+                    result.push(nl);
+                    inserted = true;
+                }
+                result.push(lock);
+                continue;
+            }
+
+            if lock.lock_range.start < nl.lock_range.start {
+                result.push(PlockRecord::new(
+                    lock.lock_type,
+                    lock.pid,
+                    lock.lock_range.start,
+                    nl.lock_range.start,
+                ));
+            }
+
+            if !inserted
+                && nl.lock_type != FileLockType::UnLock
+                && nl.lock_range.start < nl.lock_range.end
+            {
+                result.push(nl);
+                inserted = true;
+            }
+
+            if lock.lock_range.end > nl.lock_range.end {
+                result.push(PlockRecord::new(
+                    lock.lock_type,
+                    lock.pid,
+                    nl.lock_range.end,
+                    lock.lock_range.end,
+                ));
+            }
         }
 
-        // Insert from back to front to avoid index shifting issues
-        for (pos, record) in new_records.into_iter().rev() {
-            ls.insert(pos, record);
-        }
-        if nl.lock_range.start < nl.lock_range.end {
-            ls.push(PlockRecord::new(
-                nl.lock_type,
-                nl.pid,
-                nl.lock_range.start,
-                nl.lock_range.end,
-            ));
+        if !inserted
+            && nl.lock_type != FileLockType::UnLock
+            && nl.lock_range.start < nl.lock_range.end
+        {
+            result.push(nl);
         }
 
-        // Cleanup and merge
-        ls.retain(|r| r.lock_type != FileLockType::UnLock && r.lock_range.start < r.lock_range.end);
+        result.retain(|r| {
+            r.lock_type != FileLockType::UnLock && r.lock_range.start < r.lock_range.end
+        });
 
-        let mut result: Vec<PlockRecord> = Vec::new();
-        for record in ls {
-            if let Some(last) = result.last_mut()
+        let mut merged: Vec<PlockRecord> = Vec::with_capacity(result.len());
+        for record in result {
+            if let Some(last) = merged.last_mut()
                 && last.lock_type == record.lock_type
+                && last.pid == record.pid
                 && last.lock_range.end == record.lock_range.start
             {
                 last.lock_range.end = record.lock_range.end;
                 continue;
             }
-            result.push(record);
+            merged.push(record);
         }
 
-        result
+        merged
     }
 
     pub fn check_conflict(
@@ -220,6 +202,77 @@ impl PlockRecord {
             }
         }
         None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{FileLockType, PlockRecord};
+
+    #[test]
+    fn update_locks_keeps_adjacent_ranges_separate() {
+        let locks = vec![PlockRecord::new(FileLockType::Write, 1, 10, 20)];
+        let updated = PlockRecord::update_locks(
+            locks,
+            PlockRecord::new(FileLockType::Write, 1, 20, 30),
+        );
+
+        assert_eq!(
+            updated,
+            vec![PlockRecord::new(FileLockType::Write, 1, 10, 30)]
+        );
+    }
+
+    #[test]
+    fn update_locks_replaces_only_the_overlapping_region() {
+        let locks = vec![PlockRecord::new(FileLockType::Write, 1, 10, 40)];
+        let updated = PlockRecord::update_locks(
+            locks,
+            PlockRecord::new(FileLockType::Read, 1, 20, 30),
+        );
+
+        assert_eq!(
+            updated,
+            vec![
+                PlockRecord::new(FileLockType::Write, 1, 10, 20),
+                PlockRecord::new(FileLockType::Read, 1, 20, 30),
+                PlockRecord::new(FileLockType::Write, 1, 30, 40),
+            ]
+        );
+    }
+
+    #[test]
+    fn update_locks_unlock_splits_existing_range() {
+        let locks = vec![PlockRecord::new(FileLockType::Write, 1, 10, 40)];
+        let updated = PlockRecord::update_locks(
+            locks,
+            PlockRecord::new(FileLockType::UnLock, 1, 20, 30),
+        );
+
+        assert_eq!(
+            updated,
+            vec![
+                PlockRecord::new(FileLockType::Write, 1, 10, 20),
+                PlockRecord::new(FileLockType::Write, 1, 30, 40),
+            ]
+        );
+    }
+
+    #[test]
+    fn update_locks_only_merges_same_pid() {
+        let locks = vec![PlockRecord::new(FileLockType::Write, 1, 10, 20)];
+        let updated = PlockRecord::update_locks(
+            locks,
+            PlockRecord::new(FileLockType::Write, 2, 20, 30),
+        );
+
+        assert_eq!(
+            updated,
+            vec![
+                PlockRecord::new(FileLockType::Write, 1, 10, 20),
+                PlockRecord::new(FileLockType::Write, 2, 20, 30),
+            ]
+        );
     }
 }
 

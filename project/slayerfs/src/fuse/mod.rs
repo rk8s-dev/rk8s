@@ -28,10 +28,11 @@ use rfuse3::raw::Request;
 use rfuse3::raw::flags::FUSE_WRITE_CACHE;
 use rfuse3::raw::reply::{
     DirectoryEntry, DirectoryEntryPlus, ReplyAttr, ReplyCopyFileRange, ReplyCreated, ReplyData,
-    ReplyDirectory, ReplyDirectoryPlus, ReplyEntry, ReplyInit, ReplyLock, ReplyOpen, ReplyStatFs,
-    ReplyWrite, ReplyXAttr,
+    ReplyDirectory, ReplyDirectoryPlus, ReplyEntry, ReplyInit, ReplyIoctl, ReplyLock, ReplyOpen,
+    ReplyStatFs, ReplyWrite, ReplyXAttr,
 };
 use std::ffi::{OsStr, OsString};
+use std::mem::size_of;
 use std::time::Duration;
 
 use futures_util::stream::{self, BoxStream};
@@ -152,6 +153,116 @@ where
     S: BlockStore + Send + Sync + 'static,
     M: MetaLayer + Send + Sync + 'static,
 {
+    fn ioctl_ok_reply() -> ReplyIoctl {
+        ReplyIoctl {
+            result: 0,
+            flags: 0,
+            in_iovs: 0,
+            out_iovs: 0,
+            data: Vec::new(),
+        }
+    }
+
+    fn parse_clone_range(data: &[u8]) -> Option<FileCloneRange> {
+        if data.len() < size_of::<FileCloneRange>() {
+            return None;
+        }
+
+        // The kernel provides restricted ioctl payloads inline using the native
+        // C layout for this architecture.
+        Some(unsafe { std::ptr::read_unaligned(data.as_ptr().cast::<FileCloneRange>()) })
+    }
+
+    async fn resolve_proc_fd_inode(&self, pid: u32, fd: i64) -> FuseResult<i64> {
+        if fd < 0 {
+            return Err(libc::EBADF.into());
+        }
+
+        let link = std::fs::read_link(format!("/proc/{pid}/fd/{fd}"))
+            .map_err(|_| Errno::from(libc::ENOENT))?;
+        let mut host_path = link.to_string_lossy().into_owned();
+        if let Some(stripped) = host_path.strip_suffix(" (deleted)") {
+            host_path = stripped.to_string();
+        }
+        if !host_path.starts_with('/') {
+            return Err(libc::EXDEV.into());
+        }
+
+        let mut starts = vec![0];
+        for (idx, ch) in host_path.char_indices().skip(1) {
+            if ch == '/' {
+                starts.push(idx);
+            }
+        }
+
+        for start in starts {
+            let candidate = &host_path[start..];
+            if let Ok(ino) = self.lookup_path_to_ino(candidate).await {
+                return Ok(ino);
+            }
+        }
+
+        Err(libc::EXDEV.into())
+    }
+
+    async fn ioctl_ficlone(&self, req: Request, dst_ino: u64, arg: u64) -> FuseResult<ReplyIoctl> {
+        let src_fd = i32::try_from(arg).map_err(|_| Errno::from(libc::EINVAL))?;
+        let src_ino = self.resolve_proc_fd_inode(req.pid, i64::from(src_fd)).await?;
+        let src_attr = self
+            .stat_ino(src_ino)
+            .await
+            .ok_or_else(|| Errno::from(libc::ENOENT))?;
+
+        self.truncate_inode(dst_ino as i64, 0)
+            .await
+            .map_err(Into::<Errno>::into)?;
+        self.copy_file_range_inodes(src_ino, 0, dst_ino as i64, 0, src_attr.size)
+            .await
+            .map_err(Into::<Errno>::into)?;
+        self.truncate_inode(dst_ino as i64, src_attr.size)
+            .await
+            .map_err(Into::<Errno>::into)?;
+
+        Ok(Self::ioctl_ok_reply())
+    }
+
+    async fn ioctl_ficlonerange(
+        &self,
+        req: Request,
+        dst_ino: u64,
+        in_data: &[u8],
+    ) -> FuseResult<ReplyIoctl> {
+        let range = Self::parse_clone_range(in_data).ok_or_else(|| Errno::from(libc::EINVAL))?;
+        let src_ino = self.resolve_proc_fd_inode(req.pid, range.src_fd).await?;
+        self.copy_file_range_inodes(
+            src_ino,
+            range.src_offset,
+            dst_ino as i64,
+            range.dest_offset,
+            range.src_length,
+        )
+            .await
+            .map_err(Into::<Errno>::into)?;
+
+        Ok(Self::ioctl_ok_reply())
+    }
+
+    async fn unlock_owner_locks(&self, ino: u64, lock_owner: u64) {
+        let _ = self
+            .set_plock_ino(
+                ino as i64,
+                lock_owner as i64,
+                false,
+                FileLockType::UnLock,
+                FileLockRange {
+                    start: 0,
+                    end: u64::MAX,
+                },
+                0,
+            )
+            .await;
+    }
+
     async fn apply_new_entry_attrs(
         &self,
         ino: i64,
@@ -181,6 +292,15 @@ fn fuse_lock_end_to_exclusive(end: u64) -> u64 {
 
 fn exclusive_lock_end_to_fuse(end: u64) -> u64 {
     end.saturating_sub(1)
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct FileCloneRange {
+    src_fd: i64,
+    src_offset: u64,
+    src_length: u64,
+    dest_offset: u64,
 }
 
 #[allow(refining_impl_trait_reachable)]
@@ -442,12 +562,19 @@ where
         offset: i64,
     ) -> FuseResult<ReplyDirectory<BoxStream<'a, FuseResult<DirectoryEntry>>>> {
         debug!(ino, fh, offset, "fuse.readdir");
-        // Try to use handle first
-        let (entries, entries_offset, includes_dot_entries) = if fh != 0 {
-            let entries_offset = (offset as u64).saturating_sub(2);
-            (self.readdir(fh, entries_offset), entries_offset, true)
+        // Try to use handle first. FUSE directory offsets identify the next
+        // entry to read: 0=start, 1=after ".", 2=after "..", and 3+=child index+1.
+        let (entries, entries_offset, include_dot_entries, include_dotdot_only) = if fh != 0 {
+            match offset {
+                i64::MIN..=0 => (self.readdir(fh, 0), 0, true, false),
+                1 => (self.readdir(fh, 0), 0, false, true),
+                _ => {
+                    let entries_offset = (offset as u64).saturating_sub(2);
+                    (self.readdir(fh, entries_offset), entries_offset, false, false)
+                }
+            }
         } else {
-            (None, offset.max(0) as u64, false)
+            (None, offset.max(0) as u64, false, false)
         };
 
         // Fallback to stateless mode if handle not found
@@ -472,13 +599,24 @@ where
         let mut all: Vec<DirectoryEntry> = Vec::with_capacity(entries.len() + 2);
 
         // Add "." and ".." entries for handle-based reads
-        if fh != 0 && offset <= 0 {
+        if fh != 0 && include_dot_entries {
             all.push(DirectoryEntry {
                 inode: ino,
                 kind: FuseFileType::Directory,
                 name: OsString::from("."),
                 offset: 1,
             });
+            let parent_ino = self
+                .parent_of(ino as i64)
+                .await
+                .unwrap_or_else(|| self.root_ino()) as u64;
+            all.push(DirectoryEntry {
+                inode: parent_ino,
+                kind: FuseFileType::Directory,
+                name: OsString::from(".."),
+                offset: 2,
+            });
+        } else if fh != 0 && include_dotdot_only {
             let parent_ino = self
                 .parent_of(ino as i64)
                 .await
@@ -497,8 +635,7 @@ where
                 inode: e.ino as u64,
                 kind: vfs_kind_to_fuse(e.kind),
                 name: OsString::from(e.name.clone()),
-                offset: (entries_offset + i as u64 + if includes_dot_entries { 3 } else { 1 })
-                    as i64,
+                offset: (entries_offset + i as u64 + 3) as i64,
             });
         }
 
@@ -520,50 +657,73 @@ where
         let ttl = Duration::from_secs(1);
         let mut all: Vec<DirectoryEntryPlus> = Vec::new();
 
-        // Try to use handle first
-        let entries_from_handle = if fh != 0 {
-            if offset == 0 {
-                // Add "." entry
-                if let Some(attr) = self.stat_ino(ino as i64).await {
-                    let fattr = vfs_to_fuse_attr(&attr, &req);
-                    all.push(DirectoryEntryPlus {
-                        inode: ino,
-                        generation: 0,
-                        kind: FuseFileType::Directory,
-                        name: OsString::from("."),
-                        offset: 1,
-                        attr: fattr,
-                        entry_ttl: ttl,
-                        attr_ttl: ttl,
-                    });
-                } else {
-                    return Err(libc::ENOENT.into());
+        // Try to use handle first with the same offset mapping as readdir().
+        let (entries_from_handle, entries_offset, include_dot_entries, include_dotdot_only) =
+            if fh != 0 {
+                match offset {
+                    0 => (self.readdir(fh, 0), 0, true, false),
+                    1 => (self.readdir(fh, 0), 0, false, true),
+                    _ => {
+                        let entries_offset = offset.saturating_sub(2);
+                        (self.readdir(fh, entries_offset), entries_offset, false, false)
+                    }
                 }
-                // Add ".." entry
-                let parent_ino = self
-                    .parent_of(ino as i64)
-                    .await
-                    .unwrap_or_else(|| self.root_ino()) as u64;
-                if let Some(pattr) = self.stat_ino(parent_ino as i64).await {
-                    let f = vfs_to_fuse_attr(&pattr, &req);
-                    all.push(DirectoryEntryPlus {
-                        inode: parent_ino,
-                        generation: 0,
-                        kind: FuseFileType::Directory,
-                        name: OsString::from(".."),
-                        offset: 2,
-                        attr: f,
-                        entry_ttl: ttl,
-                        attr_ttl: ttl,
-                    });
-                }
-            }
+            } else {
+                (None, offset.saturating_sub(2), false, false)
+            };
 
-            let entries_offset = offset.saturating_sub(2);
-            self.readdir(fh, entries_offset)
-        } else {
-            None
-        };
+        if fh != 0 && include_dot_entries {
+            if let Some(attr) = self.stat_ino(ino as i64).await {
+                let fattr = vfs_to_fuse_attr(&attr, &req);
+                all.push(DirectoryEntryPlus {
+                    inode: ino,
+                    generation: 0,
+                    kind: FuseFileType::Directory,
+                    name: OsString::from("."),
+                    offset: 1,
+                    attr: fattr,
+                    entry_ttl: ttl,
+                    attr_ttl: ttl,
+                });
+            } else {
+                return Err(libc::ENOENT.into());
+            }
+            let parent_ino = self
+                .parent_of(ino as i64)
+                .await
+                .unwrap_or_else(|| self.root_ino()) as u64;
+            if let Some(pattr) = self.stat_ino(parent_ino as i64).await {
+                let f = vfs_to_fuse_attr(&pattr, &req);
+                all.push(DirectoryEntryPlus {
+                    inode: parent_ino,
+                    generation: 0,
+                    kind: FuseFileType::Directory,
+                    name: OsString::from(".."),
+                    offset: 2,
+                    attr: f,
+                    entry_ttl: ttl,
+                    attr_ttl: ttl,
+                });
+            }
+        } else if fh != 0 && include_dotdot_only {
+            let parent_ino = self
+                .parent_of(ino as i64)
+                .await
+                .unwrap_or_else(|| self.root_ino()) as u64;
+            if let Some(pattr) = self.stat_ino(parent_ino as i64).await {
+                let f = vfs_to_fuse_attr(&pattr, &req);
+                all.push(DirectoryEntryPlus {
+                    inode: parent_ino,
+                    generation: 0,
+                    kind: FuseFileType::Directory,
+                    name: OsString::from(".."),
+                    offset: 2,
+                    attr: f,
+                    entry_ttl: ttl,
+                    attr_ttl: ttl,
+                });
+            }
+        }
 
         // Fallback to stateless mode if handle not found
         let entries = if let Some(e) = entries_from_handle {
@@ -583,7 +743,6 @@ where
             }
         };
 
-        let entries_offset = offset.saturating_sub(2);
         for (i, e) in entries.iter().enumerate() {
             let Some(cattr) = self.stat_ino(e.ino).await else {
                 continue;
@@ -1110,20 +1269,22 @@ where
     async fn release(
         &self,
         _req: Request,
-        _inode: u64,
+        inode: u64,
         fh: u64,
         _flags: u32,
-        _lock_owner: u64,
+        lock_owner: u64,
         _flush: bool,
     ) -> FuseResult<()> {
         debug!(fh, "fuse.release");
+        self.unlock_owner_locks(inode, lock_owner).await;
         let _ = self.close(fh).await;
         Ok(())
     }
 
     // Flush file (close path callback)
-    async fn flush(&self, _req: Request, _inode: u64, fh: u64, _lock_owner: u64) -> FuseResult<()> {
+    async fn flush(&self, _req: Request, inode: u64, fh: u64, lock_owner: u64) -> FuseResult<()> {
         debug!(fh, "fuse.flush");
+        self.unlock_owner_locks(inode, lock_owner).await;
         self.flush(fh).await.map_err(Errno::from)
     }
 
@@ -1161,6 +1322,38 @@ where
             .map_err(Into::<Errno>::into)? as u64;
 
         Ok(ReplyCopyFileRange { copied })
+    }
+
+    async fn ioctl(
+        &self,
+        req: Request,
+        inode: u64,
+        _fh: u64,
+        flags: u32,
+        cmd: u32,
+        arg: u64,
+        in_data: &[u8],
+        _out_size: u32,
+    ) -> FuseResult<ReplyIoctl> {
+        debug!(
+            inode,
+            flags,
+            cmd,
+            arg,
+            in_size = in_data.len(),
+            pid = req.pid,
+            "fuse.ioctl"
+        );
+
+        if flags != 0 {
+            return Err(libc::EOPNOTSUPP.into());
+        }
+
+        match cmd {
+            x if x == libc::FICLONE as u32 => self.ioctl_ficlone(req, inode, arg).await,
+            x if x == libc::FICLONERANGE as u32 => self.ioctl_ficlonerange(req, inode, in_data).await,
+            _ => Err(libc::EOPNOTSUPP.into()),
+        }
     }
 
     async fn setxattr(

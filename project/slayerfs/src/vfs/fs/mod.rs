@@ -1827,6 +1827,24 @@ where
         Ok(written)
     }
 
+    /// Copy a byte range between two inodes by opening temporary handles.
+    pub async fn copy_file_range_inodes(
+        &self,
+        src_ino: i64,
+        off_in: u64,
+        dst_ino: i64,
+        off_out: u64,
+        length: u64,
+    ) -> Result<usize, VfsError> {
+        let src_attr = self.meta_stat_required(src_ino, PathHint::none()).await?;
+        let dst_attr = self.meta_stat_required(dst_ino, PathHint::none()).await?;
+        let src_guard = self.open_guard(src_ino, src_attr, true, false).await?;
+        let dst_guard = self.open_guard(dst_ino, dst_attr, false, true).await?;
+
+        self.copy_file_range(src_guard.fh(), off_in, dst_guard.fh(), off_out, length)
+            .await
+    }
+
     /// Allocate a per-file handle, returning the opaque fh id.
     #[tracing::instrument(level = "trace", skip(self), fields(ino, read, write))]
     pub async fn open(
@@ -2110,7 +2128,7 @@ where
     }
 
     /// Resolves a normalized path to its inode number, returning NotFound if absent.
-    async fn lookup_path_to_ino(&self, path: &str) -> Result<i64, VfsError> {
+    pub(crate) async fn lookup_path_to_ino(&self, path: &str) -> Result<i64, VfsError> {
         let (inode, _) = self.meta_lookup_path_required(path).await?;
         Ok(inode)
     }

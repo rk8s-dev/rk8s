@@ -92,6 +92,7 @@ pub struct MountArgs {
     /// Block size in bytes.
     #[arg(long)]
     pub block_size: Option<u32>,
+
 }
 
 #[derive(Args, Debug, Clone)]
@@ -292,4 +293,5 @@ mod tests {
             other => panic!("expected info command, got {other:?}"),
         }
     }
+
 }

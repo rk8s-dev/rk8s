@@ -7515,7 +7515,7 @@ dependencies = [
 
 [[package]]
 name = "rfuse3"
-version = "0.0.7"
+version = "0.0.8"
 dependencies = [
  "aligned_box",
  "async-fs",

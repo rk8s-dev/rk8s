@@ -338,7 +338,9 @@ impl<T: MetaStore + ?Sized + 'static> MetaClient<T> {
     }
 
     fn validate_symlink_target(target: &str) -> Result<(), MetaError> {
-        if target.len() > NAME_MAX {
+        // Symlink payload is not a directory entry name. It may legitimately be
+        // much longer than NAME_MAX, including slash-separated paths.
+        if target.contains('\0') {
             return Err(MetaError::InvalidFilename);
         }
 

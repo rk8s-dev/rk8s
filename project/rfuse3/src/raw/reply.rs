@@ -357,13 +357,14 @@ impl From<ReplyBmap> for fuse_bmap_out {
     }
 }
 
-/*#[derive(Debug)]
+#[derive(Debug, Clone, Ord, PartialOrd, Eq, PartialEq, Hash)]
 pub struct ReplyIoctl {
     pub result: i32,
     pub flags: u32,
     pub in_iovs: u32,
     pub out_iovs: u32,
-}*/
+    pub data: Vec<u8>,
+}
 
 #[derive(Debug, Copy, Clone, Ord, PartialOrd, Eq, PartialEq, Hash)]
 // TODO need more detail
