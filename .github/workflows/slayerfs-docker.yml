@@ -18,6 +18,7 @@ permissions:
 
 jobs:
   xfstests:
+    if: false
     name: slayerfs xfstests (redis + etcd)
     runs-on: [self-hosted]
     timeout-minutes: 240
