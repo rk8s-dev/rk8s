@@ -3441,12 +3441,21 @@ impl MetaStore for EtcdMetaStore {
                 let orphan_key = orphan_key.clone();
 
                 Box::pin(async move {
+                    // Attempt to get records, but don't fail if deserialization fails due to corrupted data
                     let _pending = tx
                         .get_typed_json::<EtcdUncommittedSliceRecord>(&pending_key)
-                        .await?;
+                        .await
+                        .unwrap_or_else(|e| {
+                            warn!("Failed to deserialize pending record for slice {}: {}, proceeding with deletion", slice_id, e);
+                            None
+                        });
                     let _orphan = tx
                         .get_typed_json::<EtcdUncommittedSliceRecord>(&orphan_key)
-                        .await?;
+                        .await
+                        .unwrap_or_else(|e| {
+                            warn!("Failed to deserialize orphan record for slice {}: {}, proceeding with deletion", slice_id, e);
+                            None
+                        });
                     tx.delete(pending_key);
                     tx.delete(orphan_key);
                     Ok(())
@@ -3543,12 +3552,21 @@ impl MetaStore for EtcdMetaStore {
                     let pending_key = pending_key.clone();
                     let meta_deleted_key = meta_deleted_key.clone();
                     Box::pin(async move {
+                        // Attempt to get records, but don't fail if deserialization fails due to corrupted data
                         let _pending = tx
                             .get_typed_json::<EtcdDelayedSliceRecord>(&pending_key)
-                            .await?;
+                            .await
+                            .unwrap_or_else(|e| {
+                                warn!("Failed to deserialize delayed pending record for id {}: {}, proceeding with deletion", delayed_id, e);
+                                None
+                            });
                         let _meta_deleted = tx
                             .get_typed_json::<EtcdDelayedSliceRecord>(&meta_deleted_key)
-                            .await?;
+                            .await
+                            .unwrap_or_else(|e| {
+                                warn!("Failed to deserialize delayed meta deleted record for id {}: {}, proceeding with deletion", delayed_id, e);
+                                None
+                            });
                         tx.delete(pending_key);
                         tx.delete(meta_deleted_key);
                         Ok(())
@@ -3652,12 +3670,21 @@ impl MetaStore for EtcdMetaStore {
                     let pending_key = pending_key.clone();
                     let orphan_key = orphan_key.clone();
                     Box::pin(async move {
+                        // Attempt to get records, but don't fail if deserialization fails due to corrupted data
                         let _pending = tx
                             .get_typed_json::<EtcdUncommittedSliceRecord>(&pending_key)
-                            .await?;
+                            .await
+                            .unwrap_or_else(|e| {
+                                warn!("Failed to deserialize pending record for slice {}: {}, proceeding with deletion", slice_id, e);
+                                None
+                            });
                         let _orphan = tx
                             .get_typed_json::<EtcdUncommittedSliceRecord>(&orphan_key)
-                            .await?;
+                            .await
+                            .unwrap_or_else(|e| {
+                                warn!("Failed to deserialize orphan record for slice {}: {}, proceeding with deletion", slice_id, e);
+                                None
+                            });
                         tx.delete(pending_key);
                         tx.delete(orphan_key);
                         Ok(())
