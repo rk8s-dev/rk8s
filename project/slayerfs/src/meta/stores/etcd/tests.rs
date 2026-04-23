@@ -1373,6 +1373,31 @@ async fn test_list_chunk_ids_rotates_scan_window_etcd() {
 #[serial]
 #[tokio::test]
 #[ignore]
+async fn test_list_chunk_ids_does_not_duplicate_short_prefix_scan_etcd() {
+    let store = new_test_store().await;
+
+    for chunk_id in [1u64, 2, 3, 4] {
+        store
+            .append_slice(
+                chunk_id,
+                SliceDesc {
+                    slice_id: 31_000 + chunk_id,
+                    chunk_id,
+                    offset: 0,
+                    length: 512,
+                },
+            )
+            .await
+            .unwrap();
+    }
+
+    assert_eq!(store.list_chunk_ids(10).await.unwrap(), vec![1, 2, 3, 4]);
+    assert_eq!(store.list_chunk_ids(10).await.unwrap(), vec![1, 2, 3, 4]);
+}
+
+#[serial]
+#[tokio::test]
+#[ignore]
 async fn test_process_delayed_slices_filters_by_age_before_limit_etcd() {
     let store = new_test_store().await;
     let chunk_id = 90;

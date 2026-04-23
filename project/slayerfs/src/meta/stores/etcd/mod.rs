@@ -725,6 +725,7 @@ impl EtcdMetaStore {
     async fn list_chunk_ids_rotating(&self, limit: usize) -> Result<Vec<u64>, MetaError> {
         let page_size = limit.clamp(64, 256);
         let mut start_key = self.chunk_scan_cursor.lock().unwrap().clone();
+        let started_from_cursor = start_key.is_some();
         let mut chunk_ids = Vec::new();
         let mut wrapped = false;
 
@@ -758,7 +759,7 @@ impl EtcdMetaStore {
             }
 
             if page_len < page_size {
-                if wrapped {
+                if wrapped || !started_from_cursor {
                     let mut cursor = self.chunk_scan_cursor.lock().unwrap();
                     *cursor = None;
                     break;
