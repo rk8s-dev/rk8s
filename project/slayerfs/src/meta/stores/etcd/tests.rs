@@ -1285,7 +1285,7 @@ async fn test_truncate_batches_large_chunk_deletes_etcd() {
 #[serial]
 #[tokio::test]
 #[ignore]
-async fn test_replace_slices_for_compact_batches_many_delayed_records_etcd() {
+async fn test_replace_slices_for_compact_rejects_non_atomic_large_delayed_batch_etcd() {
     let store = new_test_store().await;
     let chunk_id = 88;
     let slice_count = 60;
@@ -1305,13 +1305,41 @@ async fn test_replace_slices_for_compact_batches_many_delayed_records_etcd() {
     }
 
     let delayed = SliceDesc::encode_delayed_data(&slices, &replaced_ids);
-    store
+    let err = store
         .replace_slices_for_compact(chunk_id, &[], &delayed)
         .await
-        .unwrap();
+        .unwrap_err();
+    assert!(
+        matches!(err, MetaError::Internal(message) if message.contains("Atomic compaction requires"))
+    );
 
-    assert!(store.get_slices(chunk_id).await.unwrap().is_empty());
-    let pending = store.process_delayed_slices(10, -1).await.unwrap();
-    assert_eq!(pending.len(), 10);
-    assert_eq!(pending[0].0, 10_000);
+    assert_eq!(store.get_slices(chunk_id).await.unwrap(), slices);
+    assert!(
+        store
+            .process_delayed_slices(10, -1)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[serial]
+#[tokio::test]
+#[ignore]
+async fn test_cleanup_orphan_uncommitted_slices_pages_and_keeps_oldest_ids_etcd() {
+    let store = new_test_store().await;
+    let chunk_id = 89;
+
+    for idx in 0..130u64 {
+        store
+            .record_uncommitted_slice(20_000 + idx, chunk_id, 512 + idx, "compact_heavy")
+            .await
+            .unwrap();
+    }
+
+    let cleaned = store
+        .cleanup_orphan_uncommitted_slices(-1, 3)
+        .await
+        .unwrap();
+    assert_eq!(cleaned, vec![(20_000, 512), (20_001, 513), (20_002, 514)]);
 }

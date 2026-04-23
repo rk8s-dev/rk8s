@@ -197,10 +197,6 @@ impl EtcdMetaStore {
             .collect()
     }
 
-    async fn scan_prefix_keys(&self, prefix: &str) -> Result<Vec<String>, MetaError> {
-        self.scan_prefix_keys_limited(prefix, None).await
-    }
-
     fn max_chunk_compact_lock_ttl_secs(&self) -> u64 {
         self._config.compact.lock_ttl.max_ttl_secs
     }
@@ -231,13 +227,6 @@ impl EtcdMetaStore {
             out.push((key, value));
         }
         Ok(out)
-    }
-
-    async fn scan_json_prefix_serde_only<T: DeserializeOwned>(
-        &self,
-        prefix: &str,
-    ) -> Result<Vec<(String, T)>, MetaError> {
-        self.scan_json_prefix_limited_serde_only(prefix, None).await
     }
 
     /// Etcd helper method: generate link parent key for multi-hardlink files
@@ -507,10 +496,10 @@ impl EtcdMetaStore {
         Ok(())
     }
 
-    async fn append_delayed_slice_records(
-        &self,
+    async fn stage_delayed_slice_records(
+        tx: &mut EtcdTxnCtx<'_>,
         chunk_id: u64,
-        delayed_slices: Vec<(u64, u64, u32)>,
+        delayed_slices: &[(u64, u64, u32)],
         now: i64,
     ) -> Result<(), MetaError> {
         if delayed_slices.is_empty() {
@@ -518,56 +507,159 @@ impl EtcdMetaStore {
         }
 
         let delayed_id_key = DELAYED_ID_KEY.to_string();
-        let records = EtcdTxn::new(&self.client)
-            .max_retries(10)
-            .run(|tx| {
-                let delayed_id_key = delayed_id_key.clone();
-                let delayed_slices = delayed_slices.clone();
+        let mut next_id = tx
+            .get_typed_json::<i64>(&delayed_id_key)
+            .await?
+            .unwrap_or(0);
 
-                Box::pin(async move {
-                    let mut next_id = tx
-                        .get_typed_json::<i64>(&delayed_id_key)
-                        .await?
-                        .unwrap_or(0);
-                    let mut records = Vec::with_capacity(delayed_slices.len());
+        for (slice_id, offset, size) in delayed_slices {
+            next_id += 1;
+            let record = EtcdDelayedSliceRecord {
+                id: next_id,
+                slice_id: *slice_id,
+                chunk_id,
+                offset: *offset,
+                size: *size as u64,
+                created_at: now,
+                reason: "compact".to_string(),
+                status: "pending".to_string(),
+            };
+            tx.set_typed_json(Self::etcd_delayed_pending_key(next_id), &record)?;
+        }
 
-                    for (slice_id, offset, size) in delayed_slices {
-                        next_id += 1;
-                        records.push(EtcdDelayedSliceRecord {
-                            id: next_id,
-                            slice_id,
-                            chunk_id,
-                            offset,
-                            size: size as u64,
-                            created_at: now,
-                            reason: "compact".to_string(),
-                            status: "pending".to_string(),
-                        });
-                    }
+        tx.set_typed_json(delayed_id_key, &next_id)?;
+        Ok(())
+    }
 
-                    tx.set_typed_json(delayed_id_key, &next_id)?;
-                    Ok(records)
-                })
-            })
-            .await?;
+    fn ensure_atomic_compaction_write_budget(
+        fixed_writes: usize,
+        delayed_slice_count: usize,
+    ) -> Result<(), MetaError> {
+        let total_writes = fixed_writes
+            .checked_add(delayed_slice_count)
+            .ok_or_else(|| {
+                MetaError::Internal("Atomic compaction write count overflow".to_string())
+            })?;
 
-        for batch in records.chunks(ETCD_TXN_BATCH_WRITE_LIMIT) {
-            let batch = batch.to_vec();
-            EtcdTxn::new(&self.client)
-                .max_retries(10)
-                .run(|tx| {
-                    let batch = batch.clone();
-                    Box::pin(async move {
-                        for record in batch {
-                            tx.set_typed_json(Self::etcd_delayed_pending_key(record.id), &record)?;
-                        }
-                        Ok(())
-                    })
-                })
-                .await?;
+        if total_writes > ETCD_TXN_BATCH_WRITE_LIMIT {
+            return Err(MetaError::Internal(format!(
+                "Atomic compaction requires {total_writes} etcd writes but the transaction limit is {ETCD_TXN_BATCH_WRITE_LIMIT}",
+            )));
         }
 
         Ok(())
+    }
+
+    fn prefix_range_end(prefix: &str) -> Vec<u8> {
+        let mut end = prefix.as_bytes().to_vec();
+        for idx in (0..end.len()).rev() {
+            if end[idx] < u8::MAX {
+                end[idx] += 1;
+                end.truncate(idx + 1);
+                return end;
+            }
+        }
+
+        vec![0]
+    }
+
+    fn next_scan_key(key: &str) -> String {
+        let mut next_key = String::with_capacity(key.len() + 1);
+        next_key.push_str(key);
+        next_key.push(char::from(0));
+        next_key
+    }
+
+    async fn scan_json_prefix_page_serde_only<T: DeserializeOwned>(
+        &self,
+        prefix: &str,
+        start_key: Option<&str>,
+        limit: usize,
+    ) -> Result<Vec<(String, T)>, MetaError> {
+        if limit == 0 {
+            return Ok(vec![]);
+        }
+
+        let limit = i64::try_from(limit)
+            .map_err(|_| MetaError::Internal("etcd scan limit overflow".to_string()))?;
+        let mut client = self.client.clone();
+        let options = GetOptions::new()
+            .with_range(Self::prefix_range_end(prefix))
+            .with_limit(limit);
+        let resp = client
+            .get(start_key.unwrap_or(prefix), Some(options))
+            .await
+            .map_err(|e| {
+                MetaError::Internal(format!("Etcd prefix scan failed for {prefix}: {e}"))
+            })?;
+
+        let mut out = Vec::new();
+        for kv in resp.kvs() {
+            let key = std::str::from_utf8(kv.key())
+                .map_err(|e| MetaError::Internal(format!("Invalid UTF-8 key under {prefix}: {e}")))?
+                .to_string();
+            let value = serde_json::from_slice::<T>(kv.value())
+                .map_err(|e| MetaError::Internal(format!("Failed to parse JSON at {key}: {e}")))?;
+            out.push((key, value));
+        }
+
+        Ok(out)
+    }
+
+    async fn collect_uncommitted_records_for_cleanup(
+        &self,
+        prefix: &str,
+        batch_size: usize,
+        status: &str,
+        cutoff_time: Option<i64>,
+    ) -> Result<Vec<EtcdUncommittedSliceRecord>, MetaError> {
+        let page_size = batch_size.max(64).min(256);
+        let mut selected = Vec::new();
+        let mut start_key: Option<String> = None;
+
+        loop {
+            let page = self
+                .scan_json_prefix_page_serde_only::<EtcdUncommittedSliceRecord>(
+                    prefix,
+                    start_key.as_deref(),
+                    page_size,
+                )
+                .await?;
+            if page.is_empty() {
+                break;
+            }
+
+            let page_len = page.len();
+            let last_key = page.last().map(|(key, _)| key.clone());
+
+            for (_, record) in page {
+                if record.status != status {
+                    continue;
+                }
+                if let Some(cutoff_time) = cutoff_time {
+                    if record.created_at >= cutoff_time {
+                        continue;
+                    }
+                }
+                selected.push(record);
+            }
+
+            selected.sort_by_key(|record| record.id);
+            if selected.len() > batch_size {
+                selected.truncate(batch_size);
+            }
+
+            if page_len < page_size {
+                break;
+            }
+
+            let Some(last_key) = last_key else {
+                break;
+            };
+            start_key = Some(Self::next_scan_key(&last_key));
+        }
+
+        Ok(selected)
     }
 
     #[cfg(feature = "rkyv-serialization")]
@@ -3121,6 +3213,8 @@ impl MetaStore for EtcdMetaStore {
             .ok_or_else(|| MetaError::Internal("Invalid delayed data length".to_string()))?;
         let now = Utc::now().timestamp();
 
+        Self::ensure_atomic_compaction_write_budget(2, delayed_slices.len())?;
+
         EtcdTxn::new(&self.client)
             .max_retries(10)
             .run(|tx| {
@@ -3145,12 +3239,10 @@ impl MetaStore for EtcdMetaStore {
                         tx.set_typed(&slice_key, &updated_slices)?;
                     }
 
+                    Self::stage_delayed_slice_records(tx, chunk_id, &delayed_slices, now).await?;
                     Ok(())
                 })
             })
-            .await?;
-
-        self.append_delayed_slice_records(chunk_id, delayed_slices, now)
             .await
     }
 
@@ -3173,12 +3265,18 @@ impl MetaStore for EtcdMetaStore {
         let expected_slices = expected_slices.to_vec();
         let now = Utc::now().timestamp();
 
+        Self::ensure_atomic_compaction_write_budget(
+            2 + new_slices.len() * 2,
+            delayed_slices.len(),
+        )?;
+
         EtcdTxn::new(&self.client)
             .max_retries(10)
             .run(|tx| {
                 let slice_key = slice_key.clone();
                 let new_slices = new_slices.to_vec();
                 let expected_slices = expected_slices.clone();
+                let delayed_slices = delayed_slices.clone();
 
                 Box::pin(async move {
                     let current_slices: Vec<SliceDesc> =
@@ -3198,23 +3296,11 @@ impl MetaStore for EtcdMetaStore {
                         tx.delete(Self::etcd_uncommitted_orphan_key(slice.slice_id));
                     }
 
+                    Self::stage_delayed_slice_records(tx, chunk_id, &delayed_slices, now).await?;
                     Ok(())
                 })
             })
-            .await?;
-
-        if let Err(err) = self
-            .append_delayed_slice_records(chunk_id, delayed_slices, now)
             .await
-        {
-            warn!(
-                chunk_id,
-                error = %err,
-                "Failed to enqueue delayed GC records after versioned compact metadata update"
-            );
-        }
-
-        Ok(())
     }
 
     async fn record_uncommitted_slice(
@@ -3418,25 +3504,23 @@ impl MetaStore for EtcdMetaStore {
         }
 
         let cutoff_time = Utc::now().timestamp() - max_age_secs;
-        let mut pending_records: Vec<EtcdUncommittedSliceRecord> = self
-            .scan_json_prefix_serde_only::<EtcdUncommittedSliceRecord>(UNCOMMITTED_PENDING_PREFIX)
-            .await?
-            .into_iter()
-            .map(|(_, record)| record)
-            .filter(|record| record.created_at < cutoff_time && record.status == "pending")
-            .collect();
-        pending_records.sort_by_key(|record| record.id);
-        pending_records.truncate(batch_size);
+        let pending_records = self
+            .collect_uncommitted_records_for_cleanup(
+                UNCOMMITTED_PENDING_PREFIX,
+                batch_size,
+                "pending",
+                Some(cutoff_time),
+            )
+            .await?;
 
-        let mut orphan_records: Vec<EtcdUncommittedSliceRecord> = self
-            .scan_json_prefix_serde_only::<EtcdUncommittedSliceRecord>(UNCOMMITTED_ORPHAN_PREFIX)
-            .await?
-            .into_iter()
-            .map(|(_, record)| record)
-            .filter(|record| record.status == "orphan")
-            .collect();
-        orphan_records.sort_by_key(|record| record.id);
-        orphan_records.truncate(batch_size);
+        let orphan_records = self
+            .collect_uncommitted_records_for_cleanup(
+                UNCOMMITTED_ORPHAN_PREFIX,
+                batch_size,
+                "orphan",
+                None,
+            )
+            .await?;
 
         if pending_records.is_empty() && orphan_records.is_empty() {
             return Ok(vec![]);
