@@ -544,6 +544,7 @@ impl EtcdMetaStore {
         vec![0]
     }
 
+    // Etcd range scans are inclusive on the start key, so advance with a trailing NUL.
     fn next_scan_key(key: &str) -> String {
         let mut next_key = String::with_capacity(key.len() + 1);
         next_key.push_str(key);
@@ -551,7 +552,7 @@ impl EtcdMetaStore {
         next_key
     }
 
-    async fn scan_json_prefix_page_serde_only<T: DeserializeOwned>(
+    async fn scan_json_page<T: DeserializeOwned>(
         &self,
         prefix: &str,
         start_key: Option<&str>,
@@ -587,7 +588,7 @@ impl EtcdMetaStore {
         Ok(out)
     }
 
-    async fn collect_uncommitted_records_for_cleanup(
+    async fn collect_uncommitted_cleanup(
         &self,
         prefix: &str,
         batch_size: usize,
@@ -600,7 +601,7 @@ impl EtcdMetaStore {
 
         loop {
             let page = self
-                .scan_json_prefix_page_serde_only::<EtcdUncommittedSliceRecord>(
+                .scan_json_page::<EtcdUncommittedSliceRecord>(
                     prefix,
                     start_key.as_deref(),
                     page_size,
@@ -643,7 +644,7 @@ impl EtcdMetaStore {
         Ok(selected)
     }
 
-    async fn collect_delayed_records_for_processing(
+    async fn collect_delayed_ready(
         &self,
         prefix: &str,
         batch_size: usize,
@@ -656,11 +657,7 @@ impl EtcdMetaStore {
 
         loop {
             let page = self
-                .scan_json_prefix_page_serde_only::<EtcdDelayedSliceRecord>(
-                    prefix,
-                    start_key.as_deref(),
-                    page_size,
-                )
+                .scan_json_page::<EtcdDelayedSliceRecord>(prefix, start_key.as_deref(), page_size)
                 .await?;
             if page.is_empty() {
                 break;
@@ -694,7 +691,7 @@ impl EtcdMetaStore {
         Ok(selected)
     }
 
-    async fn list_chunk_ids_rotating(&self, limit: usize) -> Result<Vec<u64>, MetaError> {
+    async fn list_chunk_ids_round_robin(&self, limit: usize) -> Result<Vec<u64>, MetaError> {
         let page_size = limit.clamp(64, 256);
         let mut start_key = self.chunk_scan_cursor.lock().unwrap().clone();
         let started_from_cursor = start_key.is_some();
@@ -731,6 +728,9 @@ impl EtcdMetaStore {
             }
 
             if page_len < page_size {
+                // A short page means we reached the tail of the current window.
+                // Only wrap once when resuming from a saved cursor; a fresh prefix scan
+                // must stop here to avoid returning duplicate chunk ids.
                 if wrapped || !started_from_cursor {
                     let mut cursor = self.chunk_scan_cursor.lock().unwrap();
                     *cursor = None;
@@ -3271,7 +3271,7 @@ impl MetaStore for EtcdMetaStore {
             return Ok(vec![]);
         }
 
-        self.list_chunk_ids_rotating(limit).await
+        self.list_chunk_ids_round_robin(limit).await
     }
 
     async fn replace_slices_for_compact(
@@ -3466,15 +3466,10 @@ impl MetaStore for EtcdMetaStore {
 
         let cutoff_time = Utc::now().timestamp() - max_age_secs;
         let mut delayed_records = self
-            .collect_delayed_records_for_processing(
-                DELAYED_PENDING_PREFIX,
-                batch_size,
-                "pending",
-                cutoff_time,
-            )
+            .collect_delayed_ready(DELAYED_PENDING_PREFIX, batch_size, "pending", cutoff_time)
             .await?;
         delayed_records.extend(
-            self.collect_delayed_records_for_processing(
+            self.collect_delayed_ready(
                 DELAYED_META_DELETED_PREFIX,
                 batch_size,
                 "meta_deleted",
@@ -3576,7 +3571,7 @@ impl MetaStore for EtcdMetaStore {
 
         let cutoff_time = Utc::now().timestamp() - max_age_secs;
         let pending_records = self
-            .collect_uncommitted_records_for_cleanup(
+            .collect_uncommitted_cleanup(
                 UNCOMMITTED_PENDING_PREFIX,
                 batch_size,
                 "pending",
@@ -3585,12 +3580,7 @@ impl MetaStore for EtcdMetaStore {
             .await?;
 
         let orphan_records = self
-            .collect_uncommitted_records_for_cleanup(
-                UNCOMMITTED_ORPHAN_PREFIX,
-                batch_size,
-                "orphan",
-                None,
-            )
+            .collect_uncommitted_cleanup(UNCOMMITTED_ORPHAN_PREFIX, batch_size, "orphan", None)
             .await?;
 
         if pending_records.is_empty() && orphan_records.is_empty() {
