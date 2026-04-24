@@ -7,6 +7,7 @@ use crate::meta::config::{
 use crate::meta::file_lock::{FileLockQuery, FileLockRange, FileLockType};
 use crate::meta::store::{LockName, MetaError, SetAttrFlags, SetAttrRequest};
 use crate::meta::stores::EtcdMetaStore;
+use chrono::Utc;
 use crate::vfs::chunk_id_for;
 use serial_test::serial;
 use tokio::time;
@@ -1443,7 +1444,7 @@ async fn test_process_delayed_slices_filters_by_age_before_limit_etcd() {
     let store = new_test_store().await;
     let chunk_id = 90;
 
-    for idx in 0..130u64 {
+    for idx in 0..6u64 {
         let slice = SliceDesc {
             slice_id: 40_000 + idx,
             chunk_id,
@@ -1458,9 +1459,53 @@ async fn test_process_delayed_slices_filters_by_age_before_limit_etcd() {
             .unwrap();
     }
 
-    let ready = store.process_delayed_slices(3, -1).await.unwrap();
+    let stale_pending_keys = [
+        "gc/delayed/pending/1",
+        "gc/delayed/pending/2",
+        "gc/delayed/pending/3",
+    ];
+    let recent_pending_keys = [
+        "gc/delayed/pending/4",
+        "gc/delayed/pending/5",
+        "gc/delayed/pending/6",
+    ];
+
+    let now = Utc::now().timestamp();
+    let stale_created_at = now - 7200;
+    let recent_created_at = now;
+
+    for key in stale_pending_keys {
+        let mut record = store
+            .etcd_get_json_serde_only::<serde_json::Value>(key)
+            .await
+            .unwrap()
+            .unwrap();
+        record["created_at"] = serde_json::Value::from(stale_created_at);
+        store.etcd_put_json_serde_only(key, &record, None).await.unwrap();
+    }
+
+    for key in recent_pending_keys {
+        let mut record = store
+            .etcd_get_json_serde_only::<serde_json::Value>(key)
+            .await
+            .unwrap()
+            .unwrap();
+        record["created_at"] = serde_json::Value::from(recent_created_at);
+        store.etcd_put_json_serde_only(key, &record, None).await.unwrap();
+    }
+
+    let ready = store.process_delayed_slices(3, 3600).await.unwrap();
     assert_eq!(ready.len(), 3);
     assert_eq!(ready[0].0, 40_000);
     assert_eq!(ready[1].0, 40_001);
     assert_eq!(ready[2].0, 40_002);
+
+    let processed_ids: Vec<i64> = ready.iter().map(|entry| entry.3).collect();
+    store.confirm_delayed_deleted(&processed_ids).await.unwrap();
+
+    assert!(store
+        .process_delayed_slices(10, 3600)
+        .await
+        .unwrap()
+        .is_empty());
 }

@@ -3171,7 +3171,7 @@ impl MetaStore for EtcdMetaStore {
                     let mut ctime_update = false;
 
                     if let Some(mode) = req.mode {
-                        entry_info.permission.chmod(mode);
+                        entry_info.permission.chmod(mode & 0o777);
                         ctime_update = true;
                     }
 
