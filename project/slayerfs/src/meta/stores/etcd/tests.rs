@@ -7,8 +7,8 @@ use crate::meta::config::{
 use crate::meta::file_lock::{FileLockQuery, FileLockRange, FileLockType};
 use crate::meta::store::{LockName, MetaError, SetAttrFlags, SetAttrRequest};
 use crate::meta::stores::EtcdMetaStore;
-use chrono::Utc;
 use crate::vfs::chunk_id_for;
+use chrono::Utc;
 use serial_test::serial;
 use tokio::time;
 use uuid::Uuid;
@@ -1481,7 +1481,10 @@ async fn test_process_delayed_slices_filters_by_age_before_limit_etcd() {
             .unwrap()
             .unwrap();
         record["created_at"] = serde_json::Value::from(stale_created_at);
-        store.etcd_put_json_serde_only(key, &record, None).await.unwrap();
+        store
+            .etcd_put_json_serde_only(key, &record, None)
+            .await
+            .unwrap();
     }
 
     for key in recent_pending_keys {
@@ -1491,7 +1494,10 @@ async fn test_process_delayed_slices_filters_by_age_before_limit_etcd() {
             .unwrap()
             .unwrap();
         record["created_at"] = serde_json::Value::from(recent_created_at);
-        store.etcd_put_json_serde_only(key, &record, None).await.unwrap();
+        store
+            .etcd_put_json_serde_only(key, &record, None)
+            .await
+            .unwrap();
     }
 
     let ready = store.process_delayed_slices(3, 3600).await.unwrap();
@@ -1503,9 +1509,11 @@ async fn test_process_delayed_slices_filters_by_age_before_limit_etcd() {
     let processed_ids: Vec<i64> = ready.iter().map(|entry| entry.3).collect();
     store.confirm_delayed_deleted(&processed_ids).await.unwrap();
 
-    assert!(store
-        .process_delayed_slices(10, 3600)
-        .await
-        .unwrap()
-        .is_empty());
+    assert!(
+        store
+            .process_delayed_slices(10, 3600)
+            .await
+            .unwrap()
+            .is_empty()
+    );
 }
