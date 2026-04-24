@@ -13,11 +13,13 @@ impl MediaType {
 
         match self {
             MediaType::Tar => {
+                std::fs::create_dir_all(dst)?;
                 let tar_gz = std::fs::File::open(src)?;
                 let mut archive = tar::Archive::new(tar_gz);
                 archive.unpack(dst)?;
             }
             MediaType::TarGzip => {
+                std::fs::create_dir_all(dst)?;
                 let tar_gz = std::fs::File::open(src)?;
                 let decompressor = flate2::read::GzDecoder::new(tar_gz);
                 let mut archive = tar::Archive::new(decompressor);

@@ -93,9 +93,11 @@ async fn dispatch_handler(
             let name = name.join("/");
             match *method {
                 // Pull blobs
-                Method::GET => get_blob_handler(State(state), Path((name, digest.to_string())))
-                    .await
-                    .map(|res| res.into_response()),
+                Method::GET => {
+                    get_blob_handler(State(state), Path((name, digest.to_string())), headers)
+                        .await
+                        .map(|res| res.into_response())
+                }
                 // Check if blob exists in the registry
                 Method::HEAD => head_blob_handler(State(state), Path((name, digest.to_string())))
                     .await

@@ -16,7 +16,8 @@ use std::sync::Arc;
 pub async fn get_blob_handler(
     State(state): State<Arc<AppState>>,
     Path((name, digest_str)): Path<(String, String)>,
-) -> Result<impl IntoResponse, AppError> {
+    headers: HeaderMap,
+) -> Result<Response<Body>, AppError> {
     if !is_valid_name(&name) {
         return Err(OciError::NameInvalid(name).into());
     }
@@ -24,13 +25,42 @@ pub async fn get_blob_handler(
     let digest = oci_digest::from_str(&digest_str)
         .map_err(|_| OciError::DigestInvalid(digest_str.clone()))?;
 
-    let obj = state.storage.get_blob(&digest).await?;
+    let total_size = state.storage.blob_size(&digest).await?;
+    let range = match parse_blob_range(&headers, total_size) {
+        BlobRangeRequest::None => {
+            let obj = state.storage.get_blob(&digest).await?;
+            let body = Body::from_stream(obj.stream);
+
+            return Ok(Response::builder()
+                .status(StatusCode::OK)
+                .header(header::CONTENT_TYPE, "application/octet-stream")
+                .header(header::CONTENT_LENGTH, obj.size)
+                .header("Accept-Ranges", "bytes")
+                .header("Docker-Content-Digest", digest_str)
+                .body(body)
+                .unwrap());
+        }
+        BlobRangeRequest::Satisfiable(range) => range,
+        BlobRangeRequest::Unsatisfiable => {
+            return Ok(range_not_satisfiable_response(total_size));
+        }
+    };
+
+    let obj = state
+        .storage
+        .get_blob_range(&digest, range.start..range.end + 1)
+        .await?;
     let body = Body::from_stream(obj.stream);
 
     Ok(Response::builder()
-        .status(StatusCode::OK)
+        .status(StatusCode::PARTIAL_CONTENT)
         .header(header::CONTENT_TYPE, "application/octet-stream")
         .header(header::CONTENT_LENGTH, obj.size)
+        .header(
+            header::CONTENT_RANGE,
+            format!("bytes {}-{}/{}", range.start, range.end, range.total),
+        )
+        .header("Accept-Ranges", "bytes")
         .header("Docker-Content-Digest", digest_str)
         .body(body)
         .unwrap())
@@ -53,6 +83,7 @@ pub async fn head_blob_handler(
         .status(StatusCode::OK)
         .header(header::CONTENT_TYPE, "application/octet-stream")
         .header(header::CONTENT_LENGTH, content_length)
+        .header("Accept-Ranges", "bytes")
         .header("Docker-Content-Digest", digest_str)
         .body(Body::empty())
         .unwrap())
@@ -330,10 +361,164 @@ fn parse_content_range(headers: &HeaderMap) -> Result<(u64, u64), AppError> {
     )
 }
 
+#[derive(Debug, PartialEq, Eq)]
+enum BlobRangeRequest {
+    None,
+    Satisfiable(BlobRange),
+    Unsatisfiable,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct BlobRange {
+    start: u64,
+    end: u64,
+    total: u64,
+}
+
+fn parse_blob_range(headers: &HeaderMap, total_size: u64) -> BlobRangeRequest {
+    let Some(header_value) = headers.get(RANGE) else {
+        return BlobRangeRequest::None;
+    };
+    let Ok(header_value) = header_value.to_str() else {
+        return BlobRangeRequest::Unsatisfiable;
+    };
+    let Some((unit, range_spec)) = header_value.trim().split_once('=') else {
+        return BlobRangeRequest::Unsatisfiable;
+    };
+    if !unit.eq_ignore_ascii_case("bytes") || range_spec.contains(',') {
+        return BlobRangeRequest::Unsatisfiable;
+    }
+
+    let Some((start_spec, end_spec)) = range_spec.split_once('-') else {
+        return BlobRangeRequest::Unsatisfiable;
+    };
+    let start_spec = start_spec.trim();
+    let end_spec = end_spec.trim();
+
+    if start_spec.is_empty() {
+        return parse_blob_suffix_range(end_spec, total_size);
+    }
+
+    let Ok(start) = start_spec.parse::<u64>() else {
+        return BlobRangeRequest::Unsatisfiable;
+    };
+    if start >= total_size {
+        return BlobRangeRequest::Unsatisfiable;
+    }
+
+    let end = if end_spec.is_empty() {
+        total_size - 1
+    } else {
+        let Ok(requested_end) = end_spec.parse::<u64>() else {
+            return BlobRangeRequest::Unsatisfiable;
+        };
+        if requested_end < start {
+            return BlobRangeRequest::Unsatisfiable;
+        }
+        requested_end.min(total_size - 1)
+    };
+
+    BlobRangeRequest::Satisfiable(BlobRange {
+        start,
+        end,
+        total: total_size,
+    })
+}
+
+fn parse_blob_suffix_range(end_spec: &str, total_size: u64) -> BlobRangeRequest {
+    let Ok(suffix_len) = end_spec.parse::<u64>() else {
+        return BlobRangeRequest::Unsatisfiable;
+    };
+    if suffix_len == 0 || total_size == 0 {
+        return BlobRangeRequest::Unsatisfiable;
+    }
+
+    let start = total_size.saturating_sub(suffix_len);
+    BlobRangeRequest::Satisfiable(BlobRange {
+        start,
+        end: total_size - 1,
+        total: total_size,
+    })
+}
+
+fn range_not_satisfiable_response(total_size: u64) -> Response<Body> {
+    Response::builder()
+        .status(StatusCode::RANGE_NOT_SATISFIABLE)
+        .header(header::CONTENT_RANGE, format!("bytes */{total_size}"))
+        .header("Accept-Ranges", "bytes")
+        .body(Body::empty())
+        .unwrap()
+}
+
 fn upload_range_header(uploaded: u64) -> Option<String> {
     if uploaded == 0 {
         None
     } else {
         Some(format!("0-{}", uploaded - 1))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use axum::http::{HeaderMap, header};
+
+    use super::{BlobRange, BlobRangeRequest, parse_blob_range};
+
+    fn range_headers(range: &str) -> HeaderMap {
+        let mut headers = HeaderMap::new();
+        headers.insert(header::RANGE, range.parse().unwrap());
+        headers
+    }
+
+    #[test]
+    fn parse_blob_range_returns_none_without_header() {
+        assert_eq!(
+            parse_blob_range(&HeaderMap::new(), 10),
+            BlobRangeRequest::None
+        );
+    }
+
+    #[test]
+    fn parse_blob_range_supports_open_ended_range() {
+        assert_eq!(
+            parse_blob_range(&range_headers("bytes=5-"), 10),
+            BlobRangeRequest::Satisfiable(BlobRange {
+                start: 5,
+                end: 9,
+                total: 10,
+            })
+        );
+    }
+
+    #[test]
+    fn parse_blob_range_caps_end_at_total_size() {
+        assert_eq!(
+            parse_blob_range(&range_headers("bytes=5-99"), 10),
+            BlobRangeRequest::Satisfiable(BlobRange {
+                start: 5,
+                end: 9,
+                total: 10,
+            })
+        );
+    }
+
+    #[test]
+    fn parse_blob_range_supports_suffix_range() {
+        assert_eq!(
+            parse_blob_range(&range_headers("bytes=-4"), 10),
+            BlobRangeRequest::Satisfiable(BlobRange {
+                start: 6,
+                end: 9,
+                total: 10,
+            })
+        );
+    }
+
+    #[test]
+    fn parse_blob_range_rejects_unsatisfiable_range() {
+        assert_eq!(
+            parse_blob_range(&range_headers("bytes=10-"), 10),
+            BlobRangeRequest::Unsatisfiable
+        );
     }
 }

@@ -7,8 +7,9 @@ use crate::storage::{ObjectStream, Storage, StorageObject, verify_file_digest};
 use axum::body::BodyDataStream;
 use futures::TryStreamExt;
 use oci_spec::image::Digest;
+use std::io::SeekFrom;
 use tokio::fs::{File, OpenOptions, create_dir_all, read_dir, remove_dir_all};
-use tokio::io::{self, AsyncWriteExt, BufWriter};
+use tokio::io::{self, AsyncReadExt, AsyncSeekExt, AsyncWriteExt, BufWriter};
 use tokio_util::io::{ReaderStream, StreamReader};
 
 pub struct FilesystemStorage {
@@ -57,6 +58,31 @@ impl Storage for FilesystemStorage {
 
         let size = file.metadata().await.map_to_internal()?.len();
         let stream: ObjectStream = Box::pin(ReaderStream::new(file));
+
+        Ok(StorageObject { stream, size })
+    }
+
+    async fn get_blob_range(
+        &self,
+        digest: &Digest,
+        range: std::ops::Range<u64>,
+    ) -> Result<StorageObject> {
+        let path = self.path_manager.blob_data_path(digest);
+
+        let mut file = match File::open(&path).await {
+            Ok(file) => file,
+            Err(e) if e.kind() == io::ErrorKind::NotFound => {
+                return Err(OciError::BlobUnknown(digest.to_string()).into());
+            }
+            Err(e) => return Err(InternalError::from(e).into()),
+        };
+
+        file.seek(SeekFrom::Start(range.start))
+            .await
+            .map_to_internal()?;
+
+        let size = range.end.saturating_sub(range.start);
+        let stream: ObjectStream = Box::pin(ReaderStream::new(file.take(size)));
 
         Ok(StorageObject { stream, size })
     }
