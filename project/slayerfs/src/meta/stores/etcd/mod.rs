@@ -186,7 +186,8 @@ impl EtcdMetaStore {
         let mut client = self.client.clone();
         let options = GetOptions::new()
             .with_range(Self::prefix_range_end(prefix))
-            .with_limit(limit);
+            .with_limit(limit)
+            .with_keys_only();
         let resp = client
             .get(start_key.unwrap_or(prefix), Some(options))
             .await
