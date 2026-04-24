@@ -301,22 +301,16 @@ mod test {
         assert_eq!(sync_loop.event_handlers.len(), 2);
         assert_eq!(sync_loop.event_listen_list.len(), 0);
         assert_eq!(sync_loop.event_listeners.len(), 2);
+        let _ = sync_loop.event_handlers.contains_key(&TypeId::of::<Tick>());
         let _ = sync_loop
             .event_handlers
-            .get(&TypeId::of::<Tick>())
-            .is_some();
-        let _ = sync_loop
-            .event_handlers
-            .get(&TypeId::of::<Nothing>())
-            .is_some();
+            .contains_key(&TypeId::of::<Nothing>());
         let _ = sync_loop
             .event_listeners
-            .get(&TypeId::of::<Tick>())
-            .is_some();
+            .contains_key(&TypeId::of::<Tick>());
         let _ = sync_loop
             .event_listeners
-            .get(&TypeId::of::<Nothing>())
-            .is_some();
+            .contains_key(&TypeId::of::<Nothing>());
         sync_loop.gen_event_list();
         assert_eq!(sync_loop.event_listen_list.len(), 2);
         let mut ids = Vec::new();

@@ -645,13 +645,13 @@ mod tests {
             vec![make_container("c1", container::ContainerStatus::Stopped)],
         );
 
-        set_current_pod_records(&pod_records, &[pod_first.clone()]).unwrap();
+        set_current_pod_records(&pod_records, std::slice::from_ref(&pod_first)).unwrap();
         let record = pod_records.get(&pod_id).unwrap();
         assert!(record.old_pod.is_none());
         assert_eq!(record.current_pod.as_ref().unwrap().name, "pod-first");
         drop(record);
 
-        set_current_pod_records(&pod_records, &[pod_second.clone()]).unwrap();
+        set_current_pod_records(&pod_records, std::slice::from_ref(&pod_second)).unwrap();
         let record = pod_records.get(&pod_id).unwrap();
         assert_eq!(record.old_pod.as_ref().unwrap().name, "pod-first");
         assert_eq!(record.current_pod.as_ref().unwrap().name, "pod-second");
@@ -667,7 +667,7 @@ mod tests {
             vec![make_container("c1", container::ContainerStatus::Running)],
         );
 
-        set_current_pod_records(&pod_records, &[pod.clone()]).unwrap();
+        set_current_pod_records(&pod_records, std::slice::from_ref(&pod)).unwrap();
         set_current_pod_records(&pod_records, &[]).unwrap();
 
         let record = pod_records.get(&pod_id).unwrap();
