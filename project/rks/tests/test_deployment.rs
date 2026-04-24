@@ -11,7 +11,6 @@ use tokio::sync::RwLock;
 use tokio::time::{Duration, sleep};
 
 /// Use cargo test -p rks --test test-deployment -- --test-threads=1
-
 /// Test the basic creation of a Deployment and its reconciliation to create a ReplicaSet and Pods
 #[tokio::test]
 async fn test_deployment_basic_create() -> Result<()> {
@@ -406,6 +405,7 @@ async fn test_deployment_hash_collision() -> Result<()> {
                         image: "./blocker-image".to_string(),
                         ports: Vec::new(),
                         args: Vec::new(),
+                        tty: false,
                         resources: None,
                         liveness_probe: None,
                         readiness_probe: None,
@@ -707,6 +707,7 @@ fn create_test_deployment(name: &str, replicas: i32) -> Deployment {
                         image: "./test-image".to_string(),
                         ports: Vec::new(),
                         args: Vec::new(),
+                        tty: false,
                         resources: None,
                         liveness_probe: None,
                         readiness_probe: None,
@@ -766,7 +767,7 @@ async fn test_deployment_rolling_update_basic() -> Result<()> {
 
     // Verify new ReplicaSet was created
     let owned_rs = get_owned_replicasets(&store, "test-rolling").await?;
-    assert!(owned_rs.len() >= 1, "Should have at least 1 ReplicaSet");
+    assert!(!owned_rs.is_empty(), "Should have at least 1 ReplicaSet");
 
     // Find new RS (different from old one)
     let new_rs = owned_rs.iter().find(|rs| rs.metadata.name != old_rs_name);
