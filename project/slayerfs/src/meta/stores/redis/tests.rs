@@ -4,7 +4,7 @@ use crate::meta::config::{
     CacheConfig, ClientOptions, CompactConfig, DatabaseConfig, DatabaseType,
 };
 use crate::meta::file_lock::{FileLockQuery, FileLockRange, FileLockType};
-use crate::meta::store::{MetaError, SetAttrFlags, SetAttrRequest};
+use crate::meta::store::{LockName, MetaError, SetAttrFlags, SetAttrRequest};
 use crate::meta::stores::RedisMetaStore;
 use serial_test::serial;
 use std::sync::Arc;
@@ -85,12 +85,12 @@ struct TestSessionManager {
 use std::sync::LazyLock;
 use tokio::sync::Mutex;
 
-// 静态初始化，确保只执行一次
+// Static init, executed once.
 static SHARED_DB_INIT: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
 
 impl TestSessionManager {
     async fn new(session_count: usize) -> Self {
-        // 获取锁，确保串行初始化
+        // Lock to ensure serial initialization.
         let _guard = SHARED_DB_INIT.lock().await;
 
         use std::env;
@@ -1835,4 +1835,1038 @@ async fn test_chmod_nonexistent_inode() {
     let store = new_test_store().await;
     let result = store.chmod(999999, 0o644).await;
     assert!(result.is_err(), "chmod on nonexistent inode should fail");
+}
+
+// --- Flow correctness tests ---
+
+#[serial]
+#[tokio::test]
+#[ignore]
+async fn test_file_full_lifecycle_flow() {
+    let store = new_test_store().await;
+    let root = store.root_ino();
+
+    let ino = store
+        .create_file(root, "lifecycle.txt".to_string())
+        .await
+        .unwrap();
+    let attr = store.stat(ino).await.unwrap().unwrap();
+    assert_eq!(attr.kind, crate::meta::store::FileType::File);
+    assert_eq!(attr.nlink, 1);
+
+    let req = SetAttrRequest {
+        mode: Some(0o600),
+        ..Default::default()
+    };
+    store
+        .set_attr(ino, &req, SetAttrFlags::empty())
+        .await
+        .unwrap();
+
+    let chunk_id = crate::vfs::chunk_id_for(ino, 0).unwrap();
+    let slice = crate::chunk::SliceDesc {
+        slice_id: 101,
+        chunk_id,
+        offset: 0,
+        length: 4096,
+    };
+    store.write(ino, chunk_id, slice, 4096).await.unwrap();
+
+    let stat_after_write = store.stat(ino).await.unwrap().unwrap();
+    assert_eq!(stat_after_write.size, 4096);
+
+    let slices = store.get_slices(chunk_id).await.unwrap();
+    assert_eq!(slices.len(), 1);
+    assert_eq!(slices[0].slice_id, 101);
+
+    store.truncate(ino, 2048, 4096).await.unwrap();
+    let stat_after_truncate = store.stat(ino).await.unwrap().unwrap();
+    assert_eq!(stat_after_truncate.size, 2048);
+
+    store.unlink(root, "lifecycle.txt").await.unwrap();
+    assert_eq!(store.lookup(root, "lifecycle.txt").await.unwrap(), None);
+
+    let deleted = store.get_deleted_files().await.unwrap();
+    assert!(
+        deleted.contains(&ino),
+        "file should be in deleted set after unlink"
+    );
+}
+
+#[serial]
+#[tokio::test]
+#[ignore]
+async fn test_directory_full_lifecycle_flow() {
+    let store = new_test_store().await;
+    let root = store.root_ino();
+    let root_attr_before = store.stat(root).await.unwrap().unwrap();
+
+    let dir = store
+        .mkdir(root, "dir_lifecycle".to_string())
+        .await
+        .unwrap();
+    let root_attr_after = store.stat(root).await.unwrap().unwrap();
+    assert_eq!(
+        root_attr_after.nlink,
+        root_attr_before.nlink + 1,
+        "mkdir should increase parent nlink"
+    );
+
+    let child = store
+        .create_file(dir, "child.txt".to_string())
+        .await
+        .unwrap();
+    let entries = store.readdir(dir).await.unwrap();
+    assert!(
+        entries
+            .iter()
+            .any(|e| e.ino == child && e.name == "child.txt")
+    );
+
+    store.unlink(dir, "child.txt").await.unwrap();
+    let entries_after = store.readdir(dir).await.unwrap();
+    assert!(!entries_after.iter().any(|e| e.name == "child.txt"));
+
+    store.rmdir(root, "dir_lifecycle").await.unwrap();
+    let root_attr_final = store.stat(root).await.unwrap().unwrap();
+    assert_eq!(
+        root_attr_final.nlink, root_attr_before.nlink,
+        "parent nlink should be restored after rmdir"
+    );
+    assert_eq!(store.lookup(root, "dir_lifecycle").await.unwrap(), None);
+}
+
+#[serial]
+#[tokio::test]
+#[ignore]
+async fn test_lookup_path_resolution_flow() {
+    let store = new_test_store().await;
+    let root = store.root_ino();
+
+    let dir = store.mkdir(root, "a".to_string()).await.unwrap();
+    let sub = store.mkdir(dir, "b".to_string()).await.unwrap();
+    let _file = store.create_file(sub, "c.txt".to_string()).await.unwrap();
+
+    assert_eq!(
+        store.lookup_path("/").await.unwrap(),
+        Some((root, crate::meta::store::FileType::Dir))
+    );
+    assert_eq!(
+        store.lookup_path("/a").await.unwrap().map(|(ino, _)| ino),
+        Some(dir)
+    );
+    assert_eq!(
+        store.lookup_path("/a/b").await.unwrap().map(|(ino, _)| ino),
+        Some(sub)
+    );
+    assert!(store.lookup_path("/a/b/c.txt").await.unwrap().is_some());
+    assert_eq!(store.lookup_path("/nonexistent").await.unwrap(), None);
+    assert_eq!(
+        store.lookup_path("/a/b/nonexistent.txt").await.unwrap(),
+        None
+    );
+}
+
+#[serial]
+#[tokio::test]
+#[ignore]
+async fn test_batch_stat_mixed_flow() {
+    let store = new_test_store().await;
+    let root = store.root_ino();
+
+    let ino1 = store.create_file(root, "f1.txt".to_string()).await.unwrap();
+    let ino2 = store.create_file(root, "f2.txt".to_string()).await.unwrap();
+
+    let results = store.batch_stat(&[root, ino1, ino2, 999999]).await.unwrap();
+    assert_eq!(results.len(), 4);
+    assert!(results[0].is_some(), "root should exist");
+    assert!(results[1].is_some(), "f1 should exist");
+    assert!(results[2].is_some(), "f2 should exist");
+    assert!(results[3].is_none(), "999999 should not exist");
+}
+
+#[serial]
+#[tokio::test]
+#[ignore]
+async fn test_symlink_lookup_path_flow() {
+    let store = new_test_store().await;
+    let root = store.root_ino();
+
+    let (ino, attr) = store
+        .symlink(root, "link.txt", "/target/path")
+        .await
+        .unwrap();
+    assert_eq!(attr.kind, crate::meta::store::FileType::Symlink);
+
+    let resolved = store.lookup_path("/link.txt").await.unwrap();
+    assert_eq!(resolved, Some((ino, crate::meta::store::FileType::Symlink)));
+
+    let target = store.read_symlink(ino).await.unwrap();
+    assert_eq!(target, "/target/path");
+}
+
+#[serial]
+#[tokio::test]
+#[ignore]
+async fn test_readdir_basic_flow() {
+    let store = new_test_store().await;
+    let root = store.root_ino();
+
+    let dir = store.mkdir(root, "readdir_test".to_string()).await.unwrap();
+    let f1 = store
+        .create_file(dir, "file.txt".to_string())
+        .await
+        .unwrap();
+    let d1 = store.mkdir(dir, "subdir".to_string()).await.unwrap();
+    let (s1, _) = store.symlink(dir, "link.txt", "/dest").await.unwrap();
+
+    let entries = store.readdir(dir).await.unwrap();
+    assert_eq!(entries.len(), 3);
+
+    let mut found = std::collections::HashSet::new();
+    for e in &entries {
+        found.insert((e.ino, e.name.clone(), e.kind));
+    }
+
+    assert!(found.contains(&(
+        f1,
+        "file.txt".to_string(),
+        crate::meta::store::FileType::File
+    )));
+    assert!(found.contains(&(d1, "subdir".to_string(), crate::meta::store::FileType::Dir)));
+    assert!(found.contains(&(
+        s1,
+        "link.txt".to_string(),
+        crate::meta::store::FileType::Symlink
+    )));
+}
+
+// --- State machine tests ---
+
+#[serial]
+#[tokio::test]
+#[ignore]
+async fn test_hardlink_state_machine_full_transition() {
+    let store = new_test_store().await;
+    let root = store.root_ino();
+
+    let ino = store
+        .create_file(root, "origin.txt".to_string())
+        .await
+        .unwrap();
+    let node1 = store.get_node(ino).await.unwrap().unwrap();
+    assert_eq!(node1.attr.nlink, 1);
+    assert_eq!(node1.parent, root);
+    assert_eq!(node1.name, "origin.txt");
+
+    store.link(ino, root, "link.txt").await.unwrap();
+    let node2 = store.get_node(ino).await.unwrap().unwrap();
+    assert_eq!(node2.attr.nlink, 2);
+    assert_eq!(node2.parent, 0, "hardlink state parent should be 0");
+    assert_eq!(node2.name, "", "hardlink state name should be empty");
+
+    let link_parents = store.load_link_parents(ino).await.unwrap();
+    assert_eq!(link_parents.len(), 2);
+    assert!(link_parents.contains(&(root, "origin.txt".to_string())));
+    assert!(link_parents.contains(&(root, "link.txt".to_string())));
+
+    store.unlink(root, "origin.txt").await.unwrap();
+    let node3 = store.get_node(ino).await.unwrap().unwrap();
+    assert_eq!(node3.attr.nlink, 1);
+    assert_eq!(node3.parent, root, "restored to single parent");
+    assert_eq!(node3.name, "link.txt", "restored to single name");
+
+    let link_parents_after = store.load_link_parents(ino).await.unwrap();
+    assert!(
+        link_parents_after.is_empty(),
+        "link_parents should be cleared when nlink=1"
+    );
+
+    store.unlink(root, "link.txt").await.unwrap();
+    let deleted = store.get_deleted_files().await.unwrap();
+    assert!(
+        deleted.contains(&ino),
+        "should enter deleted after last link removed"
+    );
+}
+
+#[serial]
+#[tokio::test]
+#[ignore]
+async fn test_directory_nlink_state_machine() {
+    let store = new_test_store().await;
+    let root = store.root_ino();
+    let base_nlink = store.stat(root).await.unwrap().unwrap().nlink;
+
+    let d1 = store.mkdir(root, "d1".to_string()).await.unwrap();
+    assert_eq!(
+        store.stat(root).await.unwrap().unwrap().nlink,
+        base_nlink + 1
+    );
+
+    let _d2 = store.mkdir(d1, "d2".to_string()).await.unwrap();
+    assert_eq!(store.stat(d1).await.unwrap().unwrap().nlink, base_nlink + 1);
+
+    store.rmdir(d1, "d2").await.unwrap();
+    assert_eq!(
+        store.stat(d1).await.unwrap().unwrap().nlink,
+        base_nlink,
+        "nlink restored after child directory removal"
+    );
+
+    store.rmdir(root, "d1").await.unwrap();
+    assert_eq!(
+        store.stat(root).await.unwrap().unwrap().nlink,
+        base_nlink,
+        "root nlink should be restored after directory removal"
+    );
+}
+
+#[serial]
+#[tokio::test]
+#[ignore]
+async fn test_set_attr_flags_state_transitions() {
+    let store = new_test_store().await;
+    let root = store.root_ino();
+    let ino = store
+        .create_file(root, "attr_test.txt".to_string())
+        .await
+        .unwrap();
+
+    let req1 = SetAttrRequest {
+        mode: Some(0o4755),
+        ..Default::default()
+    };
+    let attr1 = store
+        .set_attr(ino, &req1, SetAttrFlags::empty())
+        .await
+        .unwrap();
+    assert_eq!(
+        attr1.mode & 0o7777,
+        0o755,
+        "setuid bit should be stripped on persistence"
+    );
+
+    let req2 = SetAttrRequest {
+        uid: Some(1000),
+        gid: Some(1000),
+        ..Default::default()
+    };
+    let attr2 = store
+        .set_attr(ino, &req2, SetAttrFlags::empty())
+        .await
+        .unwrap();
+    assert_eq!(attr2.uid, 1000);
+    assert_eq!(attr2.gid, 1000);
+
+    let old_ctime = attr2.ctime;
+    let req3 = SetAttrRequest {
+        size: Some(1234),
+        ..Default::default()
+    };
+    let attr3 = store
+        .set_attr(ino, &req3, SetAttrFlags::empty())
+        .await
+        .unwrap();
+    assert_eq!(attr3.size, 1234);
+    assert!(attr3.ctime >= old_ctime, "size change should update ctime");
+
+    let attr4 = store
+        .set_attr(ino, &SetAttrRequest::default(), SetAttrFlags::CLEAR_SUID)
+        .await
+        .unwrap();
+    assert_eq!(attr4.mode & 0o4000, 0);
+
+    let attr5 = store
+        .set_attr(ino, &SetAttrRequest::default(), SetAttrFlags::CLEAR_SGID)
+        .await
+        .unwrap();
+    assert_eq!(attr5.mode & 0o2000, 0);
+
+    let attr6 = store
+        .set_attr(ino, &SetAttrRequest::default(), SetAttrFlags::SET_ATIME_NOW)
+        .await
+        .unwrap();
+    assert!(attr6.atime > 0);
+
+    let attr7 = store
+        .set_attr(ino, &SetAttrRequest::default(), SetAttrFlags::SET_MTIME_NOW)
+        .await
+        .unwrap();
+    assert!(attr7.mtime > 0);
+}
+
+#[serial]
+#[tokio::test]
+#[ignore]
+async fn test_deleted_node_query_behavior() {
+    let store = new_test_store().await;
+    let root = store.root_ino();
+
+    let ino = store
+        .create_file(root, "del_query.txt".to_string())
+        .await
+        .unwrap();
+    store.unlink(root, "del_query.txt").await.unwrap();
+
+    assert!(
+        store.stat(ino).await.unwrap().is_some(),
+        "tombstone should be preserved, stat still visible"
+    );
+    let names = store.get_names(ino).await.unwrap();
+    assert!(
+        names.is_empty(),
+        "get_names should return empty for deleted node"
+    );
+    let paths = store.get_paths(ino).await.unwrap();
+    assert!(
+        paths.is_empty(),
+        "get_paths should return empty for deleted node"
+    );
+}
+
+// --- Consistency tests ---
+
+#[serial]
+#[tokio::test]
+#[ignore]
+async fn test_write_consistency() {
+    let store = new_test_store().await;
+    let root = store.root_ino();
+    let ino = store
+        .create_file(root, "write_consist.txt".to_string())
+        .await
+        .unwrap();
+    let chunk_id = crate::vfs::chunk_id_for(ino, 0).unwrap();
+
+    let slice = crate::chunk::SliceDesc {
+        slice_id: 201,
+        chunk_id,
+        offset: 0,
+        length: 8192,
+    };
+    store.write(ino, chunk_id, slice, 8192).await.unwrap();
+
+    let attr = store.stat(ino).await.unwrap().unwrap();
+    assert_eq!(attr.size, 8192, "size should be consistent after write");
+
+    let slices = store.get_slices(chunk_id).await.unwrap();
+    assert_eq!(slices.len(), 1);
+    assert_eq!(slices[0].slice_id, 201);
+    assert_eq!(slices[0].length, 8192);
+}
+
+#[serial]
+#[tokio::test]
+#[ignore]
+async fn test_truncate_consistency() {
+    let store = new_test_store().await;
+    let root = store.root_ino();
+    let ino = store
+        .create_file(root, "truncate_consist.txt".to_string())
+        .await
+        .unwrap();
+    let chunk_size = 4096u64;
+    let chunk_id0 = crate::vfs::chunk_id_for(ino, 0).unwrap();
+    let chunk_id1 = crate::vfs::chunk_id_for(ino, 1).unwrap();
+
+    store
+        .append_slice(
+            chunk_id0,
+            crate::chunk::SliceDesc {
+                slice_id: 301,
+                chunk_id: chunk_id0,
+                offset: 0,
+                length: chunk_size,
+            },
+        )
+        .await
+        .unwrap();
+    store
+        .append_slice(
+            chunk_id1,
+            crate::chunk::SliceDesc {
+                slice_id: 302,
+                chunk_id: chunk_id1,
+                offset: 0,
+                length: chunk_size,
+            },
+        )
+        .await
+        .unwrap();
+    store.set_file_size(ino, chunk_size * 2).await.unwrap();
+
+    store
+        .truncate(ino, chunk_size / 2, chunk_size)
+        .await
+        .unwrap();
+
+    let attr = store.stat(ino).await.unwrap().unwrap();
+    assert_eq!(attr.size, chunk_size / 2);
+
+    let slices0 = store.get_slices(chunk_id0).await.unwrap();
+    assert!(
+        !slices0.is_empty(),
+        "partially truncated chunk should be preserved"
+    );
+    assert!(
+        slices0
+            .iter()
+            .all(|s| s.offset + s.length as u64 <= chunk_size / 2 || s.offset <= chunk_size / 2)
+    );
+}
+
+#[serial]
+#[tokio::test]
+#[ignore]
+async fn test_delayed_slice_workflow_consistency() {
+    let store = new_test_store().await;
+    let root = store.root_ino();
+    let ino = store
+        .create_file(root, "delayed_test.txt".to_string())
+        .await
+        .unwrap();
+    let chunk_id = crate::vfs::chunk_id_for(ino, 0).unwrap();
+
+    let old_slice = crate::chunk::SliceDesc {
+        slice_id: 401,
+        chunk_id,
+        offset: 0,
+        length: 1024,
+    };
+    store
+        .append_slice(chunk_id, old_slice.clone())
+        .await
+        .unwrap();
+
+    let new_slice = crate::chunk::SliceDesc {
+        slice_id: 402,
+        chunk_id,
+        offset: 0,
+        length: 1024,
+    };
+    let delayed_data = crate::chunk::SliceDesc::encode_delayed_data(&[old_slice.clone()], &[401]);
+    store
+        .replace_slices_for_compact(chunk_id, &[new_slice], &delayed_data)
+        .await
+        .unwrap();
+
+    let slices_after = store.get_slices(chunk_id).await.unwrap();
+    assert_eq!(slices_after.len(), 1);
+    assert_eq!(slices_after[0].slice_id, 402);
+
+    let delayed = store.process_delayed_slices(10, 0).await.unwrap();
+    assert_eq!(delayed.len(), 1, "one delayed slice should be processed");
+    assert_eq!(delayed[0].0, 401);
+
+    let delayed_ids: Vec<i64> = delayed.iter().map(|d| d.3).collect();
+    store.confirm_delayed_deleted(&delayed_ids).await.unwrap();
+
+    let delayed_after = store.process_delayed_slices(10, 0).await.unwrap();
+    assert!(
+        delayed_after.is_empty(),
+        "no delayed slice should remain after confirmation"
+    );
+}
+
+#[serial]
+#[tokio::test]
+#[ignore]
+async fn test_uncommitted_slice_workflow_consistency() {
+    let store = new_test_store().await;
+    let slice_id = 501u64;
+    let chunk_id = 1001u64;
+
+    let id = store
+        .record_uncommitted_slice(slice_id, chunk_id, 2048, "write")
+        .await
+        .unwrap();
+    assert_eq!(id, slice_id as i64);
+
+    let orphans_before = store
+        .cleanup_orphan_uncommitted_slices(3600, 10)
+        .await
+        .unwrap();
+    assert!(
+        orphans_before.is_empty(),
+        "freshly recorded slice should not be orphan"
+    );
+
+    store.confirm_slice_committed(slice_id).await.unwrap();
+
+    let orphans_after = store
+        .cleanup_orphan_uncommitted_slices(0, 10)
+        .await
+        .unwrap();
+    assert!(
+        orphans_after.is_empty(),
+        "no uncommitted records should remain after confirm"
+    );
+}
+
+#[serial]
+#[tokio::test]
+#[ignore]
+async fn test_get_names_paths_hardlink_consistency() {
+    let store = new_test_store().await;
+    let root = store.root_ino();
+
+    let dir_a = store.mkdir(root, "ha".to_string()).await.unwrap();
+    let dir_b = store.mkdir(root, "hb".to_string()).await.unwrap();
+
+    let ino = store.create_file(dir_a, "f.txt".to_string()).await.unwrap();
+    store.link(ino, dir_b, "g.txt").await.unwrap();
+
+    let names = store.get_names(ino).await.unwrap();
+    assert_eq!(names.len(), 2);
+
+    let paths = store.get_paths(ino).await.unwrap();
+    assert_eq!(paths.len(), 2, "hardlink should have two paths");
+    assert!(paths.iter().any(|p| p == "/ha/f.txt"));
+    assert!(paths.iter().any(|p| p == "/hb/g.txt"));
+}
+
+#[serial]
+#[tokio::test]
+#[ignore]
+async fn test_rename_hardlink_cross_dir_consistency() {
+    let store = new_test_store().await;
+    let root = store.root_ino();
+
+    let dir_a = store.mkdir(root, "ra".to_string()).await.unwrap();
+    let dir_b = store.mkdir(root, "rb".to_string()).await.unwrap();
+    let dir_c = store.mkdir(root, "rc".to_string()).await.unwrap();
+
+    let ino = store.create_file(dir_a, "f.txt".to_string()).await.unwrap();
+    store.link(ino, dir_b, "g.txt").await.unwrap();
+
+    store
+        .rename(dir_a, "f.txt", dir_c, "h.txt".to_string())
+        .await
+        .unwrap();
+
+    assert_eq!(store.lookup(dir_a, "f.txt").await.unwrap(), None);
+    assert_eq!(store.lookup(dir_b, "g.txt").await.unwrap(), Some(ino));
+    assert_eq!(store.lookup(dir_c, "h.txt").await.unwrap(), Some(ino));
+
+    let link_parents = store.load_link_parents(ino).await.unwrap();
+    assert_eq!(link_parents.len(), 2);
+    assert!(link_parents.contains(&(dir_b, "g.txt".to_string())));
+    assert!(link_parents.contains(&(dir_c, "h.txt".to_string())));
+
+    let names = store.get_names(ino).await.unwrap();
+    assert_eq!(names.len(), 2);
+}
+
+// --- Fallback tests (error handling & edge cases) ---
+
+#[serial]
+#[tokio::test]
+#[ignore]
+async fn test_stat_nonexistent_inode_fallback() {
+    let store = new_test_store().await;
+    let result = store.stat(999999).await.unwrap();
+    assert!(
+        result.is_none(),
+        "stat on nonexistent inode should return None"
+    );
+}
+
+#[serial]
+#[tokio::test]
+#[ignore]
+async fn test_set_attr_nonexistent_inode_fallback() {
+    let store = new_test_store().await;
+    let req = SetAttrRequest {
+        mode: Some(0o644),
+        ..Default::default()
+    };
+    let result = store.set_attr(999999, &req, SetAttrFlags::empty()).await;
+    assert!(result.is_err());
+    match result.unwrap_err() {
+        MetaError::NotFound(ino) => assert_eq!(ino, 999999),
+        other => panic!("expected NotFound, got {:?}", other),
+    }
+}
+
+#[serial]
+#[tokio::test]
+#[ignore]
+async fn test_truncate_nonexistent_inode_fallback() {
+    let store = new_test_store().await;
+    let result = store.truncate(999999, 1024, 4096).await;
+    assert!(result.is_err());
+    match result.unwrap_err() {
+        MetaError::NotFound(ino) => assert_eq!(ino, 999999),
+        other => panic!("expected NotFound, got {:?}", other),
+    }
+}
+
+#[serial]
+#[tokio::test]
+#[ignore]
+async fn test_read_symlink_on_non_symlink_fallback() {
+    let store = new_test_store().await;
+    let root = store.root_ino();
+    let ino = store
+        .create_file(root, "notalink.txt".to_string())
+        .await
+        .unwrap();
+
+    let result = store.read_symlink(ino).await;
+    assert!(result.is_err());
+    match result.unwrap_err() {
+        MetaError::NotSupported(msg) => assert!(msg.contains("not a symbolic link")),
+        other => panic!("expected NotSupported, got {:?}", other),
+    }
+}
+
+#[serial]
+#[tokio::test]
+#[ignore]
+async fn test_readdir_non_directory_fallback() {
+    let store = new_test_store().await;
+    let root = store.root_ino();
+    let ino = store
+        .create_file(root, "file_for_readdir.txt".to_string())
+        .await
+        .unwrap();
+
+    let result = store.readdir(ino).await;
+    assert!(result.is_err());
+    match result.unwrap_err() {
+        MetaError::NotDirectory(i) => assert_eq!(i, ino),
+        other => panic!("expected NotDirectory, got {:?}", other),
+    }
+}
+
+#[serial]
+#[tokio::test]
+#[ignore]
+async fn test_readdir_nonexistent_inode_fallback() {
+    let store = new_test_store().await;
+    let result = store.readdir(999999).await;
+    assert!(result.is_err());
+    match result.unwrap_err() {
+        MetaError::NotFound(ino) => assert_eq!(ino, 999999),
+        other => panic!("expected NotFound, got {:?}", other),
+    }
+}
+
+#[serial]
+#[tokio::test]
+#[ignore]
+async fn test_unlink_directory_rejected_fallback() {
+    let store = new_test_store().await;
+    let root = store.root_ino();
+    let dir = store.mkdir(root, "unlink_me".to_string()).await.unwrap();
+
+    let result = store.unlink(root, "unlink_me").await;
+    assert!(result.is_err());
+    match result.unwrap_err() {
+        MetaError::NotSupported(msg) => assert!(msg.contains("not unlinkable")),
+        other => panic!("expected NotSupported, got {:?}", other),
+    }
+
+    assert_eq!(
+        store.lookup(root, "unlink_me").await.unwrap(),
+        Some(dir),
+        "directory should not be deleted"
+    );
+}
+
+#[serial]
+#[tokio::test]
+#[ignore]
+async fn test_link_root_inode_rejected_fallback() {
+    let store = new_test_store().await;
+    let root = store.root_ino();
+
+    let result = store.link(root, root, "root_link").await;
+    assert!(result.is_err());
+    match result.unwrap_err() {
+        MetaError::NotSupported(msg) => assert!(msg.contains("root inode")),
+        other => panic!("expected NotSupported, got {:?}", other),
+    }
+}
+
+#[serial]
+#[tokio::test]
+#[ignore]
+async fn test_stat_fs_accounting_fallback() {
+    let store = new_test_store().await;
+    let root = store.root_ino();
+
+    let f1 = store
+        .create_file(root, "sf1.txt".to_string())
+        .await
+        .unwrap();
+    store.set_file_size(f1, 1000).await.unwrap();
+
+    let _d1 = store.mkdir(root, "sf_dir".to_string()).await.unwrap();
+
+    let (s1, _) = store.symlink(root, "sf_link", "/target").await.unwrap();
+    store.set_file_size(s1, 6).await.unwrap();
+
+    let snap = store.stat_fs().await.unwrap();
+    assert_eq!(
+        snap.used_inodes, 4,
+        "should count 4 non-deleted inodes (including root)"
+    );
+    assert_eq!(
+        snap.total_space,
+        1000 + 6,
+        "should count file and symlink size"
+    );
+}
+
+#[serial]
+#[tokio::test]
+#[ignore]
+async fn test_counter_operations_fallback() {
+    let store = new_test_store().await;
+
+    let id1 = store.next_id(crate::meta::INODE_ID_KEY).await.unwrap();
+    let id2 = store.next_id(crate::meta::INODE_ID_KEY).await.unwrap();
+    assert!(id2 > id1, "next_id should be monotonically increasing");
+
+    let counter_name = "test_counter_ops";
+    let v0 = store.get_counter(counter_name).await.unwrap();
+    assert_eq!(v0, 0, "nonexistent counter should default to 0");
+
+    let v1 = store.incr_counter(counter_name, 5).await.unwrap();
+    assert_eq!(v1, 5);
+
+    let v2 = store.incr_counter(counter_name, -3).await.unwrap();
+    assert_eq!(v2, 2);
+
+    let set_result = store
+        .set_counter_if_small(counter_name, 100, 10)
+        .await
+        .unwrap();
+    assert!(set_result, "current 2 < 90, should allow set");
+    assert_eq!(store.get_counter(counter_name).await.unwrap(), 100);
+
+    let set_result2 = store
+        .set_counter_if_small(counter_name, 105, 10)
+        .await
+        .unwrap();
+    assert!(!set_result2, "current 100 >= 95, should reject set");
+}
+
+#[serial]
+#[tokio::test]
+#[ignore]
+async fn test_global_lock_ttl_and_reacquire_fallback() {
+    let store = new_test_store().await;
+    let lock_name = LockName::ChunkCompactLock(12345);
+
+    let acquired1 = store.get_global_lock(lock_name.clone(), 1).await;
+    assert!(acquired1, "first lock acquisition should succeed");
+
+    let acquired2 = store.get_global_lock(lock_name.clone(), 1).await;
+    assert!(!acquired2, "re-acquire within TTL should fail");
+
+    tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+
+    let acquired3 = store.get_global_lock(lock_name.clone(), 1).await;
+    assert!(acquired3, "should re-acquire after TTL expires");
+}
+
+#[serial]
+#[tokio::test]
+#[ignore]
+async fn test_init_root_idempotent_fallback() {
+    let store = new_test_store().await;
+    let root = store.root_ino();
+
+    let attr_before = store.stat(root).await.unwrap().unwrap();
+    store.initialize().await.unwrap();
+    store.initialize().await.unwrap();
+    let attr_after = store.stat(root).await.unwrap().unwrap();
+
+    assert_eq!(attr_before.ino, attr_after.ino);
+    assert_eq!(attr_before.mode, attr_after.mode);
+
+    let counter = store.get_counter("nextinode").await.unwrap();
+    assert!(counter >= 2, "counter should not be reset to 1");
+}
+
+#[serial]
+#[tokio::test]
+#[ignore]
+async fn test_get_names_paths_deleted_inode_fallback() {
+    let store = new_test_store().await;
+    let root = store.root_ino();
+
+    let ino = store
+        .create_file(root, "del_paths.txt".to_string())
+        .await
+        .unwrap();
+    store.unlink(root, "del_paths.txt").await.unwrap();
+
+    let names = store.get_names(ino).await.unwrap();
+    assert!(
+        names.is_empty(),
+        "get_names on deleted inode should be empty"
+    );
+
+    let paths = store.get_paths(ino).await.unwrap();
+    assert!(
+        paths.is_empty(),
+        "get_paths on deleted inode should be empty"
+    );
+}
+
+#[serial]
+#[tokio::test]
+#[ignore]
+async fn test_create_file_in_non_directory_fallback() {
+    let store = new_test_store().await;
+    let root = store.root_ino();
+
+    let file_ino = store
+        .create_file(root, "not_a_dir.txt".to_string())
+        .await
+        .unwrap();
+    let result = store.create_file(file_ino, "child.txt".to_string()).await;
+    assert!(result.is_err());
+    match result.unwrap_err() {
+        MetaError::NotDirectory(ino) => assert_eq!(ino, file_ino),
+        MetaError::ParentNotFound(ino) => assert_eq!(ino, file_ino),
+        other => panic!("expected NotDirectory or ParentNotFound, got {:?}", other),
+    }
+}
+
+#[serial]
+#[tokio::test]
+#[ignore]
+async fn test_mkdir_in_file_rejected_fallback() {
+    let store = new_test_store().await;
+    let root = store.root_ino();
+
+    let file_ino = store
+        .create_file(root, "file_for_mkdir.txt".to_string())
+        .await
+        .unwrap();
+    let result = store.mkdir(file_ino, "child_dir".to_string()).await;
+    assert!(result.is_err());
+    match result.unwrap_err() {
+        MetaError::NotDirectory(ino) => assert_eq!(ino, file_ino),
+        MetaError::ParentNotFound(ino) => assert_eq!(ino, file_ino),
+        other => panic!("expected NotDirectory or ParentNotFound, got {:?}", other),
+    }
+}
+
+#[serial]
+#[tokio::test]
+#[ignore]
+async fn test_lookup_path_empty_and_invalid_fallback() {
+    let store = new_test_store().await;
+
+    assert_eq!(
+        store.lookup_path("").await.unwrap(),
+        None,
+        "empty path should return None"
+    );
+    assert_eq!(
+        store.lookup_path("/a/b/c/d/e/f").await.unwrap(),
+        None,
+        "nonexistent path should return None"
+    );
+}
+
+#[serial]
+#[tokio::test]
+#[ignore]
+async fn test_batch_stat_empty_fallback() {
+    let store = new_test_store().await;
+    let result = store.batch_stat(&[]).await.unwrap();
+    assert!(result.is_empty(), "empty input should return empty Vec");
+}
+
+/// Verifies that a directory with size 0 remains accessible after set_file_size.
+#[serial]
+#[tokio::test]
+#[ignore]
+async fn test_set_file_size_on_directory_fallback() {
+    let store = new_test_store().await;
+    let root = store.root_ino();
+
+    let dir = store.mkdir(root, "sized_dir".to_string()).await.unwrap();
+    store.set_file_size(dir, 0).await.unwrap();
+    let attr = store.stat(dir).await.unwrap().unwrap();
+    assert_eq!(attr.size, 0);
+    assert_eq!(attr.kind, crate::meta::store::FileType::Dir);
+}
+
+#[serial]
+#[tokio::test]
+#[ignore]
+async fn test_list_chunk_ids_empty_and_zero_limit_fallback() {
+    let store = new_test_store().await;
+
+    let r1 = store.list_chunk_ids(0).await.unwrap();
+    assert!(r1.is_empty(), "limit=0 should return empty");
+
+    let r2 = store.list_chunk_ids(10).await.unwrap();
+    assert!(r2.is_empty(), "should return empty when no chunks exist");
+}
+
+#[serial]
+#[tokio::test]
+#[ignore]
+async fn test_extend_file_size_on_directory_fallback() {
+    let store = new_test_store().await;
+    let root = store.root_ino();
+
+    let dir = store.mkdir(root, "extend_dir".to_string()).await.unwrap();
+    store.extend_file_size(dir, 0).await.unwrap();
+    let attr = store.stat(dir).await.unwrap().unwrap();
+    assert_eq!(attr.size, 0);
+}
+
+#[serial]
+#[tokio::test]
+#[ignore]
+async fn test_cleanup_orphan_uncommitted_slice_fallback() {
+    let store = new_test_store().await;
+    let slice_id = 601u64;
+    let chunk_id = 2001u64;
+
+    store
+        .record_uncommitted_slice(slice_id, chunk_id, 4096, "write")
+        .await
+        .unwrap();
+
+    let orphans = store
+        .cleanup_orphan_uncommitted_slices(0, 10)
+        .await
+        .unwrap();
+    assert_eq!(
+        orphans.len(),
+        1,
+        "uncommitted slice not written to chunk should be orphan"
+    );
+    assert_eq!(orphans[0], (slice_id, 4096));
+
+    let orphans2 = store
+        .cleanup_orphan_uncommitted_slices(0, 10)
+        .await
+        .unwrap();
+    assert_eq!(
+        orphans2.len(),
+        1,
+        "rescan should still find orphan index record"
+    );
+
+    store.delete_uncommitted_slices(&[slice_id]).await.unwrap();
+    let orphans3 = store
+        .cleanup_orphan_uncommitted_slices(0, 10)
+        .await
+        .unwrap();
+    assert!(
+        orphans3.is_empty(),
+        "should be fully cleaned after delete_uncommitted_slices"
+    );
 }
