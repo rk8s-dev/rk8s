@@ -2464,7 +2464,7 @@ impl MetaStore for RedisMetaStore {
                 }
             }
 
-            if page_len < page_size || next_cursor == "0" {
+            if next_cursor == "0" {
                 if wrapped || !started_from_cursor {
                     let mut cursor = self.chunk_scan_cursor.lock().unwrap();
                     *cursor = None;
@@ -2505,16 +2505,37 @@ impl MetaStore for RedisMetaStore {
 
         let delayed_slices = SliceDesc::decode_delayed_data(old_slices_to_delay)
             .ok_or_else(|| MetaError::Internal("Invalid delayed data length".to_string()))?;
+        let delayed_ids: std::collections::HashSet<u64> =
+            delayed_slices.iter().map(|(id, _, _)| *id).collect();
 
         let mut conn = self.conn.clone();
         let now = Utc::now().timestamp();
         let chunk_key = self.chunk_key(chunk_id);
 
+        let raw: Vec<Vec<u8>> = redis::cmd("LRANGE")
+            .arg(&chunk_key)
+            .arg(0)
+            .arg(-1)
+            .query_async(&mut conn)
+            .await
+            .map_err(redis_err)?;
+
+        let mut kept = Vec::new();
+        for entry in raw {
+            let desc: SliceDesc = crate::meta::serialization::deserialize_meta(&entry)?;
+            if !delayed_ids.contains(&desc.slice_id) {
+                kept.push(entry);
+            }
+        }
+
         let mut pipe = redis::pipe();
         pipe.atomic();
 
-        // Replace chunk slices
+        // Replace chunk slices: keep non-delayed existing, append new
         pipe.cmd("DEL").arg(&chunk_key).ignore();
+        for entry in &kept {
+            pipe.cmd("RPUSH").arg(&chunk_key).arg(entry).ignore();
+        }
         for slice in new_slices {
             let data = crate::meta::serialization::serialize_meta(slice)?;
             pipe.cmd("RPUSH").arg(&chunk_key).arg(data).ignore();
