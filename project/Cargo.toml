@@ -35,7 +35,7 @@ libruntime = { path = "libruntime" }
 rkforge = { path = "rkforge" }
 rkl = { path = "rkl" }
 rks = { path = "rks" }
-dagrs-derive = { path = "dagrs-derive", version = "0.4.3" }
+dagrs-derive = { path = "dagrs-derive", version = "0.5.0" }
 quote = "1.0"
 proc-macro2 = "1.0"
 rfuse3 = { path = "rfuse3", version = "0.0.7", features = ["tokio-runtime", "unprivileged"] }

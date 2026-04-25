@@ -167,13 +167,13 @@ async fn main() {
     let mut graph = Graph::new();
 
     // Add nodes to the graph
-    graph.add_node(sender1);
-    graph.add_node(sender2);
-    graph.add_node(receiver);
+    graph.add_node(sender1).unwrap();
+    graph.add_node(sender2).unwrap();
+    graph.add_node(receiver).unwrap();
 
     // Add edges: both senders connect to the receiver
-    graph.add_edge(sender1_id, vec![receiver_id]);
-    graph.add_edge(sender2_id, vec![receiver_id]);
+    graph.add_edge(sender1_id, vec![receiver_id]).unwrap();
+    graph.add_edge(sender2_id, vec![receiver_id]).unwrap();
     // Run the graph
     match graph.async_start().await {
         Ok(_) => (),

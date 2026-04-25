@@ -547,6 +547,9 @@ pub struct ContainerSpec {
     #[serde(default)]
     pub args: Vec<String>,
 
+    #[serde(default)]
+    pub tty: bool,
+
     pub resources: Option<ContainerRes>,
 
     #[serde(rename = "livenessProbe", default)]
@@ -1002,6 +1005,23 @@ pub enum RksMessage {
         pod_name: String,
         error: String,
     },
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct AttachTarget {
+    pub namespace: String,
+    pub pod_name: String,
+    pub container_name: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub enum AttachControlMessage {
+    Open(AttachTarget),
+    Ack,
+    Error(String),
+    Data(Vec<u8>),
+    Resize { rows: u16, cols: u16 },
+    Close,
 }
 
 impl std::fmt::Debug for RksMessage {

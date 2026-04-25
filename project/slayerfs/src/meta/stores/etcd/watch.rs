@@ -3,11 +3,10 @@
 //! Monitors etcd changes and invalidates local cache to maintain consistency
 //! across multiple clients.
 
-use crate::meta::entities::etcd::{EtcdDirChildren, EtcdEntryInfo, EtcdForwardEntry};
+use crate::meta::entities::etcd::{EtcdEntryInfo, EtcdForwardEntry};
 use crate::meta::store::MetaError;
 use etcd_client::{Client as EtcdClient, EventType, WatchOptions};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 use tokio::time::{self, Duration};
@@ -38,13 +37,6 @@ pub enum CacheInvalidationEvent {
     /// Directly update inode metadata from r: key PUT event
     /// Avoids re-fetching from etcd (chmod, chown, utimens operations)
     UpdateInodeMetadata { ino: i64, metadata: EtcdEntryInfo },
-
-    /// Directly update directory children from c: key PUT event
-    /// Replaces cached children list without re-fetching
-    UpdateChildren {
-        parent_ino: i64,
-        children: HashMap<String, i64>, // name -> inode mapping
-    },
 }
 
 /// Etcd watch worker configuration
@@ -131,7 +123,6 @@ impl WatchConfig {
 ///       │
 ///       ├─ Parse Key: f:10:file.txt → parent=10, name=file.txt
 ///       ├─ Parse Key: r:100 → inode=100
-///       └─ Parse Key: c:10 → parent=10
 ///       │
 ///       ▼
 ///   mpsc::Sender<CacheInvalidationEvent>
@@ -295,15 +286,12 @@ impl EtcdWatchWorker {
     /// # Key Formats
     /// - `f:{parent}:{name}` - Forward index (parent, name) → inode
     /// - `r:{inode}` - Reverse index inode → metadata
-    /// - `c:{inode}` - Children index inode → children set
     ///
     /// # Event Generation Rules
     /// - `f:*` PUT → Parse value to get child_ino, generate AddChild event
     /// - `f:*` DELETE → Generate RemoveChild event
     /// - `r:*` PUT → Parse EtcdEntryInfo JSON, generate UpdateInodeMetadata event
     /// - `r:*` DELETE → Invalidate inode cache (coarse-grained)
-    /// - `c:*` PUT → Parse EtcdDirChildren JSON (HashMap<String, i64>), generate UpdateChildren event
-    /// - `c:*` DELETE → Invalidate parent children (coarse-grained)
     ///
     /// # Arguments
     /// - `key`: etcd key string
@@ -386,39 +374,6 @@ impl EtcdWatchWorker {
                     }
                 }
             }
-            "c" if parts.len() >= 2 => {
-                // Children index: c:{parent_inode} → EtcdDirChildren JSON
-                // Format: {"inode":1,"children":{"a.txt":4,"one":3}}
-                if let Ok(parent_ino) = parts[1].parse::<i64>() {
-                    match event_type {
-                        EventType::Put => {
-                            // Parse EtcdDirChildren using deserialize_meta (binary-safe)
-                            if let Ok(dir_children) = crate::meta::serialization::deserialize_meta::<
-                                EtcdDirChildren,
-                            >(value)
-                            {
-                                events.push(CacheInvalidationEvent::UpdateChildren {
-                                    parent_ino,
-                                    children: dir_children.children,
-                                });
-                                return events;
-                            }
-
-                            // Fallback: parse failed
-                            warn!(
-                                "Failed to parse EtcdDirChildren from c: key PUT, using invalidate"
-                            );
-                            events
-                                .push(CacheInvalidationEvent::InvalidateParentChildren(parent_ino));
-                        }
-                        EventType::Delete => {
-                            // Coarse-grained: children deleted
-                            events
-                                .push(CacheInvalidationEvent::InvalidateParentChildren(parent_ino));
-                        }
-                    }
-                }
-            }
             _ => {
                 // Unknown key format - safe fallback
                 warn!("Unknown etcd key format: {}", key);
@@ -472,11 +427,11 @@ mod tests {
     fn test_watch_config_from_env() {
         unsafe {
             std::env::set_var("SLAYERFS_WATCH_ENABLED", "true");
-            std::env::set_var("SLAYERFS_WATCH_PREFIXES", "f:, r: , c:");
+            std::env::set_var("SLAYERFS_WATCH_PREFIXES", "f:, r:");
         }
         let config = WatchConfig::from_env_or_default();
         assert!(config.enabled);
-        assert_eq!(config.prefixes, vec!["f:", "r:", "c:"]);
+        assert_eq!(config.prefixes, vec!["f:", "r:"]);
         unsafe {
             std::env::remove_var("SLAYERFS_WATCH_ENABLED");
             std::env::remove_var("SLAYERFS_WATCH_PREFIXES");
@@ -533,45 +488,6 @@ mod tests {
         assert!(matches!(
             events[0],
             CacheInvalidationEvent::InvalidateInode(100)
-        ));
-    }
-
-    #[test]
-    fn test_parse_children_key_put() {
-        let json = r#"{"inode":50,"children":{"file.txt":100,"dir":200}}"#;
-        let events = EtcdWatchWorker::parse_key_to_events("c:50", EventType::Put, json.as_bytes());
-        assert_eq!(events.len(), 1);
-        match &events[0] {
-            CacheInvalidationEvent::UpdateChildren {
-                parent_ino,
-                children,
-            } => {
-                assert_eq!(*parent_ino, 50);
-                assert_eq!(children.len(), 2);
-                assert_eq!(children.get("file.txt"), Some(&100));
-                assert_eq!(children.get("dir"), Some(&200));
-            }
-            _ => panic!("Expected UpdateChildren event"),
-        }
-    }
-
-    #[test]
-    fn test_parse_children_key_delete() {
-        let events = EtcdWatchWorker::parse_key_to_events("c:50", EventType::Delete, b"");
-        assert_eq!(events.len(), 1);
-        assert!(matches!(
-            events[0],
-            CacheInvalidationEvent::InvalidateParentChildren(50)
-        ));
-    }
-
-    #[test]
-    fn test_parse_children_key_invalid_json() {
-        let events = EtcdWatchWorker::parse_key_to_events("c:50", EventType::Put, b"invalid json");
-        assert_eq!(events.len(), 1);
-        assert!(matches!(
-            events[0],
-            CacheInvalidationEvent::InvalidateParentChildren(50)
         ));
     }
 }

@@ -178,37 +178,37 @@ pub mod request_validation;
 
 #[allow(dead_code)]
 mod etcdserverpb {
-    tonic::include_proto!("etcdserverpb");
+    include!(concat!(env!("OUT_DIR"), "/etcdserverpb.rs"));
 }
 
 #[allow(dead_code)]
 mod authpb {
-    tonic::include_proto!("authpb");
+    include!(concat!(env!("OUT_DIR"), "/authpb.rs"));
 }
 
 #[allow(dead_code)]
 mod mvccpb {
-    tonic::include_proto!("mvccpb");
+    include!(concat!(env!("OUT_DIR"), "/mvccpb.rs"));
 }
 
 #[allow(dead_code)]
 mod v3lockpb {
-    tonic::include_proto!("v3lockpb");
+    include!(concat!(env!("OUT_DIR"), "/v3lockpb.rs"));
 }
 
 #[allow(dead_code)]
 mod leasepb {
-    tonic::include_proto!("leasepb");
+    include!(concat!(env!("OUT_DIR"), "/leasepb.rs"));
 }
 
 #[allow(dead_code)]
 mod commandpb {
-    tonic::include_proto!("commandpb");
+    include!(concat!(env!("OUT_DIR"), "/commandpb.rs"));
 }
 
 #[allow(dead_code)]
 mod errorpb {
-    tonic::include_proto!("errorpb");
+    include!(concat!(env!("OUT_DIR"), "/errorpb.rs"));
 }
 
 use std::fmt::Display;

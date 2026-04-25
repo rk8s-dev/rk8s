@@ -10,15 +10,21 @@ use slayerfs::ChunkLayout;
 use crate::commands::pod;
 use crate::csi::{CsiNodeService, RklCsiIdentity, SlayerFsOperator, handle_csi_request};
 use crate::daemon::status::probe::probe_manager::PROBE_MANAGER;
+use crate::daemon::tty::{
+    close_attach_session, open_attach_session, resize_attach_pty, write_attach_input,
+};
 use crate::network::receiver::{NetworkConfigMessage, NetworkReceiver};
 use crate::task::TaskRunner;
 use chrono::Utc;
+use common::quic::{recv_frame, send_frame};
 use common::*;
 use gethostname::gethostname;
 use libnetwork::ip::{IPStack, PublicIPOpts, lookup_ext_iface};
 
 use crate::commands::pod::TLSConnectionArgs;
 use crate::quic::client::{Daemon as ClientDaemon, QUICClient};
+use libcontainer::syscall::syscall::create_syscall;
+use libruntime::rootpath;
 use sysinfo::{Disks, System};
 use tracing::{error, info, warn};
 
@@ -202,6 +208,26 @@ pub async fn run_once(
                 error!("[worker heartbeat] send failed: {e}");
             } else {
                 info!("[worker] heartbeat sent");
+            }
+        }
+    });
+
+    let bi_client = client.clone();
+    let bi_handle = tokio::spawn(async move {
+        loop {
+            match bi_client.accept_bi().await {
+                Ok(stream) => {
+                    let bi_client = bi_client.clone();
+                    tokio::spawn(async move {
+                        if let Err(e) = handle_attach_bistream(&bi_client, stream).await {
+                            error!("[worker attach] bi stream error: {e}");
+                        }
+                    });
+                }
+                Err(e) => {
+                    error!("[worker attach] accept_bi failed: {e}");
+                    break;
+                }
             }
         }
     });
@@ -514,7 +540,117 @@ pub async fn run_once(
             Err(e) => {
                 error!("[worker] accept_uni error: {e}, breaking to reconnect");
                 hb_handle.abort();
+                bi_handle.abort();
                 return Err(anyhow::anyhow!("accept_uni failed: {e}"));
+            }
+        }
+    }
+}
+
+async fn handle_attach_bistream(
+    _client: &QUICClient<ClientDaemon>,
+    mut stream: common::quic::RksStream,
+) -> Result<()> {
+    let open = stream.recv_frame::<AttachControlMessage>().await?;
+    let AttachControlMessage::Open(target) = open else {
+        stream
+            .send_frame(&AttachControlMessage::Error(
+                "expected AttachControlMessage::Open".to_string(),
+            ))
+            .await?;
+        return Ok(());
+    };
+
+    let container_id = match resolve_attach_container(&target) {
+        Ok(container_id) => container_id,
+        Err(e) => {
+            stream
+                .send_frame(&AttachControlMessage::Error(e.to_string()))
+                .await?;
+            return Ok(());
+        }
+    };
+
+    let session = match open_attach_session(&container_id) {
+        Ok(session) => session,
+        Err(e) => {
+            stream
+                .send_frame(&AttachControlMessage::Error(e.to_string()))
+                .await?;
+            return Ok(());
+        }
+    };
+
+    stream.send_frame(&AttachControlMessage::Ack).await?;
+
+    let (session_container_id, master_fd, mut output_rx) = session.into_parts();
+    let (mut send_stream, mut recv_stream) = stream.into_inner();
+
+    let output_task = tokio::spawn(async move {
+        while let Some(chunk) = output_rx.recv().await {
+            send_frame(&mut send_stream, &AttachControlMessage::Data(chunk)).await?;
+        }
+        let _ = send_frame(&mut send_stream, &AttachControlMessage::Close).await;
+        let _ = send_stream.finish();
+        Ok::<(), anyhow::Error>(())
+    });
+
+    let input_result = async {
+        loop {
+            let msg = recv_frame::<AttachControlMessage>(&mut recv_stream).await?;
+            match msg {
+                AttachControlMessage::Data(data) => {
+                    write_attach_input(&master_fd, &data)?;
+                }
+                AttachControlMessage::Resize { rows, cols } => {
+                    resize_attach_pty(&master_fd, rows, cols)?;
+                }
+                AttachControlMessage::Close => {
+                    break;
+                }
+                AttachControlMessage::Error(message) => {
+                    anyhow::bail!("attach client error: {message}");
+                }
+                AttachControlMessage::Open(_) | AttachControlMessage::Ack => {
+                    anyhow::bail!("unexpected attach control frame from client");
+                }
+            }
+        }
+        Ok::<(), anyhow::Error>(())
+    }
+    .await;
+
+    let _ = close_attach_session(&session_container_id);
+    let _ = output_task.await;
+    input_result
+}
+
+fn resolve_attach_container(target: &AttachTarget) -> Result<String> {
+    let root_path = rootpath::determine(None, &*create_syscall())?;
+    let pod_info = pod::PodInfo::load(&root_path, &target.pod_name)?;
+
+    match target.container_name.as_deref() {
+        Some(container_name) => pod_info
+            .container_names
+            .into_iter()
+            .find(|candidate| {
+                candidate == container_name || candidate.ends_with(&format!("-{container_name}"))
+            })
+            .ok_or_else(|| {
+                anyhow::anyhow!(
+                    "container '{}' not found in pod '{}'",
+                    container_name,
+                    target.pod_name
+                )
+            }),
+        None => {
+            if pod_info.container_names.len() == 1 {
+                Ok(pod_info.container_names[0].clone())
+            } else {
+                Err(anyhow::anyhow!(
+                    "pod '{}' has multiple containers; specify --container",
+                    target.pod_name
+                ))
             }
         }
     }

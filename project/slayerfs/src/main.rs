@@ -1,5 +1,6 @@
 mod cadapter;
 mod chunk;
+mod control;
 mod daemon;
 #[allow(dead_code)]
 mod fs;
@@ -40,10 +41,19 @@ use crate::cadapter::localfs::LocalFsBackend;
 use crate::cadapter::s3::{S3Backend, S3Config};
 use crate::chunk::layout::ChunkLayout;
 use crate::chunk::store::{BlockStore, ObjectBlockStore};
+use crate::control::client::send_request;
+use crate::control::job::JobOutcome;
+use crate::control::protocol::{ControlRequest, ControlResponse};
+use crate::control::runtime::RuntimeRegistry;
 use crate::fuse::mount::mount_vfs_unprivileged;
 use crate::meta::MetaStore;
-use crate::meta::config::{CacheConfig, ClientOptions, Config, DatabaseConfig, DatabaseType};
+use crate::meta::client::MetaClient;
+use crate::meta::config::{
+    CacheConfig, ClientOptions, CompactConfig, Config, DatabaseConfig, DatabaseType,
+    MetaClientConfig,
+};
 use crate::meta::factory::MetaStoreFactory;
+use crate::meta::layer::MetaLayer;
 use crate::meta::stores::{DatabaseMetaStore, EtcdMetaStore, RedisMetaStore};
 use crate::vfs::fs::VFS;
 
@@ -53,7 +63,9 @@ async fn main() -> anyhow::Result<()> {
 
     let cli = Cli::parse();
     let result = match cli.cmd {
-        Command::Mount(args) => mount_cmd(MountConfig::from_sources(args)?).await,
+        Command::Mount(args) => mount_cmd(MountConfig::from_sources(*args)?).await,
+        Command::Gc(args) => gc_cmd(args).await,
+        Command::Info(args) => info_cmd(args).await,
     };
     shutdown_flame();
     shutdown_chrome();
@@ -200,16 +212,139 @@ async fn mount_with_store<S>(
 where
     S: BlockStore + Send + Sync + 'static,
 {
-    let fs = VFS::new(layout, store, meta_store)
+    let store = Arc::new(store);
+    let mut meta_config = MetaClientConfig::default();
+    meta_config.options.mount_point = Some(mount_point.display().to_string());
+
+    let meta_client = MetaClient::with_options(
+        meta_store,
+        meta_config.capacity.clone(),
+        meta_config.effective_ttl(),
+        meta_config.options,
+    );
+    meta_client
+        .initialize()
         .await
         .map_err(anyhow::Error::from)?;
+    meta_client
+        .start_control_plane()
+        .await
+        .map_err(anyhow::Error::from)?;
+
+    let fs = VFS::with_meta_layer_with_compact_config(
+        layout,
+        store,
+        meta_client.clone(),
+        meta_config.compact.clone(),
+    )
+    .map_err(anyhow::Error::from)?;
     let handle = mount_vfs_unprivileged(fs, mount_point).await?;
 
     println!("mounted at {}", mount_point.display());
     tokio::signal::ctrl_c().await?;
     println!("unmounting...");
     handle.unmount().await?;
+    meta_client.shutdown_runtime().await;
     Ok(())
+}
+
+async fn gc_cmd(args: GcArgs) -> anyhow::Result<()> {
+    let registry = RuntimeRegistry::new(RuntimeRegistry::default_root());
+    let mount_point = args.mount_point.as_ref().map(|path| path.to_string_lossy());
+    let record = registry.select_instance(mount_point.as_deref()).await?;
+
+    let accepted = send_request(
+        &record.socket_path,
+        &ControlRequest::RunGc {
+            dry_run: args.dry_run,
+        },
+    )
+    .await?;
+
+    let ControlResponse::Accepted { job_id } = accepted else {
+        anyhow::bail!("unexpected response: {accepted:?}");
+    };
+
+    loop {
+        let status = send_request(
+            &record.socket_path,
+            &ControlRequest::GetJob {
+                job_id: job_id.clone(),
+            },
+        )
+        .await?;
+
+        match status {
+            ControlResponse::JobStatus {
+                state,
+                detail,
+                outcome,
+                ..
+            } => {
+                if matches!(
+                    state,
+                    crate::control::job::JobState::Pending | crate::control::job::JobState::Running
+                ) {
+                    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                    continue;
+                }
+
+                match outcome {
+                    Some(JobOutcome::Gc(result)) => {
+                        println!(
+                            "gc finished: state={state:?} orphan_slices={} orphan_objects={} deleted_objects={} errors={}",
+                            result.orphan_slice_count,
+                            result.orphan_object_count,
+                            result.deleted_object_count,
+                            result.error_count
+                        );
+                    }
+                    None => println!("gc finished: state={state:?}"),
+                }
+
+                if let Some(detail) = detail {
+                    println!("{detail}");
+                }
+
+                return Ok(());
+            }
+            ControlResponse::Error { code, message } => {
+                anyhow::bail!("gc failed: {code}: {message}");
+            }
+            other => anyhow::bail!("unexpected response: {other:?}"),
+        }
+    }
+}
+
+async fn info_cmd(args: InfoArgs) -> anyhow::Result<()> {
+    let registry = RuntimeRegistry::new(RuntimeRegistry::default_root());
+    let mount_point = args.mount_point.as_ref().map(|path| path.to_string_lossy());
+    let record = registry.select_instance(mount_point.as_deref()).await?;
+
+    let response = send_request(&record.socket_path, &ControlRequest::GetInfo).await?;
+
+    match response {
+        ControlResponse::Info {
+            pid,
+            mount_point,
+            started_at,
+            version,
+        } => {
+            let started_at = chrono::DateTime::from_timestamp_millis(started_at)
+                .map(|dt| dt.to_rfc3339())
+                .unwrap_or_else(|| started_at.to_string());
+
+            println!("mount_point: {mount_point}");
+            println!("pid: {pid}");
+            println!("started_at: {started_at}");
+            println!("version: {version}");
+            Ok(())
+        }
+        ControlResponse::Error { code, message } => {
+            anyhow::bail!("info failed: {code}: {message}");
+        }
+        other => anyhow::bail!("unexpected response: {other:?}"),
+    }
 }
 
 #[cfg(feature = "profiling")]
@@ -260,6 +395,7 @@ async fn create_meta_store(args: &MountConfig) -> anyhow::Result<Arc<dyn MetaSto
     match args.meta_backend {
         MetaBackendKind::Sqlx => {
             let client = ClientOptions::default();
+            let compact = CompactConfig::default();
 
             let config = Config {
                 database: DatabaseConfig {
@@ -267,6 +403,7 @@ async fn create_meta_store(args: &MountConfig) -> anyhow::Result<Arc<dyn MetaSto
                 },
                 cache: CacheConfig::default(),
                 client,
+                compact,
             };
             let handle = MetaStoreFactory::<DatabaseMetaStore>::create_from_config(config).await?;
             Ok(handle.store() as Arc<dyn MetaStore>)
@@ -277,6 +414,7 @@ async fn create_meta_store(args: &MountConfig) -> anyhow::Result<Arc<dyn MetaSto
             }
 
             let client = ClientOptions::default();
+            let compact = CompactConfig::default();
 
             let config = Config {
                 database: DatabaseConfig {
@@ -286,12 +424,14 @@ async fn create_meta_store(args: &MountConfig) -> anyhow::Result<Arc<dyn MetaSto
                 },
                 cache: CacheConfig::default(),
                 client,
+                compact,
             };
             let handle = MetaStoreFactory::<EtcdMetaStore>::create_from_config(config).await?;
             Ok(handle.store() as Arc<dyn MetaStore>)
         }
         MetaBackendKind::Redis => {
             let client = ClientOptions::default();
+            let compact = CompactConfig::default();
 
             let config = Config {
                 database: DatabaseConfig {
@@ -301,6 +441,7 @@ async fn create_meta_store(args: &MountConfig) -> anyhow::Result<Arc<dyn MetaSto
                 },
                 cache: CacheConfig::default(),
                 client,
+                compact,
             };
             let handle = MetaStoreFactory::<RedisMetaStore>::create_from_config(config).await?;
             Ok(handle.store() as Arc<dyn MetaStore>)

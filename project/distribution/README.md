@@ -206,7 +206,11 @@ List all repositories visible to the authenticated user:
         {
           "namespace": "myuser",
           "name": "myrepo",
-          "is_public": true
+          "is_public": true,
+          "tags": ["latest", "v1"],
+          "size_tag": "latest",
+          "size_bytes": 123456,
+          "last_pushed_at": "2026-04-13T08:30:00Z"
         }
       ]
     }

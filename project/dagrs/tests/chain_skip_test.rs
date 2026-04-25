@@ -89,14 +89,14 @@ async fn test_chain_skip_deadlock() {
     );
     let id_router = router.id();
 
-    graph.add_node(router);
-    graph.add_node(node_b);
-    graph.add_node(node_c);
-    graph.add_node(node_d);
+    graph.add_node(router).unwrap();
+    graph.add_node(node_b).unwrap();
+    graph.add_node(node_c).unwrap();
+    graph.add_node(node_d).unwrap();
 
-    graph.add_edge(id_router, vec![id_b]);
-    graph.add_edge(id_b, vec![id_c]);
-    graph.add_edge(id_c, vec![id_d]);
+    graph.add_edge(id_router, vec![id_b]).unwrap();
+    graph.add_edge(id_b, vec![id_c]).unwrap();
+    graph.add_edge(id_c, vec![id_d]).unwrap();
 
     println!("Starting Graph...");
     // Set timeout to detect deadlock

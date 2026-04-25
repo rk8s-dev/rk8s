@@ -2,6 +2,7 @@ use std::{
     collections::{HashMap, VecDeque},
     env::{self},
     fs::{self, File},
+    net::IpAddr,
     path::{Path, PathBuf},
     vec,
 };
@@ -13,7 +14,7 @@ use libcontainer::syscall::syscall::create_syscall;
 use liboci_cli::{Delete, List};
 
 use serde::{Deserialize, Serialize};
-use tracing::debug;
+use tracing::{debug, info};
 
 use crate::commands::{
     compose::{
@@ -239,7 +240,7 @@ impl ComposeManager {
         let network_mapping = self.network_manager.network_service_mapping();
 
         for (network_name, services) in network_mapping {
-            println!("Creating network: {network_name}");
+            info!("Creating network: {network_name}");
             let mut ordered: Vec<(String, ServiceSpec)> = services.clone();
             ordered.sort_by_key(|(name, _)| self.startup_order.get(name).unwrap());
 
@@ -263,6 +264,7 @@ impl ComposeManager {
                     volume_mounts: None,
                     command: None,
                     working_dir: None,
+                    tty: false,
                 };
 
                 // handle the services volume name
@@ -314,12 +316,23 @@ impl ComposeManager {
                             e
                         )
                     })?;
-                runner.set_compose_assigned_ip(std::net::IpAddr::V4(allocated_ip));
+                let ip = IpAddr::V4(allocated_ip);
+                runner.set_compose_assigned_ip(ip);
 
                 runner.add_mounts(mounts);
                 runner.add_mounts(configs_mounts);
-                create_resolv_conf()?;
+
+                // write container resolv.conf, make sure container can parse the container url.
+                // but need to deal the issue : Add rather than overwrite
+                // add add local machine this func
+                let container_id = runner.id();
+                let (opts, dns_server) = self
+                    .network_manager
+                    .create_network_opts(container_id.clone(), ip)?;
+
+                create_resolv_conf(dns_server)?;
                 add_resolv_conf(&mut runner);
+
                 match runner.run() {
                     std::result::Result::Ok(_) => {
                         self.containers.push(runner.get_container_state()?);
@@ -347,9 +360,10 @@ impl ComposeManager {
                         return Err(err);
                     }
                 };
-                self.network_manager
-                    .after_container_started(runner)
-                    .map_err(|e| anyhow!("network setup failed: {e}"))?;
+
+                // setup
+                let pid = runner.get_container_state()?.pid.unwrap();
+                NetworkManager::setup_network(&opts, pid, container_id)?;
             }
         }
         // return the compose application's state

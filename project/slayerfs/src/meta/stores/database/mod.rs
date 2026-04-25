@@ -16,10 +16,11 @@ use crate::meta::file_lock::{
     FileLockInfo, FileLockQuery, FileLockRange, FileLockType, PlockRecord,
 };
 use crate::meta::store::{
-    DirEntry, FileAttr, LockName, MetaError, MetaStore, OpenFlags, SetAttrFlags, SetAttrRequest,
-    StatFsSnapshot,
+    CHUNK_LOCK_CHECK_TTL_SECS, DirEntry, FileAttr, LockName, MetaError, MetaStore, OpenFlags,
+    SetAttrFlags, SetAttrRequest, StatFsSnapshot,
 };
 use crate::meta::{INODE_ID_KEY, Permission, SLICE_ID_KEY};
+
 use crate::utils::NumCastExt;
 use crate::vfs::chunk_id_for;
 use crate::vfs::fs::FileType;
@@ -30,7 +31,7 @@ use sea_orm::ActiveValue::{self, Set, Unchanged};
 use sea_orm::prelude::Uuid;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, ConnectOptions, ConnectionTrait, Database, DatabaseConnection,
-    EntityTrait, IntoActiveModel, PaginatorTrait, QueryFilter, QueryOrder, Schema,
+    EntityTrait, IntoActiveModel, PaginatorTrait, QueryFilter, QueryOrder, QuerySelect, Schema,
     TransactionTrait, sea_query,
 };
 use sea_query::Index;
@@ -41,7 +42,7 @@ use std::sync::OnceLock;
 use std::time::Duration;
 use tokio::select;
 use tokio_util::sync::CancellationToken;
-use tracing::{Instrument, error};
+use tracing::{Instrument, debug, error, warn};
 
 #[derive(Eq, Hash, PartialEq)]
 struct PlockHashMapKey {
@@ -311,6 +312,14 @@ impl DatabaseMetaStore {
                 .to_owned(),
             schema
                 .create_table_from_entity(XattrMeta)
+                .if_not_exists()
+                .to_owned(),
+            schema
+                .create_table_from_entity(DelayedSlice)
+                .if_not_exists()
+                .to_owned(),
+            schema
+                .create_table_from_entity(UncommittedSlice)
                 .if_not_exists()
                 .to_owned(),
         ];
@@ -724,7 +733,7 @@ impl DatabaseMetaStore {
         }
     }
 
-    async fn get_lock_internal(&self, lock_name: LockName) -> anyhow::Result<bool> {
+    async fn get_lock_internal(&self, lock_name: LockName, ttl_secs: u64) -> anyhow::Result<bool> {
         let txn = self.db.begin().await.map_err(MetaError::Database)?;
         let lock_name_str = lock_name.to_string();
         let lock_ = LocksMeta::find()
@@ -733,6 +742,7 @@ impl DatabaseMetaStore {
             .await?;
 
         let current_time = Utc::now();
+        let expires_at = current_time + ChronoDuration::seconds(ttl_secs as i64);
         let flag: bool;
         match lock_ {
             Some(lock) => {
@@ -745,8 +755,8 @@ impl DatabaseMetaStore {
                     }
                 };
 
-                if last_updated < current_time - ChronoDuration::seconds(7) {
-                    lock.last_updated = ActiveValue::Set(current_time);
+                if last_updated <= current_time {
+                    lock.last_updated = ActiveValue::Set(expires_at);
                     lock.update(&txn).await?;
                     flag = true;
                 } else {
@@ -756,7 +766,7 @@ impl DatabaseMetaStore {
             None => {
                 let lock = locks_meta::ActiveModel {
                     lock_name: ActiveValue::Set(lock_name_str),
-                    last_updated: ActiveValue::Set(current_time),
+                    last_updated: ActiveValue::Set(expires_at),
                 };
                 lock.insert(&txn).await?;
                 flag = true;
@@ -765,6 +775,33 @@ impl DatabaseMetaStore {
 
         txn.commit().await.map_err(MetaError::Database)?;
         Ok(flag)
+    }
+
+    async fn is_lock_held_internal(
+        &self,
+        lock_name: LockName,
+        _ttl_secs: u64,
+    ) -> anyhow::Result<bool> {
+        let lock_name_str = lock_name.to_string();
+        let lock_ = LocksMeta::find()
+            .filter(locks_meta::Column::LockName.eq(lock_name_str))
+            .one(&self.db)
+            .await?;
+
+        let current_time = Utc::now();
+        match lock_ {
+            Some(lock) => Ok(lock.last_updated > current_time),
+            None => Ok(false),
+        }
+    }
+
+    async fn release_lock_internal(&self, lock_name: LockName) -> anyhow::Result<bool> {
+        let lock_name_str = lock_name.to_string();
+        let result = LocksMeta::delete_many()
+            .filter(locks_meta::Column::LockName.eq(lock_name_str))
+            .exec(&self.db)
+            .await?;
+        Ok(result.rows_affected > 0)
     }
 
     async fn shutdown_session_by_id<C: ConnectionTrait>(
@@ -995,6 +1032,129 @@ impl DatabaseMetaStore {
                 }
             }
         }
+    }
+
+    async fn process_delayed_slices(
+        &self,
+        batch_size: usize,
+        max_age_secs: i64,
+    ) -> Result<Vec<(u64, u64, u64, i64)>, MetaError> {
+        // Two-phase deletion:
+        // Phase 1: Delete slice_meta records and mark as "meta_deleted"
+        // Phase 2: After block deletion succeeds, call confirm_delayed_deleted()
+        //
+        // This ensures that if block deletion fails, we can retry later.
+
+        let cutoff_time = Utc::now().timestamp() - max_age_secs;
+
+        // Include meta_deleted so failed block deletion can be retried in later GC cycles.
+        let delayed_slices: Vec<delayed_slice::Model> = DelayedSlice::find()
+            .filter(delayed_slice::Column::CreatedAt.lt(cutoff_time))
+            .filter(
+                delayed_slice::Column::Status
+                    .is_in(vec!["pending".to_string(), "meta_deleted".to_string()]),
+            )
+            .limit(batch_size as u64)
+            .all(&self.db)
+            .await
+            .map_err(MetaError::Database)?;
+
+        if delayed_slices.is_empty() {
+            return Ok(vec![]);
+        }
+
+        let mut ready_for_block_deletion = Vec::new();
+        let txn = self.db.begin().await.map_err(MetaError::Database)?;
+
+        for delayed in &delayed_slices {
+            if delayed.status == "meta_deleted" {
+                ready_for_block_deletion.push((
+                    delayed.slice_id as u64,
+                    delayed.offset as u64,
+                    delayed.size as u64,
+                    delayed.id,
+                ));
+                continue;
+            }
+
+            if delayed.status != "pending" {
+                continue;
+            }
+
+            // Delete from slice_meta table by slice_id column
+            let result = SliceMeta::delete_many()
+                .filter(slice_meta::Column::SliceId.eq(delayed.slice_id))
+                .exec(&txn)
+                .await;
+
+            match result {
+                Ok(deleted) => {
+                    if deleted.rows_affected > 0 {
+                        debug!(
+                            slice_id = delayed.slice_id,
+                            chunk_id = delayed.chunk_id,
+                            "Deleted old slice from slice_meta, marked for block deletion"
+                        );
+                    } else {
+                        // slice already deleted from slice_meta
+                        debug!(
+                            slice_id = delayed.slice_id,
+                            "Slice already deleted from slice_meta"
+                        );
+                    }
+                    // Mark as meta_deleted for block deletion phase
+                    let mut active: delayed_slice::ActiveModel = delayed.clone().into();
+                    active.status = Set("meta_deleted".to_string());
+                    if let Err(e) = active.update(&txn).await {
+                        warn!(
+                            slice_id = delayed.slice_id,
+                            error = ?e,
+                            "Failed to update delayed slice status"
+                        );
+                        continue;
+                    }
+                    // Return (slice_id, offset, size, delayed_id) for confirmation
+                    ready_for_block_deletion.push((
+                        delayed.slice_id as u64,
+                        delayed.offset as u64,
+                        delayed.size as u64,
+                        delayed.id,
+                    ));
+                }
+                Err(e) => {
+                    warn!(
+                        slice_id = delayed.slice_id,
+                        error = ?e,
+                        "Failed to delete old slice from slice_meta, will retry later"
+                    );
+                    continue;
+                }
+            }
+        }
+
+        txn.commit().await.map_err(MetaError::Database)?;
+
+        info!("phase 1");
+
+        Ok(ready_for_block_deletion)
+    }
+
+    /// Confirm delayed slices have been deleted from block storage.
+    /// This is Phase 2 of the two-phase deletion process.
+    async fn confirm_delayed_deleted(&self, delayed_ids: &[i64]) -> Result<(), MetaError> {
+        if delayed_ids.is_empty() {
+            return Ok(());
+        }
+
+        // Permanently delete the delayed_slice records
+        DelayedSlice::delete_many()
+            .filter(delayed_slice::Column::Id.is_in(delayed_ids.iter().copied()))
+            .exec(&self.db)
+            .await
+            .map_err(MetaError::Database)?;
+
+        info!("confirmed");
+        Ok(())
     }
 }
 
@@ -2473,12 +2633,29 @@ impl MetaStore for DatabaseMetaStore {
         Ok(slices)
     }
 
+    async fn list_chunk_ids(&self, limit: usize) -> Result<Vec<u64>, MetaError> {
+        let rows: Vec<(i64,)> = SliceMeta::find()
+            .select_only()
+            .column(slice_meta::Column::ChunkId)
+            .distinct()
+            .into_tuple()
+            .all(&self.db)
+            .await
+            .map_err(MetaError::Database)?;
+        Ok(rows
+            .into_iter()
+            .take(limit)
+            .map(|(id,)| id as u64)
+            .collect())
+    }
+
     #[tracing::instrument(
         level = "trace",
         skip(self, slice),
         fields(chunk_id, slice_id = slice.slice_id, offset = slice.offset, len = slice.length)
     )]
     async fn append_slice(&self, chunk_id: u64, slice: SliceDesc) -> Result<(), MetaError> {
+        let txn = self.db.begin().await.map_err(MetaError::Database)?;
         let model = slice_meta::ActiveModel {
             chunk_id: Set(chunk_id as i64),
             slice_id: Set(slice.slice_id as i64),
@@ -2486,8 +2663,8 @@ impl MetaStore for DatabaseMetaStore {
             length: Set(slice.length.as_i64()),
             ..Default::default()
         };
-
-        model.insert(&self.db).await.map_err(MetaError::Database)?;
+        model.insert(&txn).await.map_err(MetaError::Database)?;
+        txn.commit().await.map_err(MetaError::Database)?;
         Ok(())
     }
 
@@ -2503,6 +2680,16 @@ impl MetaStore for DatabaseMetaStore {
         slice: SliceDesc,
         new_size: u64,
     ) -> Result<(), MetaError> {
+        if self
+            .is_global_lock_held(
+                LockName::ChunkCompactLock(chunk_id),
+                CHUNK_LOCK_CHECK_TTL_SECS,
+            )
+            .await
+        {
+            return Err(MetaError::ContinueRetry);
+        }
+
         let txn = self.db.begin().await.map_err(MetaError::Database)?;
 
         let model = slice_meta::ActiveModel {
@@ -2636,8 +2823,22 @@ impl MetaStore for DatabaseMetaStore {
     }
 
     #[tracing::instrument(level = "trace", skip(self), fields(lock_name = ?lock_name))]
-    async fn get_global_lock(&self, lock_name: LockName) -> bool {
-        self.get_lock_internal(lock_name).await.unwrap_or_default()
+    async fn get_global_lock(&self, lock_name: LockName, ttl_secs: u64) -> bool {
+        self.get_lock_internal(lock_name, ttl_secs)
+            .await
+            .unwrap_or_default()
+    }
+
+    #[tracing::instrument(level = "trace", skip(self), fields(lock_name = ?lock_name))]
+    async fn is_global_lock_held(&self, lock_name: LockName, ttl_secs: u64) -> bool {
+        self.is_lock_held_internal(lock_name, ttl_secs)
+            .await
+            .unwrap_or(false)
+    }
+
+    #[tracing::instrument(level = "trace", skip(self), fields(lock_name = ?lock_name))]
+    async fn release_global_lock(&self, lock_name: LockName) -> bool {
+        self.release_lock_internal(lock_name).await.unwrap_or(false)
     }
 
     fn as_any(&self) -> &dyn std::any::Any {
@@ -2797,6 +2998,337 @@ impl MetaStore for DatabaseMetaStore {
         if result.rows_affected == 0 {
             return Err(MetaError::NotFound(inode));
         }
+        Ok(())
+    }
+    async fn process_delayed_slices(
+        &self,
+        batch_size: usize,
+        max_age_secs: i64,
+    ) -> Result<Vec<(u64, u64, u64, i64)>, MetaError> {
+        DatabaseMetaStore::process_delayed_slices(self, batch_size, max_age_secs).await
+    }
+
+    async fn confirm_delayed_deleted(&self, delayed_ids: &[i64]) -> Result<(), MetaError> {
+        DatabaseMetaStore::confirm_delayed_deleted(self, delayed_ids).await
+    }
+
+    async fn replace_slices_for_compact(
+        &self,
+        chunk_id: u64,
+        new_slices: &[SliceDesc],
+        old_slices_to_delay: &[u8],
+    ) -> Result<(), MetaError> {
+        if !old_slices_to_delay.is_empty() && !old_slices_to_delay.len().is_multiple_of(20) {
+            warn!(
+                chunk_id = chunk_id,
+                delayed_len = old_slices_to_delay.len(),
+                "replace_slices_for_compact: invalid delayed data length"
+            );
+            return Err(MetaError::Internal(
+                "Invalid delayed data length".to_string(),
+            ));
+        }
+
+        let txn = self.db.begin().await.map_err(MetaError::Database)?;
+
+        let delayed_slices = SliceDesc::decode_delayed_data(old_slices_to_delay)
+            .ok_or_else(|| MetaError::Internal("Invalid delayed data length".to_string()))?;
+        let slice_ids_to_delete: Vec<i64> = delayed_slices
+            .iter()
+            .map(|(slice_id, _, _)| *slice_id as i64)
+            .collect();
+
+        if !slice_ids_to_delete.is_empty() {
+            SliceMeta::delete_many()
+                .filter(slice_meta::Column::ChunkId.eq(chunk_id as i64))
+                .filter(slice_meta::Column::SliceId.is_in(slice_ids_to_delete))
+                .exec(&txn)
+                .await
+                .map_err(MetaError::Database)?;
+        }
+
+        for slice in new_slices {
+            let model = slice_meta::ActiveModel {
+                chunk_id: Set(chunk_id as i64),
+                slice_id: Set(slice.slice_id as i64),
+                offset: Set(slice.offset.as_i64()),
+                length: Set(slice.length.as_i64()),
+                ..Default::default()
+            };
+            model.insert(&txn).await.map_err(MetaError::Database)?;
+        }
+
+        if !delayed_slices.is_empty() {
+            let now = Utc::now().timestamp();
+
+            for (slice_id, offset, size) in &delayed_slices {
+                let delayed_model = delayed_slice::ActiveModel {
+                    slice_id: Set(*slice_id as i64),
+                    chunk_id: Set(chunk_id as i64),
+                    offset: Set(*offset as i64),
+                    size: Set(*size as i64),
+                    created_at: Set(now),
+                    reason: Set("compact".to_string()),
+                    status: Set("pending".to_string()),
+                    ..Default::default()
+                };
+
+                delayed_model
+                    .insert(&txn)
+                    .await
+                    .map_err(MetaError::Database)?;
+            }
+        }
+
+        txn.commit().await.map_err(MetaError::Database)?;
+        Ok(())
+    }
+
+    async fn replace_slices_for_compact_with_version(
+        &self,
+        chunk_id: u64,
+        new_slices: &[SliceDesc],
+        old_slices_to_delay: &[u8],
+        expected_slices: &[SliceDesc],
+    ) -> Result<(), MetaError> {
+        if !old_slices_to_delay.is_empty() && !old_slices_to_delay.len().is_multiple_of(20) {
+            warn!(
+                chunk_id = chunk_id,
+                delayed_len = old_slices_to_delay.len(),
+                "replace_slices_for_compact_with_version: invalid delayed data length"
+            );
+            return Err(MetaError::Internal(
+                "Invalid delayed data length".to_string(),
+            ));
+        }
+
+        let txn = self.db.begin().await.map_err(MetaError::Database)?;
+
+        let delayed_slices = SliceDesc::decode_delayed_data(old_slices_to_delay)
+            .ok_or_else(|| MetaError::Internal("Invalid delayed data length".to_string()))?;
+
+        let current_slices: Vec<slice_meta::Model> = SliceMeta::find()
+            .filter(slice_meta::Column::ChunkId.eq(chunk_id as i64))
+            .lock_exclusive()
+            .all(&txn)
+            .await
+            .map_err(MetaError::Database)?;
+
+        if current_slices.len() != expected_slices.len() {
+            warn!(
+                chunk_id = chunk_id,
+                expected_count = expected_slices.len(),
+                actual_count = current_slices.len(),
+                "Concurrent modification detected: slice count mismatch"
+            );
+            txn.rollback().await.map_err(MetaError::Database)?;
+            return Err(MetaError::ContinueRetry);
+        }
+
+        let current_map: HashMap<i64, (i64, i64)> = current_slices
+            .iter()
+            .map(|s| (s.slice_id, (s.offset, s.length)))
+            .collect();
+
+        for expected in expected_slices {
+            let expected_id = expected.slice_id as i64;
+            match current_map.get(&expected_id) {
+                Some((offset, length)) => {
+                    if *offset != expected.offset.as_i64() || *length != expected.length.as_i64() {
+                        warn!(
+                            chunk_id = chunk_id,
+                            slice_id = expected.slice_id,
+                            expected_offset = expected.offset,
+                            expected_length = expected.length,
+                            actual_offset = offset,
+                            actual_length = length,
+                            "Concurrent modification detected: slice content changed"
+                        );
+                        txn.rollback().await.map_err(MetaError::Database)?;
+                        return Err(MetaError::ContinueRetry);
+                    }
+                }
+                None => {
+                    warn!(
+                        chunk_id = chunk_id,
+                        slice_id = expected.slice_id,
+                        "Concurrent modification detected: slice missing"
+                    );
+                    txn.rollback().await.map_err(MetaError::Database)?;
+                    return Err(MetaError::ContinueRetry);
+                }
+            }
+        }
+        let slice_ids_to_delete: Vec<i64> = delayed_slices
+            .iter()
+            .map(|(slice_id, _, _)| *slice_id as i64)
+            .collect();
+
+        if !slice_ids_to_delete.is_empty() {
+            SliceMeta::delete_many()
+                .filter(slice_meta::Column::ChunkId.eq(chunk_id as i64))
+                .filter(slice_meta::Column::SliceId.is_in(slice_ids_to_delete))
+                .exec(&txn)
+                .await
+                .map_err(MetaError::Database)?;
+        }
+
+        for slice in new_slices {
+            let model = slice_meta::ActiveModel {
+                chunk_id: Set(chunk_id as i64),
+                slice_id: Set(slice.slice_id as i64),
+                offset: Set(slice.offset.as_i64()),
+                length: Set(slice.length.as_i64()),
+                ..Default::default()
+            };
+            model.insert(&txn).await.map_err(MetaError::Database)?;
+        }
+
+        if !delayed_slices.is_empty() {
+            let now = Utc::now().timestamp();
+
+            for (slice_id, offset, size) in &delayed_slices {
+                let delayed_model = delayed_slice::ActiveModel {
+                    slice_id: Set(*slice_id as i64),
+                    chunk_id: Set(chunk_id as i64),
+                    offset: Set(*offset as i64),
+                    size: Set(*size as i64),
+                    created_at: Set(now),
+                    reason: Set("compact".to_string()),
+                    status: Set("pending".to_string()),
+                    ..Default::default()
+                };
+
+                delayed_model
+                    .insert(&txn)
+                    .await
+                    .map_err(MetaError::Database)?;
+            }
+        }
+
+        for slice in new_slices {
+            UncommittedSlice::delete_many()
+                .filter(uncommitted_slice::Column::SliceId.eq(slice.slice_id as i64))
+                .exec(&txn)
+                .await
+                .map_err(MetaError::Database)?;
+        }
+
+        txn.commit().await.map_err(MetaError::Database)?;
+        Ok(())
+    }
+
+    async fn record_uncommitted_slice(
+        &self,
+        slice_id: u64,
+        chunk_id: u64,
+        size: u64,
+        operation: &str,
+    ) -> Result<i64, MetaError> {
+        let now = Utc::now().timestamp();
+
+        let model = uncommitted_slice::ActiveModel {
+            slice_id: Set(slice_id as i64),
+            chunk_id: Set(chunk_id as i64),
+            size: Set(size as i64),
+            created_at: Set(now),
+            operation: Set(operation.to_string()),
+            status: Set("pending".to_string()),
+            ..Default::default()
+        };
+
+        let result = model.insert(&self.db).await.map_err(MetaError::Database)?;
+        Ok(result.id)
+    }
+
+    async fn confirm_slice_committed(&self, slice_id: u64) -> Result<(), MetaError> {
+        UncommittedSlice::delete_many()
+            .filter(uncommitted_slice::Column::SliceId.eq(slice_id as i64))
+            .exec(&self.db)
+            .await
+            .map_err(MetaError::Database)?;
+        Ok(())
+    }
+
+    async fn cleanup_orphan_uncommitted_slices(
+        &self,
+        max_age_secs: i64,
+        batch_size: usize,
+    ) -> Result<Vec<(u64, u64)>, MetaError> {
+        let cutoff_time = Utc::now().timestamp() - max_age_secs;
+
+        let pending_slices: Vec<uncommitted_slice::Model> = UncommittedSlice::find()
+            .filter(uncommitted_slice::Column::Status.eq("pending"))
+            .filter(uncommitted_slice::Column::CreatedAt.lt(cutoff_time))
+            .limit(batch_size as u64)
+            .all(&self.db)
+            .await
+            .map_err(MetaError::Database)?;
+
+        let orphan_records: Vec<uncommitted_slice::Model> = UncommittedSlice::find()
+            .filter(uncommitted_slice::Column::Status.eq("orphan"))
+            .limit(batch_size as u64)
+            .all(&self.db)
+            .await
+            .map_err(MetaError::Database)?;
+
+        if pending_slices.is_empty() && orphan_records.is_empty() {
+            return Ok(vec![]);
+        }
+
+        let mut cleaned = Vec::new();
+        let txn = self.db.begin().await.map_err(MetaError::Database)?;
+
+        for pending in &pending_slices {
+            let exists_in_meta = SliceMeta::find()
+                .filter(slice_meta::Column::SliceId.eq(pending.slice_id))
+                .one(&txn)
+                .await
+                .map_err(MetaError::Database)?;
+
+            if exists_in_meta.is_none() {
+                // Slice was not committed: mark as orphan for block cleanup
+                let size = pending.size as u64;
+                cleaned.push((pending.slice_id as u64, size));
+
+                let mut active: uncommitted_slice::ActiveModel = pending.clone().into();
+                active.status = Set("orphan".to_string());
+                active.update(&txn).await.map_err(MetaError::Database)?;
+            } else {
+                // Slice was committed but record not cleaned up: delete directly
+                let delete_model = uncommitted_slice::ActiveModel {
+                    id: Set(pending.id),
+                    ..Default::default()
+                };
+                delete_model
+                    .delete(&txn)
+                    .await
+                    .map_err(MetaError::Database)?;
+            }
+        }
+
+        for orphan in &orphan_records {
+            cleaned.push((orphan.slice_id as u64, orphan.size as u64));
+        }
+
+        txn.commit().await.map_err(MetaError::Database)?;
+
+        Ok(cleaned)
+    }
+
+    async fn delete_uncommitted_slices(&self, slice_ids: &[u64]) -> Result<(), MetaError> {
+        if slice_ids.is_empty() {
+            return Ok(());
+        }
+
+        let slice_id_values: Vec<i64> = slice_ids.iter().map(|&id| id as i64).collect();
+
+        UncommittedSlice::delete_many()
+            .filter(uncommitted_slice::Column::SliceId.is_in(slice_id_values))
+            .exec(&self.db)
+            .await
+            .map_err(MetaError::Database)?;
+
         Ok(())
     }
 }

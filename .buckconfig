@@ -1,9 +1,9 @@
 [cells]
-  root = .
-  prelude = prelude
-  toolchains = toolchains
-  none = none
   buckal = buckal
+  none = none
+  prelude = prelude
+  root = .
+  toolchains = toolchains
 
 [cell_aliases]
   config = prelude
@@ -18,11 +18,16 @@
   buckal = git
 
 [external_cell_buckal]
-  commit_hash = 22bd38c79d2348d9a6591b7156c42d615377eaad
+  commit_hash = 221b613c564f7a1b33b4588d33d3a92779eb2d8d
   git_origin = https://github.com/buck2hub/buckal-bundles
 
 [parser]
-  target_platform_detector_spec = target:root//...->prelude//platforms:default
+  target_platform_detector_spec = target:root//...->prelude//platforms:default \
+    target:prelude//...->prelude//platforms:default \
+    target:toolchains//...->prelude//platforms:default
+
+[build]
+  execution_platforms = prelude//platforms:default
 
 [project]
-  ignore = .git .buckd .idea .vscode .zed .DS_Store buck-out build .buckal
+  ignore = .git .buckal buck-out target

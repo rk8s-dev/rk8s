@@ -90,16 +90,16 @@ async fn main() {
     let g_id = g.id();
 
     let mut graph = Graph::new();
-    vec![a, b, c, d, e, f, g]
-        .into_iter()
-        .for_each(|node| graph.add_node(node));
+    for node in [a, b, c, d, e, f, g] {
+        graph.add_node(node).unwrap();
+    }
 
-    graph.add_edge(a_id, vec![b_id, c_id, d_id]);
-    graph.add_edge(b_id, vec![e_id, g_id]);
-    graph.add_edge(c_id, vec![e_id, f_id]);
-    graph.add_edge(d_id, vec![f_id]);
-    graph.add_edge(e_id, vec![g_id]);
-    graph.add_edge(f_id, vec![g_id]);
+    graph.add_edge(a_id, vec![b_id, c_id, d_id]).unwrap();
+    graph.add_edge(b_id, vec![e_id, g_id]).unwrap();
+    graph.add_edge(c_id, vec![e_id, f_id]).unwrap();
+    graph.add_edge(d_id, vec![f_id]).unwrap();
+    graph.add_edge(e_id, vec![g_id]).unwrap();
+    graph.add_edge(f_id, vec![g_id]).unwrap();
 
     let mut env = EnvVar::new(node_table);
     env.set("base", 2usize);

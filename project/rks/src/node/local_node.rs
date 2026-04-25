@@ -62,7 +62,7 @@ pub(crate) async fn bootstrap(shared: Arc<Shared>, addr: &str) -> Result<()> {
         .with_context(|| format!("failed to acquire lease for local rks node {node_id}"))?;
 
     let (msg_tx, msg_rx) = mpsc::channel::<RksMessage>(LOCAL_SESSION_CHANNEL_SIZE);
-    let session = Arc::new(WorkerSession::new(msg_tx.clone(), lease.clone()));
+    let session = Arc::new(WorkerSession::new(None, msg_tx.clone(), lease.clone()));
     shared
         .node_registry
         .register(node_id.clone(), session.clone())

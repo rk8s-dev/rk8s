@@ -90,6 +90,7 @@ impl OCISpecGenerator {
             self.container_spec.args.clone()
         };
         process.set_args(Some(arg));
+        process.set_terminal(Some(self.container_spec.tty));
 
         let capabilities = self.get_capabilities()?;
         process.set_capabilities(Some(capabilities));

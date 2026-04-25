@@ -1,5 +1,6 @@
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use crate::chunk::SliceDesc;
@@ -46,7 +47,6 @@ impl ChildrenState {
 ///
 /// Represents a cached inode with mutable fields that can be updated in-place.
 /// Uses RwLock for async-safe concurrent access to mutable data.
-#[derive(Clone)]
 pub(crate) struct InodeEntry {
     /// File attributes (size, permissions, timestamps, etc.) of THIS inode
     pub(crate) attr: Arc<RwLock<FileAttr>>,
@@ -54,8 +54,22 @@ pub(crate) struct InodeEntry {
     pub(crate) parent: Arc<RwLock<Option<i64>>>,
     /// Directory children with loading state tracking (only used if THIS inode is a directory)
     pub(crate) children: Arc<RwLock<ChildrenState>>,
+    /// Monotonic generation for child map mutations to detect stale readdir snapshots.
+    pub(crate) children_generation: Arc<AtomicU64>,
     /// Cache slice metadata per chunk index
     pub(crate) slices: DashMap<u64, Vec<SliceDesc>>,
+}
+
+impl Clone for InodeEntry {
+    fn clone(&self) -> Self {
+        Self {
+            attr: Arc::clone(&self.attr),
+            parent: Arc::clone(&self.parent),
+            children: Arc::clone(&self.children),
+            children_generation: Arc::clone(&self.children_generation),
+            slices: self.slices.clone(),
+        }
+    }
 }
 
 impl InodeEntry {
@@ -64,6 +78,7 @@ impl InodeEntry {
             attr: Arc::new(RwLock::new(attr)),
             parent: Arc::new(RwLock::new(parent)),
             children: Arc::new(RwLock::new(ChildrenState::NotLoaded)),
+            children_generation: Arc::new(AtomicU64::new(0)),
             slices: DashMap::new(),
         }
     }
@@ -168,15 +183,34 @@ impl InodeCache {
             };
 
             *children_lock = new_map;
+            parent_node
+                .children_generation
+                .fetch_add(1, Ordering::AcqRel);
         }
     }
 
-    pub(crate) async fn load_children(&self, parent_ino: i64, entries: Vec<(String, i64)>) {
+    pub(crate) async fn children_generation(&self, parent_ino: i64) -> Option<u64> {
+        let parent_node = self.ttl_manager.get(&parent_ino).await?;
+        Some(parent_node.children_generation.load(Ordering::Acquire))
+    }
+
+    pub(crate) async fn load_children_if_fresh(
+        &self,
+        parent_ino: i64,
+        entries: Vec<(String, i64)>,
+        expected_generation: u64,
+    ) -> bool {
         if let Some(parent_node) = self.ttl_manager.get(&parent_ino).await {
             let mut children_lock = parent_node.children.write().await;
+            if parent_node.children_generation.load(Ordering::Acquire) != expected_generation {
+                return false;
+            }
             let new_children = Arc::new(entries.into_iter().collect::<BTreeMap<_, _>>());
             *children_lock = ChildrenState::Complete(new_children);
+            return true;
         }
+
+        false
     }
 
     pub(crate) async fn remove_child(&self, parent_ino: i64, name: &str) -> Option<i64> {
@@ -189,6 +223,9 @@ impl InodeCache {
                         ChildrenState::Complete(_) => ChildrenState::Complete(Arc::new(map)),
                         _ => ChildrenState::Partial(Arc::new(map)),
                     };
+                    parent_node
+                        .children_generation
+                        .fetch_add(1, Ordering::AcqRel);
 
                     self.ttl_manager.invalidate(&child_ino).await;
                     return Some(child_ino);
@@ -212,6 +249,9 @@ impl InodeCache {
                         ChildrenState::Complete(_) => ChildrenState::Complete(Arc::new(map)),
                         _ => ChildrenState::Partial(Arc::new(map)),
                     };
+                    parent_node
+                        .children_generation
+                        .fetch_add(1, Ordering::AcqRel);
                     return Some(child_ino);
                 }
             }
@@ -272,19 +312,51 @@ impl InodeCache {
 
     pub(crate) async fn append_slice(&self, inode: i64, chunk_index: u64, desc: SliceDesc) {
         if let Some(node) = self.ttl_manager.get(&inode).await {
-            node.slices
-                .entry(chunk_index)
-                .and_modify(|slices| slices.push(desc))
-                .or_insert_with(|| vec![desc]);
+            // Only append to an EXISTING cached slice list that was populated
+            // from a full backend read (via get_slices → cache_slices_if_absent).
+            // Do NOT create a new entry from a single slice — that produces a
+            // partial list that get_slices would trust as authoritative, causing
+            // it to miss slices that exist in the backing store.  This matters
+            // after truncate: invalidate_inode clears the cache, insert_node
+            // recreates it with an empty slices map, and post-truncate writes
+            // would otherwise seed a partial entry that shadows the full list.
+            if let Some(mut slices) = node.slices.get_mut(&chunk_index) {
+                slices.push(desc);
+            }
         }
     }
 
+    #[allow(dead_code)]
     pub(crate) async fn replace_slices(&self, inode: i64, chunk_index: u64, desc: &[SliceDesc]) {
         if let Some(node) = self.ttl_manager.get(&inode).await {
-            node.slices
-                .entry(chunk_index)
-                .and_modify(|slices| *slices = desc.to_owned())
-                .or_insert_with(|| desc.to_owned());
+            // Same rationale as append_slice: only update an existing entry.
+            if let Some(mut slices) = node.slices.get_mut(&chunk_index) {
+                *slices = desc.to_owned();
+            }
+        }
+    }
+
+    pub(crate) async fn cache_slices_if_absent(
+        &self,
+        inode: i64,
+        chunk_index: u64,
+        desc: &[SliceDesc],
+    ) -> Option<Vec<SliceDesc>> {
+        let node = self.ttl_manager.get(&inode).await?;
+        let entry = node.slices.entry(chunk_index);
+        Some(match entry {
+            Entry::Occupied(entry) => entry.get().clone(),
+            Entry::Vacant(entry) => {
+                let cached = desc.to_owned();
+                entry.insert(cached.clone());
+                cached
+            }
+        })
+    }
+
+    pub(crate) async fn invalidate_slices(&self, inode: i64, chunk_index: u64) {
+        if let Some(node) = self.ttl_manager.get(&inode).await {
+            node.slices.remove(&chunk_index);
         }
     }
 
@@ -299,11 +371,15 @@ impl InodeCache {
         }
     }
 
+    #[allow(dead_code)]
     pub(crate) async fn replace_children(&self, parent_ino: i64, children: HashMap<String, i64>) {
         if let Some(parent_node) = self.ttl_manager.get(&parent_ino).await {
             let mut children_lock = parent_node.children.write().await;
             let new_children = Arc::new(children.into_iter().collect::<BTreeMap<_, _>>());
             *children_lock = ChildrenState::Complete(new_children);
+            parent_node
+                .children_generation
+                .fetch_add(1, Ordering::AcqRel);
         }
     }
 }

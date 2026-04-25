@@ -5,7 +5,7 @@
 //!
 //! Request header (client → server):
 //! ```text
-//! [2 bytes] method_id (big-endian u16, see `MethodId` enum)
+//! [2 bytes] method_id (big-endian u16, see `xlinerpc::MethodId`)
 //! [2 bytes] metadata entry count
 //! For each entry: [2B key_len][key][2B val_len][val]
 //! ```
@@ -19,6 +19,7 @@
 //! ```
 
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
+pub use xlinerpc::{ALL_METHOD_IDS, MethodId};
 
 use crate::rpc::CurpError;
 
@@ -30,131 +31,6 @@ const MAX_METADATA_ENTRIES: u16 = 64;
 
 /// Maximum metadata key/value length: 4 KB
 const MAX_METADATA_KV_LEN: u16 = 4 * 1024;
-
-// ============================================================================
-// MethodId — single-source definition via macro
-// ============================================================================
-
-macro_rules! define_method_ids {
-    ( $( $(#[$meta:meta])* $variant:ident = $id:expr, $display:expr; )* ) => {
-        /// Numeric RPC method identifier for QUIC transport.
-        ///
-        /// Replaces gRPC-style string paths with compact u16 IDs.
-        /// Client and server must use the same mapping (guaranteed by this
-        /// single macro definition).
-        #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-        #[repr(u16)]
-        pub enum MethodId {
-            $( $(#[$meta])* $variant = $id, )*
-        }
-
-        impl MethodId {
-            /// Decode from raw u16. Returns `None` for unknown IDs.
-            pub fn from_u16(v: u16) -> Option<Self> {
-                match v {
-                    $( $id => Some(Self::$variant), )*
-                    _ => None,
-                }
-            }
-
-            /// Encode to u16.
-            #[inline]
-            pub fn as_u16(self) -> u16 {
-                self as u16
-            }
-
-            /// Human-readable name for logging/debugging.
-            pub fn name(self) -> &'static str {
-                match self {
-                    $( Self::$variant => $display, )*
-                }
-            }
-        }
-
-        /// All defined method IDs (for testing completeness).
-        /// Not part of the stable public API.
-        #[doc(hidden)]
-        pub const ALL_METHOD_IDS: &[MethodId] = &[
-            $( MethodId::$variant, )*
-        ];
-    };
-}
-
-define_method_ids! {
-    // Protocol service (0x00xx)
-    /// Fetch cluster membership information
-    FetchCluster       = 0x0001, "FetchCluster";
-    /// Fetch read state for linearizable reads
-    FetchReadState     = 0x0002, "FetchReadState";
-    /// Record a command proposal
-    Record             = 0x0003, "Record";
-    /// Read index for linearizable reads
-    ReadIndex          = 0x0004, "ReadIndex";
-    /// Shutdown the cluster
-    Shutdown           = 0x0005, "Shutdown";
-    /// Propose a configuration change
-    ProposeConfChange  = 0x0006, "ProposeConfChange";
-    /// Publish node information
-    Publish            = 0x0007, "Publish";
-    /// Move leader to another node
-    MoveLeader         = 0x0008, "MoveLeader";
-    /// Propose a command (server-streaming response)
-    ProposeStream      = 0x0009, "ProposeStream";
-    /// Lease keep-alive (client-streaming)
-    LeaseKeepAlive     = 0x000A, "LeaseKeepAlive";
-
-    // InnerProtocol service (0x01xx)
-    /// Append entries (Raft replication)
-    AppendEntries      = 0x0101, "AppendEntries";
-    /// Vote (Raft leader election)
-    Vote               = 0x0102, "Vote";
-    /// Install snapshot (Raft state transfer, client-streaming)
-    InstallSnapshot    = 0x0103, "InstallSnapshot";
-    /// Trigger shutdown on a follower
-    TriggerShutdown    = 0x0104, "TriggerShutdown";
-    /// Try to become leader immediately
-    TryBecomeLeaderNow = 0x0105, "TryBecomeLeaderNow";
-
-    // xline Auth direct-RPC service (0x02xx)
-    /// Authenticate with username and password
-    XlineAuthenticate  = 0x0201, "XlineAuthenticate";
-
-    // xline Lease direct-RPC service (0x03xx)
-    /// Revoke a lease
-    XlineLeaseRevoke   = 0x0301, "XlineLeaseRevoke";
-    /// Keep a lease alive
-    XlineLeaseKeepAlive = 0x0302, "XlineLeaseKeepAlive";
-    /// Query lease time-to-live
-    XlineLeaseTtl      = 0x0303, "XlineLeaseTtl";
-
-    // xline Watch direct-RPC service (0x04xx)
-    /// Watch key changes with bidirectional streaming
-    XlineWatch         = 0x0401, "XlineWatch";
-
-    // xline Maintenance direct-RPC service (0x05xx)
-    /// Get a snapshot from the server
-    XlineSnapshot      = 0x0501, "XlineSnapshot";
-    /// Send an alarm request
-    XlineAlarm         = 0x0502, "XlineAlarm";
-    /// Get server maintenance status
-    XlineMaintStatus   = 0x0503, "XlineMaintStatus";
-
-    // xline Cluster direct-RPC service (0x06xx)
-    /// Add a new cluster member
-    XlineMemberAdd     = 0x0601, "XlineMemberAdd";
-    /// Remove a cluster member
-    XlineMemberRemove  = 0x0602, "XlineMemberRemove";
-    /// Promote a learner to voter
-    XlineMemberPromote = 0x0603, "XlineMemberPromote";
-    /// Update an existing member
-    XlineMemberUpdate  = 0x0604, "XlineMemberUpdate";
-    /// List all cluster members
-    XlineMemberList    = 0x0605, "XlineMemberList";
-
-    // xline KV direct-RPC service (0x07xx)
-    /// Compact MVCC history
-    XlineCompact       = 0x0701, "XlineCompact";
-}
 
 /// Frame type constants
 const FRAME_TYPE_DATA: u8 = 0x01;

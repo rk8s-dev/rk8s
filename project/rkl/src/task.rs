@@ -6,6 +6,7 @@ use liboci_cli::{Create, Delete, Kill, Start};
 use libruntime::cri::config::ContainerConfigBuilder;
 use thiserror::Error;
 // use libruntime::cri::config::get_linux_container_config;
+use crate::daemon::tty::{broadcast_to_attach, register_tty_local};
 use libruntime::cri::cri_api::{
     ContainerConfig, CreateContainerRequest, CreateContainerResponse, Mount, PodSandboxConfig,
     PodSandboxMetadata, PortMapping, Protocol, RemovePodSandboxRequest, RemovePodSandboxResponse,
@@ -24,8 +25,9 @@ use crate::config::OVERLAY_CONFIG;
 use oci_spec::runtime::RootBuilder;
 use rkforge::commands::container::rootfs_mount::RootfsMount;
 use std::collections::HashMap;
-use std::fs::File;
+use std::fs::{self, File};
 use std::io::{BufWriter, Read, Write};
+use std::os::fd::{AsRawFd, FromRawFd};
 use std::path::{Path, PathBuf};
 use tracing::{debug, error, info};
 
@@ -249,6 +251,7 @@ impl TaskRunner {
             image: "pause:3.9".to_string(),
             ports: vec![],
             args: vec![],
+            tty: false,
             resources: None,
             liveness_probe: None,
             readiness_probe: None,
@@ -368,6 +371,7 @@ impl TaskRunner {
             // image: "/home/harry/Documents/rk8s/project/test/bundles/pause".to_string(),
             ports: vec![],
             args: vec![],
+            tty: false,
             resources: None,
             liveness_probe: None,
             readiness_probe: None,
@@ -757,9 +761,18 @@ impl TaskRunner {
             writer.flush()?;
         }
 
+        // If container requests a TTY, pass a console_socket path to create_with_log
+        // so it can receive the pty master fd from libcontainer via SCM_RIGHTS.
+        // Otherwise (tty=false) the original pipe-based log capture is used.
+        let console_sock_path = if container_spec.tty {
+            Some(PathBuf::from(format!("/run/rkl/tty/{}.sock", container_id)))
+        } else {
+            None
+        };
+
         let create_args = Create {
             bundle: bundle_path.clone().into(),
-            console_socket: None,
+            console_socket: console_sock_path.clone(),
             pid_file: None,
             no_pivot: false,
             no_new_keyring: false,
@@ -783,8 +796,17 @@ impl TaskRunner {
             original_container_name,
         ));
 
-        create_with_log(create_args, root_path.clone(), log_path)
+        let master_owned = create_with_log(create_args, root_path.clone(), log_path.clone())
             .map_err(|e| anyhow!("Failed to create container: {}", e))?;
+
+        // If PTY mode: start the tee task in daemon space and register the master
+        // fd into TTY_STORE for future attach sessions.
+        if let Some(owned_fd) = master_owned {
+            spawn_attach_tee(&container_id, &log_path, &owned_fd);
+            use std::os::fd::IntoRawFd;
+            register_tty_local(&container_id, owned_fd.into_raw_fd())
+                .map_err(|e| anyhow!("Failed to register PTY master for {container_id}: {e}"))?;
+        }
 
         Ok(CreateContainerResponse { container_id })
     }
@@ -1174,6 +1196,82 @@ impl TaskRunner {
             }
         }
     }
+}
+
+fn spawn_attach_tee(container_id: &str, log_path: &Path, master_owned: &std::os::fd::OwnedFd) {
+    let master_for_log = match nix::unistd::dup(master_owned.as_raw_fd()) {
+        Ok(fd) => fd,
+        Err(e) => {
+            error!(
+                container_id = %container_id,
+                "Failed to dup PTY master for tee task: {e}"
+            );
+            return;
+        }
+    };
+
+    let container_id = container_id.to_string();
+    let log_path = log_path.to_path_buf();
+
+    std::thread::spawn(move || {
+        let mut reader = unsafe { std::fs::File::from_raw_fd(master_for_log) };
+        if let Some(parent) = log_path.parent()
+            && let Err(e) = fs::create_dir_all(parent)
+        {
+            error!(
+                container_id = %container_id,
+                "Failed to create log directory for {:?}: {e}",
+                log_path
+            );
+            return;
+        }
+
+        let mut log_file = match fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&log_path)
+        {
+            Ok(file) => file,
+            Err(e) => {
+                error!(
+                    container_id = %container_id,
+                    "Failed to open PTY log file {:?}: {e}",
+                    log_path
+                );
+                return;
+            }
+        };
+
+        let mut raw_buf = [0u8; 4096];
+        let mut line_buf: Vec<u8> = Vec::with_capacity(256);
+
+        loop {
+            let n = match reader.read(&mut raw_buf) {
+                Ok(0) | Err(_) => break,
+                Ok(n) => n,
+            };
+            let chunk = &raw_buf[..n];
+
+            broadcast_to_attach(&container_id, chunk);
+
+            for &byte in chunk {
+                if byte == b'\n' {
+                    let ts = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Nanos, true);
+                    let line = String::from_utf8_lossy(&line_buf);
+                    let _ = writeln!(log_file, "{ts} stdout F {line}");
+                    line_buf.clear();
+                } else if byte != b'\r' {
+                    line_buf.push(byte);
+                }
+            }
+        }
+
+        if !line_buf.is_empty() {
+            let ts = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Nanos, true);
+            let line = String::from_utf8_lossy(&line_buf);
+            let _ = writeln!(log_file, "{ts} stdout F {line}");
+        }
+    });
 }
 
 // #[cfg(test)]

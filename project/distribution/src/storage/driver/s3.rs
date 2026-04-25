@@ -6,7 +6,7 @@ use bytes::Bytes;
 use futures::TryStreamExt;
 use object_store::aws::AmazonS3Builder;
 use object_store::path::Path as ObjectPath;
-use object_store::{ObjectStore, ObjectStoreExt, PutPayload};
+use object_store::{GetOptions, GetRange, ObjectStore, ObjectStoreExt, PutPayload};
 use oci_spec::image::Digest;
 use tokio::fs::{File, OpenOptions};
 use tokio::io::{self, AsyncWriteExt, BufWriter};
@@ -203,6 +203,34 @@ impl Storage for S3Storage {
         Ok(StorageObject { stream, size })
     }
 
+    async fn get_blob_range(
+        &self,
+        digest: &Digest,
+        range: std::ops::Range<u64>,
+    ) -> Result<StorageObject> {
+        let key = self.path_manager.blob_data_path(digest);
+        let path = self.to_object_path(&key);
+        let options = GetOptions::new().with_range(Some(GetRange::Bounded(range)));
+
+        let result = self
+            .store
+            .get_opts(&path, options)
+            .await
+            .map_err(|e| match e {
+                object_store::Error::NotFound { .. } => {
+                    AppError::Oci(OciError::BlobUnknown(digest.to_string()))
+                }
+                other => {
+                    AppError::Internal(InternalError::Others(format!("S3 get error: {other}")))
+                }
+            })?;
+
+        let size = result.range.end.saturating_sub(result.range.start);
+        let stream: ObjectStream = Box::pin(result.into_stream().map_err(std::io::Error::other));
+
+        Ok(StorageObject { stream, size })
+    }
+
     async fn blob_exists(&self, digest: &Digest) -> Result<bool> {
         let key = self.path_manager.blob_data_path(digest);
         let path = self.to_object_path(&key);
@@ -263,17 +291,21 @@ impl Storage for S3Storage {
 
         let file = File::create(&temp_path).await.map_to_internal()?;
         let mut file_writer = BufWriter::new(file);
-        let size = io::copy(&mut body_reader, &mut file_writer)
-            .await
-            .map_to_internal()?;
-        file_writer.shutdown().await.map_to_internal()?;
+        let size = match io::copy(&mut body_reader, &mut file_writer).await {
+            Ok(size) => size,
+            Err(error) => {
+                drop(file_writer.into_inner());
+                self.cleanup_temp_files(&session_id, &temp_path).await;
+                return Err(InternalError::from(error).into());
+            }
+        };
+        if let Err(error) = file_writer.shutdown().await {
+            drop(file_writer.into_inner());
+            self.cleanup_temp_files(&session_id, &temp_path).await;
+            return Err(InternalError::from(error).into());
+        }
 
-        let key = self.path_manager.blob_data_path(digest);
-        let s3_path = self.to_object_path(&key);
-
-        let result = self.do_finalize_upload(&temp_path, &s3_path).await;
-        self.cleanup_temp_files(&session_id, &temp_path).await;
-        result?;
+        self.finalize_upload(&session_id, digest).await?;
 
         Ok(size)
     }
@@ -295,13 +327,25 @@ impl Storage for S3Storage {
             .open(&temp_path)
             .await
             .map_to_internal()?;
+        // Preserve chunks accepted before this PATCH; only roll back bytes
+        // appended by the current request if its body stream fails.
+        let original_len = file.metadata().await.map_to_internal()?.len();
 
         let mut file_writer = BufWriter::new(file);
 
-        let size = io::copy(&mut body_reader, &mut file_writer)
-            .await
-            .map_to_internal()?;
-        file_writer.shutdown().await.map_to_internal()?;
+        let size = match io::copy(&mut body_reader, &mut file_writer).await {
+            Ok(size) => size,
+            Err(error) => {
+                let file = file_writer.into_inner();
+                file.set_len(original_len).await.map_to_internal()?;
+                return Err(InternalError::from(error).into());
+            }
+        };
+        if let Err(error) = file_writer.shutdown().await {
+            let file = file_writer.into_inner();
+            file.set_len(original_len).await.map_to_internal()?;
+            return Err(InternalError::from(error).into());
+        }
 
         Ok(size)
     }

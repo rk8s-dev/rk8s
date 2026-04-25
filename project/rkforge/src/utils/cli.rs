@@ -26,6 +26,22 @@ impl RequestBuilderExt for RequestBuilder {
     }
 }
 
+pub fn format_size(bytes: u64) -> String {
+    const KB: u64 = 1024;
+    const MB: u64 = KB * 1024;
+    const GB: u64 = MB * 1024;
+
+    if bytes >= GB {
+        format!("{:.1} GB", bytes as f64 / GB as f64)
+    } else if bytes >= MB {
+        format!("{:.1} MB", bytes as f64 / MB as f64)
+    } else if bytes >= KB {
+        format!("{:.1} KB", bytes as f64 / KB as f64)
+    } else {
+        format!("{} B", bytes)
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum User {
     Normal(String),
@@ -105,5 +121,18 @@ pub fn original_user_config_path<'a>(
         }
         User::Root => confy::get_configuration_file_path(app_name.as_ref(), config_name)
             .with_context(|| "Failed to get config path with confy"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::format_size;
+
+    #[test]
+    fn test_format_size() {
+        assert_eq!(format_size(999), "999 B");
+        assert_eq!(format_size(1024), "1.0 KB");
+        assert_eq!(format_size(1024 * 1024), "1.0 MB");
+        assert_eq!(format_size(1024 * 1024 * 1024), "1.0 GB");
     }
 }

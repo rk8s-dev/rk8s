@@ -1,28 +1,22 @@
-//! Tests for Execution Hook functionality
-//!
-//! This module tests the execution hooks that allow monitoring node lifecycle.
-//! The `ExecutionHook` trait provides hook points for:
-//! - `before_node_run`: Called before node execution
-//! - `after_node_run`: Called after successful node execution
-//! - `on_error`: Called when a node fails
-//! - `on_retry`: Called before a node retry attempt
-//! - `on_skip`: Called when a node is skipped due to branch pruning
+//! Tests for execution hook functionality.
 
 use async_trait::async_trait;
+use dagrs::graph::event::{GraphEvent, TerminationStatus};
 use dagrs::node::action::Action;
 use dagrs::node::default_node::DefaultNode;
 use dagrs::node::router_node::{Router, RouterNode};
 use dagrs::utils::hook::{ExecutionHook, RetryDecision};
-use dagrs::{EnvVar, Graph, InChannels, Node, NodeTable, OutChannels, Output};
+use dagrs::{EnvVar, ErrorCode, Graph, InChannels, Node, NodeTable, OutChannels, Output};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
+use tokio::sync::broadcast;
 
-/// A comprehensive test hook that tracks all hook invocations.
 struct ComprehensiveHook {
     before_runs: Arc<Mutex<Vec<String>>>,
     after_runs: Arc<Mutex<Vec<String>>>,
-    errors: Arc<Mutex<Vec<String>>>,
     skips: Arc<Mutex<Vec<String>>>,
     retries: Arc<Mutex<Vec<(String, u32)>>>,
+    retry_decision: RetryDecision,
 }
 
 #[async_trait]
@@ -41,11 +35,6 @@ impl ExecutionHook for ComprehensiveHook {
             .push(node.name().to_string());
     }
 
-    async fn on_error(&self, error: &(dyn std::error::Error + Send + Sync), _env: &Arc<EnvVar>) {
-        let err_str = error.to_string();
-        self.errors.lock().unwrap().push(err_str);
-    }
-
     async fn on_skip(&self, node: &dyn Node, _env: &Arc<EnvVar>) {
         self.skips.lock().unwrap().push(node.name().to_string());
     }
@@ -53,7 +42,7 @@ impl ExecutionHook for ComprehensiveHook {
     async fn on_retry(
         &self,
         node: &dyn Node,
-        _error: &(dyn std::error::Error + Send + Sync),
+        _error: &dagrs::DagrsError,
         attempt: u32,
         _max_retries: u32,
         _env: &Arc<EnvVar>,
@@ -62,11 +51,10 @@ impl ExecutionHook for ComprehensiveHook {
             .lock()
             .unwrap()
             .push((node.name().to_string(), attempt));
-        RetryDecision::Retry
+        self.retry_decision.clone()
     }
 }
 
-/// Simple action that does nothing.
 struct NoOpAction;
 
 #[async_trait]
@@ -76,7 +64,6 @@ impl Action for NoOpAction {
     }
 }
 
-/// Action that fails with an error.
 struct FailingAction {
     message: String,
 }
@@ -84,11 +71,10 @@ struct FailingAction {
 #[async_trait]
 impl Action for FailingAction {
     async fn run(&self, _: &mut InChannels, _: &mut OutChannels, _: Arc<EnvVar>) -> Output {
-        Output::Err(self.message.clone())
+        Output::execution_failed(self.message.clone())
     }
 }
 
-/// Router that selects only node A.
 struct SelectARouter {
     target_id: usize,
 }
@@ -100,6 +86,22 @@ impl Router for SelectARouter {
     }
 }
 
+async fn collect_events_until_terminated(
+    mut receiver: broadcast::Receiver<GraphEvent>,
+) -> Vec<GraphEvent> {
+    let mut events = Vec::new();
+    while let Ok(Ok(event)) =
+        tokio::time::timeout(Duration::from_millis(500), receiver.recv()).await
+    {
+        let terminated = matches!(event, GraphEvent::ExecutionTerminated { .. });
+        events.push(event);
+        if terminated {
+            break;
+        }
+    }
+    events
+}
+
 #[tokio::test]
 async fn test_hook_before_and_after() {
     let mut graph = Graph::new();
@@ -108,33 +110,31 @@ async fn test_hook_before_and_after() {
     let before_runs = Arc::new(Mutex::new(Vec::new()));
     let after_runs = Arc::new(Mutex::new(Vec::new()));
 
-    let hook = ComprehensiveHook {
-        before_runs: before_runs.clone(),
-        after_runs: after_runs.clone(),
-        errors: Arc::new(Mutex::new(Vec::new())),
-        skips: Arc::new(Mutex::new(Vec::new())),
-        retries: Arc::new(Mutex::new(Vec::new())),
-    };
-
-    graph.add_hook(Box::new(hook)).await;
+    graph
+        .add_hook(Box::new(ComprehensiveHook {
+            before_runs: before_runs.clone(),
+            after_runs: after_runs.clone(),
+            skips: Arc::new(Mutex::new(Vec::new())),
+            retries: Arc::new(Mutex::new(Vec::new())),
+            retry_decision: RetryDecision::Retry,
+        }))
+        .await;
 
     let node_a = DefaultNode::with_action("NodeA".to_string(), NoOpAction, &mut table);
     let node_b = DefaultNode::with_action("NodeB".to_string(), NoOpAction, &mut table);
     let id_a = node_a.id();
     let id_b = node_b.id();
 
-    graph.add_node(node_a);
-    graph.add_node(node_b);
-    graph.add_edge(id_a, vec![id_b]);
+    graph.add_node(node_a).unwrap();
+    graph.add_node(node_b).unwrap();
+    graph.add_edge(id_a, vec![id_b]).unwrap();
 
-    graph.async_start().await.expect("Graph should succeed");
+    graph.async_start().await.expect("graph should succeed");
 
     let before = before_runs.lock().unwrap();
     let after = after_runs.lock().unwrap();
-
-    // Both nodes should have before and after hooks called
-    assert_eq!(before.len(), 2, "before_node_run should be called twice");
-    assert_eq!(after.len(), 2, "after_node_run should be called twice");
+    assert_eq!(before.len(), 2);
+    assert_eq!(after.len(), 2);
     assert!(before.contains(&"NodeA".to_string()));
     assert!(before.contains(&"NodeB".to_string()));
     assert!(after.contains(&"NodeA".to_string()));
@@ -142,21 +142,22 @@ async fn test_hook_before_and_after() {
 }
 
 #[tokio::test]
-async fn test_hook_on_error() {
+async fn test_hook_failure_does_not_call_after_hook() {
     let mut graph = Graph::new();
     let mut table = NodeTable::new();
 
-    let errors = Arc::new(Mutex::new(Vec::new()));
+    let before_runs = Arc::new(Mutex::new(Vec::new()));
+    let after_runs = Arc::new(Mutex::new(Vec::new()));
 
-    let hook = ComprehensiveHook {
-        before_runs: Arc::new(Mutex::new(Vec::new())),
-        after_runs: Arc::new(Mutex::new(Vec::new())),
-        errors: errors.clone(),
-        skips: Arc::new(Mutex::new(Vec::new())),
-        retries: Arc::new(Mutex::new(Vec::new())),
-    };
-
-    graph.add_hook(Box::new(hook)).await;
+    graph
+        .add_hook(Box::new(ComprehensiveHook {
+            before_runs: before_runs.clone(),
+            after_runs: after_runs.clone(),
+            skips: Arc::new(Mutex::new(Vec::new())),
+            retries: Arc::new(Mutex::new(Vec::new())),
+            retry_decision: RetryDecision::Retry,
+        }))
+        .await;
 
     let failing_node = DefaultNode::with_action(
         "FailingNode".to_string(),
@@ -166,45 +167,35 @@ async fn test_hook_on_error() {
         &mut table,
     );
 
-    graph.add_node(failing_node);
+    graph.add_node(failing_node).unwrap();
 
-    let result = graph.async_start().await;
-    assert!(result.is_err(), "Graph should fail due to node error");
-
-    let errors_list = errors.lock().unwrap();
-    assert_eq!(errors_list.len(), 1, "on_error should be called once");
-    assert!(
-        errors_list[0].contains("Test error message"),
-        "Error message should be captured"
-    );
+    let err = graph.async_start().await.expect_err("graph should fail");
+    assert_eq!(err.code, ErrorCode::DgRun0006NodeExecutionFailed);
+    assert_eq!(before_runs.lock().unwrap().as_slice(), ["FailingNode"]);
+    assert!(after_runs.lock().unwrap().is_empty());
 }
 
 #[tokio::test]
 async fn test_hook_on_skip() {
-    // Test that on_skip is called when a node is pruned by a router
     let mut graph = Graph::new();
     let mut table = NodeTable::new();
 
     let skips = Arc::new(Mutex::new(Vec::new()));
 
-    let hook = ComprehensiveHook {
-        before_runs: Arc::new(Mutex::new(Vec::new())),
-        after_runs: Arc::new(Mutex::new(Vec::new())),
-        errors: Arc::new(Mutex::new(Vec::new())),
-        skips: skips.clone(),
-        retries: Arc::new(Mutex::new(Vec::new())),
-    };
+    graph
+        .add_hook(Box::new(ComprehensiveHook {
+            before_runs: Arc::new(Mutex::new(Vec::new())),
+            after_runs: Arc::new(Mutex::new(Vec::new())),
+            skips: skips.clone(),
+            retries: Arc::new(Mutex::new(Vec::new())),
+            retry_decision: RetryDecision::Retry,
+        }))
+        .await;
 
-    graph.add_hook(Box::new(hook)).await;
-
-    // Create nodes
     let node_a = DefaultNode::with_action("NodeA".to_string(), NoOpAction, &mut table);
     let id_a = node_a.id();
-
     let node_b = DefaultNode::with_action("NodeB".to_string(), NoOpAction, &mut table);
     let id_b = node_b.id();
-
-    // Router that only selects NodeA
     let router = RouterNode::new(
         "Router".to_string(),
         SelectARouter {
@@ -214,42 +205,30 @@ async fn test_hook_on_skip() {
     );
     let id_router = router.id();
 
-    graph.add_node(router);
-    graph.add_node(node_a);
-    graph.add_node(node_b);
+    graph.add_node(router).unwrap();
+    graph.add_node(node_a).unwrap();
+    graph.add_node(node_b).unwrap();
+    graph.add_edge(id_router, vec![id_a, id_b]).unwrap();
 
-    // Router -> A, Router -> B
-    graph.add_edge(id_router, vec![id_a, id_b]);
-
-    graph.async_start().await.expect("Graph should succeed");
+    graph.async_start().await.expect("graph should succeed");
 
     let skips_list = skips.lock().unwrap();
-    // NodeB should be skipped because the router only selected NodeA
-    assert!(
-        skips_list.contains(&"NodeB".to_string()),
-        "NodeB should be skipped. Skipped nodes: {:?}",
-        *skips_list
-    );
+    assert!(skips_list.contains(&"NodeB".to_string()));
 }
 
 #[tokio::test]
 async fn test_retry_decision_enum() {
-    // Test that RetryDecision enum works correctly
     assert_eq!(RetryDecision::Retry, RetryDecision::Retry);
     assert_eq!(RetryDecision::Fail, RetryDecision::Fail);
     assert_ne!(RetryDecision::Retry, RetryDecision::Fail);
-
-    // Test Debug trait
     assert_eq!(format!("{:?}", RetryDecision::Retry), "Retry");
     assert_eq!(format!("{:?}", RetryDecision::Fail), "Fail");
 
-    // Test Clone trait
     let decision = RetryDecision::Retry;
     let cloned = decision.clone();
     assert_eq!(decision, cloned);
 }
 
-/// Node with retry support that fails N times before succeeding
 struct RetryableNode {
     id: dagrs::node::NodeId,
     name: dagrs::node::NodeName,
@@ -285,122 +264,133 @@ impl Node for RetryableNode {
     fn id(&self) -> dagrs::node::NodeId {
         self.id
     }
+
     fn name(&self) -> dagrs::node::NodeName {
         self.name.clone()
     }
+
     fn input_channels(&mut self) -> &mut InChannels {
         &mut self.in_channels
     }
+
     fn output_channels(&mut self) -> &mut OutChannels {
         &mut self.out_channels
     }
+
     async fn run(&mut self, _env: Arc<EnvVar>) -> Output {
         let mut count = self.fail_count.lock().unwrap();
         *count += 1;
         if *count <= self.failures_before_success {
-            Output::Err(format!("Intentional failure #{}", *count))
+            Output::execution_failed(format!("Intentional failure #{}", *count))
         } else {
             Output::new(format!("Success after {} failures", *count - 1))
         }
     }
+
     fn max_retries(&self) -> u32 {
         self.max_retries_config
     }
+
     fn retry_delay_ms(&self, _attempt: u32) -> u64 {
-        10 // Short delay for testing
+        10
     }
 }
 
 #[tokio::test]
 async fn test_automatic_retry_success() {
-    use dagrs::graph::event::GraphEvent;
-
     let mut graph = Graph::new();
     let mut table = NodeTable::new();
     let fail_count = Arc::new(Mutex::new(0));
+    let retries = Arc::new(Mutex::new(Vec::new()));
+    let receiver = graph.subscribe();
 
-    // Node that fails 2 times then succeeds, with 3 retries allowed
+    graph
+        .add_hook(Box::new(ComprehensiveHook {
+            before_runs: Arc::new(Mutex::new(Vec::new())),
+            after_runs: Arc::new(Mutex::new(Vec::new())),
+            skips: Arc::new(Mutex::new(Vec::new())),
+            retries: retries.clone(),
+            retry_decision: RetryDecision::Retry,
+        }))
+        .await;
+
     let node = RetryableNode::new(
         "RetryNode".to_string(),
-        2, // Fail 2 times
-        3, // Allow 3 retries
+        2,
+        3,
         fail_count.clone(),
         &mut table,
     );
+    graph.add_node(node).unwrap();
 
-    let mut receiver = graph.subscribe();
-    graph.add_node(node);
+    let collector = tokio::spawn(collect_events_until_terminated(receiver));
+    graph.async_start().await.expect("graph should succeed");
+    let events = collector.await.unwrap();
 
-    // Collect events
-    let events = Arc::new(Mutex::new(Vec::new()));
-    let events_clone = events.clone();
-
-    let collector = tokio::spawn(async move {
-        let mut collected = Vec::new();
-        while let Ok(Ok(event)) =
-            tokio::time::timeout(std::time::Duration::from_millis(500), receiver.recv()).await
-        {
-            let is_finished = matches!(event, GraphEvent::GraphFinished);
-            collected.push(event);
-            if is_finished {
-                break;
-            }
-        }
-        collected
-    });
-
-    let result = graph.async_start().await;
-
-    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-    let collected = collector.await.unwrap();
-    *events_clone.lock().unwrap() = collected;
-
-    // Should succeed after retries
-    assert!(result.is_ok(), "Graph should succeed after retries");
-
-    // Should have tried 3 times total (1 initial + 2 retries)
     assert_eq!(*fail_count.lock().unwrap(), 3);
-
-    // Check for retry events
-    let events = events.lock().unwrap();
-    let retry_count = events
-        .iter()
-        .filter(|e| matches!(e, GraphEvent::NodeRetry { .. }))
-        .count();
-    assert_eq!(retry_count, 2, "Should have 2 retry events");
+    assert_eq!(retries.lock().unwrap().len(), 2);
+    assert_eq!(
+        events
+            .iter()
+            .filter(|event| matches!(event, GraphEvent::NodeRetry { .. }))
+            .count(),
+        2
+    );
+    assert!(matches!(
+        events.last(),
+        Some(GraphEvent::ExecutionTerminated {
+            status: TerminationStatus::Succeeded,
+            error: None,
+        })
+    ));
 }
 
 #[tokio::test]
-async fn test_automatic_retry_exhausted() {
+async fn test_retry_hook_can_stop_retries() {
     let mut graph = Graph::new();
     let mut table = NodeTable::new();
     let fail_count = Arc::new(Mutex::new(0));
+    let retries = Arc::new(Mutex::new(Vec::new()));
+    let receiver = graph.subscribe();
 
-    // Node that always fails, with only 2 retries allowed
+    graph
+        .add_hook(Box::new(ComprehensiveHook {
+            before_runs: Arc::new(Mutex::new(Vec::new())),
+            after_runs: Arc::new(Mutex::new(Vec::new())),
+            skips: Arc::new(Mutex::new(Vec::new())),
+            retries: retries.clone(),
+            retry_decision: RetryDecision::Fail,
+        }))
+        .await;
+
     let node = RetryableNode::new(
         "AlwaysFail".to_string(),
-        100, // Will keep failing
-        2,   // Only 2 retries
+        100,
+        3,
         fail_count.clone(),
         &mut table,
     );
+    graph.add_node(node).unwrap();
 
-    // Verify max_retries is set correctly
-    println!("Node max_retries: {}", node.max_retries());
+    let collector = tokio::spawn(collect_events_until_terminated(receiver));
+    let err = graph.async_start().await.expect_err("graph should fail");
+    let events = collector.await.unwrap();
 
-    graph.add_node(node);
-
-    let result = graph.async_start().await;
-
-    // Should fail after exhausting retries
-    assert!(
-        result.is_err(),
-        "Graph should fail after exhausting retries"
+    assert_eq!(err.code, ErrorCode::DgRun0006NodeExecutionFailed);
+    assert_eq!(*fail_count.lock().unwrap(), 1);
+    assert_eq!(retries.lock().unwrap().len(), 1);
+    assert_eq!(
+        events
+            .iter()
+            .filter(|event| matches!(event, GraphEvent::NodeRetry { .. }))
+            .count(),
+        1
     );
-
-    let actual_count = *fail_count.lock().unwrap();
-    println!("Actual fail count: {}", actual_count);
-
-    // Should have tried 3 times total (1 initial + 2 retries)
-    assert_eq!(actual_count, 3);
+    assert!(matches!(
+        events.last(),
+        Some(GraphEvent::ExecutionTerminated {
+            status: TerminationStatus::Failed,
+            error: Some(error),
+        }) if error.code == ErrorCode::DgRun0006NodeExecutionFailed
+    ));
 }

@@ -2,7 +2,6 @@ use std::sync::Arc;
 
 use crate::{
     id_gen::IdGenerator,
-    router::endpoint::EndPoint as RouterEndpoint,
     rpc::{
         Compare, CompareResult, CompareTarget, DeleteRangeRequest, DeleteRangeResponse,
         LeaseGrantRequest, LeaseGrantResponse, LockRequest, LockResponse, PutRequest, RangeRequest,
@@ -13,7 +12,6 @@ use crate::{
 };
 use clippy_utilities::OverflowArithmetic;
 use tokio::time::{Duration, sleep};
-use tonic::transport::ClientTlsConfig;
 use tracing::debug;
 use xlineapi::{
     AuthInfo,
@@ -21,6 +19,7 @@ use xlineapi::{
     execute_error::ExecuteError,
 };
 use xlinerpc::Status;
+use xlinerpc::server::EndPoint as RouterEndpoint;
 
 /// Default session ttl
 const DEFAULT_SESSION_TTL: i64 = 60;
@@ -46,7 +45,6 @@ impl LockServer {
         auth_store: Arc<AuthStore>,
         id_gen: Arc<IdGenerator>,
         _addrs: &[String],
-        _client_tls_config: Option<&ClientTlsConfig>,
     ) -> Self {
         Self {
             client,

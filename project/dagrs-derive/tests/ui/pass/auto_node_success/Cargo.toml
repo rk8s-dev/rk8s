@@ -1,0 +1,10 @@
+[package]
+name = "auto-node-success"
+version = "0.0.0"
+edition = "2021"
+
+[workspace]
+
+[dependencies]
+async-trait = "0.1"
+dagrs-derive = { path = "../../../../", features = ["derive"] }

@@ -162,6 +162,7 @@ impl TaskRunner {
             volume_mounts: None,
             command: None,
             working_dir: None,
+            tty: false,
         };
 
         let puller = RkforgeImagePuller {};

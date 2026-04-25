@@ -23,6 +23,8 @@ fn default_mount_options() -> MountOptions {
     mo.fs_name("slayerfs");
     // Enable kernel-side permission checking (recommended for most filesystems)
     mo.default_permissions(true);
+    // Required for coherent mmap/page-cache writeback under fsx-style workloads.
+    mo.write_back(true);
     // Allow other users to access the filesystem (required for multi-user scenarios and xfstests)
     // Note: Requires 'user_allow_other' in /etc/fuse.conf for non-root mounts
     mo.allow_other(true);

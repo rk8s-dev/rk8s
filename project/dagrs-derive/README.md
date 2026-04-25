@@ -41,6 +41,15 @@ Dagrs leverages cutting-edge technologies to ensure functionality and performanc
 - **[tokio](https://crates.io/crates/tokio)** - An event-driven, non-blocking I/O platform for writing asynchronous I/O backed applications.
 - **[async_trait](https://crates.io/crates/async-trait)** - Type erasure for async trait methods.
 
+## Macro Contract
+
+`dagrs-derive 0.5.0` targets the `dagrs 0.8.1` API surface.
+
+- `dependencies!` returns `Result<dagrs::Graph, dagrs::DagrsError>` and propagates graph build errors instead of ignoring them.
+- `auto_node` no longer injects `unsafe impl Send/Sync`; user-defined fields must satisfy `dagrs::Node` trait bounds naturally.
+- Invalid `auto_node` targets and reserved field collisions now fail with explicit compile-time diagnostics.
+- Macro regression coverage lives under `tests/` and includes UI fixtures for pass/fail cases.
+
 
 ## Contribution
 

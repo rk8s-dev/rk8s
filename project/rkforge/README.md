@@ -397,6 +397,9 @@ List all repositories on the distribution server:
 rkforge repo list
 ```
 
+The table includes repository visibility plus tag list, the selected size source,
+and the most recent push timestamp.
+
 Or specify a server URL if you have multiple servers configured:
 
 ```sh

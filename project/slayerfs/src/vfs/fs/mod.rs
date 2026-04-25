@@ -1,14 +1,15 @@
 //! FUSE/SDK-friendly VFS with path-based metadata ops and handle-based IO.
 
-use crate::chunk::layout::ChunkLayout;
 use crate::chunk::store::BlockStore;
+use crate::chunk::{BlockGcConfig, ChunkLayout, CompactionWorker, CompactionWorkerConfig};
 use crate::meta::MetaLayer;
 use crate::meta::client::MetaClient;
+use crate::meta::config::CompactConfig;
 use crate::meta::config::MetaClientConfig;
 use crate::meta::file_lock::{FileLockInfo, FileLockQuery, FileLockRange, FileLockType};
 use crate::meta::store::{AclRule, MetaStore, SetAttrFlags, SetAttrRequest, StatFsSnapshot};
 use dashmap::{DashMap, Entry};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
@@ -26,6 +27,58 @@ pub struct RenameFlags {
     pub exchange: bool,
     /// Remove the destination if it's a whiteout (RENAME_WHITEOUT)
     pub whiteout: bool,
+}
+
+/// Configuration for VFS background tasks
+#[derive(Debug, Clone)]
+pub struct VfsBackgroundConfig {
+    pub compaction: CompactionWorkerConfig,
+    pub gc: BlockGcConfig,
+    pub compact_config: CompactConfig,
+    pub enabled: bool,
+}
+
+impl VfsBackgroundConfig {
+    pub fn from_compact_config(
+        layout: &ChunkLayout,
+        compact_config: CompactConfig,
+        enabled: bool,
+    ) -> Self {
+        let compaction = CompactionWorkerConfig {
+            scan_interval: compact_config.interval,
+            max_chunks_per_run: compact_config.max_chunks_per_run,
+            enabled,
+        };
+
+        let gc = BlockGcConfig {
+            block_size: layout.block_size as u64,
+            interval: compact_config.interval,
+            ..Default::default()
+        };
+
+        Self {
+            compaction,
+            gc,
+            compact_config,
+            enabled,
+        }
+    }
+}
+
+impl Default for VfsBackgroundConfig {
+    fn default() -> Self {
+        Self {
+            compaction: CompactionWorkerConfig::default(),
+            gc: BlockGcConfig::default(),
+            compact_config: CompactConfig::default(),
+            enabled: true,
+        }
+    }
+}
+
+struct VfsBackgroundTasks {
+    compaction_handle: tokio::task::JoinHandle<()>,
+    gc_handle: tokio::task::JoinHandle<()>,
 }
 
 use crate::vfs::Inode;
@@ -219,8 +272,8 @@ where
     M: MetaLayer + Send + Sync + 'static,
 {
     layout: ChunkLayout,
-    backend: Arc<Backend<S, M>>,
-    meta_layer: Arc<M>,
+    pub(crate) backend: Arc<Backend<S, M>>,
+    pub(crate) meta_layer: Arc<M>,
     root: i64,
 }
 
@@ -253,6 +306,9 @@ where
 {
     core: Arc<VfsCore<S, M>>,
     state: Arc<VfsState<S, M>>,
+    /// Background tasks (compaction and gc) - only present when enabled
+    #[allow(dead_code)]
+    background_tasks: Option<VfsBackgroundTasks>,
 }
 
 impl<S, M> Clone for VFS<S, M>
@@ -264,6 +320,8 @@ where
         Self {
             core: Arc::clone(&self.core),
             state: Arc::clone(&self.state),
+            // Note: background tasks are not cloned as they should be unique per VFS instance
+            background_tasks: None,
         }
     }
 }
@@ -297,7 +355,84 @@ where
 
         meta_client.initialize().await.map_err(VfsError::from)?;
 
-        Self::from_components(VFSConfig::new(layout), store, meta_client)
+        Self::with_meta_layer_with_compact_config(layout, store, meta_client, config.compact)
+    }
+}
+
+impl<S, R> VFS<S, MetaClient<R>>
+where
+    S: BlockStore + Send + Sync + 'static,
+    R: MetaStore + Send + Sync + ?Sized + 'static,
+{
+    pub(crate) fn with_meta_layer_with_compact_config(
+        layout: ChunkLayout,
+        store: Arc<S>,
+        meta_layer: Arc<MetaClient<R>>,
+        compact_config: CompactConfig,
+    ) -> Result<Self, VfsError> {
+        let enabled = !meta_layer.options().no_background_jobs;
+        let bg_config = VfsBackgroundConfig::from_compact_config(&layout, compact_config, enabled);
+        let background_tasks =
+            Self::start_background_tasks(&meta_layer, Arc::clone(&store), layout, bg_config);
+
+        Self::from_components_with_background(
+            VFSConfig::new(layout),
+            store,
+            meta_layer,
+            background_tasks,
+        )
+    }
+
+    pub(crate) fn with_meta_layer_with_default_background(
+        layout: ChunkLayout,
+        store: Arc<S>,
+        meta_layer: Arc<MetaClient<R>>,
+    ) -> Result<Self, VfsError> {
+        Self::with_meta_layer_with_compact_config(
+            layout,
+            store,
+            meta_layer,
+            CompactConfig::default(),
+        )
+    }
+
+    /// Start background compaction and gc tasks
+    fn start_background_tasks(
+        meta_client: &Arc<MetaClient<R>>,
+        block_store: Arc<S>,
+        layout: ChunkLayout,
+        config: VfsBackgroundConfig,
+    ) -> Option<VfsBackgroundTasks> {
+        if !config.enabled {
+            return None;
+        }
+
+        let meta_store = meta_client.store();
+        let is_database_store = meta_store.name() == "database";
+
+        let mut worker = CompactionWorker::with_config(
+            meta_store,
+            block_store,
+            layout,
+            config.compact_config.clone(),
+            config.compact_config.lock_ttl.clone(),
+        );
+
+        if is_database_store {
+            let client = Arc::clone(meta_client);
+            worker = worker.with_compaction_hook(Arc::new(move |chunk_id| {
+                let client = Arc::clone(&client);
+                tokio::spawn(async move {
+                    client.invalidate_chunk_slices(chunk_id).await;
+                });
+            }));
+        }
+        let (compaction_handle, gc_handle) = worker.start(config.compaction, config.gc);
+
+        Some(VfsBackgroundTasks {
+            compaction_handle,
+            gc_handle,
+        })
     }
 }
 
@@ -307,19 +442,11 @@ where
     S: BlockStore + Send + Sync + 'static,
     M: MetaLayer + Send + Sync + 'static,
 {
-    pub(crate) fn with_meta_layer(
-        layout: ChunkLayout,
-        store: Arc<S>,
-        meta_layer: Arc<M>,
-    ) -> Result<Self, VfsError> {
-        let config = VFSConfig::new(layout);
-        Self::from_components(config, store, meta_layer)
-    }
-
-    fn from_components(
+    fn from_components_with_background(
         config: VFSConfig,
         store: Arc<S>,
         meta_layer: Arc<M>,
+        background_tasks: Option<VfsBackgroundTasks>,
     ) -> Result<Self, VfsError> {
         let layout = config.write.layout;
         let root_ino = meta_layer.root_ino();
@@ -328,7 +455,11 @@ where
         let config = Arc::new(config);
         let state = Arc::new(VfsState::new(config, backend));
 
-        Ok(Self { core, state })
+        Ok(Self {
+            core,
+            state,
+            background_tasks,
+        })
     }
 
     pub(crate) fn root_ino(&self) -> i64 {
@@ -1015,16 +1146,13 @@ where
         new_name: &str,
     ) -> Result<(), VfsError> {
         let parent_ino = self.resolve_parent_inode(dir).await?;
+        let old_path = format!("{}{}{}", dir, if dir == "/" { "" } else { "/" }, old_name);
+        let new_path = format!("{}{}{}", dir, if dir == "/" { "" } else { "/" }, new_name);
 
         // Validate the rename operation
         let (_src_ino, src_attr) = self
             .validate_rename_operation(
-                &format!("{}{}{}", dir, if dir == "/" { "" } else { "/" }, old_name),
-                &format!("{}{}{}", dir, if dir == "/" { "" } else { "/" }, new_name),
-                parent_ino,
-                old_name,
-                parent_ino,
-                new_name,
+                &old_path, &new_path, parent_ino, old_name, parent_ino, new_name,
             )
             .await?;
 
@@ -1399,7 +1527,11 @@ where
             guards.push(handle.lock_write().await);
         }
 
-        self.state.writer.flush_if_exists(ino as u64).await;
+        self.state
+            .writer
+            .flush_required(ino as u64)
+            .await
+            .map_err(|_| VfsError::Other)?;
 
         self.meta_truncate(ino, size, self.core.layout.chunk_size)
             .await?;
@@ -1431,25 +1563,63 @@ where
         req: &SetAttrRequest,
         flags: SetAttrFlags,
     ) -> Result<FileAttr, VfsError> {
-        if let Some(size) = req.size {
+        // Hold handle write guards across the ENTIRE truncate + meta_set_attr
+        // sequence so that no concurrent write_ino / FUSE_WRITE_CACHE can modify
+        // the inode between the truncate and the attribute read-back.  Dropping
+        // the guards too early allowed a race where meta_set_attr could read back
+        // a size extended by a concurrent commit, causing the FUSE setattr
+        // response to carry a wrong file size and confusing the kernel page cache.
+        let _guards = if let Some(size) = req.size {
+            let handles = self.file_handles_for_inode(ino);
+            let mut guards = Vec::with_capacity(handles.len());
+            for handle in handles {
+                guards.push(handle.lock_write().await);
+            }
+
+            self.state
+                .writer
+                .flush_required(ino as u64)
+                .await
+                .map_err(|_| VfsError::Other)?;
             self.meta_truncate(ino, size, self.core.layout.chunk_size)
                 .await?;
-        }
+            self.state.reader.invalidate_all(ino as u64).await;
+            self.state.writer.clear(ino as u64).await;
+
+            let guard = self
+                .lock_inode(ino)
+                .or_insert_with(|| Inode::new(ino, size));
+            guard.update_size(size);
+
+            if let Some(mut attr) = self.state.handles.attr_for_inode(ino) {
+                attr.size = size;
+                self.state.handles.update_attr_for_inode(ino, &attr);
+            }
+
+            Some(guards)
+        } else {
+            None
+        };
 
         let mut filtered = *req;
         filtered.size = None;
 
-        let attr = self.meta_set_attr(ino, &filtered, flags).await?;
+        let mut attr = self.meta_set_attr(ino, &filtered, flags).await?;
 
-        if let Some(size) = req.size
-            && let Some(inode) = self.state.inodes.get(&ino)
-        {
-            inode.update_size(size);
+        // Ensure the returned attr carries exactly the requested truncation size.
+        // The kernel trusts this value for truncate_pagecache decisions; a stale
+        // or extended size here can cause it to keep or invalidate wrong pages.
+        if let Some(size) = req.size {
+            attr.size = size;
+            if let Some(inode) = self.state.inodes.get(&ino) {
+                inode.update_size(size);
+            }
         }
 
         self.state.modified.touch(ino).await;
         self.state.handles.update_attr_for_inode(ino, &attr);
 
+        // _guards dropped here — after meta_set_attr has read the correct state
         Ok(attr)
     }
 
@@ -1531,6 +1701,16 @@ where
 
         let written = handle.write(offset, data).await?;
 
+        // Invalidate reader cache for the written range so subsequent reads
+        // (including FUSE reads on kernel page-cache miss) see committed data
+        // instead of a stale cached snapshot from before this write.
+        let _ = self
+            .state
+            .reader
+            .invalidate(handle.ino as u64, offset, data.len())
+            .await;
+
+        self.update_mtime_ctime(handle.ino).await?;
         self.state.modified.touch(handle.ino).await;
 
         tracing::trace!(fh, ino = handle.ino, written, "vfs.write_done");
@@ -1541,6 +1721,12 @@ where
     pub async fn write_ino(&self, ino: i64, offset: u64, data: &[u8]) -> Result<usize, VfsError> {
         if data.is_empty() {
             return Ok(0);
+        }
+
+        let handles = self.file_handles_for_inode(ino);
+        let mut guards = Vec::with_capacity(handles.len());
+        for handle in handles {
+            guards.push(handle.lock_write().await);
         }
 
         let attr = self.meta_stat_required(ino, PathHint::none()).await?;
@@ -1559,8 +1745,85 @@ where
             .write_at(offset, data)
             .await
             .map_err(VfsError::from)?;
+        writer.flush().await.map_err(|_| VfsError::Other)?;
 
+        // Invalidate reader cache for the written range so any subsequent
+        // FUSE read (kernel page-cache miss) fetches the freshly committed
+        // data instead of a stale cached zero-fill from a prior truncate.
+        let _ = self
+            .state
+            .reader
+            .invalidate(ino as u64, offset, data.len())
+            .await;
+
+        self.update_mtime_ctime(ino).await?;
         self.state.modified.touch(ino).await;
+        drop(guards);
+        Ok(written)
+    }
+
+    /// Copy a byte range between two opened file handles.
+    ///
+    /// This keeps the copy inside SlayerFS so we can serialize it with the
+    /// inode write path instead of falling back to kernel/user-space emulation.
+    pub async fn copy_file_range(
+        &self,
+        fh_in: u64,
+        off_in: u64,
+        fh_out: u64,
+        off_out: u64,
+        length: u64,
+    ) -> Result<usize, VfsError> {
+        if length == 0 {
+            return Ok(0);
+        }
+
+        let len = usize::try_from(length).map_err(|_| VfsError::InvalidInput)?;
+        let src = self.file_handle_required(fh_in)?;
+        let dst = self.file_handle_required(fh_out)?;
+
+        if !src.flags.read {
+            return Err(VfsError::PermissionDenied {
+                path: PathHint::none(),
+            });
+        }
+        if !dst.flags.write {
+            return Err(VfsError::PermissionDenied {
+                path: PathHint::none(),
+            });
+        }
+
+        let mut locked = Vec::new();
+        let mut unique = BTreeMap::new();
+        for handle in self.file_handles_for_inode(src.ino) {
+            unique.insert(handle.fh, handle);
+        }
+        for handle in self.file_handles_for_inode(dst.ino) {
+            unique.insert(handle.fh, handle);
+        }
+        for handle in unique.into_values() {
+            locked.push(handle.lock_write().await);
+        }
+
+        self.state.writer.flush_if_exists(src.ino as u64).await;
+        if dst.ino != src.ino {
+            self.state.writer.flush_if_exists(dst.ino as u64).await;
+        }
+
+        let src_attr = self.meta_stat_required(src.ino, PathHint::none()).await?;
+        let dst_attr = self.meta_stat_required(dst.ino, PathHint::none()).await?;
+        let src_guard = self.open_guard(src.ino, src_attr, true, false).await?;
+        let dst_guard = self.open_guard(dst.ino, dst_attr, false, true).await?;
+
+        // Read the full source snapshot before writing so same-file overlap keeps
+        // copy_file_range semantics close to a memmove-style copy.
+        let data = src_guard.read(off_in, len).await?;
+        let written = dst_guard.write(off_out, &data).await?;
+
+        drop(dst_guard);
+        drop(src_guard);
+        drop(locked);
+
         Ok(written)
     }
 

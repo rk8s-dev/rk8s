@@ -9,15 +9,37 @@
 //! - Memory and file-based checkpoint stores
 
 use async_trait::async_trait;
-use dagrs::graph::event::GraphEvent;
+use dagrs::graph::event::{GraphEvent, TerminationStatus};
 use dagrs::node::action::Action;
+use dagrs::node::conditional_node::{Condition, ConditionalNode};
 use dagrs::node::default_node::DefaultNode;
+use dagrs::node::loop_node::CountLoopCondition;
 use dagrs::{
     Checkpoint, CheckpointConfig, CheckpointStore, EnvVar, Graph, InChannels,
-    MemoryCheckpointStore, Node, NodeTable, OutChannels, Output,
+    MemoryCheckpointStore, Node, NodeExecStatus, NodeState, NodeTable, OutChannels, Output,
+    StoredOutputKind,
 };
-use std::sync::{Arc, Mutex};
+use std::sync::{
+    Arc, Mutex,
+    atomic::{AtomicBool, Ordering},
+};
 use std::time::Duration;
+
+async fn collect_events_until_terminated(
+    mut receiver: tokio::sync::broadcast::Receiver<GraphEvent>,
+) -> Vec<GraphEvent> {
+    let mut events = Vec::new();
+    while let Ok(Ok(event)) =
+        tokio::time::timeout(Duration::from_millis(200), receiver.recv()).await
+    {
+        let terminated = matches!(event, GraphEvent::ExecutionTerminated { .. });
+        events.push(event);
+        if terminated {
+            break;
+        }
+    }
+    events
+}
 
 /// Action that counts executions
 #[derive(Clone)]
@@ -34,19 +56,108 @@ impl Action for CounterAction {
     }
 }
 
-/// Action that sleeps for a short duration (simulating long-running task)
 #[derive(Clone)]
-struct SlowAction {
-    name: String,
-    executed: Arc<Mutex<Vec<String>>>,
+struct ProduceCheckpointedValue {
+    runs: Arc<Mutex<usize>>,
 }
 
 #[async_trait]
-impl Action for SlowAction {
+impl Action for ProduceCheckpointedValue {
     async fn run(&self, _: &mut InChannels, _: &mut OutChannels, _: Arc<EnvVar>) -> Output {
-        tokio::time::sleep(Duration::from_millis(10)).await;
-        self.executed.lock().unwrap().push(self.name.clone());
+        *self.runs.lock().unwrap() += 1;
+        Output::new("checkpointed".to_string())
+    }
+}
+
+#[derive(Clone)]
+struct CaptureCheckpointedValue {
+    source_id: dagrs::NodeId,
+    seen: Arc<Mutex<Vec<String>>>,
+}
+
+#[async_trait]
+impl Action for CaptureCheckpointedValue {
+    async fn run(&self, input: &mut InChannels, _: &mut OutChannels, _: Arc<EnvVar>) -> Output {
+        let content = input.recv_from(&self.source_id).await.unwrap();
+        let value = content.get::<String>().unwrap().clone();
+        self.seen.lock().unwrap().push(value);
         Output::empty()
+    }
+}
+
+#[derive(Clone)]
+struct ObserveActiveSendersAction {
+    expected_sender: dagrs::NodeId,
+    observed_senders: Arc<Mutex<Vec<Vec<usize>>>>,
+}
+
+#[async_trait]
+impl Action for ObserveActiveSendersAction {
+    async fn run(&self, input: &mut InChannels, _: &mut OutChannels, _: Arc<EnvVar>) -> Output {
+        let mut sender_ids: Vec<_> = input
+            .get_sender_ids()
+            .into_iter()
+            .map(|id| id.as_usize())
+            .collect();
+        sender_ids.sort_unstable();
+        self.observed_senders.lock().unwrap().push(sender_ids);
+
+        let content = input.recv_from(&self.expected_sender).await.unwrap();
+        let value = content.get::<String>().unwrap().clone();
+        Output::new(value)
+    }
+}
+
+struct AlwaysTrueCondition;
+
+#[async_trait]
+impl Condition for AlwaysTrueCondition {
+    async fn run(&self, _: &mut InChannels, _: &OutChannels, _: Arc<EnvVar>) -> bool {
+        true
+    }
+}
+
+struct NonSerializablePayload(&'static str);
+
+#[derive(Clone)]
+struct ProduceNonSerializableValue {
+    runs: Arc<Mutex<usize>>,
+}
+
+#[async_trait]
+impl Action for ProduceNonSerializableValue {
+    async fn run(&self, _: &mut InChannels, out: &mut OutChannels, _: Arc<EnvVar>) -> Output {
+        *self.runs.lock().unwrap() += 1;
+        let _ = out
+            .broadcast(dagrs::Content::new(NonSerializablePayload("custom")))
+            .await;
+        Output::new(NonSerializablePayload("custom"))
+    }
+}
+
+#[derive(Clone)]
+struct FailOnceAfterReceivingNonSerializable {
+    source_id: dagrs::NodeId,
+    seen: Arc<Mutex<Vec<String>>>,
+    fail_first: Arc<AtomicBool>,
+}
+
+#[async_trait]
+impl Action for FailOnceAfterReceivingNonSerializable {
+    async fn run(&self, input: &mut InChannels, _: &mut OutChannels, _: Arc<EnvVar>) -> Output {
+        let content = input.recv_from(&self.source_id).await.unwrap();
+        let value = content
+            .get::<NonSerializablePayload>()
+            .unwrap()
+            .0
+            .to_string();
+        self.seen.lock().unwrap().push(value);
+
+        if self.fail_first.swap(false, Ordering::SeqCst) {
+            Output::execution_failed("intentional failure after checkpoint")
+        } else {
+            Output::empty()
+        }
     }
 }
 
@@ -79,9 +190,9 @@ async fn test_manual_checkpoint_save_and_load() {
     let id_a = node_a.id();
     let id_b = node_b.id();
 
-    graph.add_node(node_a);
-    graph.add_node(node_b);
-    graph.add_edge(id_a, vec![id_b]);
+    graph.add_node(node_a).unwrap();
+    graph.add_node(node_b).unwrap();
+    graph.add_edge(id_a, vec![id_b]).unwrap();
 
     graph.set_checkpoint_store(Box::new(MemoryCheckpointStore::new()));
 
@@ -159,9 +270,18 @@ async fn test_checkpoint_with_node_states() {
     checkpoint.add_node_state(NodeState::pending(3));
 
     assert_eq!(checkpoint.node_states.len(), 3);
-    assert!(checkpoint.node_states.get(&1).unwrap().success);
-    assert!(!checkpoint.node_states.get(&2).unwrap().success);
-    assert!(!checkpoint.node_states.get(&3).unwrap().completed);
+    assert_eq!(
+        checkpoint.node_states.get(&1).unwrap().status,
+        NodeExecStatus::Succeeded
+    );
+    assert_eq!(
+        checkpoint.node_states.get(&2).unwrap().status,
+        NodeExecStatus::Failed
+    );
+    assert_eq!(
+        checkpoint.node_states.get(&3).unwrap().status,
+        NodeExecStatus::Pending
+    );
 }
 
 #[tokio::test]
@@ -206,9 +326,9 @@ async fn test_checkpoint_events() {
     let id_a = node_a.id();
     let id_b = node_b.id();
 
-    graph.add_node(node_a);
-    graph.add_node(node_b);
-    graph.add_edge(id_a, vec![id_b]);
+    graph.add_node(node_a).unwrap();
+    graph.add_node(node_b).unwrap();
+    graph.add_edge(id_a, vec![id_b]).unwrap();
 
     graph.set_checkpoint_store(Box::new(MemoryCheckpointStore::new()));
 
@@ -218,24 +338,10 @@ async fn test_checkpoint_events() {
         .with_max_checkpoints(10);
     graph.set_checkpoint_config(config);
 
-    let mut receiver = graph.subscribe();
+    let receiver = graph.subscribe();
     let events = Arc::new(Mutex::new(Vec::new()));
     let events_clone = events.clone();
-
-    // Spawn event collector
-    let collector = tokio::spawn(async move {
-        let mut collected = Vec::new();
-        while let Ok(Ok(event)) =
-            tokio::time::timeout(Duration::from_millis(200), receiver.recv()).await
-        {
-            let is_finished = matches!(event, GraphEvent::GraphFinished);
-            collected.push(event);
-            if is_finished {
-                break;
-            }
-        }
-        collected
-    });
+    let collector = tokio::spawn(collect_events_until_terminated(receiver));
 
     // Run graph
     graph.async_start().await.unwrap();
@@ -254,13 +360,19 @@ async fn test_checkpoint_events() {
     let has_node_success = events_list
         .iter()
         .any(|e| matches!(e, GraphEvent::NodeSuccess { .. }));
-    let has_finished = events_list
-        .iter()
-        .any(|e| matches!(e, GraphEvent::GraphFinished));
+    let has_terminated = events_list.iter().any(|e| {
+        matches!(
+            e,
+            GraphEvent::ExecutionTerminated {
+                status: TerminationStatus::Succeeded,
+                error: None,
+            }
+        )
+    });
 
     assert!(has_node_start, "Should have NodeStart events");
     assert!(has_node_success, "Should have NodeSuccess events");
-    assert!(has_finished, "Should have GraphFinished event");
+    assert!(has_terminated, "Should have a successful termination event");
 }
 
 #[tokio::test]
@@ -270,7 +382,6 @@ async fn test_checkpoint_config_builder() {
     assert!(!default_config.enabled);
     assert_eq!(default_config.interval_nodes, Some(10));
     assert!(default_config.on_loop_iteration);
-    assert!(default_config.before_conditional);
     assert_eq!(default_config.max_checkpoints, 5);
 
     // Test builder pattern
@@ -312,44 +423,394 @@ async fn test_checkpoint_serialization() {
 
 #[tokio::test]
 async fn test_resume_execution_basic() {
-    // This test verifies basic resume functionality
     let mut graph = Graph::new();
     let mut table = NodeTable::new();
-    let executed = Arc::new(Mutex::new(Vec::new()));
+    let producer_runs = Arc::new(Mutex::new(0));
+    let seen = Arc::new(Mutex::new(Vec::new()));
 
-    // Create nodes
     let node_a = DefaultNode::with_action(
         "A".to_string(),
-        SlowAction {
-            name: "A".to_string(),
-            executed: executed.clone(),
-        },
-        &mut table,
-    );
-    let node_b = DefaultNode::with_action(
-        "B".to_string(),
-        SlowAction {
-            name: "B".to_string(),
-            executed: executed.clone(),
+        ProduceCheckpointedValue {
+            runs: producer_runs.clone(),
         },
         &mut table,
     );
     let id_a = node_a.id();
+    let gate = ConditionalNode::with_condition("Gate".to_string(), AlwaysTrueCondition, &mut table);
+    let id_gate = gate.id();
+    let node_b = DefaultNode::with_action(
+        "B".to_string(),
+        CaptureCheckpointedValue {
+            source_id: id_a,
+            seen: seen.clone(),
+        },
+        &mut table,
+    );
     let id_b = node_b.id();
 
-    graph.add_node(node_a);
-    graph.add_node(node_b);
-    graph.add_edge(id_a, vec![id_b]);
+    graph.add_node(node_a).unwrap();
+    graph.add_node(gate).unwrap();
+    graph.add_node(node_b).unwrap();
+    graph.add_edge(id_a, vec![id_gate]).unwrap();
+    graph.add_edge(id_gate, vec![id_b]).unwrap();
+    graph.add_edge(id_a, vec![id_b]).unwrap();
 
     let store = MemoryCheckpointStore::new();
+    let mut checkpoint = Checkpoint::with_id("resume_basic", 1, 0);
+    checkpoint.active_nodes.insert(id_a.as_usize());
+    checkpoint.active_nodes.insert(id_gate.as_usize());
+    checkpoint.active_nodes.insert(id_b.as_usize());
+    checkpoint.add_node_state(
+        NodeState::succeeded(id_a.as_usize())
+            .with_output_kind(StoredOutputKind::String)
+            .with_output_data(serde_json::to_vec(&"checkpointed").unwrap())
+            .with_summary("String(checkpointed)"),
+    );
+    checkpoint.add_node_state(NodeState::succeeded(id_gate.as_usize()));
+    checkpoint.add_node_state(NodeState::pending(id_b.as_usize()));
+    store.save(&checkpoint).await.unwrap();
     graph.set_checkpoint_store(Box::new(store));
 
-    // Run the graph normally
-    graph.async_start().await.unwrap();
+    let report = tokio::time::timeout(
+        Duration::from_secs(1),
+        graph.resume_from_checkpoint("resume_basic"),
+    )
+    .await
+    .expect("resume should not hang")
+    .expect("resume should succeed");
 
-    let exec_log = executed.lock().unwrap();
-    assert!(exec_log.contains(&"A".to_string()), "Node A should execute");
-    assert!(exec_log.contains(&"B".to_string()), "Node B should execute");
+    assert_eq!(*producer_runs.lock().unwrap(), 0, "A should not rerun");
+    assert_eq!(
+        seen.lock().unwrap().as_slice(),
+        ["checkpointed"],
+        "B should receive the checkpointed output",
+    );
+    assert_eq!(report.node_succeeded, 3);
+}
+
+#[tokio::test]
+async fn test_resume_reruns_nodes_with_unserializable_outputs() {
+    let mut graph = Graph::new();
+    let mut table = NodeTable::new();
+    let producer_runs = Arc::new(Mutex::new(0usize));
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let fail_first = Arc::new(AtomicBool::new(true));
+
+    let producer = DefaultNode::with_action(
+        "Producer".to_string(),
+        ProduceNonSerializableValue {
+            runs: producer_runs.clone(),
+        },
+        &mut table,
+    );
+    let id_producer = producer.id();
+    let gate = ConditionalNode::with_condition("Gate".to_string(), AlwaysTrueCondition, &mut table);
+    let id_gate = gate.id();
+    let consumer = DefaultNode::with_action(
+        "Consumer".to_string(),
+        FailOnceAfterReceivingNonSerializable {
+            source_id: id_producer,
+            seen: seen.clone(),
+            fail_first: fail_first.clone(),
+        },
+        &mut table,
+    );
+    let id_consumer = consumer.id();
+
+    graph.add_node(producer).unwrap();
+    graph.add_node(gate).unwrap();
+    graph.add_node(consumer).unwrap();
+    graph.add_edge(id_producer, vec![id_gate]).unwrap();
+    graph.add_edge(id_gate, vec![id_consumer]).unwrap();
+    graph.add_edge(id_producer, vec![id_consumer]).unwrap();
+
+    graph.set_checkpoint_store(Box::new(MemoryCheckpointStore::new()));
+    graph.set_checkpoint_config(
+        CheckpointConfig::enabled()
+            .with_node_interval(1)
+            .with_max_checkpoints(10),
+    );
+
+    let err = graph
+        .async_start()
+        .await
+        .expect_err("first run should fail");
+    assert_eq!(err.code, dagrs::ErrorCode::DgRun0006NodeExecutionFailed);
+
+    let checkpoint = graph
+        .get_latest_checkpoint()
+        .await
+        .unwrap()
+        .expect("checkpoint should exist before the failing block");
+
+    let report = tokio::time::timeout(
+        Duration::from_secs(1),
+        graph.resume_from_checkpoint(&checkpoint.id),
+    )
+    .await
+    .expect("resume should not hang")
+    .expect("resume should succeed");
+
+    assert_eq!(
+        *producer_runs.lock().unwrap(),
+        2,
+        "producer should rerun because its output could not be checkpointed",
+    );
+    assert_eq!(
+        seen.lock().unwrap().as_slice(),
+        ["custom".to_string(), "custom".to_string()],
+    );
+    assert_eq!(report.node_succeeded, 3);
+    assert_eq!(report.node_failed, 0);
+}
+
+#[tokio::test]
+async fn test_resume_reruns_legacy_succeeded_node_without_checkpointed_output() {
+    let mut graph = Graph::new();
+    let mut table = NodeTable::new();
+    let producer_runs = Arc::new(Mutex::new(0usize));
+    let seen = Arc::new(Mutex::new(Vec::new()));
+
+    let producer = DefaultNode::with_action(
+        "Producer".to_string(),
+        ProduceNonSerializableValue {
+            runs: producer_runs.clone(),
+        },
+        &mut table,
+    );
+    let id_producer = producer.id();
+    let gate = ConditionalNode::with_condition("Gate".to_string(), AlwaysTrueCondition, &mut table);
+    let id_gate = gate.id();
+    let consumer = DefaultNode::with_action(
+        "Consumer".to_string(),
+        FailOnceAfterReceivingNonSerializable {
+            source_id: id_producer,
+            seen: seen.clone(),
+            fail_first: Arc::new(AtomicBool::new(false)),
+        },
+        &mut table,
+    );
+    let id_consumer = consumer.id();
+
+    graph.add_node(producer).unwrap();
+    graph.add_node(gate).unwrap();
+    graph.add_node(consumer).unwrap();
+    graph.add_edge(id_producer, vec![id_gate]).unwrap();
+    graph.add_edge(id_gate, vec![id_consumer]).unwrap();
+    graph.add_edge(id_producer, vec![id_consumer]).unwrap();
+
+    let store = MemoryCheckpointStore::new();
+    let mut checkpoint = Checkpoint::with_id("legacy_unserializable_success", 1, 0);
+    checkpoint.active_nodes.extend([
+        id_producer.as_usize(),
+        id_gate.as_usize(),
+        id_consumer.as_usize(),
+    ]);
+    checkpoint.add_node_state(
+        NodeState::succeeded(id_producer.as_usize())
+            .with_summary("legacy checkpoint without replayable output"),
+    );
+    checkpoint.add_node_state(NodeState::succeeded(id_gate.as_usize()));
+    checkpoint.add_node_state(NodeState::pending(id_consumer.as_usize()));
+    store.save(&checkpoint).await.unwrap();
+    graph.set_checkpoint_store(Box::new(store));
+
+    let report = tokio::time::timeout(
+        Duration::from_secs(1),
+        graph.resume_from_checkpoint("legacy_unserializable_success"),
+    )
+    .await
+    .expect("resume should not hang")
+    .expect("legacy checkpoint should be recoverable");
+
+    assert_eq!(
+        *producer_runs.lock().unwrap(),
+        1,
+        "producer should rerun when a legacy checkpoint cannot replay its output",
+    );
+    assert_eq!(seen.lock().unwrap().as_slice(), ["custom".to_string()]);
+    assert_eq!(report.node_succeeded, 3);
+    assert_eq!(report.node_failed, 0);
+}
+
+#[tokio::test]
+async fn test_resume_restores_effective_active_upstreams() {
+    let mut graph = Graph::new();
+    let mut table = NodeTable::new();
+    let observed_senders = Arc::new(Mutex::new(Vec::new()));
+
+    let node_a = DefaultNode::new("A".to_string(), &mut table);
+    let id_a = node_a.id();
+    let node_b = DefaultNode::new("B".to_string(), &mut table);
+    let id_b = node_b.id();
+    let gate = ConditionalNode::with_condition("Gate".to_string(), AlwaysTrueCondition, &mut table);
+    let id_gate = gate.id();
+    let node_d = DefaultNode::with_action(
+        "D".to_string(),
+        ObserveActiveSendersAction {
+            expected_sender: id_a,
+            observed_senders: observed_senders.clone(),
+        },
+        &mut table,
+    );
+    let id_d = node_d.id();
+
+    graph.add_node(node_a).unwrap();
+    graph.add_node(node_b).unwrap();
+    graph.add_node(gate).unwrap();
+    graph.add_node(node_d).unwrap();
+    graph.add_edge(id_a, vec![id_gate]).unwrap();
+    graph.add_edge(id_b, vec![id_gate]).unwrap();
+    graph.add_edge(id_gate, vec![id_d]).unwrap();
+    graph.add_edge(id_a, vec![id_d]).unwrap();
+    graph.add_edge(id_b, vec![id_d]).unwrap();
+
+    let store = MemoryCheckpointStore::new();
+    let mut checkpoint = Checkpoint::with_id("resume_skip_merge", 1, 0);
+    checkpoint.active_nodes.insert(id_a.as_usize());
+    checkpoint.active_nodes.insert(id_gate.as_usize());
+    checkpoint.active_nodes.insert(id_d.as_usize());
+    checkpoint.add_node_state(
+        NodeState::succeeded(id_a.as_usize())
+            .with_output_kind(StoredOutputKind::String)
+            .with_output_data(serde_json::to_vec(&"from-a").unwrap())
+            .with_summary("String(from-a)"),
+    );
+    checkpoint.add_node_state(NodeState::skipped(id_b.as_usize()));
+    checkpoint.add_node_state(NodeState::succeeded(id_gate.as_usize()));
+    checkpoint.add_node_state(NodeState::pending(id_d.as_usize()));
+    store.save(&checkpoint).await.unwrap();
+    graph.set_checkpoint_store(Box::new(store));
+
+    let report = graph
+        .resume_from_checkpoint("resume_skip_merge")
+        .await
+        .unwrap();
+    assert_eq!(
+        observed_senders.lock().unwrap().as_slice(),
+        [vec![id_a.as_usize(), id_gate.as_usize()]],
+        "only the active upstream sender should remain visible after resume",
+    );
+    assert_eq!(report.node_skipped, 1);
+}
+
+#[tokio::test]
+async fn test_resume_from_failed_checkpoint_keeps_successful_upstreams_frozen() {
+    let mut graph = Graph::new();
+    let mut table = NodeTable::new();
+    let producer_runs = Arc::new(Mutex::new(1usize));
+    let seen = Arc::new(Mutex::new(Vec::new()));
+
+    let producer = DefaultNode::with_action(
+        "Producer".to_string(),
+        ProduceCheckpointedValue {
+            runs: producer_runs.clone(),
+        },
+        &mut table,
+    );
+    let id_producer = producer.id();
+    let gate = ConditionalNode::with_condition("Gate".to_string(), AlwaysTrueCondition, &mut table);
+    let id_gate = gate.id();
+    let consumer = DefaultNode::with_action(
+        "Consumer".to_string(),
+        CaptureCheckpointedValue {
+            source_id: id_producer,
+            seen: seen.clone(),
+        },
+        &mut table,
+    );
+    let id_consumer = consumer.id();
+
+    graph.add_node(producer).unwrap();
+    graph.add_node(gate).unwrap();
+    graph.add_node(consumer).unwrap();
+    graph
+        .add_edge(id_producer, vec![id_gate, id_consumer])
+        .unwrap();
+    graph.add_edge(id_gate, vec![id_consumer]).unwrap();
+
+    let store = MemoryCheckpointStore::new();
+    let mut checkpoint = Checkpoint::with_id("failed_resume", 1, 0);
+    checkpoint.active_nodes.extend([
+        id_producer.as_usize(),
+        id_gate.as_usize(),
+        id_consumer.as_usize(),
+    ]);
+    checkpoint.add_node_state(
+        NodeState::succeeded(id_producer.as_usize())
+            .with_output_kind(StoredOutputKind::String)
+            .with_output_data(serde_json::to_vec(&"checkpointed".to_string()).unwrap())
+            .with_summary("String(checkpointed)"),
+    );
+    checkpoint.add_node_state(NodeState::succeeded(id_gate.as_usize()));
+    checkpoint.add_node_state(
+        NodeState::failed(id_consumer.as_usize())
+            .with_summary("Error: consumer failed before checkpoint"),
+    );
+    store.save(&checkpoint).await.unwrap();
+    graph.set_checkpoint_store(Box::new(store));
+
+    let report = graph.resume_from_checkpoint("failed_resume").await.unwrap();
+
+    assert_eq!(
+        *producer_runs.lock().unwrap(),
+        1,
+        "successful upstream nodes should not rerun when resuming a failed downstream block",
+    );
+    assert_eq!(
+        seen.lock().unwrap().as_slice(),
+        ["checkpointed".to_string()],
+    );
+    assert_eq!(report.node_succeeded, 3);
+    assert_eq!(report.node_failed, 0);
+}
+
+#[tokio::test]
+async fn test_loop_checkpoint_idempotency() {
+    let mut graph = Graph::new();
+    let mut table = NodeTable::new();
+    let counter = Arc::new(Mutex::new(1usize));
+
+    let node_a = DefaultNode::with_action(
+        "A".to_string(),
+        CounterAction {
+            count: counter.clone(),
+        },
+        &mut table,
+    );
+    let id_a = node_a.id();
+    let loop_node = dagrs::LoopNode::new(
+        "Loop".to_string(),
+        id_a,
+        CountLoopCondition::new(2),
+        &mut table,
+    );
+    let id_loop = loop_node.id();
+
+    graph.add_node(node_a).unwrap();
+    graph.add_node(loop_node).unwrap();
+    graph.add_edge(id_a, vec![id_loop]).unwrap();
+
+    let store = MemoryCheckpointStore::new();
+    let mut checkpoint = Checkpoint::with_id("loop_idempotent", 0, 1);
+    checkpoint.active_nodes.insert(id_a.as_usize());
+    checkpoint.active_nodes.insert(id_loop.as_usize());
+    checkpoint.add_node_state(NodeState::succeeded(id_a.as_usize()));
+    checkpoint.add_node_state(NodeState::succeeded(id_loop.as_usize()));
+    store.save(&checkpoint).await.unwrap();
+    graph.set_checkpoint_store(Box::new(store));
+
+    let report = graph
+        .resume_from_checkpoint("loop_idempotent")
+        .await
+        .unwrap();
+
+    assert_eq!(
+        *counter.lock().unwrap(),
+        3,
+        "resuming from loop checkpoint should only execute the remaining iterations",
+    );
+    assert_eq!(report.node_succeeded, 2);
 }
 #[tokio::test]
 async fn test_file_checkpoint_store_basic() {
@@ -422,18 +883,34 @@ async fn test_file_checkpoint_store_path_traversal_prevention() {
 async fn test_checkpoint_id_generation() {
     // Test that auto-generated IDs are safe
     let cp1 = Checkpoint::new(0, 0);
-    let cp2 = Checkpoint::new(10, 5);
+    let cp2 = Checkpoint::new(0, 1);
+    let cp3 = Checkpoint::new(10, 5);
 
     // IDs should start with "ckpt_" and not contain path separators
     assert!(cp1.id.starts_with("ckpt_"));
     assert!(cp2.id.starts_with("ckpt_"));
+    assert!(cp3.id.starts_with("ckpt_"));
     assert!(!cp1.id.contains('/'));
     assert!(!cp1.id.contains('\\'));
     assert!(!cp1.id.contains(".."));
 
-    // IDs should be unique
-    // Note: In very fast execution, timestamps might be the same, but pc differs
-    // This is acceptable as the ID format includes both timestamp and pc
+    assert_ne!(cp1.id, cp2.id);
+    assert_ne!(cp2.id, cp3.id);
+
+    let store = MemoryCheckpointStore::new();
+    store.save(&cp1).await.unwrap();
+    store.save(&cp2).await.unwrap();
+    store.save(&cp3).await.unwrap();
+
+    let ids = store.list().await.unwrap();
+    assert_eq!(
+        ids.len(),
+        3,
+        "generated checkpoint IDs must not overwrite each other"
+    );
+
+    let latest = store.latest().await.unwrap().unwrap();
+    assert_eq!(latest.id, cp3.id);
 }
 
 #[tokio::test]
@@ -443,11 +920,12 @@ async fn test_node_state_builder_api() {
     // Test completed with success
     let state = NodeState::completed(1, true)
         .with_summary("String(hello)")
+        .with_output_kind(StoredOutputKind::String)
         .with_output_data(b"\"hello\"".to_vec());
 
     assert_eq!(state.node_id, 1);
-    assert!(state.completed);
-    assert!(state.success);
+    assert_eq!(state.status, NodeExecStatus::Succeeded);
+    assert_eq!(state.output_kind, Some(StoredOutputKind::String));
     assert_eq!(state.output_summary, Some("String(hello)".to_string()));
     assert_eq!(state.output_data, Some(b"\"hello\"".to_vec()));
 
@@ -455,8 +933,7 @@ async fn test_node_state_builder_api() {
     let state = NodeState::completed(2, false).with_summary("Error: connection timeout");
 
     assert_eq!(state.node_id, 2);
-    assert!(state.completed);
-    assert!(!state.success);
+    assert_eq!(state.status, NodeExecStatus::Failed);
     assert_eq!(
         state.output_summary,
         Some("Error: connection timeout".to_string())
@@ -465,8 +942,13 @@ async fn test_node_state_builder_api() {
     // Test pending
     let state = NodeState::pending(3);
     assert_eq!(state.node_id, 3);
-    assert!(!state.completed);
-    assert!(!state.success);
+    assert_eq!(state.status, NodeExecStatus::Pending);
+
+    let state = NodeState::running(4);
+    assert_eq!(state.status, NodeExecStatus::Running);
+
+    let state = NodeState::skipped(5);
+    assert_eq!(state.status, NodeExecStatus::Skipped);
 }
 
 #[tokio::test]
@@ -478,6 +960,7 @@ async fn test_checkpoint_output_data_serialization() {
     // Add node with serialized output
     let output_json = serde_json::to_vec(&"test_output").unwrap();
     let state = NodeState::completed(1, true)
+        .with_output_kind(StoredOutputKind::String)
         .with_output_data(output_json.clone())
         .with_summary("String(test_output)");
     checkpoint.add_node_state(state);
@@ -488,6 +971,7 @@ async fn test_checkpoint_output_data_serialization() {
 
     // Verify output data was preserved
     let restored_state = restored.node_states.get(&1).unwrap();
+    assert_eq!(restored_state.output_kind, Some(StoredOutputKind::String));
     assert_eq!(restored_state.output_data, Some(output_json));
     assert_eq!(
         restored_state.output_summary,

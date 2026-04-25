@@ -108,6 +108,11 @@ async fn vm_assert_status(vm: &mut qlean::Machine, id: &str, expected: &str) -> 
 #[tokio::test]
 #[serial]
 async fn test_container_lifecycle_sync_mode_with_qlean() -> Result<()> {
+    tracing_subscriber::fmt()
+        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+        .with_timer(tracing_subscriber::fmt::time::LocalTime::rfc_3339())
+        .init();
+
     let project_dir = project_dir();
     let rkforge_bin = PathBuf::from(env!("CARGO_BIN_EXE_rkforge"));
     let aardvark_path = ensure_aardvark_dns(&project_dir)?;

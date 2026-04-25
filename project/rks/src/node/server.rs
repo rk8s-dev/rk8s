@@ -1,6 +1,6 @@
 use crate::node::Shared;
 use crate::node::cert::build_quic_config;
-use crate::node::dispatch::{dispatch_user, dispatch_worker};
+use crate::node::dispatch::{dispatch_user, dispatch_user_bistream, dispatch_worker};
 use crate::node::register::NodeRegister;
 use crate::node::server::private::Sealed;
 use crate::node::watcher::PodsWatcher;
@@ -213,6 +213,29 @@ impl AuthConnection<Verified> {
             log_error!(dispatch_user(msg, &self.conn, &self.shared).await)
         }
     }
+
+    fn spawn_user_bistream_loop(&self) {
+        let conn = self.conn.clone();
+        let shared = self.shared.clone();
+        tokio::spawn(async move {
+            loop {
+                match conn.accept_bi().await {
+                    Ok(stream) => {
+                        let shared = shared.clone();
+                        tokio::spawn(async move {
+                            if let Err(e) = dispatch_user_bistream(stream, shared).await {
+                                error!("[attach-relay] bi stream error: {e}");
+                            }
+                        });
+                    }
+                    Err(e) => {
+                        debug!("[attach-relay] user bi stream loop ended: {e}");
+                        break;
+                    }
+                }
+            }
+        });
+    }
 }
 
 #[async_trait]
@@ -266,6 +289,7 @@ impl ConnectionState for Verified {
                 None
             }
         } else {
+            conn.spawn_user_bistream_loop();
             None
         };
 

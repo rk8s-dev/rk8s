@@ -76,10 +76,7 @@ impl BenchClient {
         let kv_client = if use_curp_client {
             KVClient::Xline(Client::connect(addrs, config).await?)
         } else {
-            let options = config
-                .tls_config()
-                .cloned()
-                .map(|c| ConnectOptions::default().with_tls(c));
+            let options = None::<ConnectOptions>;
             KVClient::Etcd(EtcdClient::connect(addrs.clone(), options).await?)
         };
         Ok(Self { name, kv_client })

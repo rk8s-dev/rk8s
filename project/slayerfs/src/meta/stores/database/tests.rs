@@ -1,4 +1,5 @@
 use super::*;
+use crate::CompactConfig;
 use crate::meta::config::{CacheConfig, ClientOptions, DatabaseConfig};
 use crate::meta::file_lock::{FileLockQuery, FileLockRange, FileLockType};
 use tokio::time;
@@ -12,6 +13,7 @@ fn test_config() -> Config {
         },
         cache: CacheConfig::default(),
         client: ClientOptions::default(),
+        compact: CompactConfig::default(),
     }
 }
 
@@ -24,6 +26,7 @@ fn file_db_config(path: &std::path::Path) -> Config {
         },
         cache: CacheConfig::default(),
         client: ClientOptions::default(),
+        compact: CompactConfig::default(),
     }
 }
 
@@ -37,6 +40,7 @@ fn shared_db_config() -> Config {
         },
         cache: CacheConfig::default(),
         client: ClientOptions::default(),
+        compact: CompactConfig::default(),
     }
 }
 

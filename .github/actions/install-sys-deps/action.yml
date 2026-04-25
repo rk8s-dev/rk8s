@@ -1,0 +1,17 @@
+name: 'Install System Dependencies'
+description: 'Install system dependencies required by rk8s'
+
+runs:
+  using: "composite"
+  steps:
+    - name: Update APT Cache
+      run: sudo apt-get update
+      shell: bash
+
+    - name: Install System Tools
+      run: sudo apt-get install -y build-essential clang lld pkg-config protobuf-compiler zstd curl
+      shell: bash
+
+    - name: Install System Libraries
+      run: sudo apt-get install -y seccomp libseccomp-dev openssl libssl-dev
+      shell: bash

@@ -63,7 +63,7 @@ async fn main() {
 
     // create a graph with this node and run
     let mut graph = Graph::new();
-    graph.add_node(node);
+    graph.add_node(node).unwrap();
     match graph.async_start().await {
         Ok(_) => {
             // verify the output of this node

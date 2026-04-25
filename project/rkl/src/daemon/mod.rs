@@ -4,6 +4,7 @@ pub mod pod_worker;
 pub mod static_pods;
 pub mod status;
 pub mod sync_loop;
+pub mod tty;
 
 use std::{env, sync::Arc, time::Duration};
 
@@ -82,6 +83,7 @@ pub fn main(tls_cfg: TLSConnectionArgs) -> Result<(), anyhow::Error> {
                 sync_loop.run().await;
                 error!("[daemon] sync_loop exited unexpectedly");
             });
+
             tokio::signal::ctrl_c().await?;
             info!("[daemon] received Ctrl-C, shutting down");
             Ok(())

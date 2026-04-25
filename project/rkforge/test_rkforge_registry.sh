@@ -315,7 +315,7 @@ rkforge_login_with_token "$USER_A_NAME" "$USER_A_PASS" "$REGISTRY_HOST"
 
 info "Testing rkforge repo list command..."
 repo_list_output=$(../target/debug/rkforge repo --url "$REGISTRY_HOST" list 2>&1)
-if echo "$repo_list_output" | grep -q "repository.*visibility"; then
+if echo "$repo_list_output" | grep -q "repository.*visibility.*tags.*size.*updated"; then
     success "rkforge repo list command executed successfully and shows repository table"
     
     # Check if it shows the expected repositories
@@ -331,6 +331,20 @@ if echo "$repo_list_output" | grep -q "repository.*visibility"; then
     else
         info "rkforge repo list output: $repo_list_output"
         fail "rkforge repo list does not show User B's public repository"
+    fi
+
+    if echo "$repo_list_output" | grep -q "v1"; then
+        success "rkforge repo list shows pushed tag metadata"
+    else
+        info "rkforge repo list output: $repo_list_output"
+        fail "rkforge repo list does not show tag metadata"
+    fi
+
+    if echo "$repo_list_output" | grep -Eq "[0-9]{4}-[0-9]{2}-[0-9]{2}"; then
+        success "rkforge repo list shows updated timestamps"
+    else
+        info "rkforge repo list output: $repo_list_output"
+        fail "rkforge repo list does not show updated timestamps"
     fi
 else
     fail "rkforge repo list command failed or did not show expected output. Output: $repo_list_output"

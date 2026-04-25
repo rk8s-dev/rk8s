@@ -1,4 +1,4 @@
-use crate::node::NodeId;
+use crate::{DagrsError, DagrsResult, ErrorCode, node::NodeId};
 use std::collections::{HashMap, HashSet, VecDeque, hash_map::Entry};
 
 /// A simplified graph structure used for cycle detection
@@ -33,7 +33,7 @@ impl AbstractGraph {
     }
 
     /// Adds an edge between two nodes in the abstract graph
-    pub fn add_edge(&mut self, from: NodeId, to: NodeId) {
+    pub fn add_edge(&mut self, from: NodeId, to: NodeId) -> DagrsResult<()> {
         // Look up the abstract node ID that a concrete node ID has been folded into.
         let mut abstract_flag_from = false;
         let mut abstract_flag_to = false;
@@ -52,13 +52,25 @@ impl AbstractGraph {
 
         // If both `from` and `to` are abstract node IDs and `from` == `to`, skip the edge addition
         if abstract_flag_from && abstract_flag_to && from == to {
-            return;
+            return Ok(());
         }
 
         log::debug!("Adding edge from {:?} to {:?}", from, to);
 
-        self.edges.get_mut(&from).unwrap().insert(to);
-        *self.in_degree.get_mut(&to).unwrap() += 1;
+        let edges = self.edges.get_mut(&from).ok_or_else(|| {
+            DagrsError::new(ErrorCode::DgBld0001NodeNotFound, "source node not found")
+                .with_node_id(from.as_usize())
+        })?;
+        if !edges.insert(to) {
+            return Ok(());
+        }
+
+        let in_degree = self.in_degree.get_mut(&to).ok_or_else(|| {
+            DagrsError::new(ErrorCode::DgBld0001NodeNotFound, "target node not found")
+                .with_node_id(to.as_usize())
+        })?;
+        *in_degree += 1;
+        Ok(())
     }
 
     /// Adds a folded node to the abstract graph
@@ -110,7 +122,9 @@ impl AbstractGraph {
             if let Some(nexts) = self.edges.get(&node) {
                 // Decrease in-degree of the target node
                 for next in nexts {
-                    let degree = in_degree.get_mut(next).unwrap();
+                    let Some(degree) = in_degree.get_mut(next) else {
+                        return true;
+                    };
                     *degree -= 1;
                     // If in-degree becomes 0, add to queue
                     if *degree == 0 {
@@ -139,7 +153,7 @@ impl AbstractGraph {
             sorted.push(node);
             if let Some(nexts) = self.edges.get(&node) {
                 for next in nexts {
-                    let degree = in_degree.get_mut(next).unwrap();
+                    let degree = in_degree.get_mut(next)?;
                     *degree -= 1;
                     if *degree == 0 {
                         queue.push_back(*next);
@@ -169,8 +183,8 @@ mod abstract_graph_test {
         let mut graph = AbstractGraph::new();
         graph.add_node(NodeId(1));
         graph.add_node(NodeId(2));
-        graph.add_edge(NodeId(1), NodeId(2));
-        graph.add_edge(NodeId(2), NodeId(1));
+        graph.add_edge(NodeId(1), NodeId(2)).unwrap();
+        graph.add_edge(NodeId(2), NodeId(1)).unwrap();
         assert!(graph.check_loop());
     }
 
@@ -183,7 +197,7 @@ mod abstract_graph_test {
         let mut graph = AbstractGraph::new();
         graph.add_node(NodeId(1));
         graph.add_node(NodeId(2));
-        graph.add_edge(NodeId(1), NodeId(2));
+        graph.add_edge(NodeId(1), NodeId(2)).unwrap();
         assert!(!graph.check_loop());
     }
 }

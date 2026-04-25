@@ -7,7 +7,7 @@ use crate::node::Shared;
 use chrono::Utc;
 use common::quic::RksConnection;
 use common::*;
-use common::{Node, NodeStatus, PodTask, RksMessage, ServiceSpec};
+use common::{AttachControlMessage, Node, NodeStatus, PodTask, RksMessage, ServiceSpec};
 use log::{error, info, warn};
 use std::net::Ipv4Addr;
 use std::sync::Arc;
@@ -1060,5 +1060,177 @@ async fn handle_heartbeat(
     }
 
     warn!("heartbeat received for unknown node: {node_name}");
+    Ok(())
+}
+
+pub async fn dispatch_user_bistream(
+    mut stream: common::quic::RksStream,
+    shared: Arc<Shared>,
+) -> anyhow::Result<()> {
+    let open = stream.recv_frame::<AttachControlMessage>().await?;
+    let AttachControlMessage::Open(target) = open else {
+        stream
+            .send_frame(&AttachControlMessage::Error(
+                "expected AttachControlMessage::Open".to_string(),
+            ))
+            .await?;
+        return Ok(());
+    };
+
+    let pod = match shared.xline_store.get_pod(&target.pod_name).await? {
+        Some(pod) if pod.metadata.namespace == target.namespace => pod,
+        Some(_) => {
+            stream
+                .send_frame(&AttachControlMessage::Error(format!(
+                    "Pod {}/{} not found",
+                    target.namespace, target.pod_name
+                )))
+                .await?;
+            return Ok(());
+        }
+        None => {
+            stream
+                .send_frame(&AttachControlMessage::Error(format!(
+                    "Pod {}/{} not found",
+                    target.namespace, target.pod_name
+                )))
+                .await?;
+            return Ok(());
+        }
+    };
+
+    let node_name = match pod.spec.node_name {
+        Some(node_name) => node_name,
+        None => {
+            stream
+                .send_frame(&AttachControlMessage::Error(format!(
+                    "Pod {} is not assigned to any node yet",
+                    target.pod_name
+                )))
+                .await?;
+            return Ok(());
+        }
+    };
+
+    let worker_session = match shared.node_registry.get(&node_name).await {
+        Some(session) => session,
+        None => {
+            stream
+                .send_frame(&AttachControlMessage::Error(format!(
+                    "Worker node {} is not connected",
+                    node_name
+                )))
+                .await?;
+            return Ok(());
+        }
+    };
+
+    let worker_conn = match worker_session.conn.clone() {
+        Some(conn) => conn,
+        None => {
+            stream
+                .send_frame(&AttachControlMessage::Error(format!(
+                    "Worker node {} does not support remote attach",
+                    node_name
+                )))
+                .await?;
+            return Ok(());
+        }
+    };
+
+    let mut worker_stream = worker_conn.open_bi().await?;
+    worker_stream
+        .send_frame(&AttachControlMessage::Open(target))
+        .await?;
+
+    match worker_stream.recv_frame::<AttachControlMessage>().await? {
+        AttachControlMessage::Ack => {
+            stream.send_frame(&AttachControlMessage::Ack).await?;
+        }
+        AttachControlMessage::Error(message) => {
+            stream
+                .send_frame(&AttachControlMessage::Error(message))
+                .await?;
+            return Ok(());
+        }
+        other => {
+            stream
+                .send_frame(&AttachControlMessage::Error(format!(
+                    "unexpected attach response from worker: {:?}",
+                    other
+                )))
+                .await?;
+            return Ok(());
+        }
+    }
+
+    relay_attach_streams(stream, worker_stream).await
+}
+
+async fn relay_attach_streams(
+    user_stream: common::quic::RksStream,
+    worker_stream: common::quic::RksStream,
+) -> anyhow::Result<()> {
+    let (mut user_send, mut user_recv) = user_stream.into_inner();
+    let (mut worker_send, mut worker_recv) = worker_stream.into_inner();
+
+    let user_to_worker = tokio::spawn(async move {
+        loop {
+            let msg = common::quic::recv_frame::<AttachControlMessage>(&mut user_recv).await?;
+            match msg {
+                AttachControlMessage::Data(_)
+                | AttachControlMessage::Resize { .. }
+                | AttachControlMessage::Close => {
+                    common::quic::send_frame(&mut worker_send, &msg).await?;
+                    if matches!(msg, AttachControlMessage::Close) {
+                        break;
+                    }
+                }
+                AttachControlMessage::Error(message) => {
+                    common::quic::send_frame(
+                        &mut worker_send,
+                        &AttachControlMessage::Error(message),
+                    )
+                    .await?;
+                    break;
+                }
+                AttachControlMessage::Open(_) | AttachControlMessage::Ack => {
+                    anyhow::bail!("unexpected attach frame from user stream")
+                }
+            }
+        }
+        let _ = worker_send.finish();
+        Ok::<(), anyhow::Error>(())
+    });
+
+    let worker_to_user = tokio::spawn(async move {
+        loop {
+            let msg = common::quic::recv_frame::<AttachControlMessage>(&mut worker_recv).await?;
+            match msg {
+                AttachControlMessage::Data(_)
+                | AttachControlMessage::Resize { .. }
+                | AttachControlMessage::Close => {
+                    common::quic::send_frame(&mut user_send, &msg).await?;
+                    if matches!(msg, AttachControlMessage::Close) {
+                        break;
+                    }
+                }
+                AttachControlMessage::Error(message) => {
+                    common::quic::send_frame(&mut user_send, &AttachControlMessage::Error(message))
+                        .await?;
+                    break;
+                }
+                AttachControlMessage::Open(_) | AttachControlMessage::Ack => {
+                    anyhow::bail!("unexpected attach frame from worker stream")
+                }
+            }
+        }
+        let _ = user_send.finish();
+        Ok::<(), anyhow::Error>(())
+    });
+
+    let (user_to_worker, worker_to_user) = tokio::join!(user_to_worker, worker_to_user);
+    user_to_worker??;
+    worker_to_user??;
     Ok(())
 }

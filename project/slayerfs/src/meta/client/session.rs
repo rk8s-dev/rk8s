@@ -41,14 +41,14 @@ pub struct SessionInfo {
     pub created_at: DateTimeUtc,
 }
 
-pub struct SessionManager<M: MetaStore> {
+pub struct SessionManager<M: MetaStore + ?Sized> {
     shutdown_token: CancellationToken,
     store: Arc<M>,
     pub session_id: RwLock<Option<Uuid>>,
     pub session: RwLock<Option<Session>>,
 }
 
-impl<M: MetaStore + 'static> SessionManager<M> {
+impl<M: MetaStore + ?Sized + 'static> SessionManager<M> {
     pub fn new(store: Arc<M>) -> Self {
         SessionManager {
             shutdown_token: CancellationToken::new(),
@@ -59,6 +59,10 @@ impl<M: MetaStore + 'static> SessionManager<M> {
     }
 
     pub async fn start(&self, session_info: SessionInfo) -> Result<(), MetaError> {
+        if self.session_id.read().await.is_some() {
+            return Ok(());
+        }
+
         let session = self
             .store
             .start_session(session_info, self.shutdown_token.clone())
@@ -93,14 +97,16 @@ impl<M: MetaStore + 'static> SessionManager<M> {
         }
     }
 }
-pub async fn clean_sessions_circle<M: MetaStore>(store: Arc<M>, token: CancellationToken) {
+
+const SESSION_LOCK_TTL_SECS: u64 = 60;
+pub async fn clean_sessions_circle<M: MetaStore + ?Sized>(store: Arc<M>, token: CancellationToken) {
     let mut interval = tokio::time::interval(Duration::from_secs(10));
 
     loop {
         select! {
             _ = token.cancelled() => break,
             _ = interval.tick() => {
-                if store.get_global_lock(LockName::CleanupSessionsLock).await {
+                if store.get_global_lock(LockName::CleanupSessionsLock, SESSION_LOCK_TTL_SECS).await {
                     match store.cleanup_sessions().await {
                         Ok(_) => (),
                         Err(err) => error!("Failed to clean sessions: {}", err),

@@ -199,7 +199,7 @@ fn build_netavark_opts(spec: &RootfulBridgeSpec, container_id: &str) -> Result<N
             subnet: spec.subnet,
         }]),
         routes: None,
-        network_dns_servers: Some(vec![]),
+        network_dns_servers: Some(vec!["8.8.8.8".parse()?]),
     };
 
     networks.insert(spec.network_name.clone(), per);
@@ -242,7 +242,7 @@ pub fn setup_rootful_bridge(
             None,
             false,
         )
-        .map_err(|e| anyhow!("[{container_id}] netavark setup failed: {e}"))?;
+        .map_err(|e| anyhow!("[container {container_id}] netavark setup failed: {e}"))?;
 
     // Create bind mount backup of network namespace
     let bind_mount_name = format!("rkforge-{}", container_id);

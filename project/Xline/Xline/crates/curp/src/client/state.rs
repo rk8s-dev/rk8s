@@ -84,6 +84,8 @@ impl State {
             QuicClient::builder()
                 .with_root_certificates(rustls::RootCertStore::empty())
                 .without_cert()
+                .bind(["inet://0.0.0.0:0"])
+                .with_alpns(["h3"])
                 .build(),
         );
         Arc::new(Self {

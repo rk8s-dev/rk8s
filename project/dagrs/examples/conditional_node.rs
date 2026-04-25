@@ -118,19 +118,19 @@ async fn main() {
 
     // Create a graph.
     let mut graph = Graph::new();
-    vec![a, b, c, d, e, f, g]
-        .into_iter()
-        .for_each(|node| graph.add_node(node));
-    graph.add_node(x);
+    for node in [a, b, c, d, e, f, g] {
+        graph.add_node(node).unwrap();
+    }
+    graph.add_node(x).unwrap();
 
     // Set up task dependencies.
-    graph.add_edge(a_id, vec![b_id, c_id, d_id]);
-    graph.add_edge(b_id, vec![e_id, x_id]);
-    graph.add_edge(c_id, vec![e_id, f_id]);
-    graph.add_edge(d_id, vec![f_id]);
-    graph.add_edge(e_id, vec![x_id]);
-    graph.add_edge(x_id, vec![g_id]);
-    graph.add_edge(f_id, vec![g_id]);
+    graph.add_edge(a_id, vec![b_id, c_id, d_id]).unwrap();
+    graph.add_edge(b_id, vec![e_id, x_id]).unwrap();
+    graph.add_edge(c_id, vec![e_id, f_id]).unwrap();
+    graph.add_edge(d_id, vec![f_id]).unwrap();
+    graph.add_edge(e_id, vec![x_id]).unwrap();
+    graph.add_edge(x_id, vec![g_id]).unwrap();
+    graph.add_edge(f_id, vec![g_id]).unwrap();
 
     // Set a global environment variable for this dag.
     let mut env = EnvVar::new(node_table);

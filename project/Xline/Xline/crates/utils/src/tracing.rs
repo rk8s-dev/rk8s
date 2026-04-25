@@ -2,29 +2,24 @@ use opentelemetry::{
     global,
     propagation::{Extractor, Injector},
 };
-use tonic::metadata::MetadataMap;
 use tracing::Span;
 use tracing_opentelemetry::OpenTelemetrySpanExt;
-// TODO: use our own MetaData.
-// use xlinerpc::MetaData as MetaDataMap;
+use xlinerpc::MetaData;
 
-/// Struct for extract data from `MetadataMap`
-struct ExtractMap<'a>(&'a MetadataMap);
+/// Struct for extract data from `MetaData`
+struct ExtractMap<'a>(&'a MetaData);
 
 impl Extractor for ExtractMap<'_> {
-    /// Get a value for a key from the `MetadataMap`.  If the value can't be converted to &str, returns None
+    /// Get a value for a key from the `MetaData`. If the value is not UTF-8, returns `None`.
     fn get(&self, key: &str) -> Option<&str> {
-        self.0.get(key).and_then(|metadata| metadata.to_str().ok())
+        self.0.get_str(key).and_then(Result::ok)
     }
 
-    /// Collect all the keys from the `MetadataMap`.
+    /// Collect all UTF-8 keys from the `MetaData`.
     fn keys(&self) -> Vec<&str> {
         self.0
-            .keys()
-            .map(|key| match key {
-                tonic::metadata::KeyRef::Ascii(v) => v.as_str(),
-                tonic::metadata::KeyRef::Binary(v) => v.as_str(),
-            })
+            .iter()
+            .filter_map(|(key, _)| std::str::from_utf8(key).ok())
             .collect::<Vec<_>>()
     }
 }
@@ -35,7 +30,7 @@ pub trait Extract {
     fn extract_span(&self);
 }
 
-impl Extract for MetadataMap {
+impl Extract for MetaData {
     #[inline]
     fn extract_span(&self) {
         let parent_ctx = global::get_text_map_propagator(|prop| prop.extract(&ExtractMap(self)));
@@ -44,17 +39,13 @@ impl Extract for MetadataMap {
     }
 }
 
-/// Struct for inject data to `MetadataMap`
-struct InjectMap<'a>(&'a mut MetadataMap);
+/// Struct for inject data to `MetaData`
+struct InjectMap<'a>(&'a mut MetaData);
 
 impl Injector for InjectMap<'_> {
-    /// Set a key and value in the `MetadataMap`.  Does nothing if the key or value are not valid inputs
+    /// Set a key and value in the `MetaData`.
     fn set(&mut self, key: &str, value: String) {
-        if let Ok(key) = tonic::metadata::MetadataKey::from_bytes(key.as_bytes())
-            && let Ok(val) = tonic::metadata::MetadataValue::try_from(&value)
-        {
-            let _option = self.0.insert(key, val);
-        }
+        self.0.insert(key, value);
     }
 }
 
@@ -71,7 +62,7 @@ pub trait Inject {
     }
 }
 
-impl Inject for MetadataMap {
+impl Inject for MetaData {
     #[inline]
     fn inject_span(&mut self, span: &Span) {
         let ctx = span.context();
@@ -101,14 +92,14 @@ mod test {
         let span = info_span!("test span");
         let _entered = span.enter();
         let outer_trace_id = span.context().span().span_context().trace_id();
-        let mut request = tonic::Request::new("message");
+        let mut request = xlinerpc::Request::from_data("message");
         request.metadata_mut().inject_current();
         let inner_trace_id = inner_fun(&request);
         assert_eq!(outer_trace_id, inner_trace_id);
         Ok(())
     }
 
-    fn inner_fun(request: &tonic::Request<&str>) -> TraceId {
+    fn inner_fun(request: &xlinerpc::Request<&str>) -> TraceId {
         let span = info_span!("inner span");
         let _entered = span.enter();
         request.metadata().extract_span();
@@ -117,7 +108,7 @@ mod test {
 
     /// init tracing subscriber
     fn init() -> Result<(), Box<dyn std::error::Error>> {
-        let otlp_exporter = opentelemetry_otlp::new_exporter().tonic();
+        let otlp_exporter = opentelemetry_otlp::new_exporter().http();
         let provider = opentelemetry_otlp::new_pipeline()
             .tracing()
             .with_exporter(otlp_exporter)

@@ -807,6 +807,7 @@ mod tests {
                     image: "bundle".to_string(),
                     ports: vec![],
                     args: vec![],
+                    tty: false,
                     resources: None,
                     liveness_probe: None,
                     readiness_probe: None,
@@ -902,8 +903,10 @@ mod tests {
         let container = make_container("c1", Some(created_at));
         let event = make_event(PodLifecycleEventType::ContainerDied, container);
 
-        let mut pod_status = PodStatus::default();
-        pod_status.phase = PodPhase::Running;
+        let mut pod_status = PodStatus {
+            phase: PodPhase::Running,
+            ..Default::default()
+        };
 
         apply_pod_lifecycle_event(&pod_task, &mut pod_status, &event)
             .await
@@ -940,8 +943,10 @@ mod tests {
         let container = make_container("c1", None);
         let event = make_event(PodLifecycleEventType::ContainerChanged, container);
 
-        let mut pod_status = PodStatus::default();
-        pod_status.phase = PodPhase::Running;
+        let mut pod_status = PodStatus {
+            phase: PodPhase::Running,
+            ..Default::default()
+        };
         pod_status.container_statuses.push(ContainerStatus {
             name: "c1".to_string(),
             state: Some(ContainerState::Terminated {
@@ -969,8 +974,10 @@ mod tests {
         let container = make_container("c1", Some(created_at));
         let event = make_event(PodLifecycleEventType::ContainerDied, container);
 
-        let mut pod_status = PodStatus::default();
-        pod_status.phase = PodPhase::Running;
+        let mut pod_status = PodStatus {
+            phase: PodPhase::Running,
+            ..Default::default()
+        };
         pod_status.container_statuses.push(ContainerStatus {
             name: "sidecar".to_string(),
             state: Some(ContainerState::Running { started_at: None }),

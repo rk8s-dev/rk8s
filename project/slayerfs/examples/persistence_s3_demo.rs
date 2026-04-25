@@ -9,6 +9,9 @@ use std::sync::Arc;
 use tokio::signal;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
+use slayerfs::BlockStore;
+use slayerfs::daemon::worker::start_gc;
+
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
 struct Args {
@@ -240,12 +243,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .await
             .map_err(|e| format!("Failed to create S3 backend: {}", e))?;
         let object_client = ObjectClient::new(s3_backend);
-        let block_store = ObjectBlockStore::new(object_client);
+        let block_store = ObjectBlockStore::new(object_client.clone());
+
+        let block_store_for_gc: Arc<dyn BlockStore + Send + Sync> =
+            Arc::new(ObjectBlockStore::new(object_client.clone()));
 
         let layout = ChunkLayout::default();
-        let fs = VFS::new(layout, block_store, meta_store)
+        let fs = VFS::new(layout, block_store, meta_store.clone())
             .await
             .map_err(|e| format!("Failed to create VFS: {}", e))?;
+
+        println!("Starting garbage collector");
+
+        let gc_handle = tokio::spawn({
+            let meta_store = meta_store.clone();
+            let object_client = object_client.clone();
+            let block_store = block_store_for_gc;
+            async move {
+                start_gc(meta_store, Arc::new(object_client), block_store, None).await;
+            }
+        });
 
         println!("Mounting filesystem...");
 
@@ -264,6 +281,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         handle.unmount().await?;
         println!("Filesystem unmounted");
+
+        gc_handle.abort();
+        let _ = gc_handle.await;
+
         Ok(())
     }
 }

@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use crate::meta::client::{MetaClient, MetaClientOptions};
 use crate::meta::config::{
-    CacheConfig, CacheTtl, ClientOptions, Config, DatabaseConfig, DatabaseType,
+    CacheConfig, CacheTtl, ClientOptions, CompactConfig, Config, DatabaseConfig, DatabaseType,
 };
 use crate::meta::layer::MetaLayer;
 use crate::meta::store::{MetaError, MetaStore};
@@ -110,6 +110,7 @@ pub async fn create_meta_store_from_url(
         },
         cache: CacheConfig::default(),
         client: ClientOptions::default(),
+        compact: CompactConfig::default(),
     };
     MetaStoreFactory::<DatabaseMetaStore>::create_from_config(config).await
 }
@@ -127,6 +128,7 @@ pub async fn create_redis_meta_store_from_url(
         },
         cache: CacheConfig::default(),
         client: ClientOptions::default(),
+        compact: CompactConfig::default(),
     };
     MetaStoreFactory::<RedisMetaStore>::create_from_config(config).await
 }
@@ -142,6 +144,7 @@ pub async fn create_etcd_meta_store_from_urls(
         },
         cache: CacheConfig::default(),
         client: ClientOptions::default(),
+        compact: CompactConfig::default(),
     };
 
     MetaStoreFactory::<EtcdMetaStore>::create_from_config(config).await

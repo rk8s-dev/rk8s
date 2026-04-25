@@ -2,7 +2,6 @@ use curp::cmd::Command as CurpCommand;
 use h3;
 use http;
 use thiserror::Error;
-use tonic::transport::Error;
 use xlineapi::{command::Command, execute_error::ExecuteError};
 use xlinerpc::status::{Code, Status};
 /// The result type for `xline-client`
@@ -62,13 +61,6 @@ impl XlineClientBuildError {
     }
 }
 
-impl From<Error> for XlineClientBuildError {
-    #[inline]
-    fn from(e: Error) -> Self {
-        Self::RpcError(e.to_string())
-    }
-}
-
 impl From<Status> for XlineClientBuildError {
     #[inline]
     fn from(e: Status) -> Self {
@@ -123,13 +115,6 @@ pub enum XlineClientError<C: CurpCommand> {
     /// Wrong cluster version
     #[error("Wrong cluster version")]
     WrongClusterVersion,
-}
-
-impl From<Error> for XlineClientError<Command> {
-    #[inline]
-    fn from(e: Error) -> Self {
-        Self::RpcError(e.to_string())
-    }
 }
 
 impl From<Status> for XlineClientError<Command> {

@@ -41,10 +41,22 @@ const COMMIT_WAIT_SLICE: Duration = Duration::from_millis(100);
 const FLUSH_WAIT: Duration = Duration::from_secs(3);
 const FLUSH_DEADLINE: Duration = Duration::from_secs(300);
 const UPLOAD_MAX_RETRIES: u64 = 5;
+const COMMIT_RETRY_BASE_MS: u64 = 20;
+const COMMIT_RETRY_MAX_MS: u64 = 2000;
 
 const MAX_UNFLUSHED_SLICES: usize = 3;
 const MAX_SLICES_THRESHOLD: usize = 800;
 const WRITE_MAX_WAIT: Duration = Duration::from_secs(30);
+
+fn commit_retry_backoff(failures: u32) -> Duration {
+    let exp = failures.saturating_sub(1).min(16);
+    let step = COMMIT_RETRY_BASE_MS.checked_shl(exp).unwrap_or(u64::MAX);
+    let base = step.min(COMMIT_RETRY_MAX_MS);
+    // Scale jitter with base delay to spread retry bursts at higher backoff levels.
+    let jitter_span = (base / 10).max(20);
+    let jitter = rand::rng().next_u64() % (jitter_span.saturating_add(1));
+    Duration::from_millis(base.saturating_add(jitter))
+}
 
 struct UploadPlan {
     chunk_id: u64,
@@ -938,6 +950,7 @@ where
         fields(chunk_id)
     )]
     async fn commit_chunk(shared: Arc<Shared<B, M>>, chunk_id: u64) {
+        let mut commit_failures = 0u32;
         loop {
             let slice = {
                 let guard = shared.inner.lock().await;
@@ -1034,6 +1047,8 @@ where
                         .await;
 
                     if let Err(err) = result {
+                        commit_failures = commit_failures.saturating_add(1);
+                        let backoff = commit_retry_backoff(commit_failures);
                         warn!(
                             ino,
                             chunk_id = desc.chunk_id,
@@ -1041,10 +1056,13 @@ where
                             offset = desc.offset,
                             len = desc.length,
                             new_size,
+                            retry_failures = commit_failures,
+                            retry_backoff_ms = backoff.as_millis() as u64,
                             error = ?err,
                             "commit_chunk meta write failed, retrying"
                         );
                     } else {
+                        commit_failures = 0;
                         SliceHandle {
                             slice: &slice,
                             shared: &shared,
@@ -1071,16 +1089,21 @@ where
             }
 
             if !should_pop {
+                let backoff = commit_retry_backoff(commit_failures.max(1));
                 tracing::trace!(
                     status = ?runtime.status,
                     err = ?runtime.err,
+                    backoff_ms = backoff.as_millis() as u64,
                     "commit_chunk retrying"
                 );
-                tokio::time::sleep(COMMIT_WAIT_SLICE)
+                tokio::time::sleep(backoff)
                     .instrument(tracing::trace_span!("commit_chunk.wait_retry"))
                     .await;
                 continue;
             }
+
+            // A completed front slice must not leak retry history to the next one.
+            commit_failures = 0;
 
             let mut guard = shared
                 .inner
@@ -1250,6 +1273,18 @@ where
         }
     }
 
+    /// Like `flush_if_exists` but propagates errors.  Used in truncate paths
+    /// where a failed flush means data would be silently lost.
+    pub(crate) async fn flush_required(&self, ino: u64) -> anyhow::Result<()> {
+        let writer = self.files.get(&ino).map(|entry| entry.value().clone());
+        if let Some(writer) = writer
+            && writer.has_pending().await
+        {
+            writer.flush().await?;
+        }
+        Ok(())
+    }
+
     pub(crate) async fn clear(&self, ino: u64) {
         let writer = self.files.get(&ino).map(|entry| entry.value().clone());
         if let Some(writer) = writer {
@@ -1355,8 +1390,8 @@ mod tests {
             self.inner.read_range(key, offset, buf).await
         }
 
-        async fn delete_range(&self, key: BlockKey, len: u64) -> anyhow::Result<()> {
-            self.inner.delete_range(key, len).await
+        async fn delete_range(&self, key: BlockKey, block_count: u64) -> anyhow::Result<()> {
+            self.inner.delete_range(key, block_count).await
         }
     }
 

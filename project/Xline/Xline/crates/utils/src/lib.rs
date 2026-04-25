@@ -162,11 +162,6 @@
     )
 )]
 
-use std::str::FromStr;
-
-use tonic::transport::ClientTlsConfig;
-use tonic::transport::Endpoint;
-
 /// Barrier util
 pub mod barrier;
 /// configuration
@@ -229,43 +224,6 @@ pub fn timestamp() -> u64 {
     now.duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_else(|_| unreachable!("Time went backwards"))
         .as_secs()
-}
-
-/// Create a new endpoint from addr
-/// # Errors
-/// Return error if addr or tls config is invalid
-#[inline]
-#[allow(unused_variables)]
-pub fn build_endpoint(
-    addr: &str,
-    tls_config: Option<&ClientTlsConfig>,
-) -> Result<Endpoint, tonic::transport::Error> {
-    debug!(
-        "connect to {addr}{}",
-        if tls_config.is_some() {
-            " with tls_config"
-        } else {
-            ""
-        }
-    );
-    let scheme_str = addr.split_once("://").map(|(scheme, _)| scheme);
-    let endpoint = match scheme_str {
-        Some(_scheme) => Endpoint::from_str(addr)?,
-        None => Endpoint::from_shared(format!("http://{addr}"))?,
-    };
-    match scheme_str {
-        Some("http") | None => {}
-        Some("https") => {
-            let tls_config = tls_config.cloned().unwrap_or_default();
-            return endpoint.tls_config(tls_config);
-        }
-        _ => {
-            if let Some(tls_config) = tls_config {
-                return endpoint.tls_config(tls_config.clone());
-            }
-        }
-    }
-    Ok(endpoint)
 }
 
 /// Hash password

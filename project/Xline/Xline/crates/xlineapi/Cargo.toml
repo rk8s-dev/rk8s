@@ -19,7 +19,6 @@ itertools = { workspace = true }
 prost = { workspace = true }
 serde = { workspace = true }
 thiserror = { workspace = true }
-tonic = { workspace = true }
 utils = { path = "../utils" }
 
 [build-dependencies]

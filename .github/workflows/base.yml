@@ -1,75 +1,49 @@
 on:
   pull_request:
-    paths-ignore:
-      - '.github/**'
-      - 'docs/**'
-      - 'project/libcgroups/**'
-      - 'project/libcontainer/**'
-      - 'project/tools/**'
+    paths:
+      - 'project/**'
+      - 'third-party/**'
+      - 'platforms/**'
+      - 'toolchains/**'
+      - '.buckconfig'
+      - '.github/workflows/base.yml'
 
-name: Base Workflow for Check, Build and Tests
+name: Check, Build and Test
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
+env:
+  CARGO_TERM_COLOR: always
+
 jobs:
   format:
     name: Rustfmt Check
-    runs-on: [self-hosted]
-
-    env:
-      CARGO_TERM_COLOR: always
-
+    runs-on: rk8s-runner-set
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          submodules: recursive
-
-      - name: Install nightly toolchain
-        run: |
-          rustup toolchain install nightly --profile minimal
-          rustup component add rustfmt --toolchain nightly
-
-      - name: Run rustfmt
-        run: |
+      - uses: actions/checkout@v6
+      - run: |
           cd project
-          cargo +nightly fmt --all --check
+          cargo fmt --all --check
 
   clippy:
     name: Clippy Check
     strategy:
       fail-fast: true
-
-    runs-on: [self-hosted]
-    env:
-      CARGO_TERM_COLOR: always
-      RUSTUP_TOOLCHAIN: stable
-
+    runs-on: rk8s-runner-set
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          submodules: recursive
-
-      - name: Run cargo clippy
-        run: |
+      - uses: actions/checkout@v6
+      - run: |
           cd project
           cargo clippy --workspace -- -D warnings
 
   redundancy:
     name: Redundancy Check
-    runs-on: [self-hosted]
-
+    runs-on: rk8s-runner-set
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          submodules: recursive
-
-      - name: Run redundancy check
-        run: |
+      - uses: actions/checkout@v6
+      - run: |
           x=$(find third-party/rust/crates -mindepth 2 -maxdepth 2 -type d -exec bash -c '
             n=$(find "$1" -maxdepth 1 -type f | wc -l)
             [ $n -gt 1 ]
@@ -84,36 +58,15 @@ jobs:
 
   build:
     name: Buck2 Build
-
-    runs-on: [self-hosted]
-    
-    env:
-      CARGO_TERM_COLOR: always
-      RUSTUP_TOOLCHAIN: stable
-
+    runs-on: rk8s-runner-set
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          submodules: recursive
-
-      - name: Build with Buck2
-        run: buck2 build //project/...
+      - uses: actions/checkout@v6
+      - run: buck2 build //project/...
 
   test:
     name: Buck2 Test
-
-    runs-on: [self-hosted]
-    
-    env:
-      CARGO_TERM_COLOR: always
-      RUSTUP_TOOLCHAIN: stable
-
+    runs-on: rk8s-runner-set
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          submodules: recursive
-      - name: Run tests
-        run: |
+      - uses: actions/checkout@v6
+      - run: |
           echo "buck2 test"

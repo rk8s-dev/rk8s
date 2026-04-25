@@ -134,7 +134,7 @@ async fn fast_round_is_slower_than_slow_round() {
     // send propose only to the leader
     let mut leader_connect = group.get_connect(&leader).await;
     leader_connect
-        .propose(tonic::Request::new(ProposeRequest {
+        .propose(xlinerpc::Request::new(ProposeRequest {
             propose_id: Some(ProposeId {
                 client_id: TEST_CLIENT_ID,
                 seq_num: 0,
@@ -157,7 +157,7 @@ async fn fast_round_is_slower_than_slow_round() {
 
     // the follower should response empty immediately
     let resp: ProposeResponse = follower_connect
-        .propose(tonic::Request::new(ProposeRequest {
+        .propose(xlinerpc::Request::new(ProposeRequest {
             propose_id: Some(ProposeId {
                 client_id: TEST_CLIENT_ID,
                 seq_num: 0,

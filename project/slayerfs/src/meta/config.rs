@@ -20,6 +20,9 @@ pub struct Config {
     /// Client behaviour configuration (session heartbeat, read-only, etc.)
     #[serde(default)]
     pub client: ClientOptions,
+
+    #[serde(default)]
+    pub compact: CompactConfig,
 }
 
 /// Database configuration
@@ -141,6 +144,7 @@ pub struct MetaClientConfig {
     pub capacity: CacheCapacity,
     pub ttl: CacheTtl,
     pub options: MetaClientOptions,
+    pub compact: CompactConfig,
 }
 
 impl MetaClientConfig {
@@ -375,6 +379,159 @@ impl DatabaseType {
             DatabaseType::Postgres { .. } => "postgres",
             DatabaseType::Etcd { .. } => "etcd",
             DatabaseType::Redis { .. } => "redis",
+        }
+    }
+}
+
+/// Dynamic lock TTL configuration for compaction
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct LockTtlConfig {
+    /// Base TTL for async compaction in seconds (default: 10)
+    #[serde(default = "default_async_lock_ttl_secs")]
+    pub async_ttl_secs: u64,
+    /// Base TTL for sync compaction in seconds (default: 30)
+    #[serde(default = "default_sync_lock_ttl_secs")]
+    pub sync_ttl_secs: u64,
+    /// Additional TTL per slice in milliseconds (default: 50)
+    #[serde(default = "default_ttl_per_slice_ms")]
+    pub ttl_per_slice_ms: u64,
+    /// Minimum lock TTL in seconds (default: 5)
+    #[serde(default = "default_min_lock_ttl_secs")]
+    pub min_ttl_secs: u64,
+    /// Maximum lock TTL in seconds (default: 300)
+    #[serde(default = "default_max_lock_ttl_secs")]
+    pub max_ttl_secs: u64,
+}
+
+fn default_async_lock_ttl_secs() -> u64 {
+    10
+}
+
+fn default_sync_lock_ttl_secs() -> u64 {
+    30
+}
+
+fn default_ttl_per_slice_ms() -> u64 {
+    50
+}
+
+fn default_min_lock_ttl_secs() -> u64 {
+    5
+}
+
+fn default_max_lock_ttl_secs() -> u64 {
+    300
+}
+
+impl LockTtlConfig {
+    /// Calculate dynamic TTL based on compact mode and slice count
+    pub fn calculate_ttl(&self, is_sync: bool, slice_count: usize) -> u64 {
+        let base_ttl = if is_sync {
+            self.sync_ttl_secs
+        } else {
+            self.async_ttl_secs
+        };
+
+        let extra_ttl = (slice_count as u64 * self.ttl_per_slice_ms) / 1000;
+        let total_ttl = base_ttl + extra_ttl;
+
+        total_ttl.clamp(self.min_ttl_secs, self.max_ttl_secs)
+    }
+}
+
+impl Default for LockTtlConfig {
+    fn default() -> Self {
+        Self {
+            async_ttl_secs: default_async_lock_ttl_secs(),
+            sync_ttl_secs: default_sync_lock_ttl_secs(),
+            ttl_per_slice_ms: default_ttl_per_slice_ms(),
+            min_ttl_secs: default_min_lock_ttl_secs(),
+            max_ttl_secs: default_max_lock_ttl_secs(),
+        }
+    }
+}
+
+fn default_light_enabled() -> bool {
+    true
+}
+
+fn default_light_threshold() -> usize {
+    3
+}
+
+fn default_heavy_enabled() -> bool {
+    true
+}
+
+fn default_heavy_fragment_threshold() -> f64 {
+    0.3
+}
+
+fn default_heavy_slice_threshold() -> usize {
+    50
+}
+
+fn default_heavy_force_fragment_threshold() -> f64 {
+    0.5
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct CompactConfig {
+    /// Minimum slice count to trigger compaction (JuiceFS: 5)
+    pub min_slice_count: usize,
+    /// Minimum fragmentation ratio to trigger compaction
+    pub min_fragment_ratio: f64,
+    /// Slice count threshold for async compaction (JuiceFS: 100)
+    pub async_threshold: usize,
+    /// Slice count threshold for sync compaction (JuiceFS: 350)
+    pub sync_threshold: usize,
+    /// Compaction check interval
+    pub interval: Duration,
+    /// Maximum chunks to process per run
+    pub max_chunks_per_run: usize,
+    /// Maximum concurrent compaction tasks (parallelism)
+    pub max_concurrent_tasks: usize,
+    /// Dynamic lock TTL configuration
+    #[serde(default)]
+    pub lock_ttl: LockTtlConfig,
+
+    /// Enable light compaction
+    #[serde(default = "default_light_enabled")]
+    pub light_enabled: bool,
+    /// Minimum slice count to trigger light compaction
+    #[serde(default = "default_light_threshold")]
+    pub light_threshold: usize,
+    /// Enable heavy compaction (data rewrite and defragmentation)
+    #[serde(default = "default_heavy_enabled")]
+    pub heavy_enabled: bool,
+    /// Fragmentation threshold to trigger heavy compaction
+    #[serde(default = "default_heavy_fragment_threshold")]
+    pub heavy_fragment_threshold: f64,
+    /// Slice count threshold to trigger heavy compaction
+    #[serde(default = "default_heavy_slice_threshold")]
+    pub heavy_slice_threshold: usize,
+    /// Force heavy compact if fragmentation is extremely high after light
+    #[serde(default = "default_heavy_force_fragment_threshold")]
+    pub heavy_force_fragment_threshold: f64,
+}
+
+impl Default for CompactConfig {
+    fn default() -> Self {
+        Self {
+            min_slice_count: 5,
+            min_fragment_ratio: 0.1,
+            async_threshold: 100,
+            sync_threshold: 350,
+            interval: Duration::from_secs(3600),
+            max_chunks_per_run: 1000,
+            max_concurrent_tasks: 4,
+            lock_ttl: LockTtlConfig::default(),
+            light_enabled: default_light_enabled(),
+            light_threshold: default_light_threshold(),
+            heavy_enabled: default_heavy_enabled(),
+            heavy_fragment_threshold: default_heavy_fragment_threshold(),
+            heavy_slice_threshold: default_heavy_slice_threshold(),
+            heavy_force_fragment_threshold: default_heavy_force_fragment_threshold(),
         }
     }
 }

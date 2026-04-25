@@ -229,12 +229,18 @@ pub struct LoadOption {
 #[derive(Debug)]
 pub enum LockName {
     CleanupSessionsLock,
+    ChunkCompactLock(u64), // chunk_id
 }
+
+/// Default TTL for checking if chunk compact lock is held.
+/// This should be consistent with the sync compaction TTL default.
+pub const CHUNK_LOCK_CHECK_TTL_SECS: u64 = 30;
 
 impl fmt::Display for LockName {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             LockName::CleanupSessionsLock => write!(f, "CleanupSessionsLock"),
+            LockName::ChunkCompactLock(chunk_id) => write!(f, "ChunkCompactLock({})", chunk_id),
         }
     }
 }
@@ -480,6 +486,13 @@ pub trait MetaStore: Send + Sync {
 
     async fn get_slices(&self, chunk_id: u64) -> Result<Vec<SliceDesc>, MetaError>;
 
+    /// Return all distinct chunk IDs that have at least one slice.
+    /// Used by the compaction scheduler to discover compaction candidates.
+    async fn list_chunk_ids(&self, limit: usize) -> Result<Vec<u64>, MetaError> {
+        let _ = limit;
+        Err(MetaError::NotImplemented)
+    }
+
     async fn append_slice(&self, chunk_id: u64, slice: SliceDesc) -> Result<(), MetaError>;
 
     async fn write(
@@ -544,9 +557,26 @@ pub trait MetaStore: Send + Sync {
         Err(MetaError::NotImplemented)
     }
 
-    async fn get_global_lock(&self, lock_name: LockName) -> bool {
-        let _ = lock_name;
+    /// Acquire a global lock with specified TTL (time-to-live) in seconds.
+    /// Returns true if lock was acquired, false otherwise.
+    async fn get_global_lock(&self, lock_name: LockName, ttl_secs: u64) -> bool {
+        let _ = (lock_name, ttl_secs);
         true
+    }
+
+    /// Check if a global lock is currently held.
+    /// Uses the provided TTL to determine if the lock has expired.
+    async fn is_global_lock_held(&self, lock_name: LockName, ttl_secs: u64) -> bool {
+        let _ = (lock_name, ttl_secs);
+        false
+    }
+
+    /// Best-effort explicit release for a global lock.
+    ///
+    /// Callers should still rely on TTL expiry for crash recovery.
+    async fn release_global_lock(&self, lock_name: LockName) -> bool {
+        let _ = lock_name;
+        false
     }
 
     // ---------- Attribute / handle management (proposed extensions) ----------
@@ -638,8 +668,22 @@ pub trait MetaStore: Send + Sync {
         Err(MetaError::NotImplemented)
     }
 
-    async fn cleanup_delayed_slices(&self, edge_ts: i64) -> Result<i32, MetaError> {
-        let _ = edge_ts;
+    /// Process delayed slices: delete old slices after verification.
+    /// This is Phase 1 of two-phase deletion.
+    /// Returns (slice_id, offset, size, delayed_id) for block store cleanup.
+    /// After block deletion succeeds, call confirm_delayed_deleted() with delayed_ids.
+    async fn process_delayed_slices(
+        &self,
+        batch_size: usize,
+        max_age_secs: i64,
+    ) -> Result<Vec<(u64, u64, u64, i64)>, MetaError> {
+        let _ = (batch_size, max_age_secs);
+        Err(MetaError::NotImplemented)
+    }
+
+    /// Confirm delayed slices have been deleted from block storage (Phase 2).
+    async fn confirm_delayed_deleted(&self, delayed_ids: &[i64]) -> Result<(), MetaError> {
+        let _ = delayed_ids;
         Err(MetaError::NotImplemented)
     }
 
@@ -869,23 +913,57 @@ pub trait MetaStore: Send + Sync {
         Err(MetaError::NotImplemented)
     }
 
-    async fn compact_chunk(
+    async fn replace_slices_for_compact(
         &self,
-        inode: i64,
-        index: u32,
-        origin: &[u8],
-        slices: &[SliceDesc],
-        skipped: i32,
-        pos: u32,
-        id: u64,
-        size: u32,
-        delayed: &[u8],
+        chunk_id: u64,
+        new_slices: &[SliceDesc],
+        old_slices_to_delay: &[u8],
     ) -> Result<(), MetaError> {
-        let _ = (
-            inode, index, origin, slices, skipped, pos, id, size, delayed,
-        );
+        let _ = (chunk_id, new_slices, old_slices_to_delay);
         Err(MetaError::NotImplemented)
     }
+
+    async fn replace_slices_for_compact_with_version(
+        &self,
+        chunk_id: u64,
+        new_slices: &[SliceDesc],
+        old_slices_to_delay: &[u8],
+        expected_slices: &[SliceDesc],
+    ) -> Result<(), MetaError> {
+        let _ = (chunk_id, new_slices, old_slices_to_delay, expected_slices);
+        Err(MetaError::NotImplemented)
+    }
+
+    async fn record_uncommitted_slice(
+        &self,
+        slice_id: u64,
+        chunk_id: u64,
+        size: u64,
+        operation: &str,
+    ) -> Result<i64, MetaError> {
+        let _ = (slice_id, chunk_id, size, operation);
+        Err(MetaError::NotImplemented)
+    }
+
+    async fn confirm_slice_committed(&self, slice_id: u64) -> Result<(), MetaError> {
+        let _ = slice_id;
+        Err(MetaError::NotImplemented)
+    }
+
+    async fn cleanup_orphan_uncommitted_slices(
+        &self,
+        max_age_secs: i64,
+        batch_size: usize,
+    ) -> Result<Vec<(u64, u64)>, MetaError> {
+        let _ = (max_age_secs, batch_size);
+        Err(MetaError::NotImplemented)
+    }
+
+    async fn delete_uncommitted_slices(&self, slice_ids: &[u64]) -> Result<(), MetaError> {
+        let _ = slice_ids;
+        Err(MetaError::NotImplemented)
+    }
+
     // ---------- File lock ----------
 
     /// Gets lock information for a given file region.

@@ -32,14 +32,11 @@ pub fn init_metrics(config: &MetricsConfig) -> anyhow::Result<()> {
                         .with_endpoint(config.push_endpoint()),
                 )
                 .build(),
-            MetricsPushProtocol::GRPC => opentelemetry_otlp::new_pipeline()
-                .metrics(Tokio)
-                .with_exporter(
-                    opentelemetry_otlp::new_exporter()
-                        .tonic()
-                        .with_endpoint(config.push_endpoint()),
-                )
-                .build(),
+            MetricsPushProtocol::GRPC => {
+                return Err(anyhow::anyhow!(
+                    "metrics push protocol 'grpc' is not supported in current build"
+                ));
+            }
             _ => unreachable!("only 'http' or 'gRPC' will be accepted"),
         }?;
         return Ok(());

@@ -3,6 +3,10 @@ mod path_trie;
 pub mod session;
 
 use crate::chunk::SliceDesc;
+use crate::control::job::{GcJobResult, JobManager};
+use crate::control::protocol::{ControlRequest, ControlResponse};
+use crate::control::runtime::{InstanceRecord, RuntimeRegistry};
+use crate::control::server::{ControlHandler, ControlServer};
 use crate::meta::config::{CacheCapacity, CacheTtl};
 use crate::meta::file_lock::{FileLockInfo, FileLockQuery, FileLockRange, FileLockType};
 use crate::meta::layer::MetaLayer;
@@ -19,6 +23,7 @@ use dashmap::DashMap;
 use futures::stream;
 use if_addrs::get_if_addrs;
 use moka::future::Cache;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::time::Duration;
@@ -44,6 +49,8 @@ const ROOT_INODE: i64 = 1;
 pub struct MetaClientOptions {
     /// Optional mount point string used for diagnostics and session payloads.
     pub mount_point: Option<String>,
+    /// Optional override for control-plane runtime registry directory.
+    pub control_runtime_dir: Option<PathBuf>,
     /// Interval used by the background session heartbeat task.
     pub session_heartbeat: Duration,
     /// When true, metadata mutating operations return `MetaError::NotSupported`.
@@ -123,6 +130,7 @@ impl Default for MetaClientOptions {
     fn default() -> Self {
         Self {
             mount_point: None,
+            control_runtime_dir: None,
             session_heartbeat: DEFAULT_SESSION_HEARTBEAT,
             read_only: false,
             no_background_jobs: false,
@@ -140,7 +148,7 @@ const DEFAULT_SESSION_HEARTBEAT: Duration = Duration::from_secs(30);
 /// - Inode attributes (file metadata)
 /// - Directory children (directory listings)
 /// - Path-to-inode mappings (path resolution)
-pub struct MetaClient<T: MetaStore> {
+pub struct MetaClient<T: MetaStore + ?Sized> {
     store: Arc<T>,
     options: MetaClientOptions,
     root: AtomicI64,
@@ -159,6 +167,8 @@ pub struct MetaClient<T: MetaStore> {
 
     /// Manages background session heartbeats when enabled by callers.
     session_manager: Arc<SessionManager<T>>,
+    job_manager: Arc<JobManager>,
+    control_plane: Mutex<Option<ControlPlaneState>>,
 
     /// Watch Worker for etcd cache invalidation (for now only used for etcd).
     /// TODO: Now that we use the watch worker to invalidate cache in real-time,
@@ -167,7 +177,13 @@ pub struct MetaClient<T: MetaStore> {
     watch_worker: Option<Arc<EtcdWatchWorker>>,
 }
 
-impl<T: MetaStore + 'static> MetaClient<T> {
+struct ControlPlaneState {
+    registry: RuntimeRegistry,
+    record: InstanceRecord,
+    server: ControlServer,
+}
+
+impl<T: MetaStore + ?Sized + 'static> MetaClient<T> {
     /// Creates a new MetaClient with cache configuration.
     ///
     /// # Arguments
@@ -246,6 +262,8 @@ impl<T: MetaStore + 'static> MetaClient<T> {
             path_trie: Arc::new(PathTrie::new()),
             inode_to_paths: Arc::new(DashMap::new()),
             session_manager: Arc::new(SessionManager::new(store.clone())),
+            job_manager: Arc::new(JobManager::default()),
+            control_plane: Mutex::new(None),
             watch_worker: watch_worker.as_ref().map(|(w, _)| w.clone()),
         });
 
@@ -282,6 +300,16 @@ impl<T: MetaStore + 'static> MetaClient<T> {
     }
 
     /// Returns a clone of the underlying raw `MetaStore` handle.
+    #[allow(dead_code)]
+    pub fn store(&self) -> Arc<T> {
+        self.store.clone()
+    }
+
+    pub(crate) async fn invalidate_chunk_slices(&self, chunk_id: u64) {
+        let (inode, chunk_index) = extract_ino_and_chunk_index(chunk_id);
+        self.inode_cache.invalidate_slices(inode, chunk_index).await;
+    }
+
     /// Update the logical root inode. All subsequent metadata lookups treat
     /// `ROOT_INODE` as an alias for `inode`.
     #[allow(dead_code)]
@@ -374,7 +402,88 @@ impl<T: MetaStore + 'static> MetaClient<T> {
     #[allow(dead_code)]
     pub async fn shutdown_session(&self) {
         self.mark_umounting();
+        self.shutdown_control_plane().await;
         self.session_manager.shutdown().await;
+    }
+
+    pub async fn start_control_plane(self: &Arc<Self>) -> Result<(), MetaError> {
+        self.ensure_background_jobs()?;
+
+        let mount_point = self.options.mount_point.clone().ok_or_else(|| {
+            MetaError::NotSupported("control plane requires mount point".to_string())
+        })?;
+
+        let mut control_plane = self.control_plane.lock().await;
+        if control_plane.is_some() {
+            return Ok(());
+        }
+
+        let registry = RuntimeRegistry::new(
+            self.options
+                .control_runtime_dir
+                .clone()
+                .unwrap_or_else(RuntimeRegistry::default_root),
+        );
+        let pid = process::id();
+        let socket_path = registry.socket_path(pid);
+        let record = InstanceRecord::new(pid, mount_point, socket_path.clone(), Utc::now());
+        let server = ControlServer::bind(socket_path, Arc::clone(self))
+            .await
+            .map_err(|err| MetaError::Internal(err.to_string()))?;
+
+        registry
+            .write_record(&record)
+            .await
+            .map_err(|err| MetaError::Internal(err.to_string()))?;
+
+        *control_plane = Some(ControlPlaneState {
+            registry,
+            record,
+            server,
+        });
+
+        Ok(())
+    }
+
+    pub async fn shutdown_runtime(&self) {
+        self.shutdown_control_plane().await;
+        self.session_manager.shutdown().await;
+    }
+
+    async fn shutdown_control_plane(&self) {
+        let state = self.control_plane.lock().await.take();
+
+        if let Some(state) = state {
+            let _ = state.registry.remove_record(state.record.pid).await;
+            drop(state.server);
+        }
+    }
+
+    async fn enqueue_gc_job(self: &Arc<Self>, dry_run: bool) -> String {
+        let job_id = self.job_manager.create_gc_job(dry_run).await;
+        let jobs = Arc::clone(&self.job_manager);
+        let job_id_clone = job_id.clone();
+
+        tokio::spawn(async move {
+            let _ = jobs.mark_running(&job_id_clone).await;
+            let _ = jobs
+                .finish(
+                    &job_id_clone,
+                    GcJobResult {
+                        dry_run,
+                        orphan_slice_count: 0,
+                        orphan_object_count: 0,
+                        deleted_object_count: 0,
+                        error_count: 0,
+                        detail: Some(
+                            "gc execution is not implemented yet; control plane only".to_string(),
+                        ),
+                    },
+                )
+                .await;
+        });
+
+        job_id
     }
 
     /// Get the current session ID if a session is active.
@@ -474,16 +583,6 @@ impl<T: MetaStore + 'static> MetaClient<T> {
 
                 CacheInvalidationEvent::UpdateInodeMetadata { ino, metadata } => {
                     self.inode_cache.update_metadata(ino, metadata).await;
-                }
-
-                CacheInvalidationEvent::UpdateChildren {
-                    parent_ino,
-                    children,
-                } => {
-                    self.inode_cache
-                        .replace_children(parent_ino, children)
-                        .await;
-                    self.invalidate_parent_path(parent_ino).await;
                 }
             }
         }
@@ -1007,7 +1106,44 @@ impl<T: MetaStore + 'static> MetaClient<T> {
 }
 
 #[async_trait]
-impl<T: MetaStore + 'static> MetaLayer for MetaClient<T> {
+impl<T: MetaStore + ?Sized + 'static> ControlHandler for Arc<MetaClient<T>> {
+    async fn handle(&self, request: ControlRequest) -> ControlResponse {
+        match request {
+            ControlRequest::Ping => ControlResponse::Pong,
+            ControlRequest::GetInfo => {
+                let control_plane = self.control_plane.lock().await;
+
+                if let Some(state) = control_plane.as_ref() {
+                    ControlResponse::Info {
+                        pid: state.record.pid,
+                        mount_point: state.record.mount_point.clone(),
+                        started_at: state.record.started_at.timestamp_millis(),
+                        version: env!("CARGO_PKG_VERSION").to_string(),
+                    }
+                } else {
+                    ControlResponse::Error {
+                        code: "control_plane_not_running".to_string(),
+                        message: "control plane is not running".to_string(),
+                    }
+                }
+            }
+            ControlRequest::RunGc { dry_run } => {
+                let job_id = self.enqueue_gc_job(dry_run).await;
+                ControlResponse::Accepted { job_id }
+            }
+            ControlRequest::GetJob { job_id } => match self.job_manager.get(&job_id).await {
+                Some(job) => job.into(),
+                None => ControlResponse::Error {
+                    code: "job_not_found".to_string(),
+                    message: format!("job not found: {job_id}"),
+                },
+            },
+        }
+    }
+}
+
+#[async_trait]
+impl<T: MetaStore + ?Sized + 'static> MetaLayer for MetaClient<T> {
     fn name(&self) -> &'static str {
         self.store.name()
     }
@@ -1103,6 +1239,17 @@ impl<T: MetaStore + 'static> MetaLayer for MetaClient<T> {
 
         trace!("MetaClient: Inode cache MISS for readdir inode {}", inode);
 
+        // Keep the directory node cached before taking a snapshot so we can detect
+        // concurrent child mutations and avoid marking a stale listing as complete.
+        self.inode_cache
+            .ensure_node_in_cache(inode, &&*self.store, None)
+            .await?;
+        let children_generation = self
+            .inode_cache
+            .children_generation(inode)
+            .await
+            .unwrap_or(0);
+
         let mut entries = self.store.readdir(inode).await?;
         // Sort once before caching so readops always return stable ordering by name.
         entries.sort_by(|a, b| a.name.cmp(&b.name));
@@ -1115,13 +1262,22 @@ impl<T: MetaStore + 'static> MetaLayer for MetaClient<T> {
 
         // Ensure parent directory node is in cache before loading children
         self.inode_cache
-            .ensure_node_in_cache(inode, &*self.store, None)
+            .ensure_node_in_cache(inode, &&*self.store, None)
             .await?;
 
         // Load all children from database into cache, replacing any stale data
         let children_data: Vec<(String, i64)> =
             entries.iter().map(|e| (e.name.clone(), e.ino)).collect();
-        self.inode_cache.load_children(inode, children_data).await;
+        if !self
+            .inode_cache
+            .load_children_if_fresh(inode, children_data, children_generation)
+            .await
+        {
+            trace!(
+                "MetaClient: skipped stale readdir cache write for inode {}",
+                inode
+            );
+        }
 
         // Note: We shouldn't pre-fetch attributes here; use batch prefetch instead.
         Ok(entries)
@@ -1185,7 +1341,17 @@ impl<T: MetaStore + 'static> MetaLayer for MetaClient<T> {
 
         debug!("MetaClient: rmdir completed, updating cache");
 
-        self.inode_cache.remove_child(parent, name).await;
+        // Keep the deleted directory inode cached for a short time so open
+        // directory handles can still service getattr/fstat after replacement.
+        if let Some(child_ino) = self
+            .inode_cache
+            .remove_child_but_keep_inode(parent, name)
+            .await
+            && let Some(child_node) = self.inode_cache.get_node(child_ino).await
+        {
+            child_node.attr.write().await.nlink = 0;
+            child_node.clear_parent().await;
+        }
         self.invalidate_parent_path(parent).await;
 
         Ok(())
@@ -1387,18 +1553,14 @@ impl<T: MetaStore + 'static> MetaLayer for MetaClient<T> {
                     .add_child(new_parent, new_name.clone(), child_ino)
                     .await;
 
-                // Step 5: Update parent-child relationship based on hard link count
+                // Directories keep their inline parent even though nlink is >= 2.
                 if let Some(attr) = &src_attr {
-                    if attr.nlink <= 1 {
-                        // Single link: update parent directly
+                    if attr.kind == FileType::Dir || attr.nlink <= 1 {
                         if let Some(child_node) = self.inode_cache.get_node(child_ino).await {
                             child_node.set_parent(new_parent).await;
                         }
-                    } else {
-                        // Multiple links: clear parent (use LinkParentMeta instead)
-                        if let Some(child_node) = self.inode_cache.get_node(child_ino).await {
-                            child_node.clear_parent().await;
-                        }
+                    } else if let Some(child_node) = self.inode_cache.get_node(child_ino).await {
+                        child_node.clear_parent().await;
                     }
                 }
             }
@@ -1807,11 +1969,13 @@ impl<T: MetaStore + 'static> MetaLayer for MetaClient<T> {
             .get_slices(chunk_id)
             .instrument(tracing::trace_span!("get_slices.store", chunk_id))
             .await?;
-        self.inode_cache
-            .replace_slices(inode, chunk_index, &slices)
-            .await;
-        tracing::Span::current().record("slice_count", slices.len());
-        Ok(slices)
+        let cached = self
+            .inode_cache
+            .cache_slices_if_absent(inode, chunk_index, &slices)
+            .await
+            .unwrap_or(slices);
+        tracing::Span::current().record("slice_count", cached.len());
+        Ok(cached)
     }
 
     #[tracing::instrument(
@@ -1916,13 +2080,44 @@ impl<T: MetaStore + 'static> MetaLayer for MetaClient<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::meta::config::{CacheConfig, ClientOptions, Config, DatabaseConfig, DatabaseType};
+    use crate::meta::config::{
+        CacheConfig, ClientOptions, CompactConfig, Config, DatabaseConfig, DatabaseType,
+    };
     use crate::meta::stores::database::DatabaseMetaStore;
     use crate::vfs::chunk_id_for;
     use std::time::Duration;
 
     async fn create_test_client() -> Arc<MetaClient<DatabaseMetaStore>> {
         create_test_client_with_capacity(100, 100).await
+    }
+
+    async fn create_test_client_with_options(
+        options: MetaClientOptions,
+    ) -> Arc<MetaClient<DatabaseMetaStore>> {
+        let db_path = "sqlite::memory:".to_string();
+
+        let config = Config {
+            database: DatabaseConfig {
+                db_config: DatabaseType::Sqlite { url: db_path },
+            },
+            cache: CacheConfig::default(),
+            client: ClientOptions::default(),
+            compact: CompactConfig::default(),
+        };
+
+        let store = Arc::new(DatabaseMetaStore::from_config(config).await.unwrap());
+
+        let capacity = CacheCapacity {
+            inode: 100,
+            path: 100,
+        };
+
+        let ttl = CacheTtl {
+            inode_ttl: Duration::from_secs(60),
+            path_ttl: Duration::from_secs(60),
+        };
+
+        MetaClient::with_options(store, capacity, ttl, options)
     }
 
     async fn create_test_client_with_capacity(
@@ -1937,6 +2132,7 @@ mod tests {
             },
             cache: CacheConfig::default(),
             client: ClientOptions::default(),
+            compact: CompactConfig::default(),
         };
 
         let store = Arc::new(DatabaseMetaStore::from_config(config).await.unwrap());
@@ -2051,6 +2247,118 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(test_slices, from_cached);
+    }
+
+    #[tokio::test]
+    async fn test_control_plane_registers_and_serves_gc_jobs() {
+        let runtime_dir = tempfile::tempdir().unwrap();
+        let options = MetaClientOptions {
+            mount_point: Some("/mnt/test".to_string()),
+            control_runtime_dir: Some(runtime_dir.path().to_path_buf()),
+            ..Default::default()
+        };
+
+        let client = create_test_client_with_options(options).await;
+        client.start_control_plane().await.unwrap();
+
+        let registry =
+            crate::control::runtime::RuntimeRegistry::new(runtime_dir.path().to_path_buf());
+        let record = registry.select_instance(Some("/mnt/test")).await.unwrap();
+
+        let pong = crate::control::client::send_request(
+            &record.socket_path,
+            &crate::control::protocol::ControlRequest::Ping,
+        )
+        .await
+        .unwrap();
+        assert_eq!(pong, crate::control::protocol::ControlResponse::Pong);
+
+        let accepted = crate::control::client::send_request(
+            &record.socket_path,
+            &crate::control::protocol::ControlRequest::RunGc { dry_run: true },
+        )
+        .await
+        .unwrap();
+
+        let crate::control::protocol::ControlResponse::Accepted { job_id } = accepted else {
+            panic!("expected accepted response");
+        };
+
+        let status = crate::control::client::send_request(
+            &record.socket_path,
+            &crate::control::protocol::ControlRequest::GetJob { job_id },
+        )
+        .await
+        .unwrap();
+
+        match status {
+            crate::control::protocol::ControlResponse::JobStatus { .. } => {}
+            other => panic!("unexpected status response: {other:?}"),
+        }
+
+        client.shutdown_runtime().await;
+    }
+
+    #[tokio::test]
+    async fn test_control_plane_get_info_returns_mount_metadata() {
+        let runtime_dir = tempfile::tempdir().unwrap();
+        let options = MetaClientOptions {
+            mount_point: Some("/mnt/info".to_string()),
+            control_runtime_dir: Some(runtime_dir.path().to_path_buf()),
+            ..Default::default()
+        };
+
+        let client = create_test_client_with_options(options).await;
+        client.start_control_plane().await.unwrap();
+
+        let registry =
+            crate::control::runtime::RuntimeRegistry::new(runtime_dir.path().to_path_buf());
+        let record = registry.select_instance(Some("/mnt/info")).await.unwrap();
+
+        let response = crate::control::client::send_request(
+            &record.socket_path,
+            &crate::control::protocol::ControlRequest::GetInfo,
+        )
+        .await
+        .unwrap();
+
+        match response {
+            crate::control::protocol::ControlResponse::Info {
+                pid,
+                mount_point,
+                version,
+                ..
+            } => {
+                assert_eq!(pid, std::process::id());
+                assert_eq!(mount_point, "/mnt/info");
+                assert_eq!(version, env!("CARGO_PKG_VERSION"));
+            }
+            other => panic!("unexpected info response: {other:?}"),
+        }
+
+        client.shutdown_runtime().await;
+    }
+
+    #[tokio::test]
+    async fn test_control_plane_shutdown_cleans_runtime_record() {
+        let runtime_dir = tempfile::tempdir().unwrap();
+        let options = MetaClientOptions {
+            mount_point: Some("/mnt/test-cleanup".to_string()),
+            control_runtime_dir: Some(runtime_dir.path().to_path_buf()),
+            ..Default::default()
+        };
+
+        let client = create_test_client_with_options(options).await;
+        client.start_control_plane().await.unwrap();
+        client.shutdown_runtime().await;
+
+        let registry =
+            crate::control::runtime::RuntimeRegistry::new(runtime_dir.path().to_path_buf());
+        let err = registry
+            .select_instance(Some("/mnt/test-cleanup"))
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("no slayerfs instance"));
     }
 
     /// Test scenario: Complex sequence of mixed operations

@@ -123,12 +123,12 @@ async fn test_typed_channel_chain() {
     );
     let consumer_id = consumer.id();
 
-    graph.add_node(producer);
-    graph.add_node(double);
-    graph.add_node(consumer);
+    graph.add_node(producer).unwrap();
+    graph.add_node(double).unwrap();
+    graph.add_node(consumer).unwrap();
 
-    graph.add_edge(producer_id, vec![double_id]);
-    graph.add_edge(double_id, vec![consumer_id]);
+    graph.add_edge(producer_id, vec![double_id]).unwrap();
+    graph.add_edge(double_id, vec![consumer_id]).unwrap();
 
     graph.async_start().await.expect("Graph execution failed");
 
@@ -207,10 +207,10 @@ async fn test_typed_channel_with_string() {
     );
     let consumer_id = consumer.id();
 
-    graph.add_node(producer);
-    graph.add_node(consumer);
+    graph.add_node(producer).unwrap();
+    graph.add_node(consumer).unwrap();
 
-    graph.add_edge(producer_id, vec![consumer_id]);
+    graph.add_edge(producer_id, vec![consumer_id]).unwrap();
 
     graph.async_start().await.expect("Graph execution failed");
 
@@ -254,14 +254,14 @@ async fn test_typed_channel_multiple_inputs() {
     );
     let consumer_id = consumer.id();
 
-    graph.add_node(producer1);
-    graph.add_node(producer2);
-    graph.add_node(adder);
-    graph.add_node(consumer);
+    graph.add_node(producer1).unwrap();
+    graph.add_node(producer2).unwrap();
+    graph.add_node(adder).unwrap();
+    graph.add_node(consumer).unwrap();
 
-    graph.add_edge(producer1_id, vec![adder_id]);
-    graph.add_edge(producer2_id, vec![adder_id]);
-    graph.add_edge(adder_id, vec![consumer_id]);
+    graph.add_edge(producer1_id, vec![adder_id]).unwrap();
+    graph.add_edge(producer2_id, vec![adder_id]).unwrap();
+    graph.add_edge(adder_id, vec![consumer_id]).unwrap();
 
     graph.async_start().await.expect("Graph execution failed");
 

@@ -363,6 +363,7 @@ mod tests {
                 image: bundle_path,
                 ports: vec![],
                 args: vec!["/bin/echo".to_string(), "hi".to_string()],
+                tty: false,
                 resources: None,
                 liveness_probe: None,
                 readiness_probe: None,
