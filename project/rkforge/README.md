@@ -534,6 +534,167 @@ Options:
   -h, --help       Print help
 ```
 
+## Sandbox
+
+`rkforge sandbox` is a microVM-backed execution environment aimed at AI/code execution
+workloads. The current production direction is the `libkrun` path with this lifecycle:
+
+```text
+create -> boot -> ready -> exec -> stop -> remove
+```
+
+Current design goals:
+
+- users should not manually install `libkrun`
+- users should not manually install `libkrunfw`
+- users should not manually prepare guest ext4 images
+- Rust applications should be able to use sandbox functionality directly through a library API
+
+### Current Shape
+
+The sandbox implementation currently includes:
+
+- host-side `SandboxRuntime` orchestration
+- `libkrun` VM backend
+- guest agent over vsock
+- runtime bundle / embedded runtime support
+- prebuilt sandbox runtime packaging flow
+- Rust SDK facade for direct library use
+
+Related design documents:
+
+- [Sandbox Design Overview](./docs/sandbox-design/README.md)
+- [Sandbox Architecture](./docs/sandbox-design/architecture.md)
+- [Sandbox Runtime Packaging](./docs/sandbox-design/runtime-packaging.md)
+- [Sandbox SDK Surface](./docs/sandbox-design/sdk-surface.md)
+
+### Runtime Requirements
+
+For the current `libkrun` path, the host machine still needs:
+
+- Linux with `/dev/kvm`
+- user access to `/dev/kvm`
+- `mkfs.ext4`
+
+The runtime dependency story is being moved toward:
+
+- prebuilt sandbox runtime artifacts
+- embedded runtime inside `rkforge`
+- no end-user manual `libkrun` / `libkrunfw` installation
+
+On Linux, the root installer now attempts to install the matching sandbox runtime
+artifact alongside `rkforge`, unless:
+
+```sh
+RK8S_INSTALL_SANDBOX_RUNTIME=0
+```
+
+is explicitly set.
+
+### CLI Workflow
+
+Create a sandbox:
+
+```sh
+rkforge sandbox create --name demo --image python:3.12-slim
+```
+
+Execute Python inline:
+
+```sh
+rkforge sandbox exec demo --code "print('hello from guest')"
+```
+
+Execute a normal command:
+
+```sh
+rkforge sandbox exec demo -- /bin/sh -lc 'echo hello'
+```
+
+Inspect sandbox state:
+
+```sh
+rkforge sandbox inspect demo
+rkforge sandbox list
+```
+
+Stop and remove:
+
+```sh
+rkforge sandbox stop demo
+rkforge sandbox rm demo
+```
+
+### Rust SDK MVP
+
+The crate now exposes a Rust SDK facade for sandbox usage:
+
+- `SandboxClient`
+- `SandboxClientBuilder`
+- `SandboxHandle`
+- `SandboxCreateOptions`
+- `SandboxExecOptions`
+- `SandboxExecSpec`
+- `SandboxExecTarget`
+- `SandboxExecResult`
+- `SandboxMetadata`
+
+Recommended dependency configuration:
+
+```toml
+rkforge = { version = "...", default-features = false, features = ["sandbox", "sandbox-prebuilt-runtime"] }
+```
+
+Example:
+
+```rust
+use rkforge::{SandboxClient, SandboxCreateOptions, SandboxExecSpec};
+
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
+    let client = SandboxClient::new()?;
+
+    let sandbox = client.create(
+        SandboxCreateOptions::new()
+            .image("python:3.12-slim")
+            .cpus(1)
+            .memory_mib(256)
+            .name("demo"),
+    )?;
+
+    let result = sandbox
+        .execute(
+            SandboxExecSpec::python("print('hello from rust sdk')")
+                .timeout_secs(30),
+        )
+        .await?;
+
+    println!("{}", result.stdout);
+    sandbox.stop().await?;
+    client.remove(sandbox.id(), false).await?;
+    Ok(())
+}
+```
+
+### Build / Delivery Direction
+
+The sandbox runtime is being split into two concerns:
+
+1. `rkforge` library / CLI surface
+2. sandbox runtime bundle:
+   - `rkforge`
+   - `rkforge-sandbox-shim`
+   - `rkforge-sandbox-agent`
+   - `rkforge-sandbox-guest-init`
+   - `libkrun`
+   - `libkrunfw`
+
+The target release shape is:
+
+- `rkforge` binary
+- prebuilt sandbox runtime artifact uploaded to Cloudflare R2
+- build-time embedding / runtime extraction for end-user transparency
+
 ## TODOs
 
 ### Supported features

@@ -6,6 +6,28 @@ authors = ["rk8s-dev team"]
 description = "Image builder for rk8s"
 repository = "https://github.com/r2cn-dev/rk8s/tree/main/project/rkforge"
 
+[features]
+default = ["sandbox", "sandbox-system-runtime"]
+sandbox = []
+sandbox-prebuilt-runtime = ["sandbox"]
+sandbox-source-runtime = ["sandbox"]
+sandbox-system-runtime = ["sandbox"]
+
+[[bin]]
+name = "rkforge-sandbox-shim"
+path = "src/sandbox/bin/shim_main.rs"
+required-features = ["sandbox"]
+
+[[bin]]
+name = "rkforge-sandbox-agent"
+path = "src/sandbox/bin/agent_main.rs"
+required-features = ["sandbox"]
+
+[[bin]]
+name = "rkforge-sandbox-guest-init"
+path = "src/sandbox/bin/guest_init_main.rs"
+required-features = ["sandbox"]
+
 [dependencies]
 common = { workspace = true }
 libnetwork = { workspace = true }
@@ -54,6 +76,7 @@ tempfile = { workspace = true }
 uzers = { workspace = true }
 rayon = { workspace = true }
 uuid = { workspace = true, features = ["v4"] }
+libloading = { workspace = true }
 serial_test = { workspace = true }
 tabwriter = { workspace = true }
 bincode = { workspace = true }

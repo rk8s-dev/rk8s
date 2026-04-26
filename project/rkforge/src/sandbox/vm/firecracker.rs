@@ -1,9 +1,12 @@
-use crate::sandbox::protocol::GuestReadyEvent;
-use crate::sandbox::vm::{VmBackend, VmInstanceHandle, VmInstanceSpec, VmmKind};
+use crate::sandbox::protocol::{GuestReadyEvent, ReadyStage};
+use crate::sandbox::runtime_assets::RuntimeAssetBundle;
+use crate::sandbox::vm::{
+    VmBackend, VmInstanceHandle, VmInstanceSpec, VmmKind, load_shim_failure, shim_failure_path,
+    shim_log_path, spawn_shim_process,
+};
 use anyhow::{Context, Result, anyhow, bail};
 use async_trait::async_trait;
 use chrono::Utc;
-use clap::Args;
 use nix::sys::signal;
 use nix::unistd::Pid;
 use serde::{Deserialize, Serialize};
@@ -18,7 +21,6 @@ use uuid::Uuid;
 
 const DEFAULT_BOOT_TIMEOUT: Duration = Duration::from_secs(15);
 const DEFAULT_POLL_INTERVAL: Duration = Duration::from_millis(100);
-const DEFAULT_GUEST_CID: u32 = 3;
 
 #[derive(Debug, Clone)]
 pub struct FirecrackerVmBackend {
@@ -31,9 +33,8 @@ pub struct FirecrackerVmBackend {
 
 impl FirecrackerVmBackend {
     pub fn new(root: PathBuf) -> Result<Self> {
-        let shim_binary = std::env::var_os("RKFORGE_SANDBOX_SHIM_BIN")
-            .map(PathBuf::from)
-            .unwrap_or(std::env::current_exe().context("failed to resolve current executable")?);
+        let assets = RuntimeAssetBundle::prepare(&root)?;
+        let shim_binary = assets.shim_binary().to_path_buf();
         let firecracker_binary = find_firecracker_binary().ok_or_else(|| {
             anyhow!("failed to locate firecracker binary; set RKFORGE_FIRECRACKER_BIN")
         })?;
@@ -100,21 +101,10 @@ impl FirecrackerVmBackend {
     }
 
     fn spawn_shim(&self, spec_path: &Path) -> Result<u32> {
-        let child = Command::new(&self.shim_binary)
-            .arg("sandbox-shim")
-            .arg("--spec")
-            .arg(spec_path)
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()
-            .with_context(|| {
-                format!(
-                    "failed to spawn sandbox shim via {}",
-                    self.shim_binary.display()
-                )
-            })?;
-        Ok(child.id())
+        let work_dir = spec_path
+            .parent()
+            .ok_or_else(|| anyhow!("shim spec path has no parent: {}", spec_path.display()))?;
+        spawn_shim_process(&self.shim_binary, spec_path, work_dir)
     }
 }
 
@@ -130,6 +120,7 @@ impl VmBackend for FirecrackerVmBackend {
         let shim_pid = self.spawn_shim(&self.spec_path(&spec.sandbox_id))?;
         let runtime_state = wait_for_runtime_state(
             &self.runtime_state_path(&spec.sandbox_id),
+            &spec.work_dir,
             self.boot_timeout,
         )?;
 
@@ -143,6 +134,8 @@ impl VmBackend for FirecrackerVmBackend {
             work_dir: spec.work_dir.clone(),
             vmm_kind: VmmKind::Firecracker,
             vsock_uds_path: Some(spec.vsock_uds_path.clone()),
+            agent_socket_path: None,
+            ready_socket_path: None,
         };
         self.save_handle(&handle)?;
         Ok(handle)
@@ -159,6 +152,12 @@ impl VmBackend for FirecrackerVmBackend {
                     .with_context(|| "failed to parse guest ready event")?;
                 return Ok(event);
             }
+            if let Some(failure) = load_shim_failure(&handle.work_dir)? {
+                return Err(anyhow!(
+                    "sandbox shim failed before guest ready: {}",
+                    failure.error
+                ));
+            }
             tokio::time::sleep(DEFAULT_POLL_INTERVAL).await;
         }
         Err(anyhow!(
@@ -171,7 +170,9 @@ impl VmBackend for FirecrackerVmBackend {
         if let Some(pid) = handle.pid {
             let _ = signal::kill(Pid::from_raw(pid as i32), signal::Signal::SIGTERM);
         }
-        if let Some(shim_pid) = handle.shim_pid {
+        if let Some(shim_pid) = handle.shim_pid
+            && Some(shim_pid) != handle.pid
+        {
             let _ = signal::kill(Pid::from_raw(shim_pid as i32), signal::Signal::SIGTERM);
         }
         let handle_path = self.handle_path(&handle.sandbox_id);
@@ -180,12 +181,6 @@ impl VmBackend for FirecrackerVmBackend {
         }
         Ok(())
     }
-}
-
-#[derive(Debug, Args)]
-pub struct SandboxShimArgs {
-    #[arg(long)]
-    pub spec: PathBuf,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -199,12 +194,7 @@ struct RuntimeState {
     firecracker_pid: u32,
 }
 
-pub fn run_shim_command(args: SandboxShimArgs) -> Result<()> {
-    let bytes = fs::read(&args.spec)
-        .with_context(|| format!("failed to read shim spec {}", args.spec.display()))?;
-    let spec: VmInstanceSpec =
-        serde_json::from_slice(&bytes).with_context(|| "failed to parse shim spec")?;
-
+pub fn run_firecracker_shim(spec: VmInstanceSpec) -> Result<()> {
     validate_vm_spec(&spec)?;
     fs::create_dir_all(&spec.work_dir)
         .with_context(|| format!("failed to create {}", spec.work_dir.display()))?;
@@ -240,7 +230,8 @@ pub fn run_shim_command(args: SandboxShimArgs) -> Result<()> {
 
     let ready = GuestReadyEvent {
         sandbox_id: spec.sandbox_id.clone(),
-        agent_version: "rkforge-firecracker-shim".to_string(),
+        stage: ReadyStage::VmmReady,
+        agent_version: "rkforge-firecracker-vmm".to_string(),
         transport: "firecracker-api".to_string(),
         timestamp: Utc::now(),
     };
@@ -254,37 +245,6 @@ pub fn run_shim_command(args: SandboxShimArgs) -> Result<()> {
     supervise_firecracker(&spec, &mut firecracker)
 }
 
-pub fn build_vm_spec(
-    root: &Path,
-    sandbox_id: &str,
-    image: &str,
-    cpus: u32,
-    memory_mib: u32,
-    persistent: bool,
-) -> VmInstanceSpec {
-    let work_dir = root.join("instances").join(sandbox_id);
-    let guest_image_path = std::env::var_os("RKFORGE_SANDBOX_GUEST_IMAGE").map(PathBuf::from);
-    let kernel_path = std::env::var_os("RKFORGE_SANDBOX_KERNEL").map(PathBuf::from);
-    let initrd_path = std::env::var_os("RKFORGE_SANDBOX_INITRD").map(PathBuf::from);
-    VmInstanceSpec {
-        sandbox_id: sandbox_id.to_string(),
-        image: image.to_string(),
-        cpus,
-        memory_mib,
-        persistent,
-        kernel_path,
-        initrd_path,
-        guest_image_path,
-        ready_file: work_dir.join("guest-ready.json"),
-        work_dir: work_dir.clone(),
-        parent_pid: Some(std::process::id()),
-        boot_args: None,
-        firecracker_api_socket: work_dir.join("firecracker.socket"),
-        vsock_uds_path: work_dir.join("guest.vsock"),
-        guest_cid: DEFAULT_GUEST_CID,
-    }
-}
-
 fn cleanup_runtime_paths(spec: &VmInstanceSpec) -> Result<()> {
     let paths = vec![
         spec.ready_file.clone(),
@@ -293,6 +253,8 @@ fn cleanup_runtime_paths(spec: &VmInstanceSpec) -> Result<()> {
         spec.work_dir.join("runtime-state.json"),
         spec.work_dir.join("shim.pid"),
         spec.work_dir.join("shim-state.json"),
+        shim_failure_path(&spec.work_dir),
+        shim_log_path(&spec.work_dir),
     ];
     for path in paths {
         if path.exists() {
@@ -382,7 +344,7 @@ fn wait_for_socket(socket_path: &Path, timeout: Duration) -> Result<()> {
     ))
 }
 
-fn wait_for_runtime_state(path: &Path, timeout: Duration) -> Result<RuntimeState> {
+fn wait_for_runtime_state(path: &Path, work_dir: &Path, timeout: Duration) -> Result<RuntimeState> {
     let deadline = Instant::now() + timeout;
     while Instant::now() < deadline {
         if path.exists() {
@@ -391,6 +353,12 @@ fn wait_for_runtime_state(path: &Path, timeout: Duration) -> Result<RuntimeState
             let state: RuntimeState =
                 serde_json::from_slice(&bytes).with_context(|| "failed to parse runtime state")?;
             return Ok(state);
+        }
+        if let Some(failure) = load_shim_failure(work_dir)? {
+            return Err(anyhow!(
+                "sandbox shim failed before runtime state was written: {}",
+                failure.error
+            ));
         }
         std::thread::sleep(DEFAULT_POLL_INTERVAL);
     }
@@ -544,12 +512,22 @@ fn terminate_child(child: &mut Child) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::sandbox::vm::build_vm_spec;
     use tempfile::tempdir;
 
     #[test]
     fn build_vm_spec_uses_fixed_guest_paths() {
         let dir = tempdir().unwrap();
-        let spec = build_vm_spec(dir.path(), "demo", "python:3.12-slim", 1, 256, false);
+        let spec = build_vm_spec(
+            dir.path(),
+            "demo",
+            "python:3.12-slim",
+            1,
+            256,
+            false,
+            VmmKind::Firecracker,
+        )
+        .unwrap();
         assert_eq!(spec.sandbox_id, "demo");
         assert!(spec.work_dir.ends_with("demo"));
         assert!(spec.ready_file.ends_with("guest-ready.json"));
