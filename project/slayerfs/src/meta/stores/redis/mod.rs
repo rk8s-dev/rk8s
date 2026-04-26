@@ -722,6 +722,7 @@ pub struct RedisMetaStore {
     sid: std::sync::OnceLock<Uuid>,
     chunk_scan_cursor: std::sync::Mutex<Option<String>>,
     chunk_scan_buffer: std::sync::Mutex<Vec<u64>>,
+    chunk_scan_next_cursor: std::sync::Mutex<Option<String>>,
     global_lock_tokens: std::sync::Mutex<HashMap<String, i64>>,
 }
 
@@ -811,6 +812,7 @@ impl RedisMetaStore {
             sid: std::sync::OnceLock::new(),
             chunk_scan_cursor: std::sync::Mutex::new(None),
             chunk_scan_buffer: std::sync::Mutex::new(Vec::new()),
+            chunk_scan_next_cursor: std::sync::Mutex::new(None),
             global_lock_tokens: std::sync::Mutex::new(HashMap::new()),
         };
         store.init_root_directory().await?;
@@ -2445,9 +2447,9 @@ impl MetaStore for RedisMetaStore {
                 let take = limit.min(buffer.len());
                 let result: Vec<u64> = buffer.drain(..take).collect();
                 if buffer.is_empty() {
-                    // If the buffer is now empty we can resume from the saved SCAN cursor
-                    // on the next call; otherwise we keep the same cursor and continue
-                    // draining the buffer.
+                    let mut cursor = self.chunk_scan_cursor.lock().unwrap();
+                    let mut next_cursor = self.chunk_scan_next_cursor.lock().unwrap();
+                    *cursor = next_cursor.take();
                 }
                 return Ok(result);
             }
@@ -2485,10 +2487,15 @@ impl MetaStore for RedisMetaStore {
                         if !remaining.is_empty() {
                             let mut buffer = self.chunk_scan_buffer.lock().unwrap();
                             buffer.extend(remaining);
-                            // Keep the same cursor because we haven't finished this page.
+                            // Save the next cursor so we can resume from the following
+                            // page once the buffer is fully drained.
+                            let mut next_cursor_guard = self.chunk_scan_next_cursor.lock().unwrap();
+                            *next_cursor_guard = Some(next_cursor);
                         } else {
                             let mut cursor = self.chunk_scan_cursor.lock().unwrap();
                             *cursor = Some(next_cursor);
+                            let mut next_cursor_guard = self.chunk_scan_next_cursor.lock().unwrap();
+                            *next_cursor_guard = None;
                         }
                         return Ok(chunk_ids);
                     }
@@ -2499,6 +2506,8 @@ impl MetaStore for RedisMetaStore {
                 if wrapped || !started_from_cursor {
                     let mut cursor = self.chunk_scan_cursor.lock().unwrap();
                     *cursor = None;
+                    let mut next_cursor_guard = self.chunk_scan_next_cursor.lock().unwrap();
+                    *next_cursor_guard = None;
                     break;
                 }
                 start_key = Some("0".to_string());
