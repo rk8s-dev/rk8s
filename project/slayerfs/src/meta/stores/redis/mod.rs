@@ -24,6 +24,7 @@ use redis::AsyncCommands;
 use redis::aio::ConnectionManager;
 use serde::{Deserialize, Serialize};
 use std::any::Any;
+use std::collections::HashMap;
 use std::net::IpAddr;
 use std::path::Path;
 use std::str::FromStr;
@@ -720,6 +721,8 @@ pub struct RedisMetaStore {
     _config: Config,
     sid: std::sync::OnceLock<Uuid>,
     chunk_scan_cursor: std::sync::Mutex<Option<String>>,
+    chunk_scan_buffer: std::sync::Mutex<Vec<u64>>,
+    global_lock_tokens: std::sync::Mutex<HashMap<String, i64>>,
 }
 
 impl RedisMetaStore {
@@ -807,6 +810,8 @@ impl RedisMetaStore {
             _config: config,
             sid: std::sync::OnceLock::new(),
             chunk_scan_cursor: std::sync::Mutex::new(None),
+            chunk_scan_buffer: std::sync::Mutex::new(Vec::new()),
+            global_lock_tokens: std::sync::Mutex::new(HashMap::new()),
         };
         store.init_root_directory().await?;
         Ok(store)
@@ -2432,6 +2437,22 @@ impl MetaStore for RedisMetaStore {
         if limit == 0 {
             return Ok(vec![]);
         }
+
+        // Drain any buffered chunk IDs from a previous mid-page limit hit first.
+        {
+            let mut buffer = self.chunk_scan_buffer.lock().unwrap();
+            if !buffer.is_empty() {
+                let take = limit.min(buffer.len());
+                let result: Vec<u64> = buffer.drain(..take).collect();
+                if buffer.is_empty() {
+                    // If the buffer is now empty we can resume from the saved SCAN cursor
+                    // on the next call; otherwise we keep the same cursor and continue
+                    // draining the buffer.
+                }
+                return Ok(result);
+            }
+        }
+
         let page_size = limit.clamp(64, 256);
         let mut start_key = self.chunk_scan_cursor.lock().unwrap().clone();
         let started_from_cursor = start_key.is_some();
@@ -2450,15 +2471,25 @@ impl MetaStore for RedisMetaStore {
                 .await
                 .map_err(redis_err)?;
 
-            let page_len = keys.len();
-            let _last_key = keys.last().cloned();
-
-            for key in keys {
-                if let Some(chunk_id) = Self::parse_chunk_id_from_chunk_key(&key) {
+            for key in &keys {
+                if let Some(chunk_id) = Self::parse_chunk_id_from_chunk_key(key) {
                     chunk_ids.push(chunk_id);
                     if chunk_ids.len() == limit {
-                        let mut cursor = self.chunk_scan_cursor.lock().unwrap();
-                        *cursor = Some(next_cursor);
+                        // Any remaining chunk IDs in this SCAN page that we haven't
+                        // consumed need to be buffered so they aren't skipped.
+                        let remaining: Vec<u64> = keys
+                            .iter()
+                            .filter_map(|k| Self::parse_chunk_id_from_chunk_key(k))
+                            .skip(chunk_ids.len())
+                            .collect();
+                        if !remaining.is_empty() {
+                            let mut buffer = self.chunk_scan_buffer.lock().unwrap();
+                            buffer.extend(remaining);
+                            // Keep the same cursor because we haven't finished this page.
+                        } else {
+                            let mut cursor = self.chunk_scan_cursor.lock().unwrap();
+                            *cursor = Some(next_cursor);
+                        }
                         return Ok(chunk_ids);
                     }
                 }
@@ -2508,60 +2539,75 @@ impl MetaStore for RedisMetaStore {
         let delayed_ids: std::collections::HashSet<u64> =
             delayed_slices.iter().map(|(id, _, _)| *id).collect();
 
-        let mut conn = self.conn.clone();
-        let now = Utc::now().timestamp();
         let chunk_key = self.chunk_key(chunk_id);
 
-        let raw: Vec<Vec<u8>> = redis::cmd("LRANGE")
-            .arg(&chunk_key)
-            .arg(0)
-            .arg(-1)
-            .query_async(&mut conn)
-            .await
-            .map_err(redis_err)?;
+        for _ in 0..COMPACT_RETRY_LIMIT {
+            let mut conn = Self::create_connection(&self._config).await?;
 
-        let mut kept = Vec::new();
-        for entry in raw {
-            let desc: SliceDesc = crate::meta::serialization::deserialize_meta(&entry)?;
-            if !delayed_ids.contains(&desc.slice_id) {
-                kept.push(entry);
+            redis::cmd("WATCH")
+                .arg(&chunk_key)
+                .exec_async(&mut conn)
+                .await
+                .map_err(redis_err)?;
+
+            let raw: Vec<Vec<u8>> = redis::cmd("LRANGE")
+                .arg(&chunk_key)
+                .arg(0)
+                .arg(-1)
+                .query_async(&mut conn)
+                .await
+                .map_err(redis_err)?;
+
+            let mut kept = Vec::new();
+            for entry in raw {
+                let desc: SliceDesc = crate::meta::serialization::deserialize_meta(&entry)?;
+                if !delayed_ids.contains(&desc.slice_id) {
+                    kept.push(entry);
+                }
+            }
+
+            let now = Utc::now().timestamp();
+
+            let mut pipe = redis::pipe();
+            pipe.atomic();
+
+            // Replace chunk slices: keep non-delayed existing, append new
+            pipe.cmd("DEL").arg(&chunk_key).ignore();
+            for entry in &kept {
+                pipe.cmd("RPUSH").arg(&chunk_key).arg(entry).ignore();
+            }
+            for slice in new_slices {
+                let data = crate::meta::serialization::serialize_meta(slice)?;
+                pipe.cmd("RPUSH").arg(&chunk_key).arg(data).ignore();
+            }
+
+            // Create delayed records for old slices
+            if !delayed_slices.is_empty() {
+                for (slice_id, offset, size) in &delayed_slices {
+                    let delayed_id: i64 =
+                        conn.incr(DELAYED_COUNTER_KEY, 1).await.map_err(redis_err)?;
+                    let ds_key = self.delayed_key(delayed_id);
+                    pipe.hset(&ds_key, "sid", slice_id.to_string());
+                    pipe.hset(&ds_key, "off", offset.to_string());
+                    pipe.hset(&ds_key, "sz", u64::from(*size).to_string());
+                    pipe.hset(&ds_key, "st", "pending");
+                    pipe.hset(&ds_key, "ca", now.to_string());
+                    pipe.hset(&ds_key, "cid", chunk_id.to_string());
+                    pipe.cmd("ZADD")
+                        .arg(DELAYED_INDEX_KEY)
+                        .arg(now)
+                        .arg(delayed_id)
+                        .ignore();
+                }
+            }
+
+            let result: Option<()> = pipe.query_async(&mut conn).await.map_err(redis_err)?;
+            if result.is_some() {
+                return Ok(());
             }
         }
 
-        let mut pipe = redis::pipe();
-        pipe.atomic();
-
-        // Replace chunk slices: keep non-delayed existing, append new
-        pipe.cmd("DEL").arg(&chunk_key).ignore();
-        for entry in &kept {
-            pipe.cmd("RPUSH").arg(&chunk_key).arg(entry).ignore();
-        }
-        for slice in new_slices {
-            let data = crate::meta::serialization::serialize_meta(slice)?;
-            pipe.cmd("RPUSH").arg(&chunk_key).arg(data).ignore();
-        }
-
-        // Create delayed records for old slices
-        if !delayed_slices.is_empty() {
-            for (slice_id, offset, size) in delayed_slices {
-                let delayed_id: i64 = conn.incr(DELAYED_COUNTER_KEY, 1).await.map_err(redis_err)?;
-                let ds_key = self.delayed_key(delayed_id);
-                pipe.hset(&ds_key, "sid", slice_id.to_string());
-                pipe.hset(&ds_key, "off", offset.to_string());
-                pipe.hset(&ds_key, "sz", u64::from(size).to_string());
-                pipe.hset(&ds_key, "st", "pending");
-                pipe.hset(&ds_key, "ca", now.to_string());
-                pipe.hset(&ds_key, "cid", chunk_id.to_string());
-                pipe.cmd("ZADD")
-                    .arg(DELAYED_INDEX_KEY)
-                    .arg(now)
-                    .arg(delayed_id)
-                    .ignore();
-            }
-        }
-
-        let _: () = pipe.query_async(&mut conn).await.map_err(redis_err)?;
-        Ok(())
+        Err(MetaError::ContinueRetry)
     }
 
     #[tracing::instrument(
@@ -3060,14 +3106,14 @@ impl MetaStore for RedisMetaStore {
 
             if last_updated == false then
                 redis.call("HSET", key, field, now_time)
-                return true
+                return now_time
             else
                 last_updated = tonumber(last_updated)
                 if now_time < last_updated + diff then
                     return false
                 else
                     redis.call("HSET", key, field, now_time)
-                    return true
+                    return now_time
                 end
             end
             "#,
@@ -3075,18 +3121,118 @@ impl MetaStore for RedisMetaStore {
 
         let diff = chrono::Duration::seconds(ttl_secs as i64).num_milliseconds();
 
-        let resp: Result<bool, _> = script
+        let resp: Result<redis::Value, _> = script
             .key(LOCKS_KEY)
-            .arg(lock_name)
+            .arg(&lock_name)
             .arg(now)
             .arg(diff)
             .invoke_async(&mut conn)
             .await;
 
         match resp {
-            Ok(v) => v,
+            Ok(redis::Value::BulkString(bytes)) => {
+                // Lua returns the token (timestamp) as a number, which redis-rs
+                // may encode as a bulk string in some versions.
+                if let Ok(token_str) = std::str::from_utf8(&bytes)
+                    && let Ok(token) = token_str.parse::<i64>()
+                {
+                    if let Ok(mut tokens) = self.global_lock_tokens.lock() {
+                        tokens.insert(lock_name, token);
+                    }
+                    return true;
+                }
+                false
+            }
+            Ok(redis::Value::Int(token)) => {
+                if let Ok(mut tokens) = self.global_lock_tokens.lock() {
+                    tokens.insert(lock_name, token);
+                }
+                true
+            }
+            Ok(redis::Value::SimpleString(s)) if s == "false" || s == "0" => false,
+            Ok(redis::Value::Nil) => false,
+            Ok(other) => {
+                tracing::warn!("Unexpected response from get_global_lock Lua: {:?}", other);
+                false
+            }
             Err(err) => {
                 error!("{}", err.to_string());
+                false
+            }
+        }
+    }
+
+    async fn is_global_lock_held(&self, lock_name: LockName, ttl_secs: u64) -> bool {
+        let lock_name = lock_name.to_string();
+        let mut conn = self.conn.clone();
+        let now = Utc::now().timestamp_millis();
+        let ttl_millis = chrono::Duration::seconds(ttl_secs as i64).num_milliseconds();
+
+        let locked_at: Option<i64> = conn
+            .hget(LOCKS_KEY, &lock_name)
+            .await
+            .map_err(redis_err)
+            .ok()
+            .flatten();
+
+        match locked_at {
+            Some(locked_at) => now <= locked_at + ttl_millis,
+            None => false,
+        }
+    }
+
+    async fn release_global_lock(&self, lock_name: LockName) -> bool {
+        let lock_name = lock_name.to_string();
+        let expected_token = match self.global_lock_tokens.lock() {
+            Ok(tokens) => tokens.get(&lock_name).copied(),
+            Err(err) => {
+                error!("Error reading local lock token {}: {}", lock_name, err);
+                None
+            }
+        };
+        let Some(expected_token) = expected_token else {
+            return false;
+        };
+
+        let mut conn = self.conn.clone();
+
+        let script = redis::Script::new(
+            r#"
+            local key = KEYS[1]
+            local field = ARGV[1]
+            local expected = tonumber(ARGV[2])
+
+            local current = redis.call("HGET", key, field)
+            if current == false then
+                return false
+            end
+
+            current = tonumber(current)
+            if current == expected then
+                redis.call("HDEL", key, field)
+                return true
+            else
+                return false
+            end
+            "#,
+        );
+
+        let resp: Result<bool, _> = script
+            .key(LOCKS_KEY)
+            .arg(&lock_name)
+            .arg(expected_token)
+            .invoke_async(&mut conn)
+            .await;
+
+        match resp {
+            Ok(released) => {
+                if released && let Ok(mut tokens) = self.global_lock_tokens.lock() {
+                    tokens.remove(&lock_name);
+                }
+                released
+            }
+            Err(err) => {
+                error!("Error releasing lock {}: {}", lock_name, err);
                 false
             }
         }
