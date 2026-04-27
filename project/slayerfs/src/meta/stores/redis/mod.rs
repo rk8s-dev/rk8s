@@ -2206,6 +2206,7 @@ impl MetaStore for RedisMetaStore {
     }
 
     #[tracing::instrument(level = "trace", skip(self), fields(batch_size, max_age_secs))]
+    // GC Phase 1: find aged delayed slices, delete their chunk meta, and mark them for block deletion.
     async fn process_delayed_slices(
         &self,
         batch_size: usize,
@@ -2345,6 +2346,7 @@ impl MetaStore for RedisMetaStore {
     }
 
     #[tracing::instrument(level = "trace", skip(self), fields(delayed_count = delayed_ids.len()))]
+    // GC Phase 2: permanently remove delayed slice records after their blocks have been deleted.
     async fn confirm_delayed_deleted(&self, delayed_ids: &[i64]) -> Result<(), MetaError> {
         if delayed_ids.is_empty() {
             return Ok(());
@@ -2473,16 +2475,18 @@ impl MetaStore for RedisMetaStore {
                 .await
                 .map_err(redis_err)?;
 
+            let mut chunk_idx_in_page = 0;
             for key in &keys {
                 if let Some(chunk_id) = Self::parse_chunk_id_from_chunk_key(key) {
                     chunk_ids.push(chunk_id);
+                    chunk_idx_in_page += 1;
                     if chunk_ids.len() == limit {
                         // Any remaining chunk IDs in this SCAN page that we haven't
                         // consumed need to be buffered so they aren't skipped.
                         let remaining: Vec<u64> = keys
                             .iter()
                             .filter_map(|k| Self::parse_chunk_id_from_chunk_key(k))
-                            .skip(chunk_ids.len())
+                            .skip(chunk_idx_in_page)
                             .collect();
                         if !remaining.is_empty() {
                             let mut buffer = self.chunk_scan_buffer.lock().unwrap();
@@ -2526,6 +2530,7 @@ impl MetaStore for RedisMetaStore {
         skip(self, new_slices, old_slices_to_delay),
         fields(chunk_id)
     )]
+    // Replace old chunk slices with new ones and create delayed records for the removed slices.
     async fn replace_slices_for_compact(
         &self,
         chunk_id: u64,
@@ -2624,6 +2629,7 @@ impl MetaStore for RedisMetaStore {
         skip(self, new_slices, old_slices_to_delay, expected_slices),
         fields(chunk_id)
     )]
+    // Versioned slice replacement: verify chunk state matches expectations before swapping slices.
     async fn replace_slices_for_compact_with_version(
         &self,
         chunk_id: u64,
@@ -2775,6 +2781,7 @@ impl MetaStore for RedisMetaStore {
         skip(self, operation),
         fields(slice_id, chunk_id, size)
     )]
+    // Track a newly written slice as uncommitted so GC can clean it up if the commit fails.
     async fn record_uncommitted_slice(
         &self,
         slice_id: u64,
@@ -2804,6 +2811,7 @@ impl MetaStore for RedisMetaStore {
     }
 
     #[tracing::instrument(level = "trace", skip(self), fields(slice_id))]
+    // Mark an uncommitted slice as committed by removing its tracking record.
     async fn confirm_slice_committed(&self, slice_id: u64) -> Result<(), MetaError> {
         let mut conn = self.conn.clone();
         let uc_key = self.uncommitted_key(slice_id);
@@ -2825,6 +2833,7 @@ impl MetaStore for RedisMetaStore {
     }
 
     #[tracing::instrument(level = "trace", skip(self), fields(max_age_secs, batch_size))]
+    // Scan for stale uncommitted slices: mark orphans for block cleanup and remove committed leftovers.
     async fn cleanup_orphan_uncommitted_slices(
         &self,
         max_age_secs: i64,
@@ -2961,6 +2970,7 @@ impl MetaStore for RedisMetaStore {
     }
 
     #[tracing::instrument(level = "trace", skip(self), fields(slice_count = slice_ids.len()))]
+    // Delete uncommitted slice tracking records after their orphan blocks have been cleaned up.
     async fn delete_uncommitted_slices(&self, slice_ids: &[u64]) -> Result<(), MetaError> {
         if slice_ids.is_empty() {
             return Ok(());
