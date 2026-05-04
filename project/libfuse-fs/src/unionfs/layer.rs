@@ -466,10 +466,12 @@ mod test {
             ..Default::default()
         })
         .unwrap();
-        fs.init(Request::default()).await.unwrap();
-        fs.delete_whiteout(Request::default(), 1, OsStr::new("missing"))
-            .await
-            .unwrap();
+        unwrap_or_skip_eperm!(fs.init(Request::default()).await, "fs init");
+        unwrap_or_skip_eperm!(
+            fs.delete_whiteout(Request::default(), 1, OsStr::new("missing"))
+                .await,
+            "delete_whiteout missing OCI marker"
+        );
     }
 
     // Mark as ignored by default; run with: RUN_PRIVILEGED_TESTS=1 cargo test -- --ignored
