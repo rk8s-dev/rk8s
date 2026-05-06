@@ -5,12 +5,13 @@ use xlineapi::{
     LeaseGrantResponse, LeaseKeepAliveResponse, LeaseLeasesResponse, LeaseRevokeResponse,
     LeaseTimeToLiveResponse, RequestWrapper, command::Command,
 };
+use xlinerpc::MethodId;
 
 use crate::{
     CurpClient,
     error::{Result, XlineClientError},
     lease_gen::LeaseIdGenerator,
-    transport::{Channel, MethodId, Streaming},
+    transport::{Channel, Streaming},
     types::lease::LeaseKeeper,
 };
 

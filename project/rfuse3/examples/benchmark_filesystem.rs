@@ -131,7 +131,7 @@ impl BenchmarkFs {
         Ok(FileAttr {
             ino: inode,
             size: data.len() as u64,
-            blocks: (data.len() as u64 + 511) / 512,
+            blocks: (data.len() as u64).div_ceil(512),
             atime: self.created_at.into(),
             mtime: self.created_at.into(),
             ctime: self.created_at.into(),
@@ -548,10 +548,8 @@ impl Filesystem for BenchmarkFs {
             });
         }
         let mut state = self.state.write().await;
-        if state.name_to_inode.contains_key(name) {
-            if flags & libc::O_EXCL as u32 != 0 {
-                return Err(libc::EEXIST.into());
-            }
+        if state.name_to_inode.contains_key(name) && flags & libc::O_EXCL as u32 != 0 {
+            return Err(libc::EEXIST.into());
         }
         let inode = match state.name_to_inode.get(name).copied() {
             Some(existing) => existing,

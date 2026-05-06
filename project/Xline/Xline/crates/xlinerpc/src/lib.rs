@@ -6,14 +6,20 @@ use std::{collections::BTreeMap, path::Path, path::PathBuf};
 
 pub mod codec;
 pub mod envelope;
+pub mod grpc;
+pub mod h3_client;
+pub mod method;
 pub mod request;
 pub mod response;
+pub mod server;
 pub mod status;
 pub mod streaming;
 
 // Re-export commonly used types
 pub use codec::{BinaryCodec, Codec, DecodeError, EncodeError};
 pub use envelope::Envelope;
+pub use h3_client::H3Channel;
+pub use method::{ALL_METHOD_IDS, MethodId};
 pub use request::Request;
 pub use response::Response;
 pub use status::{Code, Status};

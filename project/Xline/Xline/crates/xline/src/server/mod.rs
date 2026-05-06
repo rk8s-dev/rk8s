@@ -8,6 +8,8 @@ mod cluster_server;
 pub(crate) mod command;
 /// curp server
 mod curp_server;
+/// H3 server for HTTP/3 client requests
+pub(crate) mod h3_server;
 /// Xline kv server
 mod kv_server;
 /// Xline lease server

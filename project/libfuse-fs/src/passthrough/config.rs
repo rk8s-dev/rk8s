@@ -1,11 +1,14 @@
 // Copyright (C) 2020-2022 Alibaba Cloud. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+#[cfg(target_os = "macos")]
+use std::num::NonZeroUsize;
 use std::path::PathBuf;
 use std::str::FromStr;
 use std::time::Duration;
 
 use crate::util::mapping::IdMappings;
+use crate::util::whiteout::WhiteoutFormat;
 
 /// The caching policy that the file system should report to the FUSE client. By default the FUSE
 /// protocol uses close-to-open consistency. This means that any cached contents of the file are
@@ -181,6 +184,37 @@ pub struct Config {
 
     /// UID/GID mapping. Format: `uidmapping=H:T:L[:H2:T2:L2...],gidmapping=H:T:L[:H2:T2:L2...]`
     pub mapping: IdMappings,
+
+    /// Whiteout format used when this passthrough is layered under overlayfs/unionfs.
+    /// Defaults to `CharDev` on Linux (kernel-overlayfs convention) and to
+    /// `OciWhiteout` on macOS (avoids the root requirement of `mknod` char dev).
+    pub whiteout_format: WhiteoutFormat,
+
+    /// **Experimental configuration knob — semantics not API-stable.**
+    ///
+    /// On macOS, store inode references as path components + lazily-opened
+    /// fds (the `Reopenable` `InodeHandle` variant) instead of always-open
+    /// `O_RDONLY` fds. Lets metadata caching TTLs stay at the crate
+    /// default (5 s) without pinning a real fd per kernel-cached inode.
+    ///
+    /// Lazy is the default and beats the eager fallback by ~2.76× on
+    /// meta-stat in clean same-environment A/B benchmarks. The flag is
+    /// kept as an escape hatch for users who want the eager behaviour
+    /// (e.g. to debug an LRU/path-rewrite issue), but its name and
+    /// semantics may change without notice. Production callers should
+    /// not depend on the eager fallback long-term.
+    ///
+    /// Default on macOS: `true`.
+    #[cfg(target_os = "macos")]
+    pub macos_lazy_inode_fd: bool,
+
+    /// macOS only: hard cap on the number of cached backing fds held by the
+    /// lazy-fd path. When `None` (default), the cap is computed at startup
+    /// as `RLIMIT_NOFILE_soft / 2`. Set explicitly to override (useful for
+    /// tests and constrained environments). Has no effect when
+    /// `macos_lazy_inode_fd == false`.
+    #[cfg(target_os = "macos")]
+    pub macos_lazy_fd_lru_max: Option<NonZeroUsize>,
 }
 
 impl Default for Config {
@@ -207,6 +241,11 @@ impl Default for Config {
             use_mmap: false,
             max_mmap_size: 1024 * 1024 * 1024,
             mapping: IdMappings::default(),
+            whiteout_format: WhiteoutFormat::default(),
+            #[cfg(target_os = "macos")]
+            macos_lazy_inode_fd: true,
+            #[cfg(target_os = "macos")]
+            macos_lazy_fd_lru_max: None,
         }
     }
 }

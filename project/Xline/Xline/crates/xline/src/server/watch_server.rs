@@ -10,11 +10,11 @@ use tokio_stream::{Stream, StreamExt, wrappers::ReceiverStream};
 use tracing::{debug, warn};
 use utils::task_manager::{Listener, TaskManager, tasks::TaskName};
 use xlineapi::command::KeyRange;
+use xlinerpc::server::EndPoint as RouterEndpoint;
 use xlinerpc::{Status, Streaming};
 
 use crate::{
     header_gen::HeaderGenerator,
-    router::endpoint::EndPoint as RouterEndpoint,
     rpc::{
         RequestUnion, ResponseHeader, WatchCancelRequest, WatchCreateRequest, WatchProgressRequest,
         WatchRequest, WatchResponse,

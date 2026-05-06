@@ -5,8 +5,8 @@
 
 use std::{marker::PhantomData, sync::Arc, task::Poll};
 
+use dquic::prelude::{Connection, QuicListeners};
 use futures::{Stream, future::BoxFuture};
-use gm_quic::prelude::{Connection, QuicListeners};
 use prost::Message;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::task::JoinHandle;
@@ -113,6 +113,24 @@ where
             service: Arc::new(external_service),
             inner_service: Arc::new(rpc),
             ext_service: NoopQuicServiceExt,
+            _phantom: PhantomData,
+        }
+    }
+}
+
+impl<C, CE, RC, XH> Clone for QuicGrpcServer<C, CE, RC, XH>
+where
+    C: Command,
+    CE: CommandExecutor<C>,
+    RC: RoleChange,
+    XH: QuicServiceExt,
+{
+    #[inline]
+    fn clone(&self) -> Self {
+        Self {
+            service: Arc::clone(&self.service),
+            inner_service: Arc::clone(&self.inner_service),
+            ext_service: self.ext_service.clone(),
             _phantom: PhantomData,
         }
     }

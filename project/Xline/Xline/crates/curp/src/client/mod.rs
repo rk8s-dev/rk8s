@@ -284,7 +284,7 @@ impl ClientBuilder {
     /// Use QUIC transport
     #[inline]
     #[must_use]
-    pub fn quic_transport(mut self, quic_client: Arc<gm_quic::prelude::QuicClient>) -> Self {
+    pub fn quic_transport(mut self, quic_client: Arc<dquic::prelude::QuicClient>) -> Self {
         self.transport = Some(crate::rpc::transport::TransportConfig {
             client: quic_client,
             dns_fallback: crate::rpc::quic_transport::channel::DnsFallback::Disabled,
@@ -300,10 +300,7 @@ impl ClientBuilder {
     #[doc(hidden)]
     #[inline]
     #[must_use]
-    pub fn quic_transport_for_test(
-        mut self,
-        quic_client: Arc<gm_quic::prelude::QuicClient>,
-    ) -> Self {
+    pub fn quic_transport_for_test(mut self, quic_client: Arc<dquic::prelude::QuicClient>) -> Self {
         self.transport = Some(crate::rpc::transport::TransportConfig {
             client: quic_client,
             dns_fallback: crate::rpc::quic_transport::channel::DnsFallback::LocalhostForTest,
@@ -321,7 +318,8 @@ impl ClientBuilder {
         mut self,
         addrs: Vec<String>,
     ) -> Result<Self, crate::rpc::CurpError> {
-        use crate::rpc::{CurpError, MethodId, quic_transport::channel::QuicChannel};
+        use crate::rpc::{CurpError, quic_transport::channel::QuicChannel};
+        use xlinerpc::MethodId;
 
         let transport = self.transport.as_ref().ok_or_else(|| {
             CurpError::internal("discover_from requires quic_transport to be set")
@@ -336,14 +334,7 @@ impl ClientBuilder {
                 let client = Arc::clone(&quic_client);
                 let addr = addr.clone();
                 async move {
-                    let channel = match dns_fallback {
-                        crate::rpc::quic_transport::channel::DnsFallback::LocalhostForTest => {
-                            QuicChannel::connect_single_for_test(&addr, client).await?
-                        }
-                        crate::rpc::quic_transport::channel::DnsFallback::Disabled => {
-                            QuicChannel::connect_single(&addr, client).await?
-                        }
-                    };
+                    let channel = QuicChannel::with_addrs(client, vec![addr], dns_fallback);
                     let resp: FetchClusterResponse = channel
                         .unary_call(
                             MethodId::FetchCluster,

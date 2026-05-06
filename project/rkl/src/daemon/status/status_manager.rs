@@ -1372,6 +1372,7 @@ mod tests {
             image: "image".to_string(),
             ports: Vec::new(),
             args: Vec::new(),
+            tty: false,
             resources: None,
             liveness_probe: None,
             readiness_probe: None,

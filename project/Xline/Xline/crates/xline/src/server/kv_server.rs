@@ -17,10 +17,10 @@ use xlineapi::{
     request_validation::RequestValidator,
 };
 use xlinerpc::Status;
+use xlinerpc::server::EndPoint as RouterEndpoint;
 
 use crate::{
     revision_check::RevisionCheck,
-    router::endpoint::EndPoint as RouterEndpoint,
     rpc::{
         CompactionRequest, CompactionResponse, DeleteRangeRequest, DeleteRangeResponse, PutRequest,
         PutResponse, RangeRequest, RangeResponse, RequestWrapper, Response, ResponseOp, TxnRequest,

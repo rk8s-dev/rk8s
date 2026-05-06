@@ -1,0 +1,171 @@
+name: libfuse-fs macOS
+
+# Runs cargo check / test --lib / build --example on macOS for libfuse-fs and
+# rfuse3 in the `check` job. The `mount-smoke` job additionally installs
+# macFUSE via Homebrew and exercises a real mount — kext-loading on
+# GitHub-hosted runners is gated on macOS version + System Integrity
+# Protection state, so the job is `continue-on-error: true` and treated
+# as advisory until we have a self-hosted runner with stable kext
+# permissions. Set repository variable LIBFUSE_SELF_HOSTED_MACFUSE=1 on a
+# macFUSE-capable self-hosted runner to enable the required smoke gate.
+#
+# Full conformance / performance baselines live in
+# project/libfuse-fs/tests/conformance/run_pjdfstest.sh and
+# project/libfuse-fs/script/macfuse_bench.sh — those are run by hand;
+# the numbers live in docs/macos-*.md.
+
+on:
+  pull_request:
+    paths:
+      - 'project/libfuse-fs/**'
+      - 'project/rfuse3/**'
+      - '.github/workflows/libfuse-fs-macos.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: libfuse-fs-macos-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+
+      - name: Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Cargo cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: project/libfuse-fs
+
+      - name: cargo check (rfuse3)
+        working-directory: project/rfuse3
+        run: cargo check --all-targets
+
+      - name: cargo check (libfuse-fs lib)
+        working-directory: project/libfuse-fs
+        run: cargo check --lib
+
+      - name: cargo build --example passthrough
+        working-directory: project/libfuse-fs
+        run: cargo build --example passthrough
+
+      - name: cargo test --lib (rfuse3)
+        working-directory: project/rfuse3
+        run: cargo test --lib --quiet
+
+      - name: cargo test --lib (libfuse-fs)
+        working-directory: project/libfuse-fs
+        # The mount-based tests are gated to RUN_PRIVILEGED_TESTS=1; without
+        # the env var they self-skip. Keep the lib-test run lightweight.
+        run: cargo test --lib --quiet
+
+  mount-smoke:
+    # Real-mount smoke job. macFUSE needs a kext, which most GitHub-hosted
+    # macOS runners refuse to load without operator approval — when that
+    # happens, this job is expected to skip / fail-soft. The check job
+    # above is the gate; this one is advisory until self-hosted lands.
+    runs-on: macos-latest
+    needs: check
+    timeout-minutes: 25
+    continue-on-error: true
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+
+      - name: Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cargo cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: project/libfuse-fs
+
+      - name: Install macFUSE
+        id: install_macfuse
+        run: |
+          set -euo pipefail
+          if [[ -x /Library/Filesystems/macfuse.fs/Contents/Resources/mount_macfuse ]]; then
+            echo "macFUSE already installed"
+          else
+            brew install --cask macfuse || {
+              echo "macFUSE install failed (kext approval likely missing) — skipping smoke"
+              echo "macfuse_ok=0" >> "$GITHUB_OUTPUT"
+              exit 0
+            }
+          fi
+          if [[ -x /Library/Filesystems/macfuse.fs/Contents/Resources/mount_macfuse ]]; then
+            echo "macfuse_ok=1" >> "$GITHUB_OUTPUT"
+          else
+            echo "macfuse_ok=0" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build passthrough example
+        if: steps.install_macfuse.outputs.macfuse_ok == '1'
+        working-directory: project/libfuse-fs
+        run: cargo build --example passthrough
+
+      - name: Smoke mount
+        if: steps.install_macfuse.outputs.macfuse_ok == '1'
+        working-directory: project/libfuse-fs
+        env:
+          KEEP_MOUNT: "0"
+          MACFUSE_SMOKE_REQUIRED: "0"
+          MOUNT_POINT: ${{ runner.temp }}/libfusefs-smoke-mnt
+          ROOT_DIR: ${{ runner.temp }}/libfusefs-smoke-root
+          RUN_MACFUSE_TESTS: "1"
+          SMOKE_LOOPS: "1"
+        run: bash tests/macos_mount_smoke.sh
+
+      - name: Skipped (no macFUSE)
+        if: steps.install_macfuse.outputs.macfuse_ok != '1'
+        run: echo "macFUSE not available on this runner — smoke skipped (advisory)"
+
+  self-hosted-mount-smoke:
+    # Required gate for a runner where macFUSE is preinstalled and approved.
+    # Kept behind a repo variable so GitHub-hosted PRs do not get stuck
+    # waiting for labels that are not present in every fork/repo.
+    if: vars.LIBFUSE_SELF_HOSTED_MACFUSE == '1'
+    runs-on: [self-hosted, macOS, macfuse]
+    needs: check
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+
+      - name: Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cargo cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: project/libfuse-fs
+
+      - name: Build passthrough example
+        working-directory: project/libfuse-fs
+        run: cargo build --example passthrough
+
+      - name: Smoke mount x10
+        working-directory: project/libfuse-fs
+        env:
+          KEEP_MOUNT: "0"
+          MOUNT_POINT: ${{ runner.temp }}/libfusefs-smoke-mnt
+          ROOT_DIR: ${{ runner.temp }}/libfusefs-smoke-root
+          RUN_MACFUSE_TESTS: "1"
+          SMOKE_LOOPS: "10"
+        run: bash tests/macos_mount_smoke.sh

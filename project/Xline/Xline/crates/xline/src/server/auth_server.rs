@@ -3,6 +3,7 @@ use std::sync::Arc;
 use tracing::debug;
 use utils::hash_password;
 use xlinerpc::Status;
+use xlinerpc::server::EndPoint as RouterEndpoint;
 // TODO: use our own status type
 // use xlinerpc::status::Status;
 use xlineapi::{
@@ -11,7 +12,6 @@ use xlineapi::{
 };
 
 use crate::{
-    router::endpoint::EndPoint as RouterEndpoint,
     rpc::{
         AuthDisableRequest, AuthDisableResponse, AuthEnableRequest, AuthEnableResponse,
         AuthRoleAddRequest, AuthRoleAddResponse, AuthRoleDeleteRequest, AuthRoleDeleteResponse,

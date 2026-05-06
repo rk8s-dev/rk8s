@@ -22,57 +22,36 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  tests:
-    name: Tests (unit + qlean)
+  unit-and-integration:
+    name: Unit and Fast Integration Tests
+    runs-on: rk8s-runner-set
+    timeout-minutes: 45
+    env:
+      RUST_BACKTRACE: "1"
+    steps:
+      - uses: actions/checkout@v6
+      - run: |
+          cd project
+          cargo build --release -p aardvark-dns
+          sudo mv target/release/aardvark-dns /usr/bin/
+      - run: |
+          cd project
+          cargo test -p rkforge --lib
+      - run: |
+          cd project
+          cargo test -p rkforge --test test_image_cmd
+
+  qlean-lifecycle:
+    name: Qlean Container Lifecycle Test
     runs-on: [self-hosted]
     timeout-minutes: 45
     env:
       RUSTUP_TOOLCHAIN: stable
       RUST_BACKTRACE: "1"
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          submodules: recursive
-
-      - name: Ensure aardvark-dns exists
-        shell: bash
-        run: |
-          if [ -f /usr/bin/aardvark-dns ]; then
-              echo "aardvark-dns already exists, skipping build"
-          else
-              echo "aardvark-dns not found, building..."
-              cd project
-              cargo build --release -p aardvark-dns
-              sudo mv target/release/aardvark-dns /usr/bin/
-          fi
-
-      - name: Cache cargo + qlean
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            # project/target
-          key: rkforge-${{ runner.os }}-${{ hashFiles('project/Cargo.lock') }}
-
+      - uses: actions/checkout@v6
       # Set up qlean prerequisites is unnecessary here as the self-hosted runner is already configured with the necessary dependencies and permissions to run qlean tests.
       # If the runner environment changes in the future, don't forget to add a step to check for qlean prerequisites and set up the environment accordingly.
-
-      - name: Run rkforge unit tests
-        shell: bash
-        run: |
+      - run: |
           cd project
-          cargo test -p rkforge --lib
-
-      - name: Run rkforge fast integration tests
-        shell: bash
-        run: |
-          cd project
-          cargo test -p rkforge --test test_image_cmd
-
-      - name: Run rkforge lifecycle test in qlean VM
-        shell: bash
-        run: |
-          cd project
-          cargo test -p rkforge --test test_container_lifecycle_qlean -- --nocapture
+          RUST_LOG=qlean=info cargo test -p rkforge --test test_container_lifecycle_qlean -- --nocapture

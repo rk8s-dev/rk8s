@@ -100,6 +100,7 @@ async fn exec_non_interactive(client: &mut Client, matches: &ArgMatches) -> Resu
         .watch_client()
         .watch(key.as_bytes(), Some(watch_options))
         .await?;
+
     while let Some(resp) = stream
         .message()
         .await

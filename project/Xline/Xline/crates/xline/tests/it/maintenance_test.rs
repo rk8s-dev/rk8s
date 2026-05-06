@@ -26,10 +26,12 @@ async fn test_snapshot_and_restore() -> Result<(), Box<dyn std::error::Error>> {
         let client = cluster.client().await.kv_client();
         let _ignore = client.put("key", "value", None).await?;
         tokio::time::sleep(Duration::from_millis(100)).await; // TODO: use `propose_index` and remove this sleep after we finished our client.
-        let mut maintenance_client =
-            Client::connect(vec![cluster.get_client_url(0)], ClientOptions::default())
-                .await?
-                .maintenance_client();
+        let mut maintenance_client = Client::connect(
+            vec![cluster.get_client_url(0)],
+            ClientOptions::default().with_quic_tls_config(Cluster::create_quic_tls_config()),
+        )
+        .await?
+        .maintenance_client();
         let mut stream = maintenance_client.snapshot().await?;
         let mut snapshot = tokio::fs::File::create(&snapshot_path).await?;
         while let Some(chunk) = stream.message().await? {

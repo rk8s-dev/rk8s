@@ -18,7 +18,7 @@ use tracing_subscriber::{EnvFilter, layer::SubscriberExt, util::SubscriberInitEx
 use slayerfs::{
     BlockKey, BlockStore, CacheConfig, ChunkLayout, ClientOptions, Config, DatabaseConfig,
     DatabaseMetaStore, DatabaseType, EtcdMetaStore, LocalFsBackend, MetaClient, MetaStore,
-    MetaStoreFactory, ObjectBlockStore, ObjectClient, S3Backend, S3Config, VFS,
+    MetaStoreFactory, ObjectBlockStore, ObjectClient, RedisMetaStore, S3Backend, S3Config, VFS,
 };
 
 const MB: usize = 1024 * 1024;
@@ -116,6 +116,7 @@ enum BackendKind {
 #[derive(ValueEnum, Debug, Clone)]
 enum MetaBackendKind {
     Sqlx,
+    Redis,
     Etcd,
 }
 
@@ -151,6 +152,7 @@ struct S3BackendOpts {
 #[derive(Clone)]
 enum MetaBackend {
     Sqlx { url: String },
+    Redis { url: String },
     Etcd { urls: Vec<String> },
 }
 
@@ -198,6 +200,7 @@ impl BenchConfig {
 
         let meta_backend = match args.meta_backend {
             MetaBackendKind::Sqlx => MetaBackend::Sqlx { url: args.meta_url },
+            MetaBackendKind::Redis => MetaBackend::Redis { url: args.meta_url },
             MetaBackendKind::Etcd => {
                 let urls = args
                     .meta_etcd_urls
@@ -403,6 +406,24 @@ async fn create_meta_store(cfg: &BenchConfig) -> Result<Arc<dyn MetaStore>> {
             let handle = MetaStoreFactory::<DatabaseMetaStore>::create_from_config(config)
                 .await
                 .context("create sqlx meta store")?;
+            Ok(handle.store() as Arc<dyn MetaStore>)
+        }
+        MetaBackend::Redis { url } => {
+            let client = ClientOptions {
+                no_background_jobs: true,
+                ..ClientOptions::default()
+            };
+            let config = Config {
+                database: DatabaseConfig {
+                    db_config: DatabaseType::Redis { url: url.clone() },
+                },
+                cache: CacheConfig::default(),
+                client,
+                compact: Default::default(),
+            };
+            let handle = MetaStoreFactory::<RedisMetaStore>::create_from_config(config)
+                .await
+                .context("create redis meta store")?;
             Ok(handle.store() as Arc<dyn MetaStore>)
         }
         MetaBackend::Etcd { urls } => {

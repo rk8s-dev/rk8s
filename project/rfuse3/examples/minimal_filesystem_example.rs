@@ -195,7 +195,7 @@ impl Filesystem for MinimalFileSystem {
                     kind: FileType::Directory,
                     name: std::ffi::OsString::from("."),
                     offset: 1,
-                    attr: root_attr.clone(),
+                    attr: root_attr,
                     entry_ttl: Duration::from_secs(1),
                     attr_ttl: Duration::from_secs(1),
                 },
@@ -263,7 +263,7 @@ impl Filesystem for MinimalFileSystem {
             let end = std::cmp::min(start + size as usize, self.content.len());
 
             let data = if start < self.content.len() {
-                self.content[start..end].as_bytes().to_vec()
+                self.content.as_bytes()[start..end].to_vec()
             } else {
                 Vec::new()
             };

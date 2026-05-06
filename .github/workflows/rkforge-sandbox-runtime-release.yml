@@ -1,0 +1,111 @@
+name: Build RKForge Sandbox Runtime to R2
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+jobs:
+  build-and-upload-runtime:
+    runs-on: ${{ matrix.target.runner }}
+    strategy:
+      fail-fast: true
+      matrix:
+        target:
+          - { rust: x86_64-unknown-linux-gnu, arch: amd64, runner: ubuntu-latest }
+          - { rust: aarch64-unknown-linux-gnu, arch: arm64, runner: ubuntu-24.04-arm }
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Rust
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+          target: ${{ matrix.target.rust }}
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential clang lld pkg-config protobuf-compiler zstd \
+            git curl patchelf python3 python3-pyelftools \
+            bc flex bison libelf-dev cpio rsync e2fsprogs
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/registry
+          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Cache cargo index
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/git
+          key: ${{ runner.os }}-cargo-index-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Cache cargo build
+        uses: actions/cache@v4
+        with:
+          path: project/target
+          key: ${{ runner.os }}-cargo-build-target-${{ matrix.target.rust }}-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Build rkforge release binaries
+        working-directory: ./project
+        run: |
+          cargo build --release --target ${{ matrix.target.rust }} -p rkforge \
+            --bin rkforge \
+            --bin rkforge-sandbox-shim \
+            --bin rkforge-sandbox-agent \
+            --bin rkforge-sandbox-guest-init
+
+      - name: Build libkrunfw from source
+        run: |
+          set -euxo pipefail
+          mkdir -p /tmp/rkforge-runtime-src
+          git clone --depth 1 https://github.com/containers/libkrunfw.git /tmp/rkforge-runtime-src/libkrunfw
+          make -C /tmp/rkforge-runtime-src/libkrunfw -j"$(nproc)"
+          make -C /tmp/rkforge-runtime-src/libkrunfw install PREFIX=/tmp/rkforge-runtime-install/libkrunfw
+
+      - name: Build libkrun from source
+        run: |
+          set -euxo pipefail
+          git clone --depth 1 https://github.com/containers/libkrun.git /tmp/rkforge-runtime-src/libkrun
+          make -C /tmp/rkforge-runtime-src/libkrun -j"$(nproc)" BLK=1
+          make -C /tmp/rkforge-runtime-src/libkrun install PREFIX=/tmp/rkforge-runtime-install/libkrun BLK=1
+
+      - name: Assemble runtime bundle and tarball
+        working-directory: ./project/rkforge
+        run: |
+          set -euxo pipefail
+          VERSION="${GITHUB_REF_NAME}"
+          TARGET="${{ matrix.target.rust }}"
+          mkdir -p runtime dist
+          tools/build-sandbox-runtime.sh \
+            --rkforge-bin "${GITHUB_WORKSPACE}/project/target/${{ matrix.target.rust }}/release/rkforge" \
+            --libkrun /tmp/rkforge-runtime-install/libkrun/lib64/libkrun.so \
+            --libkrunfw /tmp/rkforge-runtime-install/libkrunfw/lib64/libkrunfw.so \
+            --output runtime/current \
+            --archive "dist/rkforge-sandbox-runtime-${VERSION}-${TARGET}.tar.gz"
+
+          test -f "${GITHUB_WORKSPACE}/project/target/${{ matrix.target.rust }}/release/rkforge-sandbox-shim"
+          test -f "${GITHUB_WORKSPACE}/project/target/${{ matrix.target.rust }}/release/rkforge-sandbox-agent"
+          test -f "${GITHUB_WORKSPACE}/project/target/${{ matrix.target.rust }}/release/rkforge-sandbox-guest-init"
+
+      - name: Upload runtime artifact to Cloudflare R2
+        env:
+          RCLONE_CONFIG_R2_TYPE: s3
+          RCLONE_CONFIG_R2_PROVIDER: Cloudflare
+          RCLONE_CONFIG_R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          RCLONE_CONFIG_R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          RCLONE_CONFIG_R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+          RCLONE_CONFIG_R2_ACL: private
+        working-directory: ./project/rkforge
+        run: |
+          if [[ -f /etc/os-release ]]; then
+            curl https://rclone.org/install.sh | sudo bash
+          fi
+
+          rclone copy ./dist/ r2:${{ secrets.R2_BUCKET_NAME }}/rk8s/releases/${{ github.ref_name }}/ -v

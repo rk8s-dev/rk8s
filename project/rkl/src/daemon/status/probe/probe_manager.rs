@@ -675,8 +675,10 @@ mod tests {
     }
 
     fn test_pod_task(pod_name: &str) -> PodTask {
-        let mut metadata = ObjectMeta::default();
-        metadata.name = pod_name.to_string();
+        let metadata = ObjectMeta {
+            name: pod_name.to_string(),
+            ..Default::default()
+        };
 
         let probe = test_probe();
         PodTask {
@@ -691,6 +693,7 @@ mod tests {
                         image: "busybox".to_string(),
                         ports: vec![],
                         args: vec![],
+                        tty: false,
                         resources: None,
                         liveness_probe: Some(probe.clone()),
                         readiness_probe: Some(probe.clone()),
@@ -706,6 +709,7 @@ mod tests {
                         image: "busybox".to_string(),
                         ports: vec![],
                         args: vec![],
+                        tty: false,
                         resources: None,
                         liveness_probe: None,
                         readiness_probe: None,

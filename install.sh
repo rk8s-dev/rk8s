@@ -11,6 +11,7 @@ INSTALL_DIR="${RK8S_INSTALL_DIR:-/usr/local/bin}"
 COMPONENTS="rkforge distribution rks rkl slayerfs"
 DEFAULT_COMPONENT="rkforge"
 DEFAULT_VERSION="v0.1.2"
+INSTALL_SANDBOX_RUNTIME="${RK8S_INSTALL_SANDBOX_RUNTIME:-1}"
 
 # Color codes for output
 if [ -t 1 ]; then
@@ -78,6 +79,8 @@ ENVIRONMENT VARIABLES:
     RK8S_VERSION               Override version detection
     RK8S_INSTALL_DIR           Override installation directory
     RK8S_BASE_URL              Override download base URL
+    RK8S_INSTALL_SANDBOX_RUNTIME
+                               Set to 0 to skip rkforge sandbox runtime installation
 
 EOF
     exit 0
@@ -155,6 +158,23 @@ detect_arch() {
     echo "$ARCH"
 }
 
+detect_rust_target() {
+    case "${OS}/${ARCH}" in
+        linux/amd64)
+            echo "x86_64-unknown-linux-gnu"
+            ;;
+        linux/arm64)
+            echo "aarch64-unknown-linux-gnu"
+            ;;
+        darwin/arm64)
+            echo "aarch64-apple-darwin"
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+
 # Check for required tools
 check_dependencies() {
     if command -v curl >/dev/null 2>&1; then
@@ -177,6 +197,78 @@ download_file() {
         wget -q "$url" -O "$output" || return 1
     fi
     return 0
+}
+
+ensure_dir() {
+    local dir="$1"
+    if [ -d "$dir" ]; then
+        return 0
+    fi
+    if mkdir -p "$dir" 2>/dev/null; then
+        return 0
+    fi
+    if command -v sudo >/dev/null 2>&1; then
+        sudo mkdir -p "$dir"
+        return 0
+    fi
+    error "Cannot create directory $dir. Try: export RK8S_INSTALL_DIR=~/.rk8s/bin"
+}
+
+copy_tree() {
+    local src="$1"
+    local dest="$2"
+    ensure_dir "$dest"
+    if [ -w "$dest" ]; then
+        cp -a "$src"/. "$dest"/
+    else
+        if command -v sudo >/dev/null 2>&1; then
+            sudo cp -a "$src"/. "$dest"/
+        else
+            error "No write permission to $dest and sudo not available."
+        fi
+    fi
+}
+
+install_rkforge_sandbox_runtime() {
+    if [ "$INSTALL_SANDBOX_RUNTIME" = "0" ]; then
+        warn "Skipping rkforge sandbox runtime installation (RK8S_INSTALL_SANDBOX_RUNTIME=0)"
+        return 0
+    fi
+
+    if [ "$OS" != "linux" ]; then
+        warn "Sandbox runtime installation is currently only enabled on Linux, skipping..."
+        return 0
+    fi
+
+    local rust_target
+    rust_target="$(detect_rust_target)" || {
+        warn "No sandbox runtime target mapping for ${OS}/${ARCH}, skipping..."
+        return 0
+    }
+
+    local runtime_name="rkforge-sandbox-runtime-${VERSION}-${rust_target}.tar.gz"
+    local runtime_url="${BASE_URL}/${VERSION}/${runtime_name}"
+    local runtime_tar="${TEMP_DIR}/${runtime_name}"
+    local runtime_extract="${TEMP_DIR}/sandbox-runtime"
+    local runtime_root
+    runtime_root="$(dirname "$INSTALL_DIR")"
+    local runtime_lib_dir="${runtime_root}/lib"
+
+    info "Downloading rkforge sandbox runtime from $runtime_url..."
+    if ! download_file "$runtime_url" "$runtime_tar"; then
+        error "Failed to download rkforge sandbox runtime. Set RK8S_INSTALL_SANDBOX_RUNTIME=0 to skip sandbox support."
+    fi
+
+    ensure_dir "$runtime_extract"
+    tar -xzf "$runtime_tar" -C "$runtime_extract" || error "Failed to extract sandbox runtime archive"
+
+    if [ ! -d "$runtime_extract/runtime/bin" ] || [ ! -d "$runtime_extract/runtime/lib" ]; then
+        error "Sandbox runtime archive has unexpected layout"
+    fi
+
+    copy_tree "$runtime_extract/runtime/bin" "$INSTALL_DIR"
+    copy_tree "$runtime_extract/runtime/lib" "$runtime_lib_dir"
+    success "Installed rkforge sandbox runtime successfully"
 }
 
 # Fetch latest version from GitHub API
@@ -289,6 +381,10 @@ install_component() {
     fi
 
     success "Installed $component successfully"
+
+    if [ "$component" = "rkforge" ]; then
+        install_rkforge_sandbox_runtime
+    fi
 }
 
 # Main installation logic

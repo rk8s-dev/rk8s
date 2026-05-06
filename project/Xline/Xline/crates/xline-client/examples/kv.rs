@@ -7,11 +7,18 @@ use xline_client::{
 #[tokio::main]
 async fn main() -> Result<()> {
     // the name and address of all curp members
-    let curp_members = ["10.0.0.1:2379", "10.0.0.2:2379", "10.0.0.3:2379"];
+    // For local testing with 3 QUIC nodes:
+    let curp_members = [
+        "https://server0:2379", // node0
+        "https://server1:2381", // node1
+        "https://server2:2383", // node2
+    ];
 
-    let client = Client::connect(curp_members, ClientOptions::default())
-        .await?
-        .kv_client();
+    // Load CA certificate for QUIC TLS verification
+    let ca_cert_pem = include_bytes!("../../../fixtures/ca.crt").to_vec();
+    let options = ClientOptions::default().with_quic_peer_ca_cert(ca_cert_pem);
+
+    let client = Client::connect(curp_members, options).await?.kv_client();
 
     // put
     client.put("key1", "value1", None).await?;

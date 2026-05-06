@@ -4930,7 +4930,7 @@ dependencies = [
 
 [[package]]
 name = "libfuse-fs"
-version = "0.1.11"
+version = "0.1.12"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -4941,6 +4941,7 @@ dependencies = [
  "futures-util",
  "itertools 0.14.0",
  "libc",
+ "lru 0.16.3",
  "memmap2",
  "moka",
  "nix 0.29.0",
@@ -4957,6 +4958,16 @@ dependencies = [
  "uuid",
  "vm-memory",
  "vmm-sys-util 0.12.1",
+]
+
+[[package]]
+name = "libloading"
+version = "0.8.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d7c4b02199fee7c5d21a5ae7d8cfa79a6ef5bb2fc834d6e9058e89c825efdc55"
+dependencies = [
+ "cfg-if",
+ "windows-link 0.2.1",
 ]
 
 [[package]]
@@ -7649,6 +7660,7 @@ dependencies = [
  "libcni",
  "libcontainer",
  "libfuse-fs",
+ "libloading",
  "libnetwork",
  "liboci-cli",
  "libruntime",
@@ -7678,6 +7690,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
+ "tokio-util",
  "tracing",
  "tracing-subscriber",
  "trust-dns-resolver",

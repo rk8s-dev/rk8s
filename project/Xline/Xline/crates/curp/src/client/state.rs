@@ -78,12 +78,14 @@ impl State {
         cluster_version: u64,
     ) -> Arc<Self> {
         use crate::rpc::quic_transport::channel::DnsFallback;
-        use gm_quic::prelude::QuicClient;
+        use dquic::prelude::QuicClient;
 
         let quic_client = Arc::new(
             QuicClient::builder()
                 .with_root_certificates(rustls::RootCertStore::empty())
                 .without_cert()
+                .bind(["inet://0.0.0.0:0"])
+                .with_alpns(["h3"])
                 .build(),
         );
         Arc::new(Self {
