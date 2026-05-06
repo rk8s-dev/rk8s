@@ -4,21 +4,22 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "vendor",
+    name = "cni-plugin-vendor",
     urls = ["https://static.crates.io/crates/cni-plugin/cni-plugin-0.2.1.crate"],
     sha256 = "48c6fba2d1478ddc5ecc7f258ad010cf19b37c12f143d9497bd02ce4b6bb6b57",
     type = "tar.gz",
     strip_prefix = "cni-plugin-0.2.1",
+    out = "vendor",
 )
 
 cargo_manifest(
-    name = "manifest",
-    vendor = ":vendor",
+    name = "cni-plugin-manifest",
+    vendor = ":cni-plugin-vendor",
 )
 
 rust_library(
     name = "cni-plugin",
-    srcs = [":vendor"],
+    srcs = [":cni-plugin-vendor"],
     crate = "cni_plugin",
     crate_root = "vendor/src/lib.rs",
     edition = "2018",
@@ -27,11 +28,11 @@ rust_library(
         "futures",
         "with-smol",
     ],
-    rustc_flags = ["@$(location :manifest[env_flags])"],
+    rustc_flags = ["@$(location :cni-plugin-manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/async-process/1.8.1:async-process",
-        "//third-party/rust/crates/futures/0.3.31:futures",
+        "//third-party/rust/crates/futures/0.3.32:futures",
         "//third-party/rust/crates/ipnetwork/0.17.0:ipnetwork",
         "//third-party/rust/crates/log/0.4.29:log",
         "//third-party/rust/crates/macaddr/1.0.1:macaddr",

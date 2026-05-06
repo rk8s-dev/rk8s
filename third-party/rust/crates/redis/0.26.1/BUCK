@@ -4,21 +4,22 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "vendor",
+    name = "redis-vendor",
     urls = ["https://static.crates.io/crates/redis/redis-0.26.1.crate"],
     sha256 = "e902a69d09078829137b4a5d9d082e0490393537badd7c91a3d69d14639e115f",
     type = "tar.gz",
     strip_prefix = "redis-0.26.1",
+    out = "vendor",
 )
 
 cargo_manifest(
-    name = "manifest",
-    vendor = ":vendor",
+    name = "redis-manifest",
+    vendor = ":redis-vendor",
 )
 
 rust_library(
     name = "redis",
-    srcs = [":vendor"],
+    srcs = [":redis-vendor"],
     crate = "redis",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
@@ -43,25 +44,25 @@ rust_library(
         "tokio-retry",
         "tokio-util",
     ],
-    rustc_flags = ["@$(location :manifest[env_flags])"],
+    rustc_flags = ["@$(location :redis-manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/arc-swap/1.8.2:arc-swap",
+        "//third-party/rust/crates/arc-swap/1.9.1:arc-swap",
         "//third-party/rust/crates/async-trait/0.1.89:async-trait",
         "//third-party/rust/crates/bytes/1.11.1:bytes",
         "//third-party/rust/crates/combine/4.6.7:combine",
-        "//third-party/rust/crates/futures-util/0.3.31:futures-util",
-        "//third-party/rust/crates/futures/0.3.31:futures",
-        "//third-party/rust/crates/itoa/1.0.17:itoa",
+        "//third-party/rust/crates/futures-util/0.3.32:futures-util",
+        "//third-party/rust/crates/futures/0.3.32:futures",
+        "//third-party/rust/crates/itoa/1.0.18:itoa",
         "//third-party/rust/crates/num-bigint/0.4.6:num-bigint",
         "//third-party/rust/crates/percent-encoding/2.3.2:percent-encoding",
-        "//third-party/rust/crates/pin-project-lite/0.2.16:pin-project-lite",
+        "//third-party/rust/crates/pin-project-lite/0.2.17:pin-project-lite",
         "//third-party/rust/crates/ryu/1.0.23:ryu",
         "//third-party/rust/crates/sha1_smol/1.0.1:sha1_smol",
         "//third-party/rust/crates/socket2/0.5.10:socket2",
-        "//third-party/rust/crates/tokio-retry/0.3.0:tokio-retry",
+        "//third-party/rust/crates/tokio-retry/0.3.1:tokio-retry",
         "//third-party/rust/crates/tokio-util/0.7.18:tokio-util",
-        "//third-party/rust/crates/tokio/1.49.0:tokio",
+        "//third-party/rust/crates/tokio/1.52.2:tokio",
         "//third-party/rust/crates/url/2.5.8:url",
     ],
 )

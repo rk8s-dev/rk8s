@@ -4,30 +4,31 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "buildscript_run", "rust_binary", "rust_library")
 
 http_archive(
-    name = "vendor",
+    name = "async-io-vendor",
     urls = ["https://static.crates.io/crates/async-io/async-io-2.6.0.crate"],
     sha256 = "456b8a8feb6f42d237746d4b3e9a178494627745c3c56c6ea55d92ba50d026fc",
     type = "tar.gz",
     strip_prefix = "async-io-2.6.0",
+    out = "vendor",
 )
 
 cargo_manifest(
-    name = "manifest",
-    vendor = ":vendor",
+    name = "async-io-manifest",
+    vendor = ":async-io-vendor",
 )
 
 rust_library(
     name = "async-io",
-    srcs = [":vendor"],
+    srcs = [":async-io-vendor"],
     crate = "async_io",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
-        "OUT_DIR": "$(location :build-script-run[out_dir])",
+        "OUT_DIR": "$(location :async-io-build-script-run[out_dir])",
     },
     rustc_flags = [
-        "@$(location :build-script-run[rustc_flags])",
-        "@$(location :manifest[env_flags])",
+        "@$(location :async-io-build-script-run[rustc_flags])",
+        "@$(location :async-io-manifest[env_flags])",
     ],
     os_deps = {
         "windows": ["//third-party/rust/crates/windows-sys/0.61.2:windows-sys"],
@@ -36,32 +37,32 @@ rust_library(
     deps = [
         "//third-party/rust/crates/cfg-if/1.0.4:cfg-if",
         "//third-party/rust/crates/concurrent-queue/2.5.0:concurrent-queue",
-        "//third-party/rust/crates/futures-io/0.3.31:futures-io",
+        "//third-party/rust/crates/futures-io/0.3.32:futures-io",
         "//third-party/rust/crates/futures-lite/2.6.1:futures-lite",
         "//third-party/rust/crates/parking/2.2.1:parking",
         "//third-party/rust/crates/polling/3.11.0:polling",
-        "//third-party/rust/crates/rustix/1.1.3:rustix",
+        "//third-party/rust/crates/rustix/1.1.4:rustix",
         "//third-party/rust/crates/slab/0.4.12:slab",
     ],
 )
 
 rust_binary(
-    name = "build-script-build",
-    srcs = [":vendor"],
+    name = "async-io-build-script-build",
+    srcs = [":async-io-vendor"],
     crate = "build_script_build",
     crate_root = "vendor/build.rs",
     edition = "2021",
-    rustc_flags = ["@$(location :manifest[env_flags])"],
+    rustc_flags = ["@$(location :async-io-manifest[env_flags])"],
     visibility = [],
     deps = ["//third-party/rust/crates/autocfg/1.5.0:autocfg"],
 )
 
 buildscript_run(
-    name = "build-script-run",
+    name = "async-io-build-script-run",
     package_name = "async-io",
-    buildscript_rule = ":build-script-build",
-    env_srcs = [":manifest[env_dict]"],
+    buildscript_rule = ":async-io-build-script-build",
+    env_srcs = [":async-io-manifest[env_dict]"],
     version = "2.6.0",
-    manifest_dir = ":vendor",
+    manifest_dir = ":async-io-vendor",
     visibility = ["PUBLIC"],
 )

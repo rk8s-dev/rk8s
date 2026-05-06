@@ -4,37 +4,38 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "vendor",
+    name = "h2-vendor",
     urls = ["https://static.crates.io/crates/h2/h2-0.3.27.crate"],
     sha256 = "0beca50380b1fc32983fc1cb4587bfa4bb9e78fc259aad4a0032d2080309222d",
     type = "tar.gz",
     strip_prefix = "h2-0.3.27",
+    out = "vendor",
 )
 
 cargo_manifest(
-    name = "manifest",
-    vendor = ":vendor",
+    name = "h2-manifest",
+    vendor = ":h2-vendor",
 )
 
 rust_library(
     name = "h2",
-    srcs = [":vendor"],
+    srcs = [":h2-vendor"],
     crate = "h2",
     crate_root = "vendor/src/lib.rs",
     edition = "2018",
-    rustc_flags = ["@$(location :manifest[env_flags])"],
+    rustc_flags = ["@$(location :h2-manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/bytes/1.11.1:bytes",
         "//third-party/rust/crates/fnv/1.0.7:fnv",
-        "//third-party/rust/crates/futures-core/0.3.31:futures-core",
-        "//third-party/rust/crates/futures-sink/0.3.31:futures-sink",
-        "//third-party/rust/crates/futures-util/0.3.31:futures-util",
+        "//third-party/rust/crates/futures-core/0.3.32:futures-core",
+        "//third-party/rust/crates/futures-sink/0.3.32:futures-sink",
+        "//third-party/rust/crates/futures-util/0.3.32:futures-util",
         "//third-party/rust/crates/http/0.2.12:http",
-        "//third-party/rust/crates/indexmap/2.13.0:indexmap",
+        "//third-party/rust/crates/indexmap/2.14.0:indexmap",
         "//third-party/rust/crates/slab/0.4.12:slab",
         "//third-party/rust/crates/tokio-util/0.7.18:tokio-util",
-        "//third-party/rust/crates/tokio/1.49.0:tokio",
+        "//third-party/rust/crates/tokio/1.52.2:tokio",
         "//third-party/rust/crates/tracing/0.1.44:tracing",
     ],
 )

@@ -4,26 +4,27 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "buildscript_run", "rust_binary", "rust_library")
 
 http_archive(
-    name = "vendor",
+    name = "ring-vendor",
     urls = ["https://static.crates.io/crates/ring/ring-0.17.14.crate"],
     sha256 = "a4689e6c2294d81e88dc6261c768b63bc4fcdb852be6d1352498b114f61383b7",
     type = "tar.gz",
     strip_prefix = "ring-0.17.14",
+    out = "vendor",
 )
 
 cargo_manifest(
-    name = "manifest",
-    vendor = ":vendor",
+    name = "ring-manifest",
+    vendor = ":ring-vendor",
 )
 
 rust_library(
     name = "ring",
-    srcs = [":vendor"],
+    srcs = [":ring-vendor"],
     crate = "ring",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
-        "OUT_DIR": "$(location :build-script-run[out_dir])",
+        "OUT_DIR": "$(location :ring-build-script-run[out_dir])",
     },
     features = [
         "alloc",
@@ -33,11 +34,11 @@ rust_library(
         "wasm32_unknown_unknown_js",
     ],
     rustc_flags = [
-        "@$(location :build-script-run[rustc_flags])",
-        "@$(location :manifest[env_flags])",
+        "@$(location :ring-build-script-run[rustc_flags])",
+        "@$(location :ring-manifest[env_flags])",
     ],
     os_deps = {
-        "macos": ["//third-party/rust/crates/libc/0.2.182:libc"],
+        "macos": ["//third-party/rust/crates/libc/0.2.186:libc"],
     },
     visibility = ["PUBLIC"],
     deps = [
@@ -48,8 +49,8 @@ rust_library(
 )
 
 rust_binary(
-    name = "build-script-build",
-    srcs = [":vendor"],
+    name = "ring-build-script-build",
+    srcs = [":ring-vendor"],
     crate = "build_script_build",
     crate_root = "vendor/build.rs",
     edition = "2021",
@@ -60,16 +61,16 @@ rust_binary(
         "std",
         "wasm32_unknown_unknown_js",
     ],
-    rustc_flags = ["@$(location :manifest[env_flags])"],
+    rustc_flags = ["@$(location :ring-manifest[env_flags])"],
     visibility = [],
-    deps = ["//third-party/rust/crates/cc/1.2.56:cc"],
+    deps = ["//third-party/rust/crates/cc/1.2.61:cc"],
 )
 
 buildscript_run(
-    name = "build-script-run",
+    name = "ring-build-script-run",
     package_name = "ring",
-    buildscript_rule = ":build-script-build",
-    env_srcs = [":manifest[env_dict]"],
+    buildscript_rule = ":ring-build-script-build",
+    env_srcs = [":ring-manifest[env_dict]"],
     features = [
         "alloc",
         "default",
@@ -78,6 +79,6 @@ buildscript_run(
         "wasm32_unknown_unknown_js",
     ],
     version = "0.17.14",
-    manifest_dir = ":vendor",
+    manifest_dir = ":ring-vendor",
     visibility = ["PUBLIC"],
 )

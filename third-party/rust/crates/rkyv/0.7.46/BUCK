@@ -4,26 +4,27 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "buildscript_run", "rust_binary", "rust_library")
 
 http_archive(
-    name = "vendor",
+    name = "rkyv-vendor",
     urls = ["https://static.crates.io/crates/rkyv/rkyv-0.7.46.crate"],
     sha256 = "2297bf9c81a3f0dc96bc9521370b88f054168c29826a75e89c55ff196e7ed6a1",
     type = "tar.gz",
     strip_prefix = "rkyv-0.7.46",
+    out = "vendor",
 )
 
 cargo_manifest(
-    name = "manifest",
-    vendor = ":vendor",
+    name = "rkyv-manifest",
+    vendor = ":rkyv-vendor",
 )
 
 rust_library(
     name = "rkyv",
-    srcs = [":vendor"],
+    srcs = [":rkyv-vendor"],
     crate = "rkyv",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
-        "OUT_DIR": "$(location :build-script-run[out_dir])",
+        "OUT_DIR": "$(location :rkyv-build-script-run[out_dir])",
     },
     features = [
         "alloc",
@@ -32,8 +33,8 @@ rust_library(
         "std",
     ],
     rustc_flags = [
-        "@$(location :build-script-run[rustc_flags])",
-        "@$(location :manifest[env_flags])",
+        "@$(location :rkyv-build-script-run[rustc_flags])",
+        "@$(location :rkyv-manifest[env_flags])",
     ],
     visibility = ["PUBLIC"],
     deps = [
@@ -45,14 +46,14 @@ rust_library(
         "//third-party/rust/crates/rend/0.4.2:rend",
         "//third-party/rust/crates/rkyv_derive/0.7.46:rkyv_derive",
         "//third-party/rust/crates/seahash/4.1.0:seahash",
-        "//third-party/rust/crates/tinyvec/1.10.0:tinyvec",
-        "//third-party/rust/crates/uuid/1.21.0:uuid",
+        "//third-party/rust/crates/tinyvec/1.11.0:tinyvec",
+        "//third-party/rust/crates/uuid/1.23.1:uuid",
     ],
 )
 
 rust_binary(
-    name = "build-script-build",
-    srcs = [":vendor"],
+    name = "rkyv-build-script-build",
+    srcs = [":rkyv-vendor"],
     crate = "build_script_build",
     crate_root = "vendor/build.rs",
     edition = "2021",
@@ -62,15 +63,15 @@ rust_binary(
         "size_32",
         "std",
     ],
-    rustc_flags = ["@$(location :manifest[env_flags])"],
+    rustc_flags = ["@$(location :rkyv-manifest[env_flags])"],
     visibility = [],
 )
 
 buildscript_run(
-    name = "build-script-run",
+    name = "rkyv-build-script-run",
     package_name = "rkyv",
-    buildscript_rule = ":build-script-build",
-    env_srcs = [":manifest[env_dict]"],
+    buildscript_rule = ":rkyv-build-script-build",
+    env_srcs = [":rkyv-manifest[env_dict]"],
     features = [
         "alloc",
         "hashbrown",
@@ -78,6 +79,6 @@ buildscript_run(
         "std",
     ],
     version = "0.7.46",
-    manifest_dir = ":vendor",
+    manifest_dir = ":rkyv-vendor",
     visibility = ["PUBLIC"],
 )

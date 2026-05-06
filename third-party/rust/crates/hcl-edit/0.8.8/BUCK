@@ -4,26 +4,27 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "vendor",
+    name = "hcl-edit-vendor",
     urls = ["https://static.crates.io/crates/hcl-edit/hcl-edit-0.8.8.crate"],
     sha256 = "88489f7cdf733b4c7798403f72d2c16fdc2b720e82c5151055f618a9b49afc1c",
     type = "tar.gz",
     strip_prefix = "hcl-edit-0.8.8",
+    out = "vendor",
 )
 
 cargo_manifest(
-    name = "manifest",
-    vendor = ":vendor",
+    name = "hcl-edit-manifest",
+    vendor = ":hcl-edit-vendor",
 )
 
 rust_library(
     name = "hcl-edit",
-    srcs = [":vendor"],
+    srcs = [":hcl-edit-vendor"],
     crate = "hcl_edit",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
     features = ["default"],
-    rustc_flags = ["@$(location :manifest[env_flags])"],
+    rustc_flags = ["@$(location :hcl-edit-manifest[env_flags])"],
     named_deps = {
         "vecmap": "//third-party/rust/crates/vecmap-rs/0.2.4:vecmap-rs",
     },
@@ -31,6 +32,6 @@ rust_library(
     deps = [
         "//third-party/rust/crates/fnv/1.0.7:fnv",
         "//third-party/rust/crates/hcl-primitives/0.1.11:hcl-primitives",
-        "//third-party/rust/crates/winnow/0.7.14:winnow",
+        "//third-party/rust/crates/winnow/0.7.15:winnow",
     ],
 )

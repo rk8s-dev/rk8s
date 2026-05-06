@@ -4,25 +4,26 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "vendor",
+    name = "russh-util-vendor",
     urls = ["https://static.crates.io/crates/russh-util/russh-util-0.52.0.crate"],
     sha256 = "668424a5dde0bcb45b55ba7de8476b93831b4aa2fa6947e145f3b053e22c60b6",
     type = "tar.gz",
     strip_prefix = "russh-util-0.52.0",
+    out = "vendor",
 )
 
 cargo_manifest(
-    name = "manifest",
-    vendor = ":vendor",
+    name = "russh-util-manifest",
+    vendor = ":russh-util-vendor",
 )
 
 rust_library(
     name = "russh-util",
-    srcs = [":vendor"],
+    srcs = [":russh-util-vendor"],
     crate = "russh_util",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
-    rustc_flags = ["@$(location :manifest[env_flags])"],
+    rustc_flags = ["@$(location :russh-util-manifest[env_flags])"],
     visibility = ["PUBLIC"],
-    deps = ["//third-party/rust/crates/tokio/1.49.0:tokio"],
+    deps = ["//third-party/rust/crates/tokio/1.52.2:tokio"],
 )

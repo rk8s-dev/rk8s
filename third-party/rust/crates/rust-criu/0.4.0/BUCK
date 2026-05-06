@@ -4,56 +4,57 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "buildscript_run", "rust_binary", "rust_library")
 
 http_archive(
-    name = "vendor",
+    name = "rust-criu-vendor",
     urls = ["https://static.crates.io/crates/rust-criu/rust-criu-0.4.0.crate"],
     sha256 = "4737b28406b3395359f485127073117a11cedc8942738b69ba6ab9a79432acbc",
     type = "tar.gz",
     strip_prefix = "rust-criu-0.4.0",
+    out = "vendor",
 )
 
 cargo_manifest(
-    name = "manifest",
-    vendor = ":vendor",
+    name = "rust-criu-manifest",
+    vendor = ":rust-criu-vendor",
 )
 
 rust_library(
     name = "rust-criu",
-    srcs = [":vendor"],
+    srcs = [":rust-criu-vendor"],
     crate = "rust_criu",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
-        "OUT_DIR": "$(location :build-script-run[out_dir])",
+        "OUT_DIR": "$(location :rust-criu-build-script-run[out_dir])",
     },
     rustc_flags = [
-        "@$(location :build-script-run[rustc_flags])",
-        "@$(location :manifest[env_flags])",
+        "@$(location :rust-criu-build-script-run[rustc_flags])",
+        "@$(location :rust-criu-manifest[env_flags])",
     ],
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/anyhow/1.0.101:anyhow",
-        "//third-party/rust/crates/libc/0.2.182:libc",
+        "//third-party/rust/crates/anyhow/1.0.102:anyhow",
+        "//third-party/rust/crates/libc/0.2.186:libc",
         "//third-party/rust/crates/protobuf/3.2.0:protobuf",
     ],
 )
 
 rust_binary(
-    name = "build-script-build",
-    srcs = [":vendor"],
+    name = "rust-criu-build-script-build",
+    srcs = [":rust-criu-vendor"],
     crate = "build_script_build",
     crate_root = "vendor/build.rs",
     edition = "2021",
-    rustc_flags = ["@$(location :manifest[env_flags])"],
+    rustc_flags = ["@$(location :rust-criu-manifest[env_flags])"],
     visibility = [],
     deps = ["//third-party/rust/crates/protobuf-codegen/3.2.0:protobuf-codegen"],
 )
 
 buildscript_run(
-    name = "build-script-run",
+    name = "rust-criu-build-script-run",
     package_name = "rust-criu",
-    buildscript_rule = ":build-script-build",
-    env_srcs = [":manifest[env_dict]"],
+    buildscript_rule = ":rust-criu-build-script-build",
+    env_srcs = [":rust-criu-manifest[env_dict]"],
     version = "0.4.0",
-    manifest_dir = ":vendor",
+    manifest_dir = ":rust-criu-vendor",
     visibility = ["PUBLIC"],
 )

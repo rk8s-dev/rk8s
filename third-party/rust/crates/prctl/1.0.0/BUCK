@@ -4,28 +4,29 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "vendor",
+    name = "prctl-vendor",
     urls = ["https://static.crates.io/crates/prctl/prctl-1.0.0.crate"],
     sha256 = "059a34f111a9dee2ce1ac2826a68b24601c4298cfeb1a587c3cb493d5ab46f52",
     type = "tar.gz",
     strip_prefix = "prctl-1.0.0",
+    out = "vendor",
 )
 
 cargo_manifest(
-    name = "manifest",
-    vendor = ":vendor",
+    name = "prctl-manifest",
+    vendor = ":prctl-vendor",
 )
 
 rust_library(
     name = "prctl",
-    srcs = [":vendor"],
+    srcs = [":prctl-vendor"],
     crate = "prctl",
     crate_root = "vendor/src/lib.rs",
     edition = "2015",
-    rustc_flags = ["@$(location :manifest[env_flags])"],
+    rustc_flags = ["@$(location :prctl-manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/libc/0.2.182:libc",
-        "//third-party/rust/crates/nix/0.30.1:nix",
+        "//third-party/rust/crates/libc/0.2.186:libc",
+        "//third-party/rust/crates/nix/0.31.2:nix",
     ],
 )

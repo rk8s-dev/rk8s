@@ -4,29 +4,30 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "vendor",
+    name = "serde_yaml-vendor",
     urls = ["https://static.crates.io/crates/serde_yaml/serde_yaml-0.9.34+deprecated.crate"],
     sha256 = "6a8b1a1a2ebf674015cc02edccce75287f1a0130d394307b36743c2f5d504b47",
     type = "tar.gz",
     strip_prefix = "serde_yaml-0.9.34+deprecated",
+    out = "vendor",
 )
 
 cargo_manifest(
-    name = "manifest",
-    vendor = ":vendor",
+    name = "serde_yaml-manifest",
+    vendor = ":serde_yaml-vendor",
 )
 
 rust_library(
     name = "serde_yaml",
-    srcs = [":vendor"],
+    srcs = [":serde_yaml-vendor"],
     crate = "serde_yaml",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
-    rustc_flags = ["@$(location :manifest[env_flags])"],
+    rustc_flags = ["@$(location :serde_yaml-manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/indexmap/2.13.0:indexmap",
-        "//third-party/rust/crates/itoa/1.0.17:itoa",
+        "//third-party/rust/crates/indexmap/2.14.0:indexmap",
+        "//third-party/rust/crates/itoa/1.0.18:itoa",
         "//third-party/rust/crates/ryu/1.0.23:ryu",
         "//third-party/rust/crates/serde/1.0.228:serde",
         "//third-party/rust/crates/unsafe-libyaml/0.2.11:unsafe-libyaml",

@@ -4,21 +4,22 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "vendor",
+    name = "core-foundation-vendor",
     urls = ["https://static.crates.io/crates/core-foundation/core-foundation-0.9.4.crate"],
     sha256 = "91e195e091a93c46f7102ec7818a2aa394e1e1771c3ab4825963fa03e45afb8f",
     type = "tar.gz",
     strip_prefix = "core-foundation-0.9.4",
+    out = "vendor",
 )
 
 cargo_manifest(
-    name = "manifest",
-    vendor = ":vendor",
+    name = "core-foundation-manifest",
+    vendor = ":core-foundation-vendor",
 )
 
 rust_library(
     name = "core-foundation",
-    srcs = [":vendor"],
+    srcs = [":core-foundation-vendor"],
     crate = "core_foundation",
     crate_root = "vendor/src/lib.rs",
     edition = "2018",
@@ -26,10 +27,10 @@ rust_library(
         "default",
         "link",
     ],
-    rustc_flags = ["@$(location :manifest[env_flags])"],
+    rustc_flags = ["@$(location :core-foundation-manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/core-foundation-sys/0.8.7:core-foundation-sys",
-        "//third-party/rust/crates/libc/0.2.182:libc",
+        "//third-party/rust/crates/libc/0.2.186:libc",
     ],
 )

@@ -4,21 +4,22 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "vendor",
+    name = "sqlx-macros-vendor",
     urls = ["https://static.crates.io/crates/sqlx-macros/sqlx-macros-0.8.6.crate"],
     sha256 = "a2d452988ccaacfbf5e0bdbc348fb91d7c8af5bee192173ac3636b5fb6e6715d",
     type = "tar.gz",
     strip_prefix = "sqlx-macros-0.8.6",
+    out = "vendor",
 )
 
 cargo_manifest(
-    name = "manifest",
-    vendor = ":vendor",
+    name = "sqlx-macros-manifest",
+    vendor = ":sqlx-macros-vendor",
 )
 
 rust_library(
     name = "sqlx-macros",
-    srcs = [":vendor"],
+    srcs = [":sqlx-macros-vendor"],
     crate = "sqlx_macros",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
@@ -38,14 +39,14 @@ rust_library(
         "time",
         "uuid",
     ],
-    rustc_flags = ["@$(location :manifest[env_flags])"],
+    rustc_flags = ["@$(location :sqlx-macros-manifest[env_flags])"],
     proc_macro = True,
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/proc-macro2/1.0.106:proc-macro2",
-        "//third-party/rust/crates/quote/1.0.44:quote",
+        "//third-party/rust/crates/quote/1.0.45:quote",
         "//third-party/rust/crates/sqlx-core/0.8.6:sqlx-core",
         "//third-party/rust/crates/sqlx-macros-core/0.8.6:sqlx-macros-core",
-        "//third-party/rust/crates/syn/2.0.115:syn",
+        "//third-party/rust/crates/syn/2.0.117:syn",
     ],
 )

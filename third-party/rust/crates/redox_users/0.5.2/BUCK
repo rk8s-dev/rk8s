@@ -4,29 +4,30 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "vendor",
+    name = "redox_users-vendor",
     urls = ["https://static.crates.io/crates/redox_users/redox_users-0.5.2.crate"],
     sha256 = "a4e608c6638b9c18977b00b475ac1f28d14e84b27d8d42f70e0bf1e3dec127ac",
     type = "tar.gz",
     strip_prefix = "redox_users-0.5.2",
+    out = "vendor",
 )
 
 cargo_manifest(
-    name = "manifest",
-    vendor = ":vendor",
+    name = "redox_users-manifest",
+    vendor = ":redox_users-vendor",
 )
 
 rust_library(
     name = "redox_users",
-    srcs = [":vendor"],
+    srcs = [":redox_users-vendor"],
     crate = "redox_users",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
-    rustc_flags = ["@$(location :manifest[env_flags])"],
+    rustc_flags = ["@$(location :redox_users-manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/getrandom/0.2.17:getrandom",
-        "//third-party/rust/crates/libredox/0.1.12:libredox",
+        "//third-party/rust/crates/libredox/0.1.16:libredox",
         "//third-party/rust/crates/thiserror/2.0.18:thiserror",
     ],
 )

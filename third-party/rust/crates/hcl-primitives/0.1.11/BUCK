@@ -4,21 +4,22 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "vendor",
+    name = "hcl-primitives-vendor",
     urls = ["https://static.crates.io/crates/hcl-primitives/hcl-primitives-0.1.11.crate"],
     sha256 = "829a11d304c89e2cfe0dbb494a686bbe2b48ade17705c62cd1957b04aa4630f6",
     type = "tar.gz",
     strip_prefix = "hcl-primitives-0.1.11",
+    out = "vendor",
 )
 
 cargo_manifest(
-    name = "manifest",
-    vendor = ":vendor",
+    name = "hcl-primitives-manifest",
+    vendor = ":hcl-primitives-vendor",
 )
 
 rust_library(
     name = "hcl-primitives",
-    srcs = [":vendor"],
+    srcs = [":hcl-primitives-vendor"],
     crate = "hcl_primitives",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
@@ -27,13 +28,13 @@ rust_library(
         "serde",
         "std",
     ],
-    rustc_flags = ["@$(location :manifest[env_flags])"],
+    rustc_flags = ["@$(location :hcl-primitives-manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/itoa/1.0.17:itoa",
+        "//third-party/rust/crates/itoa/1.0.18:itoa",
         "//third-party/rust/crates/kstring/2.0.2:kstring",
         "//third-party/rust/crates/ryu/1.0.23:ryu",
         "//third-party/rust/crates/serde/1.0.228:serde",
-        "//third-party/rust/crates/unicode-ident/1.0.23:unicode-ident",
+        "//third-party/rust/crates/unicode-ident/1.0.24:unicode-ident",
     ],
 )

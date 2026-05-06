@@ -4,67 +4,68 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "buildscript_run", "rust_binary", "rust_library")
 
 http_archive(
-    name = "vendor",
+    name = "etcd-client-vendor",
     urls = ["https://static.crates.io/crates/etcd-client/etcd-client-0.17.0.crate"],
     sha256 = "8acfe553027cd07fc5fafa81a84f19a7a87eaffaccd2162b6db05e8d6ce98084",
     type = "tar.gz",
     strip_prefix = "etcd-client-0.17.0",
+    out = "vendor",
 )
 
 cargo_manifest(
-    name = "manifest",
-    vendor = ":vendor",
+    name = "etcd-client-manifest",
+    vendor = ":etcd-client-vendor",
 )
 
 rust_library(
     name = "etcd-client",
-    srcs = [":vendor"],
+    srcs = [":etcd-client-vendor"],
     crate = "etcd_client",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
-        "OUT_DIR": "$(location :build-script-run[out_dir])",
+        "OUT_DIR": "$(location :etcd-client-build-script-run[out_dir])",
     },
     features = ["tls"],
     rustc_flags = [
-        "@$(location :build-script-run[rustc_flags])",
-        "@$(location :manifest[env_flags])",
+        "@$(location :etcd-client-build-script-run[rustc_flags])",
+        "@$(location :etcd-client-manifest[env_flags])",
     ],
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/http/1.4.0:http",
         "//third-party/rust/crates/prost/0.14.3:prost",
         "//third-party/rust/crates/tokio-stream/0.1.18:tokio-stream",
-        "//third-party/rust/crates/tokio/1.49.0:tokio",
-        "//third-party/rust/crates/tonic-prost/0.14.4:tonic-prost",
-        "//third-party/rust/crates/tonic/0.14.4:tonic",
+        "//third-party/rust/crates/tokio/1.52.2:tokio",
+        "//third-party/rust/crates/tonic-prost/0.14.5:tonic-prost",
+        "//third-party/rust/crates/tonic/0.14.5:tonic",
         "//third-party/rust/crates/tower-service/0.3.3:tower-service",
         "//third-party/rust/crates/tower/0.5.3:tower",
     ],
 )
 
 rust_binary(
-    name = "build-script-build",
-    srcs = [":vendor"],
+    name = "etcd-client-build-script-build",
+    srcs = [":etcd-client-vendor"],
     crate = "build_script_build",
     crate_root = "vendor/build.rs",
     edition = "2021",
     features = ["tls"],
-    rustc_flags = ["@$(location :manifest[env_flags])"],
+    rustc_flags = ["@$(location :etcd-client-manifest[env_flags])"],
     visibility = [],
     deps = [
-        "//third-party/rust/crates/tonic-build/0.14.4:tonic-build",
-        "//third-party/rust/crates/tonic-prost-build/0.14.4:tonic-prost-build",
+        "//third-party/rust/crates/tonic-build/0.14.5:tonic-build",
+        "//third-party/rust/crates/tonic-prost-build/0.14.5:tonic-prost-build",
     ],
 )
 
 buildscript_run(
-    name = "build-script-run",
+    name = "etcd-client-build-script-run",
     package_name = "etcd-client",
-    buildscript_rule = ":build-script-build",
-    env_srcs = [":manifest[env_dict]"],
+    buildscript_rule = ":etcd-client-build-script-build",
+    env_srcs = [":etcd-client-manifest[env_dict]"],
     features = ["tls"],
     version = "0.17.0",
-    manifest_dir = ":vendor",
+    manifest_dir = ":etcd-client-vendor",
     visibility = ["PUBLIC"],
 )

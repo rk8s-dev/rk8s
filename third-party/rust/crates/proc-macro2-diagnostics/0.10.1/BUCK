@@ -4,26 +4,27 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "buildscript_run", "rust_binary", "rust_library")
 
 http_archive(
-    name = "vendor",
+    name = "proc-macro2-diagnostics-vendor",
     urls = ["https://static.crates.io/crates/proc-macro2-diagnostics/proc-macro2-diagnostics-0.10.1.crate"],
     sha256 = "af066a9c399a26e020ada66a034357a868728e72cd426f3adcd35f80d88d88c8",
     type = "tar.gz",
     strip_prefix = "proc-macro2-diagnostics-0.10.1",
+    out = "vendor",
 )
 
 cargo_manifest(
-    name = "manifest",
-    vendor = ":vendor",
+    name = "proc-macro2-diagnostics-manifest",
+    vendor = ":proc-macro2-diagnostics-vendor",
 )
 
 rust_library(
     name = "proc-macro2-diagnostics",
-    srcs = [":vendor"],
+    srcs = [":proc-macro2-diagnostics-vendor"],
     crate = "proc_macro2_diagnostics",
     crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
-        "OUT_DIR": "$(location :build-script-run[out_dir])",
+        "OUT_DIR": "$(location :proc-macro2-diagnostics-build-script-run[out_dir])",
     },
     features = [
         "colors",
@@ -31,21 +32,21 @@ rust_library(
         "yansi",
     ],
     rustc_flags = [
-        "@$(location :build-script-run[rustc_flags])",
-        "@$(location :manifest[env_flags])",
+        "@$(location :proc-macro2-diagnostics-build-script-run[rustc_flags])",
+        "@$(location :proc-macro2-diagnostics-manifest[env_flags])",
     ],
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/proc-macro2/1.0.106:proc-macro2",
-        "//third-party/rust/crates/quote/1.0.44:quote",
-        "//third-party/rust/crates/syn/2.0.115:syn",
+        "//third-party/rust/crates/quote/1.0.45:quote",
+        "//third-party/rust/crates/syn/2.0.117:syn",
         "//third-party/rust/crates/yansi/1.0.1:yansi",
     ],
 )
 
 rust_binary(
-    name = "build-script-build",
-    srcs = [":vendor"],
+    name = "proc-macro2-diagnostics-build-script-build",
+    srcs = [":proc-macro2-diagnostics-vendor"],
     crate = "build_script_build",
     crate_root = "vendor/build.rs",
     edition = "2018",
@@ -54,22 +55,22 @@ rust_binary(
         "default",
         "yansi",
     ],
-    rustc_flags = ["@$(location :manifest[env_flags])"],
+    rustc_flags = ["@$(location :proc-macro2-diagnostics-manifest[env_flags])"],
     visibility = [],
     deps = ["//third-party/rust/crates/version_check/0.9.5:version_check"],
 )
 
 buildscript_run(
-    name = "build-script-run",
+    name = "proc-macro2-diagnostics-build-script-run",
     package_name = "proc-macro2-diagnostics",
-    buildscript_rule = ":build-script-build",
-    env_srcs = [":manifest[env_dict]"],
+    buildscript_rule = ":proc-macro2-diagnostics-build-script-build",
+    env_srcs = [":proc-macro2-diagnostics-manifest[env_dict]"],
     features = [
         "colors",
         "default",
         "yansi",
     ],
     version = "0.10.1",
-    manifest_dir = ":vendor",
+    manifest_dir = ":proc-macro2-diagnostics-vendor",
     visibility = ["PUBLIC"],
 )

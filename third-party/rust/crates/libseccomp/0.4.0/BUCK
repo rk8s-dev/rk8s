@@ -4,56 +4,57 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "buildscript_run", "rust_binary", "rust_library")
 
 http_archive(
-    name = "vendor",
+    name = "libseccomp-vendor",
     urls = ["https://static.crates.io/crates/libseccomp/libseccomp-0.4.0.crate"],
     sha256 = "0e5310a2c5b6ffbc094b5f70a2ca7b79ed36ad90e6f90994b166489a1bce3fcc",
     type = "tar.gz",
     strip_prefix = "libseccomp-0.4.0",
+    out = "vendor",
 )
 
 cargo_manifest(
-    name = "manifest",
-    vendor = ":vendor",
+    name = "libseccomp-manifest",
+    vendor = ":libseccomp-vendor",
 )
 
 rust_library(
     name = "libseccomp",
-    srcs = [":vendor"],
+    srcs = [":libseccomp-vendor"],
     crate = "libseccomp",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
-        "OUT_DIR": "$(location :build-script-run[out_dir])",
+        "OUT_DIR": "$(location :libseccomp-build-script-run[out_dir])",
     },
     rustc_flags = [
-        "@$(location :build-script-run[rustc_flags])",
-        "@$(location :manifest[env_flags])",
+        "@$(location :libseccomp-build-script-run[rustc_flags])",
+        "@$(location :libseccomp-manifest[env_flags])",
     ],
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/bitflags/2.11.0:bitflags",
-        "//third-party/rust/crates/libc/0.2.182:libc",
+        "//third-party/rust/crates/bitflags/2.11.1:bitflags",
+        "//third-party/rust/crates/libc/0.2.186:libc",
         "//third-party/rust/crates/libseccomp-sys/0.3.0:libseccomp-sys",
     ],
 )
 
 rust_binary(
-    name = "build-script-build",
-    srcs = [":vendor"],
+    name = "libseccomp-build-script-build",
+    srcs = [":libseccomp-vendor"],
     crate = "build_script_build",
     crate_root = "vendor/build.rs",
     edition = "2021",
-    rustc_flags = ["@$(location :manifest[env_flags])"],
+    rustc_flags = ["@$(location :libseccomp-manifest[env_flags])"],
     visibility = [],
-    deps = ["//third-party/rust/crates/pkg-config/0.3.32:pkg-config"],
+    deps = ["//third-party/rust/crates/pkg-config/0.3.33:pkg-config"],
 )
 
 buildscript_run(
-    name = "build-script-run",
+    name = "libseccomp-build-script-run",
     package_name = "libseccomp",
-    buildscript_rule = ":build-script-build",
-    env_srcs = [":manifest[env_dict]"],
+    buildscript_rule = ":libseccomp-build-script-build",
+    env_srcs = [":libseccomp-manifest[env_dict]"],
     version = "0.4.0",
-    manifest_dir = ":vendor",
+    manifest_dir = ":libseccomp-vendor",
     visibility = ["PUBLIC"],
 )

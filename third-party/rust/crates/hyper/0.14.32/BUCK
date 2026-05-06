@@ -4,21 +4,22 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "vendor",
+    name = "hyper-vendor",
     urls = ["https://static.crates.io/crates/hyper/hyper-0.14.32.crate"],
     sha256 = "41dfc780fdec9373c01bae43289ea34c972e40ee3c9f6b3c8801a35f35586ce7",
     type = "tar.gz",
     strip_prefix = "hyper-0.14.32",
+    out = "vendor",
 )
 
 cargo_manifest(
-    name = "manifest",
-    vendor = ":vendor",
+    name = "hyper-manifest",
+    vendor = ":hyper-vendor",
 )
 
 rust_library(
     name = "hyper",
-    srcs = [":vendor"],
+    srcs = [":hyper-vendor"],
     crate = "hyper",
     crate_root = "vendor/src/lib.rs",
     edition = "2018",
@@ -34,22 +35,22 @@ rust_library(
         "stream",
         "tcp",
     ],
-    rustc_flags = ["@$(location :manifest[env_flags])"],
+    rustc_flags = ["@$(location :hyper-manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/bytes/1.11.1:bytes",
-        "//third-party/rust/crates/futures-channel/0.3.31:futures-channel",
-        "//third-party/rust/crates/futures-core/0.3.31:futures-core",
-        "//third-party/rust/crates/futures-util/0.3.31:futures-util",
+        "//third-party/rust/crates/futures-channel/0.3.32:futures-channel",
+        "//third-party/rust/crates/futures-core/0.3.32:futures-core",
+        "//third-party/rust/crates/futures-util/0.3.32:futures-util",
         "//third-party/rust/crates/h2/0.3.27:h2",
         "//third-party/rust/crates/http-body/0.4.6:http-body",
         "//third-party/rust/crates/http/0.2.12:http",
         "//third-party/rust/crates/httparse/1.10.1:httparse",
         "//third-party/rust/crates/httpdate/1.0.3:httpdate",
-        "//third-party/rust/crates/itoa/1.0.17:itoa",
-        "//third-party/rust/crates/pin-project-lite/0.2.16:pin-project-lite",
+        "//third-party/rust/crates/itoa/1.0.18:itoa",
+        "//third-party/rust/crates/pin-project-lite/0.2.17:pin-project-lite",
         "//third-party/rust/crates/socket2/0.5.10:socket2",
-        "//third-party/rust/crates/tokio/1.49.0:tokio",
+        "//third-party/rust/crates/tokio/1.52.2:tokio",
         "//third-party/rust/crates/tower-service/0.3.3:tower-service",
         "//third-party/rust/crates/tracing/0.1.44:tracing",
         "//third-party/rust/crates/want/0.3.1:want",

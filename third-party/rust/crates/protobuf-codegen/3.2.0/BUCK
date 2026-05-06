@@ -4,33 +4,34 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "vendor",
+    name = "protobuf-codegen-vendor",
     urls = ["https://static.crates.io/crates/protobuf-codegen/protobuf-codegen-3.2.0.crate"],
     sha256 = "0dd418ac3c91caa4032d37cb80ff0d44e2ebe637b2fb243b6234bf89cdac4901",
     type = "tar.gz",
     strip_prefix = "protobuf-codegen-3.2.0",
+    out = "vendor",
 )
 
 cargo_manifest(
-    name = "manifest",
-    vendor = ":vendor",
+    name = "protobuf-codegen-manifest",
+    vendor = ":protobuf-codegen-vendor",
 )
 
 rust_library(
     name = "protobuf-codegen",
-    srcs = [":vendor"],
+    srcs = [":protobuf-codegen-vendor"],
     crate = "protobuf_codegen",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
-    rustc_flags = ["@$(location :manifest[env_flags])"],
+    rustc_flags = ["@$(location :protobuf-codegen-manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/anyhow/1.0.101:anyhow",
-        "//third-party/rust/crates/once_cell/1.21.3:once_cell",
+        "//third-party/rust/crates/anyhow/1.0.102:anyhow",
+        "//third-party/rust/crates/once_cell/1.21.4:once_cell",
         "//third-party/rust/crates/protobuf-parse/3.2.0:protobuf-parse",
         "//third-party/rust/crates/protobuf/3.2.0:protobuf",
         "//third-party/rust/crates/regex/1.12.3:regex",
-        "//third-party/rust/crates/tempfile/3.25.0:tempfile",
+        "//third-party/rust/crates/tempfile/3.27.0:tempfile",
         "//third-party/rust/crates/thiserror/1.0.69:thiserror",
     ],
 )

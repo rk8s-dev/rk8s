@@ -4,36 +4,37 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "buildscript_run", "rust_binary", "rust_library")
 
 http_archive(
-    name = "vendor",
+    name = "serde_yml-vendor",
     urls = ["https://static.crates.io/crates/serde_yml/serde_yml-0.0.12.crate"],
     sha256 = "59e2dd588bf1597a252c3b920e0143eb99b0f76e4e082f4c92ce34fbc9e71ddd",
     type = "tar.gz",
     strip_prefix = "serde_yml-0.0.12",
+    out = "vendor",
 )
 
 cargo_manifest(
-    name = "manifest",
-    vendor = ":vendor",
+    name = "serde_yml-manifest",
+    vendor = ":serde_yml-vendor",
 )
 
 rust_library(
     name = "serde_yml",
-    srcs = [":vendor"],
+    srcs = [":serde_yml-vendor"],
     crate = "serde_yml",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
-        "OUT_DIR": "$(location :build-script-run[out_dir])",
+        "OUT_DIR": "$(location :serde_yml-build-script-run[out_dir])",
     },
     features = ["default"],
     rustc_flags = [
-        "@$(location :build-script-run[rustc_flags])",
-        "@$(location :manifest[env_flags])",
+        "@$(location :serde_yml-build-script-run[rustc_flags])",
+        "@$(location :serde_yml-manifest[env_flags])",
     ],
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/indexmap/2.13.0:indexmap",
-        "//third-party/rust/crates/itoa/1.0.17:itoa",
+        "//third-party/rust/crates/indexmap/2.14.0:indexmap",
+        "//third-party/rust/crates/itoa/1.0.18:itoa",
         "//third-party/rust/crates/libyml/0.0.5:libyml",
         "//third-party/rust/crates/memchr/2.8.0:memchr",
         "//third-party/rust/crates/ryu/1.0.23:ryu",
@@ -42,24 +43,24 @@ rust_library(
 )
 
 rust_binary(
-    name = "build-script-build",
-    srcs = [":vendor"],
+    name = "serde_yml-build-script-build",
+    srcs = [":serde_yml-vendor"],
     crate = "build_script_build",
     crate_root = "vendor/build.rs",
     edition = "2021",
     features = ["default"],
-    rustc_flags = ["@$(location :manifest[env_flags])"],
+    rustc_flags = ["@$(location :serde_yml-manifest[env_flags])"],
     visibility = [],
     deps = ["//third-party/rust/crates/version_check/0.9.5:version_check"],
 )
 
 buildscript_run(
-    name = "build-script-run",
+    name = "serde_yml-build-script-run",
     package_name = "serde_yml",
-    buildscript_rule = ":build-script-build",
-    env_srcs = [":manifest[env_dict]"],
+    buildscript_rule = ":serde_yml-build-script-build",
+    env_srcs = [":serde_yml-manifest[env_dict]"],
     features = ["default"],
     version = "0.0.12",
-    manifest_dir = ":vendor",
+    manifest_dir = ":serde_yml-vendor",
     visibility = ["PUBLIC"],
 )

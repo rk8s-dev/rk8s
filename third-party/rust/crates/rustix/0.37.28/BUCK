@@ -4,26 +4,27 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "buildscript_run", "rust_binary", "rust_library")
 
 http_archive(
-    name = "vendor",
+    name = "rustix-vendor",
     urls = ["https://static.crates.io/crates/rustix/rustix-0.37.28.crate"],
     sha256 = "519165d378b97752ca44bbe15047d5d3409e875f39327546b42ac81d7e18c1b6",
     type = "tar.gz",
     strip_prefix = "rustix-0.37.28",
+    out = "vendor",
 )
 
 cargo_manifest(
-    name = "manifest",
-    vendor = ":vendor",
+    name = "rustix-manifest",
+    vendor = ":rustix-vendor",
 )
 
 rust_library(
     name = "rustix",
-    srcs = [":vendor"],
+    srcs = [":rustix-vendor"],
     crate = "rustix",
     crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
-        "OUT_DIR": "$(location :build-script-run[out_dir])",
+        "OUT_DIR": "$(location :rustix-build-script-run[out_dir])",
     },
     features = [
         "fs",
@@ -31,8 +32,8 @@ rust_library(
         "std",
     ],
     rustc_flags = [
-        "@$(location :build-script-run[rustc_flags])",
-        "@$(location :manifest[env_flags])",
+        "@$(location :rustix-build-script-run[rustc_flags])",
+        "@$(location :rustix-manifest[env_flags])",
     ],
     os_named_deps = {
         "libc_errno": {
@@ -41,7 +42,7 @@ rust_library(
         },
     },
     os_deps = {
-        "macos": ["//third-party/rust/crates/libc/0.2.182:libc"],
+        "macos": ["//third-party/rust/crates/libc/0.2.186:libc"],
         "windows": ["//third-party/rust/crates/windows-sys/0.48.0:windows-sys"],
     },
     visibility = ["PUBLIC"],
@@ -53,8 +54,8 @@ rust_library(
 )
 
 rust_binary(
-    name = "build-script-build",
-    srcs = [":vendor"],
+    name = "rustix-build-script-build",
+    srcs = [":rustix-vendor"],
     crate = "build_script_build",
     crate_root = "vendor/build.rs",
     edition = "2018",
@@ -63,21 +64,21 @@ rust_binary(
         "io-lifetimes",
         "std",
     ],
-    rustc_flags = ["@$(location :manifest[env_flags])"],
+    rustc_flags = ["@$(location :rustix-manifest[env_flags])"],
     visibility = [],
 )
 
 buildscript_run(
-    name = "build-script-run",
+    name = "rustix-build-script-run",
     package_name = "rustix",
-    buildscript_rule = ":build-script-build",
-    env_srcs = [":manifest[env_dict]"],
+    buildscript_rule = ":rustix-build-script-build",
+    env_srcs = [":rustix-manifest[env_dict]"],
     features = [
         "fs",
         "io-lifetimes",
         "std",
     ],
     version = "0.37.28",
-    manifest_dir = ":vendor",
+    manifest_dir = ":rustix-vendor",
     visibility = ["PUBLIC"],
 )

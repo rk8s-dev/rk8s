@@ -4,30 +4,31 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "vendor",
+    name = "windows-interface-vendor",
     urls = ["https://static.crates.io/crates/windows-interface/windows-interface-0.59.3.crate"],
     sha256 = "3f316c4a2570ba26bbec722032c4099d8c8bc095efccdc15688708623367e358",
     type = "tar.gz",
     strip_prefix = "windows-interface-0.59.3",
+    out = "vendor",
 )
 
 cargo_manifest(
-    name = "manifest",
-    vendor = ":vendor",
+    name = "windows-interface-manifest",
+    vendor = ":windows-interface-vendor",
 )
 
 rust_library(
     name = "windows-interface",
-    srcs = [":vendor"],
+    srcs = [":windows-interface-vendor"],
     crate = "windows_interface",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
-    rustc_flags = ["@$(location :manifest[env_flags])"],
+    rustc_flags = ["@$(location :windows-interface-manifest[env_flags])"],
     proc_macro = True,
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/proc-macro2/1.0.106:proc-macro2",
-        "//third-party/rust/crates/quote/1.0.44:quote",
-        "//third-party/rust/crates/syn/2.0.115:syn",
+        "//third-party/rust/crates/quote/1.0.45:quote",
+        "//third-party/rust/crates/syn/2.0.117:syn",
     ],
 )

@@ -4,21 +4,22 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "vendor",
+    name = "wasmparser-vendor",
     urls = ["https://static.crates.io/crates/wasmparser/wasmparser-0.244.0.crate"],
     sha256 = "47b807c72e1bac69382b3a6fb3dbe8ea4c0ed87ff5629b8685ae6b9a611028fe",
     type = "tar.gz",
     strip_prefix = "wasmparser-0.244.0",
+    out = "vendor",
 )
 
 cargo_manifest(
-    name = "manifest",
-    vendor = ":vendor",
+    name = "wasmparser-manifest",
+    vendor = ":wasmparser-vendor",
 )
 
 rust_library(
     name = "wasmparser",
-    srcs = [":vendor"],
+    srcs = [":wasmparser-vendor"],
     crate = "wasmparser",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
@@ -30,12 +31,12 @@ rust_library(
         "std",
         "validate",
     ],
-    rustc_flags = ["@$(location :manifest[env_flags])"],
+    rustc_flags = ["@$(location :wasmparser-manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/bitflags/2.11.0:bitflags",
+        "//third-party/rust/crates/bitflags/2.11.1:bitflags",
         "//third-party/rust/crates/hashbrown/0.15.5:hashbrown",
-        "//third-party/rust/crates/indexmap/2.13.0:indexmap",
-        "//third-party/rust/crates/semver/1.0.27:semver",
+        "//third-party/rust/crates/indexmap/2.14.0:indexmap",
+        "//third-party/rust/crates/semver/1.0.28:semver",
     ],
 )

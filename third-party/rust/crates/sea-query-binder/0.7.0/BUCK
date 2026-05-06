@@ -4,21 +4,22 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "vendor",
+    name = "sea-query-binder-vendor",
     urls = ["https://static.crates.io/crates/sea-query-binder/sea-query-binder-0.7.0.crate"],
     sha256 = "b0019f47430f7995af63deda77e238c17323359af241233ec768aba1faea7608",
     type = "tar.gz",
     strip_prefix = "sea-query-binder-0.7.0",
+    out = "vendor",
 )
 
 cargo_manifest(
-    name = "manifest",
-    vendor = ":vendor",
+    name = "sea-query-binder-manifest",
+    vendor = ":sea-query-binder-vendor",
 )
 
 rust_library(
     name = "sea-query-binder",
-    srcs = [":vendor"],
+    srcs = [":sea-query-binder-vendor"],
     crate = "sea_query_binder",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
@@ -40,16 +41,16 @@ rust_library(
         "with-time",
         "with-uuid",
     ],
-    rustc_flags = ["@$(location :manifest[env_flags])"],
+    rustc_flags = ["@$(location :sea-query-binder-manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/bigdecimal/0.4.10:bigdecimal",
-        "//third-party/rust/crates/chrono/0.4.43:chrono",
-        "//third-party/rust/crates/rust_decimal/1.40.0:rust_decimal",
+        "//third-party/rust/crates/chrono/0.4.44:chrono",
+        "//third-party/rust/crates/rust_decimal/1.41.0:rust_decimal",
         "//third-party/rust/crates/sea-query/0.32.7:sea-query",
         "//third-party/rust/crates/serde_json/1.0.149:serde_json",
         "//third-party/rust/crates/sqlx/0.8.6:sqlx",
         "//third-party/rust/crates/time/0.3.47:time",
-        "//third-party/rust/crates/uuid/1.21.0:uuid",
+        "//third-party/rust/crates/uuid/1.23.1:uuid",
     ],
 )

@@ -4,30 +4,31 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "vendor",
+    name = "thiserror-impl-vendor",
     urls = ["https://static.crates.io/crates/thiserror-impl/thiserror-impl-1.0.69.crate"],
     sha256 = "4fee6c4efc90059e10f81e6d42c60a18f76588c3d74cb83a0b242a2b6c7504c1",
     type = "tar.gz",
     strip_prefix = "thiserror-impl-1.0.69",
+    out = "vendor",
 )
 
 cargo_manifest(
-    name = "manifest",
-    vendor = ":vendor",
+    name = "thiserror-impl-manifest",
+    vendor = ":thiserror-impl-vendor",
 )
 
 rust_library(
     name = "thiserror-impl",
-    srcs = [":vendor"],
+    srcs = [":thiserror-impl-vendor"],
     crate = "thiserror_impl",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
-    rustc_flags = ["@$(location :manifest[env_flags])"],
+    rustc_flags = ["@$(location :thiserror-impl-manifest[env_flags])"],
     proc_macro = True,
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/proc-macro2/1.0.106:proc-macro2",
-        "//third-party/rust/crates/quote/1.0.44:quote",
-        "//third-party/rust/crates/syn/2.0.115:syn",
+        "//third-party/rust/crates/quote/1.0.45:quote",
+        "//third-party/rust/crates/syn/2.0.117:syn",
     ],
 )

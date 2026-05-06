@@ -4,21 +4,22 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "vendor",
+    name = "objc2-io-kit-vendor",
     urls = ["https://static.crates.io/crates/objc2-io-kit/objc2-io-kit-0.3.2.crate"],
     sha256 = "33fafba39597d6dc1fb709123dfa8289d39406734be322956a69f0931c73bb15",
     type = "tar.gz",
     strip_prefix = "objc2-io-kit-0.3.2",
+    out = "vendor",
 )
 
 cargo_manifest(
-    name = "manifest",
-    vendor = ":vendor",
+    name = "objc2-io-kit-manifest",
+    vendor = ":objc2-io-kit-vendor",
 )
 
 rust_library(
     name = "objc2-io-kit",
-    srcs = [":vendor"],
+    srcs = [":objc2-io-kit-vendor"],
     crate = "objc2_io_kit",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
@@ -27,10 +28,10 @@ rust_library(
         "libc",
         "std",
     ],
-    rustc_flags = ["@$(location :manifest[env_flags])"],
+    rustc_flags = ["@$(location :objc2-io-kit-manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/libc/0.2.182:libc",
+        "//third-party/rust/crates/libc/0.2.186:libc",
         "//third-party/rust/crates/objc2-core-foundation/0.3.2:objc2-core-foundation",
     ],
 )

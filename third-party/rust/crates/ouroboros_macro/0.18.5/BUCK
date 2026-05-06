@@ -4,32 +4,33 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "vendor",
+    name = "ouroboros_macro-vendor",
     urls = ["https://static.crates.io/crates/ouroboros_macro/ouroboros_macro-0.18.5.crate"],
     sha256 = "3c7028bdd3d43083f6d8d4d5187680d0d3560d54df4cc9d752005268b41e64d0",
     type = "tar.gz",
     strip_prefix = "ouroboros_macro-0.18.5",
+    out = "vendor",
 )
 
 cargo_manifest(
-    name = "manifest",
-    vendor = ":vendor",
+    name = "ouroboros_macro-manifest",
+    vendor = ":ouroboros_macro-vendor",
 )
 
 rust_library(
     name = "ouroboros_macro",
-    srcs = [":vendor"],
+    srcs = [":ouroboros_macro-vendor"],
     crate = "ouroboros_macro",
     crate_root = "vendor/src/lib.rs",
     edition = "2018",
-    rustc_flags = ["@$(location :manifest[env_flags])"],
+    rustc_flags = ["@$(location :ouroboros_macro-manifest[env_flags])"],
     proc_macro = True,
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/heck/0.4.1:heck",
         "//third-party/rust/crates/proc-macro2-diagnostics/0.10.1:proc-macro2-diagnostics",
         "//third-party/rust/crates/proc-macro2/1.0.106:proc-macro2",
-        "//third-party/rust/crates/quote/1.0.44:quote",
-        "//third-party/rust/crates/syn/2.0.115:syn",
+        "//third-party/rust/crates/quote/1.0.45:quote",
+        "//third-party/rust/crates/syn/2.0.117:syn",
     ],
 )

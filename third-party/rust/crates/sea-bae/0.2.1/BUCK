@@ -4,32 +4,33 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "vendor",
+    name = "sea-bae-vendor",
     urls = ["https://static.crates.io/crates/sea-bae/sea-bae-0.2.1.crate"],
     sha256 = "f694a6ab48f14bc063cfadff30ab551d3c7e46d8f81836c51989d548f44a2a25",
     type = "tar.gz",
     strip_prefix = "sea-bae-0.2.1",
+    out = "vendor",
 )
 
 cargo_manifest(
-    name = "manifest",
-    vendor = ":vendor",
+    name = "sea-bae-manifest",
+    vendor = ":sea-bae-vendor",
 )
 
 rust_library(
     name = "sea-bae",
-    srcs = [":vendor"],
+    srcs = [":sea-bae-vendor"],
     crate = "sea_bae",
     crate_root = "vendor/src/lib.rs",
     edition = "2018",
-    rustc_flags = ["@$(location :manifest[env_flags])"],
+    rustc_flags = ["@$(location :sea-bae-manifest[env_flags])"],
     proc_macro = True,
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/heck/0.4.1:heck",
         "//third-party/rust/crates/proc-macro-error2/2.0.1:proc-macro-error2",
         "//third-party/rust/crates/proc-macro2/1.0.106:proc-macro2",
-        "//third-party/rust/crates/quote/1.0.44:quote",
-        "//third-party/rust/crates/syn/2.0.115:syn",
+        "//third-party/rust/crates/quote/1.0.45:quote",
+        "//third-party/rust/crates/syn/2.0.117:syn",
     ],
 )

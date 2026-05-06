@@ -4,114 +4,97 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "buildscript_run", "rust_binary", "rust_library")
 
 filegroup(
-    name = "vendor",
+    name = "aardvark-dns-vendor",
     srcs = glob(["**/**"]),
+    out = "vendor",
 )
 
 cargo_manifest(
-    name = "manifest",
-    vendor = ":vendor",
+    name = "aardvark-dns-manifest",
+    vendor = ":aardvark-dns-vendor",
 )
 
 rust_binary(
     name = "aardvark-dns",
-    srcs = [":vendor"],
+    srcs = [":aardvark-dns-vendor"],
     crate = "aardvark_dns",
     crate_root = "vendor/src/main.rs",
     edition = "2018",
     env = {
-        "OUT_DIR": "$(location :build-script-run[out_dir])",
+        "OUT_DIR": "$(location :aardvark-dns-build-script-run[out_dir])",
     },
     rustc_flags = [
-        "@$(location :build-script-run[rustc_flags])",
-        "@$(location :manifest[env_flags])",
-    ] + select({
-        "prelude//os/constraints:windows": select({
-            "prelude//abi/constraints:gnu": [
-                "@$(location //third-party/rust/crates/windows_x86_64_gnu/0.42.2:build-script-run[rustc_flags])",
-                "@$(location //third-party/rust/crates/windows_x86_64_gnu/0.48.5:build-script-run[rustc_flags])",
-                "@$(location //third-party/rust/crates/windows_x86_64_gnu/0.52.6:build-script-run[rustc_flags])",
-                "@$(location //third-party/rust/crates/windows_x86_64_gnu/0.53.1:build-script-run[rustc_flags])",
-                "@$(location //third-party/rust/crates/winapi-x86_64-pc-windows-gnu/0.4.0:build-script-run[rustc_flags])",
-            ],
-            "DEFAULT": [
-                "@$(location //third-party/rust/crates/windows_x86_64_msvc/0.42.2:build-script-run[rustc_flags])",
-                "@$(location //third-party/rust/crates/windows_x86_64_msvc/0.48.5:build-script-run[rustc_flags])",
-                "@$(location //third-party/rust/crates/windows_x86_64_msvc/0.52.6:build-script-run[rustc_flags])",
-                "@$(location //third-party/rust/crates/windows_x86_64_msvc/0.53.1:build-script-run[rustc_flags])",
-            ],
-        }),
-        "DEFAULT": [],
-    }),
+        "@$(location :aardvark-dns-build-script-run[rustc_flags])",
+        "@$(location :aardvark-dns-manifest[env_flags])",
+    ],
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/arc-swap/1.8.2:arc-swap",
-        "//third-party/rust/crates/clap/4.5.58:clap",
+        "//third-party/rust/crates/arc-swap/1.9.1:arc-swap",
+        "//third-party/rust/crates/clap/4.5.61:clap",
         "//third-party/rust/crates/flume/0.11.1:flume",
-        "//third-party/rust/crates/futures-util/0.3.31:futures-util",
-        "//third-party/rust/crates/futures/0.3.31:futures",
+        "//third-party/rust/crates/futures-util/0.3.32:futures-util",
+        "//third-party/rust/crates/futures/0.3.32:futures",
         "//third-party/rust/crates/hickory-client/0.25.2:hickory-client",
         "//third-party/rust/crates/hickory-proto/0.25.2:hickory-proto",
         "//third-party/rust/crates/hickory-server/0.25.2:hickory-server",
-        "//third-party/rust/crates/inotify/0.11.0:inotify",
-        "//third-party/rust/crates/libc/0.2.182:libc",
+        "//third-party/rust/crates/inotify/0.11.1:inotify",
+        "//third-party/rust/crates/libc/0.2.186:libc",
         "//third-party/rust/crates/log/0.4.29:log",
         "//third-party/rust/crates/nix/0.30.1:nix",
         "//third-party/rust/crates/syslog/7.0.0:syslog",
-        "//third-party/rust/crates/tokio/1.49.0:tokio",
-        ":aardvark_dns",
+        "//third-party/rust/crates/tokio/1.52.2:tokio",
     ],
 )
 
 rust_library(
     name = "aardvark_dns",
-    srcs = [":vendor"],
+    srcs = [":aardvark-dns-vendor"],
     crate = "aardvark_dns",
     crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
-        "OUT_DIR": "$(location :build-script-run[out_dir])",
+        "OUT_DIR": "$(location :aardvark-dns-build-script-run[out_dir])",
     },
     rustc_flags = [
-        "@$(location :build-script-run[rustc_flags])",
-        "@$(location :manifest[env_flags])",
+        "@$(location :aardvark-dns-build-script-run[rustc_flags])",
+        "@$(location :aardvark-dns-manifest[env_flags])",
     ],
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/arc-swap/1.8.2:arc-swap",
-        "//third-party/rust/crates/clap/4.5.58:clap",
+        "//third-party/rust/crates/arc-swap/1.9.1:arc-swap",
+        "//third-party/rust/crates/clap/4.5.61:clap",
         "//third-party/rust/crates/flume/0.11.1:flume",
-        "//third-party/rust/crates/futures-util/0.3.31:futures-util",
-        "//third-party/rust/crates/futures/0.3.31:futures",
+        "//third-party/rust/crates/futures-util/0.3.32:futures-util",
+        "//third-party/rust/crates/futures/0.3.32:futures",
         "//third-party/rust/crates/hickory-client/0.25.2:hickory-client",
         "//third-party/rust/crates/hickory-proto/0.25.2:hickory-proto",
         "//third-party/rust/crates/hickory-server/0.25.2:hickory-server",
-        "//third-party/rust/crates/inotify/0.11.0:inotify",
-        "//third-party/rust/crates/libc/0.2.182:libc",
+        "//third-party/rust/crates/inotify/0.11.1:inotify",
+        "//third-party/rust/crates/libc/0.2.186:libc",
         "//third-party/rust/crates/log/0.4.29:log",
         "//third-party/rust/crates/nix/0.30.1:nix",
         "//third-party/rust/crates/syslog/7.0.0:syslog",
-        "//third-party/rust/crates/tokio/1.49.0:tokio",
+        "//third-party/rust/crates/tokio/1.52.2:tokio",
     ],
 )
 
 rust_binary(
-    name = "build-script-build",
-    srcs = [":vendor"],
+    name = "aardvark-dns-build-script-build",
+    srcs = [":aardvark-dns-vendor"],
     crate = "build_script_build",
     crate_root = "vendor/build.rs",
     edition = "2018",
-    rustc_flags = ["@$(location :manifest[env_flags])"],
+    rustc_flags = ["@$(location :aardvark-dns-manifest[env_flags])"],
     visibility = [],
-    deps = ["//third-party/rust/crates/chrono/0.4.43:chrono"],
+    deps = ["//third-party/rust/crates/chrono/0.4.44:chrono"],
 )
 
 buildscript_run(
-    name = "build-script-run",
+    name = "aardvark-dns-build-script-run",
     package_name = "aardvark-dns",
-    buildscript_rule = ":build-script-build",
-    env_srcs = [":manifest[env_dict]"],
+    buildscript_rule = ":aardvark-dns-build-script-build",
+    env_srcs = [":aardvark-dns-manifest[env_dict]"],
     version = "1.17.0",
-    manifest_dir = ":vendor",
+    manifest_dir = ":aardvark-dns-vendor",
     visibility = ["PUBLIC"],
 )

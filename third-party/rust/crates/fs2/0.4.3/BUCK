@@ -4,28 +4,29 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "vendor",
+    name = "fs2-vendor",
     urls = ["https://static.crates.io/crates/fs2/fs2-0.4.3.crate"],
     sha256 = "9564fc758e15025b46aa6643b1b77d047d1a56a1aea6e01002ac0c7026876213",
     type = "tar.gz",
     strip_prefix = "fs2-0.4.3",
+    out = "vendor",
 )
 
 cargo_manifest(
-    name = "manifest",
-    vendor = ":vendor",
+    name = "fs2-manifest",
+    vendor = ":fs2-vendor",
 )
 
 rust_library(
     name = "fs2",
-    srcs = [":vendor"],
+    srcs = [":fs2-vendor"],
     crate = "fs2",
     crate_root = "vendor/src/lib.rs",
     edition = "2015",
-    rustc_flags = ["@$(location :manifest[env_flags])"],
+    rustc_flags = ["@$(location :fs2-manifest[env_flags])"],
     os_deps = {
-        "linux": ["//third-party/rust/crates/libc/0.2.182:libc"],
-        "macos": ["//third-party/rust/crates/libc/0.2.182:libc"],
+        "linux": ["//third-party/rust/crates/libc/0.2.186:libc"],
+        "macos": ["//third-party/rust/crates/libc/0.2.186:libc"],
         "windows": ["//third-party/rust/crates/winapi/0.3.9:winapi"],
     },
     visibility = ["PUBLIC"],

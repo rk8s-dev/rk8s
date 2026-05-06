@@ -4,44 +4,48 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 filegroup(
-    name = "vendor",
+    name = "libfuse-fs-vendor",
     srcs = glob(["**/**"]),
+    out = "vendor",
 )
 
 cargo_manifest(
-    name = "manifest",
-    vendor = ":vendor",
+    name = "libfuse-fs-manifest",
+    vendor = ":libfuse-fs-vendor",
 )
 
 rust_library(
     name = "libfuse_fs",
-    srcs = [":vendor"],
+    srcs = [":libfuse-fs-vendor"],
     crate = "libfuse_fs",
     crate_root = "vendor/src/lib.rs",
     edition = "2024",
-    rustc_flags = ["@$(location :manifest[env_flags])"],
+    rustc_flags = ["@$(location :libfuse-fs-manifest[env_flags])"],
+    os_deps = {
+        "macos": ["//third-party/rust/crates/lru/0.16.4:lru"],
+    },
     visibility = ["PUBLIC"],
     deps = [
         "//project/rfuse3:rfuse3",
         "//third-party/rust/crates/async-trait/0.1.89:async-trait",
-        "//third-party/rust/crates/bitflags/2.11.0:bitflags",
+        "//third-party/rust/crates/bitflags/2.11.1:bitflags",
         "//third-party/rust/crates/bytes/1.11.1:bytes",
-        "//third-party/rust/crates/clap/4.5.58:clap",
-        "//third-party/rust/crates/futures-util/0.3.31:futures-util",
-        "//third-party/rust/crates/futures/0.3.31:futures",
+        "//third-party/rust/crates/clap/4.5.61:clap",
+        "//third-party/rust/crates/futures-util/0.3.32:futures-util",
+        "//third-party/rust/crates/futures/0.3.32:futures",
         "//third-party/rust/crates/itertools/0.14.0:itertools",
-        "//third-party/rust/crates/libc/0.2.182:libc",
-        "//third-party/rust/crates/memmap2/0.9.9:memmap2",
-        "//third-party/rust/crates/moka/0.12.13:moka",
+        "//third-party/rust/crates/libc/0.2.186:libc",
+        "//third-party/rust/crates/memmap2/0.9.10:memmap2",
+        "//third-party/rust/crates/moka/0.12.15:moka",
         "//third-party/rust/crates/nix/0.29.0:nix",
         "//third-party/rust/crates/radix_trie/0.2.1:radix_trie",
         "//third-party/rust/crates/reqwest/0.12.28:reqwest",
         "//third-party/rust/crates/serde/1.0.228:serde",
         "//third-party/rust/crates/serde_json/1.0.149:serde_json",
-        "//third-party/rust/crates/tokio/1.49.0:tokio",
-        "//third-party/rust/crates/tracing-subscriber/0.3.22:tracing-subscriber",
+        "//third-party/rust/crates/tokio/1.52.2:tokio",
+        "//third-party/rust/crates/tracing-subscriber/0.3.23:tracing-subscriber",
         "//third-party/rust/crates/tracing/0.1.44:tracing",
-        "//third-party/rust/crates/uuid/1.21.0:uuid",
+        "//third-party/rust/crates/uuid/1.23.1:uuid",
         "//third-party/rust/crates/vm-memory/0.16.2:vm-memory",
         "//third-party/rust/crates/vmm-sys-util/0.12.1:vmm-sys-util",
     ],

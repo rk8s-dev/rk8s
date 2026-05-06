@@ -4,21 +4,22 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "vendor",
+    name = "sqlx-sqlite-vendor",
     urls = ["https://static.crates.io/crates/sqlx-sqlite/sqlx-sqlite-0.8.6.crate"],
     sha256 = "c2d12fe70b2c1b4401038055f90f151b78208de1f9f89a7dbfd41587a10c3eea",
     type = "tar.gz",
     strip_prefix = "sqlx-sqlite-0.8.6",
+    out = "vendor",
 )
 
 cargo_manifest(
-    name = "manifest",
-    vendor = ":vendor",
+    name = "sqlx-sqlite-manifest",
+    vendor = ":sqlx-sqlite-vendor",
 )
 
 rust_library(
     name = "sqlx-sqlite",
-    srcs = [":vendor"],
+    srcs = [":sqlx-sqlite-vendor"],
     crate = "sqlx_sqlite",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
@@ -33,17 +34,17 @@ rust_library(
         "time",
         "uuid",
     ],
-    rustc_flags = ["@$(location :manifest[env_flags])"],
+    rustc_flags = ["@$(location :sqlx-sqlite-manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/atoi/2.0.0:atoi",
-        "//third-party/rust/crates/chrono/0.4.43:chrono",
+        "//third-party/rust/crates/chrono/0.4.44:chrono",
         "//third-party/rust/crates/flume/0.11.1:flume",
-        "//third-party/rust/crates/futures-channel/0.3.31:futures-channel",
-        "//third-party/rust/crates/futures-core/0.3.31:futures-core",
-        "//third-party/rust/crates/futures-executor/0.3.31:futures-executor",
+        "//third-party/rust/crates/futures-channel/0.3.32:futures-channel",
+        "//third-party/rust/crates/futures-core/0.3.32:futures-core",
+        "//third-party/rust/crates/futures-executor/0.3.32:futures-executor",
         "//third-party/rust/crates/futures-intrusive/0.5.0:futures-intrusive",
-        "//third-party/rust/crates/futures-util/0.3.31:futures-util",
+        "//third-party/rust/crates/futures-util/0.3.32:futures-util",
         "//third-party/rust/crates/libsqlite3-sys/0.30.1:libsqlite3-sys",
         "//third-party/rust/crates/log/0.4.29:log",
         "//third-party/rust/crates/percent-encoding/2.3.2:percent-encoding",
@@ -54,6 +55,6 @@ rust_library(
         "//third-party/rust/crates/time/0.3.47:time",
         "//third-party/rust/crates/tracing/0.1.44:tracing",
         "//third-party/rust/crates/url/2.5.8:url",
-        "//third-party/rust/crates/uuid/1.21.0:uuid",
+        "//third-party/rust/crates/uuid/1.23.1:uuid",
     ],
 )

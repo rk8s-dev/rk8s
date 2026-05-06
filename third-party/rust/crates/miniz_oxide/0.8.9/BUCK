@@ -4,21 +4,22 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "vendor",
+    name = "miniz_oxide-vendor",
     urls = ["https://static.crates.io/crates/miniz_oxide/miniz_oxide-0.8.9.crate"],
     sha256 = "1fa76a2c86f704bdb222d66965fb3d63269ce38518b83cb0575fca855ebb6316",
     type = "tar.gz",
     strip_prefix = "miniz_oxide-0.8.9",
+    out = "vendor",
 )
 
 cargo_manifest(
-    name = "manifest",
-    vendor = ":vendor",
+    name = "miniz_oxide-manifest",
+    vendor = ":miniz_oxide-vendor",
 )
 
 rust_library(
     name = "miniz_oxide",
-    srcs = [":vendor"],
+    srcs = [":miniz_oxide-vendor"],
     crate = "miniz_oxide",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
@@ -27,10 +28,10 @@ rust_library(
         "simd-adler32",
         "with-alloc",
     ],
-    rustc_flags = ["@$(location :manifest[env_flags])"],
+    rustc_flags = ["@$(location :miniz_oxide-manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/adler2/2.0.1:adler2",
-        "//third-party/rust/crates/simd-adler32/0.3.8:simd-adler32",
+        "//third-party/rust/crates/simd-adler32/0.3.9:simd-adler32",
     ],
 )

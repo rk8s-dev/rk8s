@@ -4,21 +4,22 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "vendor",
+    name = "criterion-vendor",
     urls = ["https://static.crates.io/crates/criterion/criterion-0.5.1.crate"],
     sha256 = "f2b12d017a929603d80db1831cd3a24082f8137ce19c69e6447f54f5fc8d692f",
     type = "tar.gz",
     strip_prefix = "criterion-0.5.1",
+    out = "vendor",
 )
 
 cargo_manifest(
-    name = "manifest",
-    vendor = ":vendor",
+    name = "criterion-manifest",
+    vendor = ":criterion-vendor",
 )
 
 rust_library(
     name = "criterion",
-    srcs = [":vendor"],
+    srcs = [":criterion-vendor"],
     crate = "criterion",
     crate_root = "vendor/src/lib.rs",
     edition = "2018",
@@ -29,21 +30,21 @@ rust_library(
         "plotters",
         "rayon",
     ],
-    rustc_flags = ["@$(location :manifest[env_flags])"],
+    rustc_flags = ["@$(location :criterion-manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/anes/0.1.6:anes",
         "//third-party/rust/crates/cast/0.3.0:cast",
         "//third-party/rust/crates/ciborium/0.2.2:ciborium",
-        "//third-party/rust/crates/clap/4.5.58:clap",
+        "//third-party/rust/crates/clap/4.5.61:clap",
         "//third-party/rust/crates/criterion-plot/0.5.0:criterion-plot",
         "//third-party/rust/crates/is-terminal/0.4.17:is-terminal",
         "//third-party/rust/crates/itertools/0.10.5:itertools",
         "//third-party/rust/crates/num-traits/0.2.19:num-traits",
-        "//third-party/rust/crates/once_cell/1.21.3:once_cell",
+        "//third-party/rust/crates/once_cell/1.21.4:once_cell",
         "//third-party/rust/crates/oorandom/11.1.5:oorandom",
         "//third-party/rust/crates/plotters/0.3.7:plotters",
-        "//third-party/rust/crates/rayon/1.11.0:rayon",
+        "//third-party/rust/crates/rayon/1.12.0:rayon",
         "//third-party/rust/crates/regex/1.12.3:regex",
         "//third-party/rust/crates/serde/1.0.228:serde",
         "//third-party/rust/crates/serde_derive/1.0.228:serde_derive",

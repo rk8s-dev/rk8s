@@ -4,21 +4,22 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "vendor",
+    name = "pgp-vendor",
     urls = ["https://static.crates.io/crates/pgp/pgp-0.19.0.crate"],
     sha256 = "eaffe1ec22db286599c30ae6be75b37493b558735d86c8e59ec5c38794415fe4",
     type = "tar.gz",
     strip_prefix = "pgp-0.19.0",
+    out = "vendor",
 )
 
 cargo_manifest(
-    name = "manifest",
-    vendor = ":vendor",
+    name = "pgp-manifest",
+    vendor = ":pgp-vendor",
 )
 
 rust_library(
     name = "pgp",
-    srcs = [":vendor"],
+    srcs = [":pgp-vendor"],
     crate = "pgp",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
@@ -26,7 +27,7 @@ rust_library(
         "bzip2",
         "default",
     ],
-    rustc_flags = ["@$(location :manifest[env_flags])"],
+    rustc_flags = ["@$(location :pgp-manifest[env_flags])"],
     named_deps = {
         "md5": "//third-party/rust/crates/md-5/0.10.6:md-5",
         "num_bigint": "//third-party/rust/crates/num-bigint-dig/0.8.6:num-bigint-dig",
@@ -39,7 +40,7 @@ rust_library(
         "//third-party/rust/crates/aes/0.8.4:aes",
         "//third-party/rust/crates/argon2/0.5.3:argon2",
         "//third-party/rust/crates/base64/0.22.1:base64",
-        "//third-party/rust/crates/bitfields/1.0.2:bitfields",
+        "//third-party/rust/crates/bitfields/1.0.3:bitfields",
         "//third-party/rust/crates/block-padding/0.3.3:block-padding",
         "//third-party/rust/crates/blowfish/0.9.1:blowfish",
         "//third-party/rust/crates/buffer-redux/1.1.0:buffer-redux",
@@ -72,12 +73,12 @@ rust_library(
         "//third-party/rust/crates/log/0.4.29:log",
         "//third-party/rust/crates/nom/8.0.0:nom",
         "//third-party/rust/crates/num-traits/0.2.19:num-traits",
-        "//third-party/rust/crates/num_enum/0.7.5:num_enum",
+        "//third-party/rust/crates/num_enum/0.7.6:num_enum",
         "//third-party/rust/crates/ocb3/0.1.0:ocb3",
         "//third-party/rust/crates/p256/0.13.2:p256",
         "//third-party/rust/crates/p384/0.13.1:p384",
         "//third-party/rust/crates/p521/0.13.3:p521",
-        "//third-party/rust/crates/rand/0.8.5:rand",
+        "//third-party/rust/crates/rand/0.8.6:rand",
         "//third-party/rust/crates/regex/1.12.3:regex",
         "//third-party/rust/crates/replace_with/0.1.8:replace_with",
         "//third-party/rust/crates/ripemd/0.1.3:ripemd",
@@ -85,7 +86,7 @@ rust_library(
         "//third-party/rust/crates/sha1-checked/0.10.0:sha1-checked",
         "//third-party/rust/crates/sha1/0.10.6:sha1",
         "//third-party/rust/crates/sha2/0.10.9:sha2",
-        "//third-party/rust/crates/sha3/0.10.8:sha3",
+        "//third-party/rust/crates/sha3/0.10.9:sha3",
         "//third-party/rust/crates/signature/2.2.0:signature",
         "//third-party/rust/crates/smallvec/1.15.1:smallvec",
         "//third-party/rust/crates/snafu/0.8.9:snafu",

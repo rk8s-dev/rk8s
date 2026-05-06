@@ -4,21 +4,22 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "vendor",
+    name = "priority-queue-vendor",
     urls = ["https://static.crates.io/crates/priority-queue/priority-queue-2.7.0.crate"],
     sha256 = "93980406f12d9f8140ed5abe7155acb10bb1e69ea55c88960b9c2f117445ef96",
     type = "tar.gz",
     strip_prefix = "priority-queue-2.7.0",
+    out = "vendor",
 )
 
 cargo_manifest(
-    name = "manifest",
-    vendor = ":vendor",
+    name = "priority-queue-manifest",
+    vendor = ":priority-queue-vendor",
 )
 
 rust_library(
     name = "priority-queue",
-    srcs = [":vendor"],
+    srcs = [":priority-queue-vendor"],
     crate = "priority_queue",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
@@ -26,11 +27,11 @@ rust_library(
         "default",
         "std",
     ],
-    rustc_flags = ["@$(location :manifest[env_flags])"],
+    rustc_flags = ["@$(location :priority-queue-manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/equivalent/1.0.2:equivalent",
-        "//third-party/rust/crates/indexmap/2.13.0:indexmap",
+        "//third-party/rust/crates/indexmap/2.14.0:indexmap",
         "//third-party/rust/crates/serde/1.0.228:serde",
     ],
 )

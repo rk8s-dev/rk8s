@@ -4,21 +4,22 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "vendor",
+    name = "flate2-vendor",
     urls = ["https://static.crates.io/crates/flate2/flate2-1.1.9.crate"],
     sha256 = "843fba2746e448b37e26a819579957415c8cef339bf08564fe8b7ddbd959573c",
     type = "tar.gz",
     strip_prefix = "flate2-1.1.9",
+    out = "vendor",
 )
 
 cargo_manifest(
-    name = "manifest",
-    vendor = ":vendor",
+    name = "flate2-manifest",
+    vendor = ":flate2-vendor",
 )
 
 rust_library(
     name = "flate2",
-    srcs = [":vendor"],
+    srcs = [":flate2-vendor"],
     crate = "flate2",
     crate_root = "vendor/src/lib.rs",
     edition = "2018",
@@ -30,11 +31,11 @@ rust_library(
         "rust_backend",
         "zlib-rs",
     ],
-    rustc_flags = ["@$(location :manifest[env_flags])"],
+    rustc_flags = ["@$(location :flate2-manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/crc32fast/1.5.0:crc32fast",
         "//third-party/rust/crates/miniz_oxide/0.8.9:miniz_oxide",
-        "//third-party/rust/crates/zlib-rs/0.6.0:zlib-rs",
+        "//third-party/rust/crates/zlib-rs/0.6.3:zlib-rs",
     ],
 )

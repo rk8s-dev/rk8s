@@ -4,21 +4,22 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "vendor",
+    name = "oci-client-vendor",
     urls = ["https://static.crates.io/crates/oci-client/oci-client-0.15.0.crate"],
     sha256 = "9b74df13319e08bc386d333d3dc289c774c88cc543cae31f5347db07b5ec2172",
     type = "tar.gz",
     strip_prefix = "oci-client-0.15.0",
+    out = "vendor",
 )
 
 cargo_manifest(
-    name = "manifest",
-    vendor = ":vendor",
+    name = "oci-client-manifest",
+    vendor = ":oci-client-vendor",
 )
 
 rust_library(
     name = "oci-client",
-    srcs = [":vendor"],
+    srcs = [":oci-client-vendor"],
     crate = "oci_client",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
@@ -27,12 +28,12 @@ rust_library(
         "native-tls",
         "test-registry",
     ],
-    rustc_flags = ["@$(location :manifest[env_flags])"],
+    rustc_flags = ["@$(location :oci-client-manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/bytes/1.11.1:bytes",
-        "//third-party/rust/crates/chrono/0.4.43:chrono",
-        "//third-party/rust/crates/futures-util/0.3.31:futures-util",
+        "//third-party/rust/crates/chrono/0.4.44:chrono",
+        "//third-party/rust/crates/futures-util/0.3.32:futures-util",
         "//third-party/rust/crates/http-auth/0.1.10:http-auth",
         "//third-party/rust/crates/http/1.4.0:http",
         "//third-party/rust/crates/jwt/0.16.0:jwt",
@@ -45,7 +46,7 @@ rust_library(
         "//third-party/rust/crates/serde_json/1.0.149:serde_json",
         "//third-party/rust/crates/sha2/0.10.9:sha2",
         "//third-party/rust/crates/thiserror/2.0.18:thiserror",
-        "//third-party/rust/crates/tokio/1.49.0:tokio",
+        "//third-party/rust/crates/tokio/1.52.2:tokio",
         "//third-party/rust/crates/tracing/0.1.44:tracing",
         "//third-party/rust/crates/unicase/2.9.0:unicase",
     ],

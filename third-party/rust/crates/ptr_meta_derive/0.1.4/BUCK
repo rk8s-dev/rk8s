@@ -4,30 +4,31 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "vendor",
+    name = "ptr_meta_derive-vendor",
     urls = ["https://static.crates.io/crates/ptr_meta_derive/ptr_meta_derive-0.1.4.crate"],
     sha256 = "16b845dbfca988fa33db069c0e230574d15a3088f147a87b64c7589eb662c9ac",
     type = "tar.gz",
     strip_prefix = "ptr_meta_derive-0.1.4",
+    out = "vendor",
 )
 
 cargo_manifest(
-    name = "manifest",
-    vendor = ":vendor",
+    name = "ptr_meta_derive-manifest",
+    vendor = ":ptr_meta_derive-vendor",
 )
 
 rust_library(
     name = "ptr_meta_derive",
-    srcs = [":vendor"],
+    srcs = [":ptr_meta_derive-vendor"],
     crate = "ptr_meta_derive",
     crate_root = "vendor/src/lib.rs",
     edition = "2018",
-    rustc_flags = ["@$(location :manifest[env_flags])"],
+    rustc_flags = ["@$(location :ptr_meta_derive-manifest[env_flags])"],
     proc_macro = True,
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/proc-macro2/1.0.106:proc-macro2",
-        "//third-party/rust/crates/quote/1.0.44:quote",
+        "//third-party/rust/crates/quote/1.0.45:quote",
         "//third-party/rust/crates/syn/1.0.109:syn",
     ],
 )

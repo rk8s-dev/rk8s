@@ -4,21 +4,22 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "vendor",
+    name = "qrcode-vendor",
     urls = ["https://static.crates.io/crates/qrcode/qrcode-0.14.1.crate"],
     sha256 = "d68782463e408eb1e668cf6152704bd856c78c5b6417adaee3203d8f4c1fc9ec",
     type = "tar.gz",
     strip_prefix = "qrcode-0.14.1",
+    out = "vendor",
 )
 
 cargo_manifest(
-    name = "manifest",
-    vendor = ":vendor",
+    name = "qrcode-manifest",
+    vendor = ":qrcode-vendor",
 )
 
 rust_library(
     name = "qrcode",
-    srcs = [":vendor"],
+    srcs = [":qrcode-vendor"],
     crate = "qrcode",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
@@ -28,7 +29,7 @@ rust_library(
         "pic",
         "svg",
     ],
-    rustc_flags = ["@$(location :manifest[env_flags])"],
+    rustc_flags = ["@$(location :qrcode-manifest[env_flags])"],
     visibility = ["PUBLIC"],
-    deps = ["//third-party/rust/crates/image/0.25.9:image"],
+    deps = ["//third-party/rust/crates/image/0.25.10:image"],
 )

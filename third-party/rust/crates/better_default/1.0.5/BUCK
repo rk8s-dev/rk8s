@@ -4,30 +4,31 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "vendor",
+    name = "better_default-vendor",
     urls = ["https://static.crates.io/crates/better_default/better_default-1.0.5.crate"],
     sha256 = "7b9a5040dce49a7642c97ccb1ae59567098967b5d52c29773f1299a42d23bb39",
     type = "tar.gz",
     strip_prefix = "better_default-1.0.5",
+    out = "vendor",
 )
 
 cargo_manifest(
-    name = "manifest",
-    vendor = ":vendor",
+    name = "better_default-manifest",
+    vendor = ":better_default-vendor",
 )
 
 rust_library(
     name = "better_default",
-    srcs = [":vendor"],
+    srcs = [":better_default-vendor"],
     crate = "better_default",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
-    rustc_flags = ["@$(location :manifest[env_flags])"],
+    rustc_flags = ["@$(location :better_default-manifest[env_flags])"],
     proc_macro = True,
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/proc-macro2/1.0.106:proc-macro2",
-        "//third-party/rust/crates/quote/1.0.44:quote",
-        "//third-party/rust/crates/syn/2.0.115:syn",
+        "//third-party/rust/crates/quote/1.0.45:quote",
+        "//third-party/rust/crates/syn/2.0.117:syn",
     ],
 )

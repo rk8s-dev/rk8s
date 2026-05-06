@@ -4,41 +4,42 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "buildscript_run", "rust_binary", "rust_library")
 
 http_archive(
-    name = "vendor",
+    name = "nc-vendor",
     urls = ["https://static.crates.io/crates/nc/nc-0.9.7.crate"],
     sha256 = "44a4f56a68f96b49bca0ea29a91caa983bb5f37e064183436a45b80dc441cd55",
     type = "tar.gz",
     strip_prefix = "nc-0.9.7",
+    out = "vendor",
 )
 
 cargo_manifest(
-    name = "manifest",
-    vendor = ":vendor",
+    name = "nc-manifest",
+    vendor = ":nc-vendor",
 )
 
 rust_library(
     name = "nc",
-    srcs = [":vendor"],
+    srcs = [":nc-vendor"],
     crate = "nc",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
     env = {
-        "OUT_DIR": "$(location :build-script-run[out_dir])",
+        "OUT_DIR": "$(location :nc-build-script-run[out_dir])",
     },
     features = [
         "default",
         "std",
     ],
     rustc_flags = [
-        "@$(location :build-script-run[rustc_flags])",
-        "@$(location :manifest[env_flags])",
+        "@$(location :nc-build-script-run[rustc_flags])",
+        "@$(location :nc-manifest[env_flags])",
     ],
     visibility = ["PUBLIC"],
 )
 
 rust_binary(
-    name = "build-script-build",
-    srcs = [":vendor"],
+    name = "nc-build-script-build",
+    srcs = [":nc-vendor"],
     crate = "build_script_build",
     crate_root = "vendor/build.rs",
     edition = "2021",
@@ -46,21 +47,21 @@ rust_binary(
         "default",
         "std",
     ],
-    rustc_flags = ["@$(location :manifest[env_flags])"],
+    rustc_flags = ["@$(location :nc-manifest[env_flags])"],
     visibility = [],
-    deps = ["//third-party/rust/crates/cc/1.2.56:cc"],
+    deps = ["//third-party/rust/crates/cc/1.2.61:cc"],
 )
 
 buildscript_run(
-    name = "build-script-run",
+    name = "nc-build-script-run",
     package_name = "nc",
-    buildscript_rule = ":build-script-build",
-    env_srcs = [":manifest[env_dict]"],
+    buildscript_rule = ":nc-build-script-build",
+    env_srcs = [":nc-manifest[env_dict]"],
     features = [
         "default",
         "std",
     ],
     version = "0.9.7",
-    manifest_dir = ":vendor",
+    manifest_dir = ":nc-vendor",
     visibility = ["PUBLIC"],
 )

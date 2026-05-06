@@ -4,33 +4,34 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "vendor",
+    name = "protobuf-parse-vendor",
     urls = ["https://static.crates.io/crates/protobuf-parse/protobuf-parse-3.2.0.crate"],
     sha256 = "9d39b14605eaa1f6a340aec7f320b34064feb26c93aec35d6a9a2272a8ddfa49",
     type = "tar.gz",
     strip_prefix = "protobuf-parse-3.2.0",
+    out = "vendor",
 )
 
 cargo_manifest(
-    name = "manifest",
-    vendor = ":vendor",
+    name = "protobuf-parse-manifest",
+    vendor = ":protobuf-parse-vendor",
 )
 
 rust_library(
     name = "protobuf-parse",
-    srcs = [":vendor"],
+    srcs = [":protobuf-parse-vendor"],
     crate = "protobuf_parse",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
-    rustc_flags = ["@$(location :manifest[env_flags])"],
+    rustc_flags = ["@$(location :protobuf-parse-manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/anyhow/1.0.101:anyhow",
+        "//third-party/rust/crates/anyhow/1.0.102:anyhow",
         "//third-party/rust/crates/indexmap/1.9.3:indexmap",
         "//third-party/rust/crates/log/0.4.29:log",
         "//third-party/rust/crates/protobuf-support/3.2.0:protobuf-support",
         "//third-party/rust/crates/protobuf/3.2.0:protobuf",
-        "//third-party/rust/crates/tempfile/3.25.0:tempfile",
+        "//third-party/rust/crates/tempfile/3.27.0:tempfile",
         "//third-party/rust/crates/thiserror/1.0.69:thiserror",
         "//third-party/rust/crates/which/4.4.2:which",
     ],

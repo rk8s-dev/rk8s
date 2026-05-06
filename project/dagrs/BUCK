@@ -4,18 +4,19 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 filegroup(
-    name = "vendor",
+    name = "dagrs-vendor",
     srcs = glob(["**/**"]),
+    out = "vendor",
 )
 
 cargo_manifest(
-    name = "manifest",
-    vendor = ":vendor",
+    name = "dagrs-manifest",
+    vendor = ":dagrs-vendor",
 )
 
 rust_library(
     name = "dagrs",
-    srcs = [":vendor"],
+    srcs = [":dagrs-vendor"],
     crate = "dagrs",
     crate_root = "vendor/src/lib.rs",
     edition = "2024",
@@ -23,15 +24,15 @@ rust_library(
         "default",
         "derive",
     ],
-    rustc_flags = ["@$(location :manifest[env_flags])"],
+    rustc_flags = ["@$(location :dagrs-manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
         "//project/dagrs-derive:dagrs_derive",
         "//third-party/rust/crates/async-trait/0.1.89:async-trait",
-        "//third-party/rust/crates/futures/0.3.31:futures",
+        "//third-party/rust/crates/futures/0.3.32:futures",
         "//third-party/rust/crates/log/0.4.29:log",
         "//third-party/rust/crates/serde/1.0.228:serde",
         "//third-party/rust/crates/serde_json/1.0.149:serde_json",
-        "//third-party/rust/crates/tokio/1.49.0:tokio",
+        "//third-party/rust/crates/tokio/1.52.2:tokio",
     ],
 )

@@ -4,26 +4,27 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "buildscript_run", "rust_binary", "rust_library")
 
 http_archive(
-    name = "vendor",
+    name = "procfs-vendor",
     urls = ["https://static.crates.io/crates/procfs/procfs-0.17.0.crate"],
     sha256 = "cc5b72d8145275d844d4b5f6d4e1eef00c8cd889edb6035c21675d1bb1f45c9f",
     type = "tar.gz",
     strip_prefix = "procfs-0.17.0",
+    out = "vendor",
 )
 
 cargo_manifest(
-    name = "manifest",
-    vendor = ":vendor",
+    name = "procfs-manifest",
+    vendor = ":procfs-vendor",
 )
 
 rust_library(
     name = "procfs",
-    srcs = [":vendor"],
+    srcs = [":procfs-vendor"],
     crate = "procfs",
     crate_root = "vendor/src/lib.rs",
     edition = "2018",
     env = {
-        "OUT_DIR": "$(location :build-script-run[out_dir])",
+        "OUT_DIR": "$(location :procfs-build-script-run[out_dir])",
     },
     features = [
         "chrono",
@@ -31,13 +32,13 @@ rust_library(
         "flate2",
     ],
     rustc_flags = [
-        "@$(location :build-script-run[rustc_flags])",
-        "@$(location :manifest[env_flags])",
+        "@$(location :procfs-build-script-run[rustc_flags])",
+        "@$(location :procfs-manifest[env_flags])",
     ],
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/bitflags/2.11.0:bitflags",
-        "//third-party/rust/crates/chrono/0.4.43:chrono",
+        "//third-party/rust/crates/bitflags/2.11.1:bitflags",
+        "//third-party/rust/crates/chrono/0.4.44:chrono",
         "//third-party/rust/crates/flate2/1.1.9:flate2",
         "//third-party/rust/crates/hex/0.4.3:hex",
         "//third-party/rust/crates/procfs-core/0.17.0:procfs-core",
@@ -46,8 +47,8 @@ rust_library(
 )
 
 rust_binary(
-    name = "build-script-build",
-    srcs = [":vendor"],
+    name = "procfs-build-script-build",
+    srcs = [":procfs-vendor"],
     crate = "build_script_build",
     crate_root = "vendor/build.rs",
     edition = "2018",
@@ -56,21 +57,21 @@ rust_binary(
         "default",
         "flate2",
     ],
-    rustc_flags = ["@$(location :manifest[env_flags])"],
+    rustc_flags = ["@$(location :procfs-manifest[env_flags])"],
     visibility = [],
 )
 
 buildscript_run(
-    name = "build-script-run",
+    name = "procfs-build-script-run",
     package_name = "procfs",
-    buildscript_rule = ":build-script-build",
-    env_srcs = [":manifest[env_dict]"],
+    buildscript_rule = ":procfs-build-script-build",
+    env_srcs = [":procfs-manifest[env_dict]"],
     features = [
         "chrono",
         "default",
         "flate2",
     ],
     version = "0.17.0",
-    manifest_dir = ":vendor",
+    manifest_dir = ":procfs-vendor",
     visibility = ["PUBLIC"],
 )

@@ -4,21 +4,22 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "vendor",
+    name = "time-vendor",
     urls = ["https://static.crates.io/crates/time/time-0.3.47.crate"],
     sha256 = "743bd48c283afc0388f9b8827b976905fb217ad9e647fae3a379a9283c4def2c",
     type = "tar.gz",
     strip_prefix = "time-0.3.47",
+    out = "vendor",
 )
 
 cargo_manifest(
-    name = "manifest",
-    vendor = ":vendor",
+    name = "time-manifest",
+    vendor = ":time-vendor",
 )
 
 rust_library(
     name = "time",
-    srcs = [":vendor"],
+    srcs = [":time-vendor"],
     crate = "time",
     crate_root = "vendor/src/lib.rs",
     edition = "2024",
@@ -33,22 +34,22 @@ rust_library(
         "serde-well-known",
         "std",
     ],
-    rustc_flags = ["@$(location :manifest[env_flags])"],
+    rustc_flags = ["@$(location :time-manifest[env_flags])"],
     os_deps = {
         "linux": [
-            "//third-party/rust/crates/libc/0.2.182:libc",
+            "//third-party/rust/crates/libc/0.2.186:libc",
             "//third-party/rust/crates/num_threads/0.1.7:num_threads",
         ],
         "macos": [
-            "//third-party/rust/crates/libc/0.2.182:libc",
+            "//third-party/rust/crates/libc/0.2.186:libc",
             "//third-party/rust/crates/num_threads/0.1.7:num_threads",
         ],
     },
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/deranged/0.5.6:deranged",
-        "//third-party/rust/crates/itoa/1.0.17:itoa",
-        "//third-party/rust/crates/num-conv/0.2.0:num-conv",
+        "//third-party/rust/crates/deranged/0.5.8:deranged",
+        "//third-party/rust/crates/itoa/1.0.18:itoa",
+        "//third-party/rust/crates/num-conv/0.2.1:num-conv",
         "//third-party/rust/crates/powerfmt/0.2.0:powerfmt",
         "//third-party/rust/crates/serde_core/1.0.228:serde_core",
         "//third-party/rust/crates/time-core/0.1.8:time-core",

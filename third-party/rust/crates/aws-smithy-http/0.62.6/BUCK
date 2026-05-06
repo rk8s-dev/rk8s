@@ -4,21 +4,22 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "vendor",
+    name = "aws-smithy-http-vendor",
     urls = ["https://static.crates.io/crates/aws-smithy-http/aws-smithy-http-0.62.6.crate"],
     sha256 = "826141069295752372f8203c17f28e30c464d22899a43a0c9fd9c458d469c88b",
     type = "tar.gz",
     strip_prefix = "aws-smithy-http-0.62.6",
+    out = "vendor",
 )
 
 cargo_manifest(
-    name = "manifest",
-    vendor = ":vendor",
+    name = "aws-smithy-http-manifest",
+    vendor = ":aws-smithy-http-vendor",
 )
 
 rust_library(
     name = "aws-smithy-http",
-    srcs = [":vendor"],
+    srcs = [":aws-smithy-http-vendor"],
     crate = "aws_smithy_http",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
@@ -26,7 +27,7 @@ rust_library(
         "aws-smithy-eventstream",
         "event-stream",
     ],
-    rustc_flags = ["@$(location :manifest[env_flags])"],
+    rustc_flags = ["@$(location :aws-smithy-http-manifest[env_flags])"],
     named_deps = {
         "http_02x": "//third-party/rust/crates/http/0.2.12:http",
         "http_1x": "//third-party/rust/crates/http/1.4.0:http",
@@ -34,15 +35,15 @@ rust_library(
     },
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/aws-smithy-eventstream/0.60.19:aws-smithy-eventstream",
-        "//third-party/rust/crates/aws-smithy-runtime-api/1.11.4:aws-smithy-runtime-api",
-        "//third-party/rust/crates/aws-smithy-types/1.4.4:aws-smithy-types",
+        "//third-party/rust/crates/aws-smithy-eventstream/0.60.20:aws-smithy-eventstream",
+        "//third-party/rust/crates/aws-smithy-runtime-api/1.12.0:aws-smithy-runtime-api",
+        "//third-party/rust/crates/aws-smithy-types/1.4.7:aws-smithy-types",
         "//third-party/rust/crates/bytes-utils/0.1.4:bytes-utils",
         "//third-party/rust/crates/bytes/1.11.1:bytes",
-        "//third-party/rust/crates/futures-core/0.3.31:futures-core",
-        "//third-party/rust/crates/futures-util/0.3.31:futures-util",
+        "//third-party/rust/crates/futures-core/0.3.32:futures-core",
+        "//third-party/rust/crates/futures-util/0.3.32:futures-util",
         "//third-party/rust/crates/percent-encoding/2.3.2:percent-encoding",
-        "//third-party/rust/crates/pin-project-lite/0.2.16:pin-project-lite",
+        "//third-party/rust/crates/pin-project-lite/0.2.17:pin-project-lite",
         "//third-party/rust/crates/pin-utils/0.1.0:pin-utils",
         "//third-party/rust/crates/tracing/0.1.44:tracing",
     ],

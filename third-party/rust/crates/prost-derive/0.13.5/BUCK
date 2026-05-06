@@ -4,32 +4,33 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "vendor",
+    name = "prost-derive-vendor",
     urls = ["https://static.crates.io/crates/prost-derive/prost-derive-0.13.5.crate"],
     sha256 = "8a56d757972c98b346a9b766e3f02746cde6dd1cd1d1d563472929fdd74bec4d",
     type = "tar.gz",
     strip_prefix = "prost-derive-0.13.5",
+    out = "vendor",
 )
 
 cargo_manifest(
-    name = "manifest",
-    vendor = ":vendor",
+    name = "prost-derive-manifest",
+    vendor = ":prost-derive-vendor",
 )
 
 rust_library(
     name = "prost-derive",
-    srcs = [":vendor"],
+    srcs = [":prost-derive-vendor"],
     crate = "prost_derive",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
-    rustc_flags = ["@$(location :manifest[env_flags])"],
+    rustc_flags = ["@$(location :prost-derive-manifest[env_flags])"],
     proc_macro = True,
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/anyhow/1.0.101:anyhow",
+        "//third-party/rust/crates/anyhow/1.0.102:anyhow",
         "//third-party/rust/crates/itertools/0.14.0:itertools",
         "//third-party/rust/crates/proc-macro2/1.0.106:proc-macro2",
-        "//third-party/rust/crates/quote/1.0.44:quote",
-        "//third-party/rust/crates/syn/2.0.115:syn",
+        "//third-party/rust/crates/quote/1.0.45:quote",
+        "//third-party/rust/crates/syn/2.0.117:syn",
     ],
 )

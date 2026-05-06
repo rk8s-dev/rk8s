@@ -4,21 +4,22 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "vendor",
+    name = "procfs-core-vendor",
     urls = ["https://static.crates.io/crates/procfs-core/procfs-core-0.17.0.crate"],
     sha256 = "239df02d8349b06fc07398a3a1697b06418223b1c7725085e801e7c0fc6a12ec",
     type = "tar.gz",
     strip_prefix = "procfs-core-0.17.0",
+    out = "vendor",
 )
 
 cargo_manifest(
-    name = "manifest",
-    vendor = ":vendor",
+    name = "procfs-core-manifest",
+    vendor = ":procfs-core-vendor",
 )
 
 rust_library(
     name = "procfs-core",
-    srcs = [":vendor"],
+    srcs = [":procfs-core-vendor"],
     crate = "procfs_core",
     crate_root = "vendor/src/lib.rs",
     edition = "2018",
@@ -26,11 +27,11 @@ rust_library(
         "chrono",
         "default",
     ],
-    rustc_flags = ["@$(location :manifest[env_flags])"],
+    rustc_flags = ["@$(location :procfs-core-manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
-        "//third-party/rust/crates/bitflags/2.11.0:bitflags",
-        "//third-party/rust/crates/chrono/0.4.43:chrono",
+        "//third-party/rust/crates/bitflags/2.11.1:bitflags",
+        "//third-party/rust/crates/chrono/0.4.44:chrono",
         "//third-party/rust/crates/hex/0.4.3:hex",
     ],
 )

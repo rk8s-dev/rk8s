@@ -4,21 +4,22 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "vendor",
+    name = "nix-vendor",
     urls = ["https://static.crates.io/crates/nix/nix-0.26.4.crate"],
     sha256 = "598beaf3cc6fdd9a5dfb1630c2800c7acd31df7aaf0f565796fba2b53ca1af1b",
     type = "tar.gz",
     strip_prefix = "nix-0.26.4",
+    out = "vendor",
 )
 
 cargo_manifest(
-    name = "manifest",
-    vendor = ":vendor",
+    name = "nix-manifest",
+    vendor = ":nix-vendor",
 )
 
 rust_library(
     name = "nix",
-    srcs = [":vendor"],
+    srcs = [":nix-vendor"],
     crate = "nix",
     crate_root = "vendor/src/lib.rs",
     edition = "2018",
@@ -27,11 +28,11 @@ rust_library(
         "process",
         "signal",
     ],
-    rustc_flags = ["@$(location :manifest[env_flags])"],
+    rustc_flags = ["@$(location :nix-manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/bitflags/1.3.2:bitflags",
         "//third-party/rust/crates/cfg-if/1.0.4:cfg-if",
-        "//third-party/rust/crates/libc/0.2.182:libc",
+        "//third-party/rust/crates/libc/0.2.186:libc",
     ],
 )

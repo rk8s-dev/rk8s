@@ -4,21 +4,22 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "vendor",
+    name = "futures-lite-vendor",
     urls = ["https://static.crates.io/crates/futures-lite/futures-lite-1.13.0.crate"],
     sha256 = "49a9d51ce47660b1e808d3c990b4709f2f415d928835a17dfd16991515c46bce",
     type = "tar.gz",
     strip_prefix = "futures-lite-1.13.0",
+    out = "vendor",
 )
 
 cargo_manifest(
-    name = "manifest",
-    vendor = ":vendor",
+    name = "futures-lite-manifest",
+    vendor = ":futures-lite-vendor",
 )
 
 rust_library(
     name = "futures-lite",
-    srcs = [":vendor"],
+    srcs = [":futures-lite-vendor"],
     crate = "futures_lite",
     crate_root = "vendor/src/lib.rs",
     edition = "2018",
@@ -32,15 +33,15 @@ rust_library(
         "std",
         "waker-fn",
     ],
-    rustc_flags = ["@$(location :manifest[env_flags])"],
+    rustc_flags = ["@$(location :futures-lite-manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/fastrand/1.9.0:fastrand",
-        "//third-party/rust/crates/futures-core/0.3.31:futures-core",
-        "//third-party/rust/crates/futures-io/0.3.31:futures-io",
+        "//third-party/rust/crates/futures-core/0.3.32:futures-core",
+        "//third-party/rust/crates/futures-io/0.3.32:futures-io",
         "//third-party/rust/crates/memchr/2.8.0:memchr",
         "//third-party/rust/crates/parking/2.2.1:parking",
-        "//third-party/rust/crates/pin-project-lite/0.2.16:pin-project-lite",
+        "//third-party/rust/crates/pin-project-lite/0.2.17:pin-project-lite",
         "//third-party/rust/crates/waker-fn/1.2.0:waker-fn",
     ],
 )

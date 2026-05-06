@@ -4,31 +4,32 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "vendor",
+    name = "blocking-vendor",
     urls = ["https://static.crates.io/crates/blocking/blocking-1.6.2.crate"],
     sha256 = "e83f8d02be6967315521be875afa792a316e28d57b5a2d401897e2a7921b7f21",
     type = "tar.gz",
     strip_prefix = "blocking-1.6.2",
+    out = "vendor",
 )
 
 cargo_manifest(
-    name = "manifest",
-    vendor = ":vendor",
+    name = "blocking-manifest",
+    vendor = ":blocking-vendor",
 )
 
 rust_library(
     name = "blocking",
-    srcs = [":vendor"],
+    srcs = [":blocking-vendor"],
     crate = "blocking",
     crate_root = "vendor/src/lib.rs",
     edition = "2021",
-    rustc_flags = ["@$(location :manifest[env_flags])"],
+    rustc_flags = ["@$(location :blocking-manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust/crates/async-channel/2.5.0:async-channel",
         "//third-party/rust/crates/async-task/4.7.1:async-task",
-        "//third-party/rust/crates/futures-io/0.3.31:futures-io",
+        "//third-party/rust/crates/futures-io/0.3.32:futures-io",
         "//third-party/rust/crates/futures-lite/2.6.1:futures-lite",
-        "//third-party/rust/crates/piper/0.2.4:piper",
+        "//third-party/rust/crates/piper/0.2.5:piper",
     ],
 )

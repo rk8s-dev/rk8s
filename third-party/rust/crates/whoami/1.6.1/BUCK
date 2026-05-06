@@ -4,24 +4,25 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "vendor",
+    name = "whoami-vendor",
     urls = ["https://static.crates.io/crates/whoami/whoami-1.6.1.crate"],
     sha256 = "5d4a4db5077702ca3015d3d02d74974948aba2ad9e12ab7df718ee64ccd7e97d",
     type = "tar.gz",
     strip_prefix = "whoami-1.6.1",
+    out = "vendor",
 )
 
 cargo_manifest(
-    name = "manifest",
-    vendor = ":vendor",
+    name = "whoami-manifest",
+    vendor = ":whoami-vendor",
 )
 
 rust_library(
     name = "whoami",
-    srcs = [":vendor"],
+    srcs = [":whoami-vendor"],
     crate = "whoami",
     crate_root = "vendor/src/lib.rs",
     edition = "2018",
-    rustc_flags = ["@$(location :manifest[env_flags])"],
+    rustc_flags = ["@$(location :whoami-manifest[env_flags])"],
     visibility = ["PUBLIC"],
 )

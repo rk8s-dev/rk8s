@@ -4,29 +4,30 @@ load("@buckal//:cargo_manifest.bzl", "cargo_manifest")
 load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
-    name = "vendor",
+    name = "hostname-vendor",
     urls = ["https://static.crates.io/crates/hostname/hostname-0.3.1.crate"],
     sha256 = "3c731c3e10504cc8ed35cfe2f1db4c9274c3d35fa486e3b31df46f068ef3e867",
     type = "tar.gz",
     strip_prefix = "hostname-0.3.1",
+    out = "vendor",
 )
 
 cargo_manifest(
-    name = "manifest",
-    vendor = ":vendor",
+    name = "hostname-manifest",
+    vendor = ":hostname-vendor",
 )
 
 rust_library(
     name = "hostname",
-    srcs = [":vendor"],
+    srcs = [":hostname-vendor"],
     crate = "hostname",
     crate_root = "vendor/src/lib.rs",
     edition = "2015",
     features = ["default"],
-    rustc_flags = ["@$(location :manifest[env_flags])"],
+    rustc_flags = ["@$(location :hostname-manifest[env_flags])"],
     os_deps = {
-        "linux": ["//third-party/rust/crates/libc/0.2.182:libc"],
-        "macos": ["//third-party/rust/crates/libc/0.2.182:libc"],
+        "linux": ["//third-party/rust/crates/libc/0.2.186:libc"],
+        "macos": ["//third-party/rust/crates/libc/0.2.186:libc"],
         "windows": ["//third-party/rust/crates/winapi/0.3.9:winapi"],
     },
     visibility = ["PUBLIC"],
