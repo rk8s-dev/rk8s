@@ -4912,7 +4912,7 @@ dependencies = [
 
 [[package]]
 name = "libfuse-fs"
-version = "0.1.12"
+version = "0.1.13"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -7516,7 +7516,7 @@ dependencies = [
 
 [[package]]
 name = "rfuse3"
-version = "0.0.7"
+version = "0.0.8"
 dependencies = [
  "aligned_box",
  "async-fs",
