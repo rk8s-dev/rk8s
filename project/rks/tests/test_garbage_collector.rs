@@ -56,6 +56,7 @@ fn pod_with_meta(name: &str, uid: Uuid, owners: Option<Vec<OwnerReference>>) -> 
         ports: vec![],
         args: vec![],
         tty: false,
+        gpus: None,
         resources: Some(common::ContainerRes {
             limits: Some(Resource {
                 cpu: Some("100m".to_string()),
@@ -131,6 +132,7 @@ fn replicaset_with_meta(name: &str, uid: Uuid, replicas: i32) -> ReplicaSet {
                         ports: vec![],
                         args: vec![],
                         tty: false,
+                        gpus: None,
                         resources: Some(common::ContainerRes {
                             limits: Some(Resource {
                                 cpu: Some("100m".to_string()),

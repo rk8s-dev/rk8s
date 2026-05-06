@@ -1373,6 +1373,7 @@ mod tests {
             ports: Vec::new(),
             args: Vec::new(),
             tty: false,
+            gpus: None,
             resources: None,
             liveness_probe: None,
             readiness_probe: None,

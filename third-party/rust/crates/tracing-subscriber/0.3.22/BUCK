@@ -29,6 +29,7 @@ rust_library(
         "env-filter",
         "fmt",
         "json",
+        "local-time",
         "matchers",
         "nu-ansi-term",
         "once_cell",
