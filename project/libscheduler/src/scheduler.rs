@@ -406,6 +406,7 @@ impl Scheduler {
         queue: Arc<SchedulingQueue>,
         res_sx: UnboundedSender<Result<Assignment, anyhow::Error>>,
         strategy: ScoringStrategy,
+        gang_state: Arc<GangStateStore>,
     ) {
         let (pod_priority, pod_name) = queue.next_pod().await;
         let cache_read = cache.read().await;
@@ -485,14 +486,35 @@ impl Scheduler {
                 &filtered,
             );
             scores.sort_by_key(|b| std::cmp::Reverse(b.0));
+            let chosen = scores[0].1.name.clone();
             let mut cache_write = cache.write().await;
-            if cache_write.assume(&pod_name, &scores[0].1.name) {
-                res_sx
-                    .send(Ok(Assignment {
-                        pod_name,
-                        node_name: scores[0].1.name.clone(),
-                    }))
-                    .expect("scheduling result rx closed before scheduler closed");
+            if cache_write.assume(&pod_name, &chosen) {
+                drop(cache_write);
+                match pod_info.spec.gang.as_ref() {
+                    None => {
+                        res_sx
+                            .send(Ok(Assignment {
+                                pod_name,
+                                node_name: chosen,
+                            }))
+                            .expect("scheduling result rx closed before scheduler closed");
+                    }
+                    Some(g) => {
+                        let full = gang_state.add_member(&g.id, g.size, &pod_name, &chosen);
+                        if full
+                            && let Some(members) = gang_state.take_and_clear(&g.id)
+                        {
+                            for (p, n) in members {
+                                res_sx
+                                    .send(Ok(Assignment {
+                                        pod_name: p,
+                                        node_name: n,
+                                    }))
+                                    .expect("scheduling result rx closed before scheduler closed");
+                            }
+                        }
+                    }
+                }
             }
         }
     }
@@ -513,6 +535,7 @@ impl Scheduler {
         let enabled_plugins = self.enabled_plugins.clone();
         let (sx, rx) = unbounded_channel();
         let strategy = self.strategy.clone();
+        let gang_state = self.gang_state.clone();
         tokio::spawn(async move {
             loop {
                 Self::schedule_one(
@@ -521,6 +544,7 @@ impl Scheduler {
                     queue.clone(),
                     sx.clone(),
                     strategy.clone(),
+                    gang_state.clone(),
                 )
                 .await;
             }
@@ -839,6 +863,7 @@ mod tests {
             scheduler.queue.clone(),
             sx,
             scheduler.strategy,
+            scheduler.gang_state.clone(),
         )
         .await;
         let res = rx.recv().await.unwrap();
@@ -846,5 +871,76 @@ mod tests {
         let assignment = res.unwrap();
         assert_eq!(assignment.pod_name, "pod");
         assert_eq!(assignment.node_name, "node");
+    }
+
+    #[tokio::test]
+    async fn test_schedule_one_gang_holds_until_full() {
+        use crate::models::GangSpec;
+
+        let scheduler: Scheduler =
+            Scheduler::new(ScoringStrategy::LeastAllocated, Plugins::default());
+
+        {
+            let mut cache = scheduler.cache.write().await;
+            cache.update_node(NodeInfo {
+                name: "node".to_string(),
+                allocatable: ResourcesRequirements {
+                    cpu: 100,
+                    memory: 1000,
+                },
+                ..Default::default()
+            });
+            for i in 0..3u32 {
+                cache.update_pod(PodInfo {
+                    name: format!("p{i}"),
+                    labels: std::collections::HashMap::new(),
+                    spec: PodSpec {
+                        resources: ResourcesRequirements { cpu: 1, memory: 1 },
+                        priority: 1,
+                        gang: Some(GangSpec {
+                            id: "g".into(),
+                            size: 3,
+                        }),
+                        ..Default::default()
+                    },
+                    queued_info: QueuedInfo::default(),
+                    scheduled: None,
+                });
+            }
+        }
+
+        let (sx, mut rx) = unbounded_channel();
+        for i in 0..3u32 {
+            scheduler.queue.push(format!("p{i}"), 1).await;
+        }
+        // First two schedule_one calls: nothing should be sent.
+        for _ in 0..2 {
+            Scheduler::schedule_one(
+                scheduler.enabled_plugins.clone(),
+                scheduler.cache.clone(),
+                scheduler.queue.clone(),
+                sx.clone(),
+                scheduler.strategy.clone(),
+                scheduler.gang_state.clone(),
+            )
+            .await;
+            assert!(rx.try_recv().is_err());
+        }
+        // Third call closes the gang: expect 3 assignments drained.
+        Scheduler::schedule_one(
+            scheduler.enabled_plugins,
+            scheduler.cache.clone(),
+            scheduler.queue.clone(),
+            sx,
+            scheduler.strategy,
+            scheduler.gang_state.clone(),
+        )
+        .await;
+        let mut got = Vec::new();
+        for _ in 0..3 {
+            got.push(rx.recv().await.unwrap().unwrap().pod_name);
+        }
+        got.sort();
+        assert_eq!(got, vec!["p0", "p1", "p2"]);
     }
 }
