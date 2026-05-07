@@ -102,6 +102,10 @@ pub fn convert_pod_task_to_pod_info(pod_task: PodTask) -> PodInfo {
         node_name: pod_task.spec.node_name.clone(),
         node_selector: HashMap::new(),
         affinity: pod_task.spec.affinity.map(crate::models::Affinity::from),
+        gpu_request: 0,
+        gpu_memory_request: None,
+        gang: None,
+        topology_constraints: Vec::new(),
     };
 
     PodInfo {
@@ -144,6 +148,7 @@ fn convert_k8s_node_to_node_info(k8s_node: Node) -> NodeInfo {
         spec,
         requested: ResourcesRequirements::default(),
         allocatable,
+        gpu_resources: None,
     }
 }
 

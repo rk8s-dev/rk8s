@@ -125,6 +125,7 @@ fn create_test_pod(name: &str, cpu_limit: Option<&str>, memory_limit: Option<&st
             limits: Some(Resource {
                 cpu: cpu_limit.map(|s| s.to_string()),
                 memory: memory_limit.map(|s| s.to_string()),
+                ..Default::default()
             }),
         })
     } else {
