@@ -728,6 +728,8 @@ mod tests {
                 affinity: None,
                 restart_policy: RestartPolicy::Always,
                 volumes: vec![],
+                gang: None,
+                topology_constraints: vec![],
             },
             status: PodStatus::default(),
         }
