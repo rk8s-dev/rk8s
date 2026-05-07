@@ -7,6 +7,7 @@ use tokio::time::{Duration, Instant};
 
 use crate::cache::Cache;
 use crate::cycle_state::CycleState;
+use crate::gang_state::GangStateStore;
 use crate::models::{Assignment, BackOffPod, PodNameWithPriority};
 use crate::models::{NodeInfo, PodInfo};
 use crate::plugins::node_resources_fit::ScoringStrategy;
@@ -21,6 +22,7 @@ pub struct Scheduler {
     // Differ to k8s, we don't have profile cofig now
     strategy: ScoringStrategy,
     enabled_plugins: EnabledPlugins,
+    gang_state: Arc<GangStateStore>,
 }
 
 type ActiveQueue = Arc<Mutex<BinaryHeap<PodNameWithPriority>>>;
@@ -254,7 +256,8 @@ impl Default for Scheduler {
 
 impl Scheduler {
     pub fn new(strategy: ScoringStrategy, plugins: Plugins) -> Self {
-        let registry = Registry::default();
+        let gang_state = Arc::new(GangStateStore::default());
+        let registry = Registry::new(gang_state.clone());
         let mut enabled = EnabledPlugins::default();
 
         macro_rules! enable_plugins {
@@ -301,6 +304,7 @@ impl Scheduler {
             queue: Arc::new(SchedulingQueue::new(queueing_hints)),
             strategy,
             enabled_plugins: enabled,
+            gang_state,
         }
     }
 
