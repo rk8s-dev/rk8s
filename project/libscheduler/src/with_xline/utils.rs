@@ -2,7 +2,10 @@ use std::collections::HashMap;
 
 use etcd_client::{Client, GetOptions, KeyValue};
 
-use crate::models::{NodeInfo, NodeSpec, PodInfo, PodSpec, QueuedInfo, ResourcesRequirements};
+use crate::models::{
+    GangSpec, GpuResources, NodeInfo, NodeSpec, PodInfo, PodSpec, QueuedInfo,
+    ResourcesRequirements, TopologyConstraint,
+};
 use common::{Node, PodTask};
 
 pub async fn get_pod(
@@ -66,6 +69,8 @@ pub fn get_node_from_kv(kv: &KeyValue) -> Result<NodeInfo, anyhow::Error> {
 pub fn convert_pod_task_to_pod_info(pod_task: PodTask) -> PodInfo {
     let mut total_cpu = 0;
     let mut total_memory = 0;
+    let mut total_gpu: u32 = 0;
+    let mut max_gpu_mem: Option<u64> = None;
 
     for container in &pod_task.spec.containers {
         if let Some(resources) = &container.resources
@@ -73,11 +78,18 @@ pub fn convert_pod_task_to_pod_info(pod_task: PodTask) -> PodInfo {
         {
             total_cpu += parse_cpu(&limits.cpu.clone().unwrap_or_default());
             total_memory += parse_memory(&limits.memory.clone().unwrap_or_default());
+            total_gpu = total_gpu.saturating_add(limits.gpu.unwrap_or(0));
+            if let Some(s) = &limits.gpu_memory {
+                let v = parse_memory(s);
+                max_gpu_mem = Some(max_gpu_mem.map_or(v, |m| m.max(v)));
+            }
         }
     }
 
     let mut init_cpu = 0;
     let mut init_memory = 0;
+    let mut init_gpu: u32 = 0;
+    let mut init_gpu_mem: Option<u64> = None;
 
     for container in &pod_task.spec.init_containers {
         if let Some(resources) = &container.resources
@@ -85,11 +97,38 @@ pub fn convert_pod_task_to_pod_info(pod_task: PodTask) -> PodInfo {
         {
             init_cpu = init_cpu.max(parse_cpu(&limits.cpu.clone().unwrap_or_default()));
             init_memory = init_memory.max(parse_memory(&limits.memory.clone().unwrap_or_default()));
+            init_gpu = init_gpu.max(limits.gpu.unwrap_or(0));
+            if let Some(s) = &limits.gpu_memory {
+                let v = parse_memory(s);
+                init_gpu_mem = Some(init_gpu_mem.map_or(v, |m| m.max(v)));
+            }
         }
     }
 
     total_cpu = total_cpu.max(init_cpu);
     total_memory = total_memory.max(init_memory);
+    total_gpu = total_gpu.max(init_gpu);
+    max_gpu_mem = match (max_gpu_mem, init_gpu_mem) {
+        (Some(a), Some(b)) => Some(a.max(b)),
+        (Some(a), None) => Some(a),
+        (None, Some(b)) => Some(b),
+        (None, None) => None,
+    };
+
+    let gang = pod_task.spec.gang.clone().map(|g| GangSpec {
+        id: g.id,
+        size: g.size,
+    });
+    let topology_constraints: Vec<TopologyConstraint> = pod_task
+        .spec
+        .topology_constraints
+        .iter()
+        .cloned()
+        .map(|c| TopologyConstraint {
+            topology_key: c.topology_key,
+            same_value: c.same_value,
+        })
+        .collect();
 
     let spec = PodSpec {
         resources: ResourcesRequirements {
@@ -102,10 +141,10 @@ pub fn convert_pod_task_to_pod_info(pod_task: PodTask) -> PodInfo {
         node_name: pod_task.spec.node_name.clone(),
         node_selector: HashMap::new(),
         affinity: pod_task.spec.affinity.map(crate::models::Affinity::from),
-        gpu_request: 0,
-        gpu_memory_request: None,
-        gang: None,
-        topology_constraints: Vec::new(),
+        gpu_request: total_gpu,
+        gpu_memory_request: max_gpu_mem,
+        gang,
+        topology_constraints,
     };
 
     PodInfo {
@@ -142,13 +181,30 @@ fn convert_k8s_node_to_node_info(k8s_node: Node) -> NodeInfo {
         ),
     };
 
+    let gpu_resources = labels
+        .get("nvidia.com/gpu.count")
+        .and_then(|v| v.parse::<u32>().ok())
+        .map(|total| GpuResources {
+            total,
+            requested: 0,
+            memory_per_gpu: labels
+                .get("nvidia.com/gpu.memory-gib")
+                .and_then(|v| v.parse::<u64>().ok())
+                .map(|gib| gib * 1024 * 1024 * 1024)
+                .unwrap_or(0),
+            model: labels
+                .get("nvidia.com/gpu.product")
+                .cloned()
+                .unwrap_or_default(),
+        });
+
     NodeInfo {
         name: k8s_node.metadata.name,
         labels,
         spec,
         requested: ResourcesRequirements::default(),
         allocatable,
-        gpu_resources: None,
+        gpu_resources,
     }
 }
 
@@ -191,5 +247,113 @@ fn parse_memory(memory_str: &str) -> u64 {
         memory_str.trim_end_matches('g').parse::<u64>().unwrap_or(0) * 1000 * 1000 * 1000
     } else {
         memory_str.parse::<u64>().unwrap_or(0)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_pod_with_gpu_and_gang() {
+        let yaml = r#"
+apiVersion: v1
+kind: Pod
+metadata:
+  name: llm-rank0
+  namespace: default
+  labels: {}
+spec:
+  containers:
+    - name: trainer
+      image: nvidia/cuda
+      ports: []
+      args: []
+      tty: false
+      resources:
+        limits:
+          cpu: "8"
+          memory: 16Gi
+          gpu: 4
+          gpu_memory: 80Gi
+  gang:
+    id: g1
+    size: 4
+  topology_constraints:
+    - topology_key: topology.rk8s.io/nvlink-domain
+      same_value: true
+"#;
+        let pod_task: PodTask = serde_yaml::from_str(yaml).unwrap();
+        let info = convert_pod_task_to_pod_info(pod_task);
+        assert_eq!(info.spec.gpu_request, 4);
+        assert_eq!(info.spec.gpu_memory_request, Some(80 * 1024 * 1024 * 1024));
+        let gang = info.spec.gang.expect("gang missing");
+        assert_eq!(gang.id, "g1");
+        assert_eq!(gang.size, 4);
+        assert_eq!(info.spec.topology_constraints.len(), 1);
+        assert_eq!(
+            info.spec.topology_constraints[0].topology_key,
+            "topology.rk8s.io/nvlink-domain"
+        );
+        assert!(info.spec.topology_constraints[0].same_value);
+    }
+
+    #[test]
+    fn parse_node_with_gpu_labels() {
+        let yaml = r#"
+apiVersion: v1
+kind: Node
+metadata:
+  name: gpu-node
+  namespace: default
+  labels:
+    nvidia.com/gpu.count: "8"
+    nvidia.com/gpu.memory-gib: "80"
+    nvidia.com/gpu.product: "H100"
+spec:
+  podCIDR: 10.0.0.0/24
+  taints: []
+status:
+  capacity:
+    cpu: "64"
+    memory: 256Gi
+  allocatable:
+    cpu: "64"
+    memory: 256Gi
+  conditions: []
+"#;
+        let node: Node = serde_yaml::from_str(yaml).unwrap();
+        let info = convert_k8s_node_to_node_info(node);
+        let gpu = info.gpu_resources.expect("gpu_resources missing");
+        assert_eq!(gpu.total, 8);
+        assert_eq!(gpu.memory_per_gpu, 80 * 1024 * 1024 * 1024);
+        assert_eq!(gpu.model, "H100");
+        assert_eq!(gpu.requested, 0);
+    }
+
+    #[test]
+    fn parse_node_without_gpu_labels() {
+        let yaml = r#"
+apiVersion: v1
+kind: Node
+metadata:
+  name: cpu-node
+  namespace: default
+  labels: {}
+spec:
+  podCIDR: 10.0.0.0/24
+  taints: []
+status:
+  capacity:
+    cpu: "8"
+    memory: 16Gi
+  allocatable:
+    cpu: "8"
+    memory: 16Gi
+  conditions: []
+"#;
+        let node: Node = serde_yaml::from_str(yaml).unwrap();
+        let info = convert_k8s_node_to_node_info(node);
+        assert!(info.gpu_resources.is_none());
     }
 }
