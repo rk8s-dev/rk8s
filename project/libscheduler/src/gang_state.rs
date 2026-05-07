@@ -49,6 +49,24 @@ impl GangStateStore {
             .collect()
     }
 
+    /// Atomically remove and return all timed-out incomplete gangs.
+    /// Each entry is `(gang_id, members_map)`.
+    pub fn take_timed_out(&self, timeout: Duration) -> Vec<(String, HashMap<String, String>)> {
+        let mut g = self.inner.write().unwrap();
+        let now = Instant::now();
+        let timed_out_ids: Vec<String> = g
+            .iter()
+            .filter(|(_, e)| {
+                (e.assumed.len() as u32) < e.size && now.duration_since(e.created_at) > timeout
+            })
+            .map(|(k, _)| k.clone())
+            .collect();
+        timed_out_ids
+            .into_iter()
+            .filter_map(|id| g.remove(&id).map(|e| (id, e.assumed)))
+            .collect()
+    }
+
     #[cfg(test)]
     pub fn set_created_at_for_test(&self, gang_id: &str, ts: Instant) {
         let mut g = self.inner.write().unwrap();

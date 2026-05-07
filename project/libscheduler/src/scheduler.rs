@@ -16,6 +16,9 @@ use crate::plugins::{
     PreFilterPlugin, PreScorePlugin, QueueingHint, Registry, ScorePlugin, Status,
 };
 
+pub const GANG_TIMEOUT_DEFAULT: Duration = Duration::from_secs(60);
+pub const GANG_TIMEOUT_CHECK_INTERVAL_DEFAULT: Duration = Duration::from_secs(1);
+
 pub struct Scheduler {
     cache: Arc<RwLock<Cache>>,
     queue: Arc<SchedulingQueue>,
@@ -23,6 +26,8 @@ pub struct Scheduler {
     strategy: ScoringStrategy,
     enabled_plugins: EnabledPlugins,
     gang_state: Arc<GangStateStore>,
+    gang_timeout: Duration,
+    gang_timeout_check_interval: Duration,
 }
 
 type ActiveQueue = Arc<Mutex<BinaryHeap<PodNameWithPriority>>>;
@@ -305,7 +310,16 @@ impl Scheduler {
             strategy,
             enabled_plugins: enabled,
             gang_state,
+            gang_timeout: GANG_TIMEOUT_DEFAULT,
+            gang_timeout_check_interval: GANG_TIMEOUT_CHECK_INTERVAL_DEFAULT,
         }
+    }
+
+    /// Test hook: override gang timeout & check interval to avoid waiting 60s in tests.
+    pub fn with_gang_timeout(mut self, timeout: Duration, check_interval: Duration) -> Self {
+        self.gang_timeout = timeout;
+        self.gang_timeout_check_interval = check_interval;
+        self
     }
 
     fn run_prefilter_plugin(
@@ -549,6 +563,38 @@ impl Scheduler {
                 .await;
             }
         });
+
+        // Gang timeout watchdog: roll back assumes for incomplete gangs that didn't fill in time.
+        let gang_state_bg = self.gang_state.clone();
+        let cache_bg = self.cache.clone();
+        let queue_bg = self.queue.clone();
+        let timeout = self.gang_timeout;
+        let check_interval = self.gang_timeout_check_interval;
+        tokio::spawn(async move {
+            let mut t = interval(check_interval);
+            loop {
+                t.tick().await;
+                let timed_out = gang_state_bg.take_timed_out(timeout);
+                if timed_out.is_empty() {
+                    continue;
+                }
+                let mut to_requeue: Vec<(String, u64)> = Vec::new();
+                {
+                    let mut cache_w = cache_bg.write().await;
+                    for (_gang_id, members) in timed_out {
+                        for pod_name in members.keys() {
+                            if let Some(p) = cache_w.unassume(pod_name) {
+                                to_requeue.push((p.name, p.spec.priority));
+                            }
+                        }
+                    }
+                }
+                for (name, priority) in to_requeue {
+                    queue_bg.push(name, priority).await;
+                }
+            }
+        });
+
         rx
     }
 
