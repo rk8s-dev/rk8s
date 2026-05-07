@@ -2603,7 +2603,7 @@ dependencies = [
  "hex",
  "jsonwebtoken",
  "object_store",
- "oci-spec",
+ "oci-spec 0.9.0",
  "qlean",
  "rand 0.9.2",
  "regex",
@@ -4766,7 +4766,23 @@ checksum = "acabc2d6b351af9406d5bddfe86697c3791fda2a6d6d03b90d86af1f0998751e"
 dependencies = [
  "fixedbitset",
  "nix 0.29.0",
- "oci-spec",
+ "oci-spec 0.8.4",
+ "pathrs",
+ "procfs",
+ "serde",
+ "thiserror 2.0.18",
+ "tracing",
+]
+
+[[package]]
+name = "libcgroups"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ff828a1e0ab31b46ebefd1e8e231b7572dec6f663d17ecee1bee42a565649672"
+dependencies = [
+ "fixedbitset",
+ "nix 0.29.0",
+ "oci-spec 0.9.0",
  "pathrs",
  "procfs",
  "serde",
@@ -4788,7 +4804,7 @@ dependencies = [
  "libc",
  "log",
  "macaddr",
- "netlink-packet-route",
+ "netlink-packet-route 0.25.1",
  "nix 0.29.0",
  "once_cell",
  "rand 0.9.2",
@@ -4804,20 +4820,22 @@ dependencies = [
 
 [[package]]
 name = "libcontainer"
-version = "0.5.7"
+version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a6320ae84435bed00efb3e0a7c2de8a38bba4d619e801d8ab3a8527fcf427709"
+checksum = "4c0d145abd052d4f374d5b9fb8beaa7c817a691ef0143260353b69761a96dd6a"
 dependencies = [
  "caps",
  "chrono",
  "fastrand 2.3.0",
  "libc",
- "libcgroups",
+ "libcgroups 0.6.0",
  "libseccomp",
  "nc",
+ "netlink-packet-core",
+ "netlink-packet-route 0.26.0",
+ "netlink-sys",
  "nix 0.29.0",
- "oci-spec",
- "once_cell",
+ "oci-spec 0.9.0",
  "pathrs",
  "prctl",
  "procfs",
@@ -4971,7 +4989,7 @@ dependencies = [
  "libcni",
  "log",
  "macaddr",
- "netlink-packet-route",
+ "netlink-packet-route 0.25.1",
  "nftables",
  "nix 0.29.0",
  "regex",
@@ -5033,7 +5051,7 @@ dependencies = [
  "ipnetwork",
  "json",
  "lazy_static",
- "libcgroups",
+ "libcgroups 0.5.7",
  "libcni",
  "libcontainer",
  "libfuse-fs",
@@ -5041,9 +5059,9 @@ dependencies = [
  "liboci-cli",
  "libvault",
  "log",
- "netlink-packet-route",
+ "netlink-packet-route 0.25.1",
  "nix 0.29.0",
- "oci-spec",
+ "oci-spec 0.9.0",
  "prost 0.13.5",
  "prost-build 0.13.5",
  "prost-types 0.12.6",
@@ -5525,7 +5543,7 @@ dependencies = [
  "log",
  "mozim",
  "netlink-packet-core",
- "netlink-packet-route",
+ "netlink-packet-route 0.25.1",
  "netlink-sys",
  "nftables",
  "nix 0.30.1",
@@ -5557,6 +5575,18 @@ name = "netlink-packet-route"
 version = "0.25.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3ec2f5b6839be2a19d7fa5aab5bc444380f6311c2b693551cb80f45caaa7b5ef"
+dependencies = [
+ "bitflags 2.11.0",
+ "libc",
+ "log",
+ "netlink-packet-core",
+]
+
+[[package]]
+name = "netlink-packet-route"
+version = "0.26.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9ea06a7cec15a9df94c58bddc472b1de04ca53bd32e72da7da2c5dd1c3885edc"
 dependencies = [
  "bitflags 2.11.0",
  "libc",
@@ -5899,7 +5929,7 @@ dependencies = [
  "http-auth",
  "jwt",
  "lazy_static",
- "oci-spec",
+ "oci-spec 0.8.4",
  "olpc-cjson",
  "regex",
  "reqwest 0.12.28",
@@ -5917,6 +5947,23 @@ name = "oci-spec"
 version = "0.8.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fc3da52b83ce3258fbf29f66ac784b279453c2ac3c22c5805371b921ede0d308"
+dependencies = [
+ "const_format",
+ "derive_builder",
+ "getset",
+ "regex",
+ "serde",
+ "serde_json",
+ "strum 0.27.2",
+ "strum_macros 0.27.2",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "oci-spec"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e8445a2631507cec628a15fdd6154b54a3ab3f20ed4fe9d73a3b8b7a4e1ba03a"
 dependencies = [
  "const_format",
  "derive_builder",
@@ -7609,7 +7656,7 @@ dependencies = [
  "json",
  "lazy_static",
  "libc",
- "libcgroups",
+ "libcgroups 0.5.7",
  "libcni",
  "libcontainer",
  "libfuse-fs",
@@ -7619,10 +7666,10 @@ dependencies = [
  "libruntime",
  "libvault",
  "netavark",
- "netlink-packet-route",
+ "netlink-packet-route 0.25.1",
  "nix 0.29.0",
  "oci-client",
- "oci-spec",
+ "oci-spec 0.9.0",
  "once_cell",
  "qlean",
  "qrcode",
@@ -7682,7 +7729,7 @@ dependencies = [
  "ipnetwork",
  "json",
  "lazy_static",
- "libcgroups",
+ "libcgroups 0.5.7",
  "libcni",
  "libcontainer",
  "libcsi",
@@ -7692,10 +7739,10 @@ dependencies = [
  "libruntime",
  "libvault",
  "log",
- "netlink-packet-route",
+ "netlink-packet-route 0.25.1",
  "nftables",
  "nix 0.29.0",
- "oci-spec",
+ "oci-spec 0.9.0",
  "procfs",
  "prost 0.13.5",
  "prost-build 0.13.5",
@@ -7764,7 +7811,7 @@ dependencies = [
  "log",
  "lru 0.16.3",
  "native-tls",
- "netlink-packet-route",
+ "netlink-packet-route 0.25.1",
  "nftables",
  "nix 0.29.0",
  "once_cell",
@@ -7880,7 +7927,7 @@ dependencies = [
  "futures",
  "log",
  "netlink-packet-core",
- "netlink-packet-route",
+ "netlink-packet-route 0.25.1",
  "netlink-proto",
  "netlink-sys",
  "nix 0.29.0",

@@ -467,6 +467,19 @@ pub struct Resource {
     pub memory: Option<String>,
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct GpuSpec {
+    #[serde(default)]
+    pub enabled: bool,
+
+    #[serde(default)]
+    pub device_ids: Vec<String>,
+
+    #[serde(default)]
+    pub driver_capabilities: Vec<String>,
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
 pub struct SecurityContext {
     #[serde(rename = "runAsUser")]
@@ -549,6 +562,9 @@ pub struct ContainerSpec {
 
     #[serde(default)]
     pub tty: bool,
+
+    #[serde(default)]
+    pub gpus: Option<GpuSpec>,
 
     pub resources: Option<ContainerRes>,
 

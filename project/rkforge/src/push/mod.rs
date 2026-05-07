@@ -12,10 +12,10 @@ use anyhow::{Context, anyhow, bail};
 use clap::Parser;
 use futures::{StreamExt, TryStreamExt, stream};
 use oci_client::Client;
+use oci_client::Reference;
 use oci_client::client::PushResponse;
 use oci_client::manifest::{OciImageIndex, OciManifest};
 use oci_client::secrets::RegistryAuth;
-use oci_spec::distribution::Reference;
 use reqwest::header::RANGE;
 use reqwest::{StatusCode, Url};
 use std::collections::HashMap;
@@ -932,6 +932,7 @@ fn strip_explicit_tag(raw: &str) -> &str {
 #[cfg(test)]
 mod tests {
     use crate::storage::parse_image_ref;
+    use oci_client::Reference;
     use reqwest::header::HeaderValue;
 
     use super::{
@@ -999,9 +1000,7 @@ mod tests {
 
     #[test]
     fn test_registry_qualified_push_ref_is_not_prefixed_twice() {
-        let parsed = "ghcr.io/acme/app:v1"
-            .parse::<oci_spec::distribution::Reference>()
-            .unwrap();
+        let parsed = "ghcr.io/acme/app:v1".parse::<Reference>().unwrap();
         let normalized = format!("{}:{}", parsed.repository(), parsed.tag().unwrap());
         let target = parse_image_ref(parsed.registry(), normalized, None::<String>).unwrap();
         assert_eq!(target.whole(), "ghcr.io/acme/app:v1");

@@ -3,12 +3,15 @@ use libcontainer::oci_spec::runtime::{
     Capability, LinuxBuilder, LinuxCapabilities, LinuxNamespaceBuilder, LinuxNamespaceType,
     MountBuilder, ProcessBuilder, Spec,
 };
+use tracing::debug;
 
 use crate::cri::cri_api::ContainerConfig;
 use anyhow::{Result, anyhow};
 use common::ContainerSpec;
-use oci_spec::runtime::{LinuxNamespace, RootBuilder};
-use std::collections::HashSet;
+use oci_spec::runtime::{HookBuilder, HooksBuilder, LinuxNamespace, RootBuilder};
+use std::collections::{BTreeMap, HashSet};
+use std::env;
+use std::path::{Path, PathBuf};
 
 // Default supported capabilities (from docker's implementation)
 lazy_static! {
@@ -91,6 +94,7 @@ impl OCISpecGenerator {
         };
         process.set_args(Some(arg));
         process.set_terminal(Some(self.container_spec.tty));
+        process.set_env(Some(self.build_process_env(&process)));
 
         let capabilities = self.get_capabilities()?;
         process.set_capabilities(Some(capabilities));
@@ -148,7 +152,87 @@ impl OCISpecGenerator {
             self.inner_spec.set_mounts(Some(oci_mounts));
         }
 
+        if let Some(hooks) = self.build_gpu_hooks()? {
+            self.inner_spec.set_hooks(Some(hooks));
+            debug!("GPU hooks added to OCI spec: {:?}", self.inner_spec.hooks());
+        }
+
         Ok(self.inner_spec)
+    }
+
+    fn build_process_env(&self, process: &oci_spec::runtime::Process) -> Vec<String> {
+        let mut env_map = BTreeMap::new();
+
+        for entry in process.env().as_ref().cloned().unwrap_or_default() {
+            if let Some((key, value)) = split_env_entry(&entry) {
+                env_map.insert(key.to_string(), value.to_string());
+            }
+        }
+
+        for entry in self.gpu_env_vars() {
+            if let Some((key, value)) = split_env_entry(&entry) {
+                env_map.insert(key.to_string(), value.to_string());
+            }
+        }
+
+        env_map
+            .into_iter()
+            .map(|(key, value)| format!("{key}={value}"))
+            .collect()
+    }
+
+    fn build_gpu_hooks(&self) -> Result<Option<oci_spec::runtime::Hooks>> {
+        let Some(gpu_spec) = &self.container_spec.gpus else {
+            return Ok(None);
+        };
+        debug!("In build_gpu_hooks() GPU spec found: {:?}", gpu_spec);
+        if !gpu_spec.enabled {
+            return Ok(None);
+        }
+
+        let hook_path = find_nvidia_container_runtime_hook().ok_or_else(|| {
+            anyhow!(
+                "GPU support requested for container '{}' but nvidia-container-runtime-hook was not found in PATH or standard locations",
+                self.container_spec.name
+            )
+        })?;
+
+        let hook = HookBuilder::default()
+            .path(hook_path)
+            .args(vec![
+                "nvidia-container-runtime-hook".to_string(),
+                "prestart".to_string(),
+            ])
+            .build()?;
+
+        let hooks = HooksBuilder::default().create_runtime(vec![hook]).build()?;
+        Ok(Some(hooks))
+    }
+
+    fn gpu_env_vars(&self) -> Vec<String> {
+        let Some(gpu_spec) = &self.container_spec.gpus else {
+            return vec![];
+        };
+        if !gpu_spec.enabled {
+            return vec![];
+        }
+
+        let visible_devices = if gpu_spec.device_ids.is_empty() {
+            "all".to_string()
+        } else {
+            gpu_spec.device_ids.join(",")
+        };
+
+        let driver_capabilities = if gpu_spec.driver_capabilities.is_empty() {
+            "utility,compute".to_string()
+        } else {
+            gpu_spec.driver_capabilities.join(",")
+        };
+
+        vec![
+            format!("NVIDIA_VISIBLE_DEVICES={visible_devices}"),
+            format!("NVIDIA_DRIVER_CAPABILITIES={driver_capabilities}"),
+        ]
     }
 
     fn create_container_namespaces(&self) -> Result<Vec<LinuxNamespace>> {
@@ -216,6 +300,36 @@ impl OCISpecGenerator {
 
         Ok(namespaces)
     }
+}
+
+fn find_nvidia_container_runtime_hook() -> Option<PathBuf> {
+    const CANDIDATES: &[&str] = &[
+        "/usr/bin/nvidia-container-runtime-hook",
+        "/usr/local/bin/nvidia-container-runtime-hook",
+        "/bin/nvidia-container-runtime-hook",
+    ];
+
+    if let Some(path) = env::var_os("PATH") {
+        for dir in env::split_paths(&path) {
+            let candidate = dir.join("nvidia-container-runtime-hook");
+            if is_executable_file(&candidate) {
+                return Some(candidate);
+            }
+        }
+    }
+
+    CANDIDATES
+        .iter()
+        .map(PathBuf::from)
+        .find(|candidate| is_executable_file(candidate))
+}
+
+fn is_executable_file(path: &Path) -> bool {
+    path.is_file()
+}
+
+fn split_env_entry(entry: &str) -> Option<(&str, &str)> {
+    entry.split_once('=')
 }
 
 macro_rules! drop_capability_from_set {

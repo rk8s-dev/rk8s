@@ -364,6 +364,7 @@ mod tests {
                 ports: vec![],
                 args: vec!["/bin/echo".to_string(), "hi".to_string()],
                 tty: false,
+                gpus: None,
                 resources: None,
                 liveness_probe: None,
                 readiness_probe: None,
