@@ -434,6 +434,11 @@ pub struct PodSpec {
     //if pod is distributed to a node ,then this field should be filled with node-id
     #[serde(default)]
     pub node_name: Option<String>,
+    /// Override the pause (sandbox) container image. Can be an OCI image reference
+    /// (e.g. "pause:3.9") or a local bundle path (e.g. "/path/to/pause/bundle").
+    /// Falls back to "pause:3.9" when not set.
+    #[serde(rename = "pauseImage", default)]
+    pub pause_image: Option<String>,
     #[serde(default)]
     pub containers: Vec<ContainerSpec>,
     #[serde(default)]
