@@ -264,7 +264,7 @@ impl<'a> NodeRegister<'a> {
         let node_net_config = build_node_network_config(
             node_id.clone(),
             config,
-            false,
+            true,
             Some(ipv4_subnet),
             ipv6_subnet,
         )?;

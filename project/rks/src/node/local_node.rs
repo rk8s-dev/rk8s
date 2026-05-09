@@ -85,7 +85,7 @@ pub(crate) async fn bootstrap(shared: Arc<Shared>, addr: &str) -> Result<()> {
     let node_net_config = build_node_network_config(
         node_id.clone(),
         &network_config,
-        false,
+        true,
         Some(lease.subnet),
         lease.ipv6_subnet,
     )
