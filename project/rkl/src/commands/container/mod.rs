@@ -639,10 +639,9 @@ pub fn delete_container(id: &str) -> Result<()> {
     // Get bundle_path before delete (container state will be cleaned up after delete)
     let container = load_container(&root_path, id)?;
     let bundle_path = container.bundle().to_path_buf();
-    let pid = container
-        .pid()
-        .ok_or(anyhow!("invalid container {} can't find pid", id))?;
-    remove_container_network(pid)?;
+    if let Some(pid) = container.pid() {
+        remove_container_network(pid)?;
+    }
 
     let delete_args = Delete {
         container_id: id.to_string(),
