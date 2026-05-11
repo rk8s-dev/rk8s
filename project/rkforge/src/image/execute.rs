@@ -9,11 +9,33 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use crate::{
+    config::meta::Repositories,
     image::{config::normalize_path, context::StageContext as Context},
     pull::sync_pull_or_get_image_with_policy_and_output,
-    storage::full_image_ref,
+    storage::{full_image_ref, read_manifest, ultimate_blob_path},
     task::{CopyTask, RunTask, TaskExec},
 };
+
+/// Check if an image's layers are all present in local storage.
+/// Returns layer paths if the image is fully cached, None otherwise.
+fn try_local_image_layers(img_ref: &str) -> Option<Vec<PathBuf>> {
+    let repos = Repositories::load().ok()?;
+    let digest = repos.get(img_ref).ok()??.to_string();
+    let manifest = read_manifest(&digest).ok()?;
+    let layers = match manifest {
+        oci_client::manifest::OciManifest::Image(m) => m.layers,
+        _ => return None,
+    };
+    let paths: Option<Vec<PathBuf>> = layers
+        .iter()
+        .map(|l| ultimate_blob_path(&l.digest).ok())
+        .collect();
+    let paths = paths?;
+    if paths.iter().any(|p| !p.exists()) {
+        return None;
+    }
+    Some(paths)
+}
 
 /// Extract the argument string from a BreakableString (used for Misc instructions like WORKDIR, USER).
 fn extract_misc_argument(args: &BreakableString) -> String {
@@ -264,12 +286,30 @@ impl<P: AsRef<Path>> InstructionExt<P> for FromInstruction {
 
         let img_ref = full_image_ref(&image_parsed.image, image_parsed.tag.as_deref());
 
-        let (_, layers) = sync_pull_or_get_image_with_policy_and_output(
-            &img_ref,
-            None::<String>,
-            ctx.no_cache,
-            ctx.quiet,
-        )?;
+        let layers = if !ctx.no_cache {
+            if let Some(local_layers) = try_local_image_layers(&img_ref) {
+                if !ctx.quiet {
+                    println!("  -> Using local image: {img_ref}");
+                }
+                local_layers
+            } else {
+                let (_, l) = sync_pull_or_get_image_with_policy_and_output(
+                    &img_ref,
+                    None::<String>,
+                    ctx.no_cache,
+                    ctx.quiet,
+                )?;
+                l
+            }
+        } else {
+            let (_, l) = sync_pull_or_get_image_with_policy_and_output(
+                &img_ref,
+                None::<String>,
+                ctx.no_cache,
+                ctx.quiet,
+            )?;
+            l
+        };
 
         // add image alias mapping
         if let Some(alias) = &self.alias {
