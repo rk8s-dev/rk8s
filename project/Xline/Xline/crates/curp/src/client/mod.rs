@@ -284,7 +284,7 @@ impl ClientBuilder {
     /// Use QUIC transport
     #[inline]
     #[must_use]
-    pub fn quic_transport(mut self, quic_client: Arc<gm_quic::prelude::QuicClient>) -> Self {
+    pub fn quic_transport(mut self, quic_client: Arc<dquic::prelude::QuicClient>) -> Self {
         self.transport = Some(crate::rpc::transport::TransportConfig {
             client: quic_client,
             dns_fallback: crate::rpc::quic_transport::channel::DnsFallback::Disabled,
@@ -300,10 +300,7 @@ impl ClientBuilder {
     #[doc(hidden)]
     #[inline]
     #[must_use]
-    pub fn quic_transport_for_test(
-        mut self,
-        quic_client: Arc<gm_quic::prelude::QuicClient>,
-    ) -> Self {
+    pub fn quic_transport_for_test(mut self, quic_client: Arc<dquic::prelude::QuicClient>) -> Self {
         self.transport = Some(crate::rpc::transport::TransportConfig {
             client: quic_client,
             dns_fallback: crate::rpc::quic_transport::channel::DnsFallback::LocalhostForTest,

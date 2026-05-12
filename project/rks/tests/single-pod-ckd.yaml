@@ -1,0 +1,23 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: simple-container-task
+  labels:
+    app: my-app
+spec:
+  pauseImage: /home/tcy/rk8s/project/test/bundles/pause
+  containers:
+    - name: main-container1    
+      image: /home/tcy/bundle/candle
+      args:             
+        - bash          
+      tty: true
+      gpus:
+        enabled: true
+      ports:
+        - containerPort: 80
+      resources:
+        limits:
+          cpu: "500m"
+          memory: "512Mi"
+status:

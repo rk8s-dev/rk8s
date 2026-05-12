@@ -4,7 +4,8 @@
 
 use std::collections::HashSet;
 
-use gm_quic::prelude::{BindUri, ParseBindUriError};
+use dquic::prelude::BindUri;
+use dquic::qinterface::bind_uri::ParseBindUriError;
 
 /// Extract the host portion from a URL string like "https://host:port/path".
 /// Returns `None` if the URL cannot be parsed or has no host.

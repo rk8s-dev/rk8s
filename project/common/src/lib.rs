@@ -434,6 +434,11 @@ pub struct PodSpec {
     //if pod is distributed to a node ,then this field should be filled with node-id
     #[serde(default)]
     pub node_name: Option<String>,
+    /// Override the pause (sandbox) container image. Can be an OCI image reference
+    /// (e.g. "pause:3.9") or a local bundle path (e.g. "/path/to/pause/bundle").
+    /// Falls back to "pause:3.9" when not set.
+    #[serde(rename = "pauseImage", default)]
+    pub pause_image: Option<String>,
     #[serde(default)]
     pub containers: Vec<ContainerSpec>,
     #[serde(default)]
@@ -465,6 +470,19 @@ pub struct ContainerRes {
 pub struct Resource {
     pub cpu: Option<String>,
     pub memory: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct GpuSpec {
+    #[serde(default)]
+    pub enabled: bool,
+
+    #[serde(default)]
+    pub device_ids: Vec<String>,
+
+    #[serde(default)]
+    pub driver_capabilities: Vec<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
@@ -549,6 +567,9 @@ pub struct ContainerSpec {
 
     #[serde(default)]
     pub tty: bool,
+
+    #[serde(default)]
+    pub gpus: Option<GpuSpec>,
 
     pub resources: Option<ContainerRes>,
 

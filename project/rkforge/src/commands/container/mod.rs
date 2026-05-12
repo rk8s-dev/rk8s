@@ -221,6 +221,8 @@ impl ContainerRunner {
                 image: "".to_string(),
                 ports: vec![],
                 args: vec![],
+                tty: false,
+                gpus: None,
                 resources: None,
                 liveness_probe: None,
                 readiness_probe: None,
@@ -230,7 +232,6 @@ impl ContainerRunner {
                 volume_mounts: None,
                 command: None,
                 working_dir: None,
-                tty: false,
             },
             config: None,
             container_id: container_id.to_string(),
@@ -847,6 +848,8 @@ mod test {
             image: bundle_path,
             ports: vec![],
             args: vec!["/bin/echo".to_string(), "hi".to_string()],
+            tty: false,
+            gpus: None,
             resources: None,
             liveness_probe: None,
             readiness_probe: None,
@@ -856,7 +859,6 @@ mod test {
             volume_mounts: None,
             command: None,
             working_dir: None,
-            tty: false,
         };
         let runner = ContainerRunner::from_spec(spec.clone(), None).unwrap();
         assert_eq!(runner.container_id, "demo1");
@@ -881,6 +883,8 @@ mod test {
                 image: bundle_path,
                 ports: vec![],
                 args: vec![],
+                tty: false,
+                gpus: None,
                 resources: None,
                 liveness_probe: None,
                 readiness_probe: None,
@@ -890,7 +894,6 @@ mod test {
                 volume_mounts: None,
                 command: None,
                 working_dir: None,
-                tty: false,
             },
             None,
         )

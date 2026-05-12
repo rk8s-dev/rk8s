@@ -36,7 +36,8 @@ derive_builder = "0.20.0"
 event-listener = "5.3.1"
 flume = "0.11.0"
 futures = "0.3.30"
-gm-quic = "0.4.0"
+dquic = { git = "https://github.com/genmeta/dquic.git", tag = "v0.5.0" }
+h3-shim = { git = "https://github.com/genmeta/dquic.git", package = "h3-shim", tag = "v0.5.0" }
 itertools = "0.13"
 jsonwebtoken = "9.3.0"
 log = "0.4.22"

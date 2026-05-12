@@ -19,8 +19,8 @@ use curp_test_utils::{
     TestRoleChange, TestRoleChangeInner,
     test_cmd::{TestCE, TestCommand, TestCommandResult},
 };
+use dquic::prelude::{QuicClient, QuicListeners};
 use engine::MemorySnapshotAllocator;
-use gm_quic::prelude::{QuicClient, QuicListeners};
 use rcgen::{CertificateParams, KeyPair};
 use rustls::pki_types::CertificateDer;
 use tokio::{net::TcpListener, sync::mpsc, task::JoinHandle};
@@ -123,7 +123,7 @@ impl QuicCurpGroup {
                     key_der.as_slice(),
                     vec![
                         bind_uri_str
-                            .parse::<gm_quic::qbase::net::addr::BindUri>()
+                            .parse::<dquic::qbase::net::addr::BindUri>()
                             .unwrap(),
                     ],
                     None::<Vec<u8>>,

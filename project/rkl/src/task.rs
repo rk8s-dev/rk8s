@@ -247,11 +247,16 @@ impl TaskRunner {
         // 1. Get sandbox bundle path
         let sandbox_spec = ContainerSpec {
             name: "sandbox".to_string(),
-            // FIXME: SHOULD define a const variable image name
-            image: "pause:3.9".to_string(),
+            image: self
+                .task
+                .spec
+                .pause_image
+                .clone()
+                .unwrap_or_else(|| "pause:3.9".to_string()),
             ports: vec![],
             args: vec![],
             tty: false,
+            gpus: None,
             resources: None,
             liveness_probe: None,
             readiness_probe: None,
@@ -366,12 +371,16 @@ impl TaskRunner {
         // 1. Get sandbox bundle path
         let sandbox_spec = ContainerSpec {
             name: "sandbox".to_string(),
-            // FIXME: SHOULD define a const variable image name
-            image: "pause:3.9".to_string(),
-            // image: "/home/harry/Documents/rk8s/project/test/bundles/pause".to_string(),
+            image: self
+                .task
+                .spec
+                .pause_image
+                .clone()
+                .unwrap_or_else(|| "pause:3.9".to_string()),
             ports: vec![],
             args: vec![],
             tty: false,
+            gpus: None,
             resources: None,
             liveness_probe: None,
             readiness_probe: None,
@@ -586,7 +595,7 @@ impl TaskRunner {
                 }
                 (Some(builder), bundle_path)
             } else {
-                (None, "".to_string())
+                (None, container.image.clone())
             }
         } else {
             sync_handle_image_typ(&puller, container)?
@@ -650,7 +659,7 @@ impl TaskRunner {
                 }
                 (Some(builder), bundle_path)
             } else {
-                (None, "".to_string())
+                (None, container.image.clone())
             }
         } else {
             handle_image_typ(&puller, container).await?
@@ -719,10 +728,18 @@ impl TaskRunner {
             anyhow::Error::from(e)
         })?;
 
+        debug!(
+            "ContainerSpec for container {}: {:#?}",
+            container_id, container_spec
+        );
         let generator = OCISpecGenerator::new(config, container_spec, Some(pause_pid));
         let mut spec = generator.generate().map_err(|e| {
             anyhow!("failed to build OCI Specification for container {container_id}: {e}")
         })?;
+        debug!(
+            "Generated OCI spec for container {}: {:#?}",
+            container_id, spec
+        );
 
         // If this container uses overlay rootfs, override Root path to "merged"
         if self.rootfs_mounts.contains_key(&container_id) {
@@ -751,15 +768,15 @@ impl TaskRunner {
             return Err(anyhow!("Bundle directory does not exist"));
         }
 
-        // FIXME: If there is a config.json in bundle (which is unexpected in production), keep it
-        // Expected behavior: the container should own it's unique bundle path
+        spec.canonicalize_rootfs(&bundle_dir).map_err(|e| {
+            anyhow!("failed to canonicalize rootfs for container {container_id}: {e}")
+        })?;
+
         let config_path = format!("{bundle_path}/config.json");
-        if !Path::new(&config_path).exists() {
-            let file = File::create(&config_path)?;
-            let mut writer = BufWriter::new(file);
-            serde_json::to_writer_pretty(&mut writer, &spec)?;
-            writer.flush()?;
-        }
+        let file = File::create(&config_path)?;
+        let mut writer = BufWriter::new(file);
+        serde_json::to_writer_pretty(&mut writer, &spec)?;
+        writer.flush()?;
 
         // If container requests a TTY, pass a console_socket path to create_with_log
         // so it can receive the pty master fd from libcontainer via SCM_RIGHTS.

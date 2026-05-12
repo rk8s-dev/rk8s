@@ -90,28 +90,6 @@ fn ensure_quic_tls(config: XlineServerConfig, server_idx: usize) -> XlineServerC
     )
 }
 
-#[inline]
-fn normalize_connect_addr(addr: std::net::SocketAddr) -> std::net::SocketAddr {
-    match addr {
-        std::net::SocketAddr::V4(v4) => {
-            let ip = if v4.ip().is_unspecified() {
-                std::net::Ipv4Addr::LOCALHOST
-            } else {
-                *v4.ip()
-            };
-            std::net::SocketAddr::new(ip.into(), v4.port())
-        }
-        std::net::SocketAddr::V6(v6) => {
-            let ip = if v6.ip().is_unspecified() {
-                std::net::Ipv6Addr::LOCALHOST
-            } else {
-                *v6.ip()
-            };
-            std::net::SocketAddr::new(ip.into(), v6.port())
-        }
-    }
-}
-
 /// Cluster
 pub struct Cluster {
     /// client and peer listeners of members
@@ -283,26 +261,24 @@ impl Cluster {
     ) {
         let idx = self.all_members_peer_urls.len();
         let name = format!("server{}", idx);
-        // Ensure TLS is configured for the new node so it can communicate with existing cluster
-        let tls_config = base_config.tls();
-        let server_tls_enabled = tls_config.server_tls_enabled();
-        let tls_config = if server_tls_enabled {
-            tls_config.clone()
-        } else {
-            // Use per-server TLS certificates so that the server name (e.g., "server3")
-            // matches the certificate's SAN
-            server_quic_tls_config_for_tests(idx)
-        };
+        // Ensure the dynamic node follows the same TLS/SNI conventions as static nodes.
+        let base_config = ensure_quic_tls(base_config, idx);
+        let server_tls_enabled = base_config.tls().server_tls_enabled();
         let scheme = if server_tls_enabled { "https" } else { "http" };
+        let advertised_host = if server_cert_path(idx).exists() && server_key_path(idx).exists() {
+            format!("server{idx}")
+        } else {
+            "localhost".to_owned()
+        };
         let self_client_listen_url = format!("{scheme}://{}", xline_listener.local_addr().unwrap());
         let self_peer_listen_url = format!("{scheme}://{}", curp_listener.local_addr().unwrap());
         let self_client_url = format!(
-            "{scheme}://{}",
-            normalize_connect_addr(xline_listener.local_addr().unwrap())
+            "{scheme}://{advertised_host}:{}",
+            xline_listener.local_addr().unwrap().port()
         );
         let self_peer_url = format!(
-            "{scheme}://{}",
-            normalize_connect_addr(curp_listener.local_addr().unwrap())
+            "{scheme}://{advertised_host}:{}",
+            curp_listener.local_addr().unwrap().port()
         );
         self.all_members_client_urls.push(self_client_url.clone());
         self.all_members_peer_urls.push(self_peer_url.clone());
@@ -329,33 +305,26 @@ impl Cluster {
             InitialClusterState::Existing,
         );
 
-        // Override TLS config to ensure it matches the cluster
-        let config = XlineServerConfig::new(
-            config.cluster().clone(),
-            config.storage().clone(),
-            config.log().clone(),
-            config.trace().clone(),
-            config.auth().clone(),
-            *config.compact(),
-            tls_config,
-            config.metrics().clone(),
+        let server = Arc::new(
+            XlineServer::new(
+                config.cluster().clone(),
+                config.storage().clone(),
+                *config.compact(),
+                config.auth().clone(),
+                config.tls().clone(),
+            )
+            .await
+            .unwrap(),
         );
-
-        let server = XlineServer::new(
-            config.cluster().clone(),
-            config.storage().clone(),
-            *config.compact(),
-            config.auth().clone(),
-            config.tls().clone(),
-        )
-        .await
-        .unwrap();
+        self.servers.push(Arc::clone(&server));
         let result = server
             .start_from_listener(xline_listener, curp_listener)
             .await;
         if let Err(e) = result {
             panic!("Server start error: {e}");
         }
+        // Dynamic node startup is asynchronous; wait briefly for QUIC listeners to accept.
+        time::sleep(Duration::from_millis(1500)).await;
     }
 
     /// Create or get the client with the specified index

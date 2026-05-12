@@ -1034,6 +1034,7 @@ impl DatabaseMetaStore {
         }
     }
 
+    // GC Phase 1: find aged delayed slices, delete their slice_meta records, and mark them for block deletion.
     async fn process_delayed_slices(
         &self,
         batch_size: usize,
@@ -3000,6 +3001,7 @@ impl MetaStore for DatabaseMetaStore {
         }
         Ok(())
     }
+    // GC Phase 1: find aged delayed slices, delete their slice_meta records, and mark them for block deletion.
     async fn process_delayed_slices(
         &self,
         batch_size: usize,
@@ -3008,10 +3010,12 @@ impl MetaStore for DatabaseMetaStore {
         DatabaseMetaStore::process_delayed_slices(self, batch_size, max_age_secs).await
     }
 
+    // GC Phase 2: permanently remove delayed slice records after their blocks have been deleted.
     async fn confirm_delayed_deleted(&self, delayed_ids: &[i64]) -> Result<(), MetaError> {
         DatabaseMetaStore::confirm_delayed_deleted(self, delayed_ids).await
     }
 
+    // Replace old chunk slices with new ones and insert delayed records for the removed slices.
     async fn replace_slices_for_compact(
         &self,
         chunk_id: u64,
@@ -3084,6 +3088,7 @@ impl MetaStore for DatabaseMetaStore {
         Ok(())
     }
 
+    // Versioned slice replacement: verify chunk state matches expectations before swapping slices.
     async fn replace_slices_for_compact_with_version(
         &self,
         chunk_id: u64,
@@ -3218,6 +3223,7 @@ impl MetaStore for DatabaseMetaStore {
         Ok(())
     }
 
+    // Track a newly written slice as uncommitted so GC can clean it up if the commit fails.
     async fn record_uncommitted_slice(
         &self,
         slice_id: u64,
@@ -3241,6 +3247,7 @@ impl MetaStore for DatabaseMetaStore {
         Ok(result.id)
     }
 
+    // Mark an uncommitted slice as committed by removing its tracking record.
     async fn confirm_slice_committed(&self, slice_id: u64) -> Result<(), MetaError> {
         UncommittedSlice::delete_many()
             .filter(uncommitted_slice::Column::SliceId.eq(slice_id as i64))
@@ -3250,6 +3257,7 @@ impl MetaStore for DatabaseMetaStore {
         Ok(())
     }
 
+    // Scan for stale uncommitted slices: mark orphans for block cleanup and remove committed leftovers.
     async fn cleanup_orphan_uncommitted_slices(
         &self,
         max_age_secs: i64,
@@ -3316,6 +3324,7 @@ impl MetaStore for DatabaseMetaStore {
         Ok(cleaned)
     }
 
+    // Delete uncommitted slice tracking records after their orphan blocks have been cleaned up.
     async fn delete_uncommitted_slices(&self, slice_ids: &[u64]) -> Result<(), MetaError> {
         if slice_ids.is_empty() {
             return Ok(());

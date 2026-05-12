@@ -14,8 +14,9 @@ use std::{
     time::Duration,
 };
 
+use dquic::prelude::{Connection, QuicClient, StreamReader, StreamWriter};
+use dquic::qresolve::Source;
 use futures::{Stream, future::BoxFuture};
-use gm_quic::prelude::{Connection, QuicClient, StreamReader, StreamWriter};
 use prost::Message;
 use tokio::io::AsyncWriteExt;
 use tokio::sync::{RwLock, oneshot};
@@ -163,15 +164,16 @@ impl QuicChannel {
 
     /// Try connecting to a single address.
     ///
-    /// Strips the port from the address before using it as the TLS server_name,
-    /// because gm-quic's connect() passes the raw string (with port) as the TLS
-    /// server_name, causing ServerName::try_from("host:port") to fail.
+    /// Strips the port from the address before using it as the TLS server_name.
     async fn try_connect(&self, addr_str: &str) -> Result<Connection, CurpError> {
         // Parse endpoint to get hostname (for SNI) and SocketAddr (for connection)
         let (server_name, socket_addr) = self.parse_endpoint(addr_str)?;
 
-        // connected_to() is synchronous in gm-quic 0.4.0
-        match self.client.connected_to(&server_name, [socket_addr]) {
+        match self
+            .client
+            .connected_to_with_source(&server_name, [(Source::System, socket_addr.into())])
+            .await
+        {
             Ok(conn) => Ok(conn),
             Err(e) => match self.dns_fallback {
                 DnsFallback::Disabled => Err(CurpError::internal(format!(
@@ -183,11 +185,15 @@ impl QuicChannel {
                     let fallback_addr =
                         std::net::SocketAddr::new(std::net::Ipv4Addr::LOCALHOST.into(), port);
                     tracing::warn!(
-                        "connected_to failed for {server_name}:{port} ({e}), \
+                        "connected_to_with_source failed for {server_name}:{port} ({e}), \
                          falling back to {fallback_addr} (test mode)"
                     );
                     self.client
-                        .connected_to(&server_name, [fallback_addr])
+                        .connected_to_with_source(
+                            &server_name,
+                            [(Source::System, fallback_addr.into())],
+                        )
+                        .await
                         .map_err(|e2| {
                             CurpError::internal(format!("QUIC connect error: {e2} (original: {e})"))
                         })

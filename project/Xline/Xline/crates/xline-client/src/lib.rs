@@ -237,7 +237,7 @@ impl Client {
             .into_iter()
             .map(|addr| addr.as_ref().to_owned())
             .collect();
-        let quic_client = Arc::new(Self::build_quic_client(&options)?);
+        let quic_client = Arc::new(Self::build_quic_client(&options).await?);
         let channel = Self::build_channel(
             addrs.clone(),
             Arc::clone(&quic_client),
@@ -305,9 +305,9 @@ impl Client {
     }
 
     /// Build a QUIC client with optional peer CA certificate for identity verification.
-    fn build_quic_client(
+    async fn build_quic_client(
         options: &ClientOptions,
-    ) -> Result<gm_quic::prelude::QuicClient, XlineClientBuildError> {
+    ) -> Result<dquic::prelude::QuicClient, XlineClientBuildError> {
         // Install the default crypto provider for rustls if not already installed.
         let _ = rustls::crypto::ring::default_provider().install_default();
 
@@ -340,17 +340,19 @@ impl Client {
             match (tls.client_cert_path(), tls.client_key_path()) {
                 (Some(cert_path), Some(key_path)) => {
                     tracing::debug!(?cert_path, "using client cert for QUIC");
-                    gm_quic::prelude::QuicClient::builder()
+                    dquic::prelude::QuicClient::builder()
                         .with_root_certificates(root_store)
                         .with_cert(cert_path, key_path)
                         .bind(["inet://0.0.0.0:0"])
+                        .await
                         .with_alpns(["h3"])
                         .build()
                 }
-                (None, None) => gm_quic::prelude::QuicClient::builder()
+                (None, None) => dquic::prelude::QuicClient::builder()
                     .with_root_certificates(root_store)
                     .without_cert()
                     .bind(["inet://0.0.0.0:0"])
+                    .await
                     .with_alpns(["h3"])
                     .build(),
                 _ => {
@@ -360,10 +362,11 @@ impl Client {
                 }
             }
         } else {
-            gm_quic::prelude::QuicClient::builder()
+            dquic::prelude::QuicClient::builder()
                 .with_root_certificates(root_store)
                 .without_cert()
                 .bind(["inet://0.0.0.0:0"])
+                .await
                 .with_alpns(["h3"])
                 .build()
         };
@@ -396,7 +399,7 @@ impl Client {
     /// Build a QUIC channel over discovered peer endpoints.
     fn build_channel(
         addrs: Vec<String>,
-        quic_client: Arc<gm_quic::prelude::QuicClient>,
+        quic_client: Arc<dquic::prelude::QuicClient>,
         timeout: std::time::Duration,
     ) -> Channel {
         Channel::new(quic_client, addrs, None, timeout)

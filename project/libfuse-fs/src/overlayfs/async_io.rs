@@ -23,14 +23,11 @@ impl Filesystem for OverlayFs {
         if self.config.do_import {
             self.import().await?;
         }
-        #[cfg(target_os = "linux")]
-        {
-            for layer in self.lower_layers.iter() {
-                layer.init(_req).await?;
-            }
-            if let Some(upper) = &self.upper_layer {
-                upper.init(_req).await?;
-            }
+        for layer in self.lower_layers.iter() {
+            layer.init(_req).await?;
+        }
+        if let Some(upper) = &self.upper_layer {
+            upper.init(_req).await?;
         }
         if !self.config.do_import || self.config.writeback {
             self.writeback.store(true, Ordering::Relaxed);
@@ -295,7 +292,9 @@ impl Filesystem for OverlayFs {
         if newpnode.whiteout.load(Ordering::Relaxed) {
             return Err(Error::from_raw_os_error(libc::ENOENT).into());
         }
-        let new_name = new_name.to_str().unwrap();
+        let new_name = new_name
+            .to_str()
+            .ok_or_else(|| Error::from_raw_os_error(libc::EINVAL))?;
         // trace!(
         //     "LINK: inode: {}, new_parent: {}, trying to do_link: src_inode: {}, newpnode: {}",
         //     inode, new_parent, node.inode, newpnode.inode
@@ -1004,10 +1003,13 @@ impl Filesystem for OverlayFs {
             }
         }
 
+        let name_str = name
+            .to_str()
+            .ok_or_else(|| Error::from_raw_os_error(libc::EINVAL))?;
         let final_handle = self
             .do_create(req, &pnode, name, mode, flags.try_into().unwrap())
             .await?;
-        let entry = self.do_lookup(req, parent, name.to_str().unwrap()).await?;
+        let entry = self.do_lookup(req, parent, name_str).await?;
         let fh = final_handle
             .ok_or_else(|| std::io::Error::new(ErrorKind::NotFound, "Handle not found"))?;
 
@@ -1245,7 +1247,9 @@ mod tests {
 
         let mut mount_options = MountOptions::default();
         // .allow_other(true)
-        mount_options.force_readdir_plus(true).uid(uid).gid(gid);
+        #[cfg(target_os = "linux")]
+        mount_options.force_readdir_plus(true);
+        mount_options.uid(uid).gid(gid);
 
         let mut mount_handle: rfuse3::raw::MountHandle = if !not_unprivileged {
             Session::new(mount_options)

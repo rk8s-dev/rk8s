@@ -5,10 +5,11 @@ metadata:
   labels:
     app: my-app
 spec:
+  pauseImage: /home/tcy/rk8s/project/test/bundles/pause
   node_name: 
   containers:
     - name: container1    
-      image: busybox:latest         
+      image: /home/tcy/rk8s/project/test/bundles/busybox         
       ports:
         - containerPort: 80
       args:             

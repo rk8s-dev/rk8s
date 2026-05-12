@@ -181,6 +181,45 @@ pub fn openat(
     }
 }
 
+/// Return a C-string path that, when opened, refers to the same underlying file as `fd`.
+///
+/// On Linux this is `/proc/self/fd/{fd}` — works for any fd including `O_PATH` ones.
+/// On macOS this resolves the absolute path via `fcntl(F_GETPATH)`. The returned path
+/// is suitable for passing to path-based syscalls like `setxattr`/`getxattr` which
+/// don't have well-behaved `f*` variants on every platform.
+pub fn fd_path_cstr(fd: std::os::unix::io::RawFd) -> io::Result<CString> {
+    #[cfg(target_os = "linux")]
+    {
+        CString::new(format!("/proc/self/fd/{fd}"))
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let mut buf = [0u8; libc::MAXPATHLEN as usize];
+        let res = unsafe { libc::fcntl(fd, libc::F_GETPATH, buf.as_mut_ptr()) };
+        if res < 0 {
+            return Err(io::Error::last_os_error());
+        }
+        let path = unsafe { CStr::from_ptr(buf.as_ptr() as *const libc::c_char) };
+        Ok(path.to_owned())
+    }
+}
+
+/// Concatenate a directory C-string path and a single component C-string into
+/// a NUL-terminated absolute path. Used by macOS callers (e.g. `renamex_np`)
+/// that don't have a dirfd-relative variant.
+pub fn join_dir_and_name(dir: &CStr, name: &CStr) -> io::Result<CString> {
+    let dir_bytes = dir.to_bytes();
+    let name_bytes = name.to_bytes();
+    let mut out = Vec::with_capacity(dir_bytes.len() + 1 + name_bytes.len() + 1);
+    out.extend_from_slice(dir_bytes);
+    if !dir_bytes.ends_with(b"/") {
+        out.push(b'/');
+    }
+    out.extend_from_slice(name_bytes);
+    CString::new(out).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
+}
+
 /// Open `/proc/self/fd/{fd}` with the given flags to effectively duplicate the given `fd` with new
 /// flags (e.g. to turn an `O_PATH` file descriptor into one that can be used for I/O).
 pub fn reopen_fd_through_proc(
@@ -273,6 +312,17 @@ pub fn einval() -> io::Error {
 
 pub fn enosys() -> io::Error {
     io::Error::from_raw_os_error(libc::ENOSYS)
+}
+
+/// True if this xattr name belongs to a Linux-only namespace that the macOS
+/// kernel will refuse anyway. Reject these early so callers see ENOTSUP from
+/// us instead of a confusing kernel error after the syscall fails.
+#[cfg(target_os = "macos")]
+pub fn is_linux_only_xattr(name: &CStr) -> bool {
+    let bytes = name.to_bytes();
+    bytes.starts_with(b"security.")
+        || bytes.starts_with(b"trusted.")
+        || bytes.starts_with(b"system.")
 }
 #[allow(unused)]
 pub fn eperm() -> io::Error {
@@ -442,6 +492,36 @@ pub fn set_creds(
     // We have to change the gid before we change the uid because if we change the uid first then we
     // lose the capability to change the gid.  However changing back can happen in any order.
     ScopedGid::new(gid).and_then(|gid| Ok((ScopedUid::new(uid)?, gid)))
+}
+
+/// macOS-only: attempt to APFS-clone `src` into `dst` via `clonefile(2)`.
+///
+/// Returns:
+/// * `Ok(true)` — clone succeeded; on APFS this is an O(1) copy-on-write.
+/// * `Ok(false)` — the underlying filesystem rejects clones (cross-volume,
+///   non-APFS, etc.). Caller falls back to `read`/`write`.
+/// * `Err(_)` — destination exists, source unreadable, or other error
+///   the caller must surface.
+///
+/// `dst` must NOT exist; `clonefile` rejects an existing path with EEXIST.
+/// The caller is expected to ensure exclusive creation. Mode/uid/gid/xattrs
+/// are preserved by the clone (see `clonefile(2)`), so no chmod/chown is
+/// required after a successful return.
+#[cfg(target_os = "macos")]
+pub fn try_apfs_clonefile(src: &CStr, dst: &CStr) -> io::Result<bool> {
+    // 0 = no flags. CLONE_NOFOLLOW is also acceptable but the existing
+    // overlayfs flow only triggers copy-up for regular files, not symlinks.
+    let res = unsafe { libc::clonefile(src.as_ptr(), dst.as_ptr(), 0) };
+    if res == 0 {
+        return Ok(true);
+    }
+    let err = io::Error::last_os_error();
+    match err.raw_os_error() {
+        // ENOTSUP: filesystem doesn't support cloning (e.g. ExFAT, NFS).
+        // EXDEV: cross-volume — clone requires the same APFS volume.
+        Some(libc::ENOTSUP) | Some(libc::EXDEV) => Ok(false),
+        _ => Err(err),
+    }
 }
 
 #[cfg(test)]
@@ -629,5 +709,43 @@ mod tests {
 
         assert_eq!(st1.st_dev, st2.st_dev);
         assert_ne!(st1.st_ino, st2.st_ino);
+    }
+
+    /// `clonefile(2)` round-trip on macOS APFS. macOS tempdirs default to
+    /// the APFS root volume, so the call should succeed and produce a
+    /// byte-identical copy.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_apfs_clone_roundtrip() {
+        let dir = tempfile::tempdir().unwrap();
+        let src = dir.path().join("src.bin");
+        let dst = dir.path().join("dst.bin");
+        // 4 MiB payload with deterministic content. Big enough that a
+        // byte-by-byte copy would take measurable time; small enough not
+        // to stress CI tmpfs quotas.
+        let payload: Vec<u8> = (0..(4 * 1024 * 1024)).map(|i| (i % 251) as u8).collect();
+        std::fs::write(&src, &payload).unwrap();
+        let src_c = CString::new(src.as_os_str().as_bytes()).unwrap();
+        let dst_c = CString::new(dst.as_os_str().as_bytes()).unwrap();
+
+        let cloned = try_apfs_clonefile(&src_c, &dst_c).expect("clone failed");
+        assert!(
+            cloned,
+            "macOS tempdir defaults to APFS — clone should succeed"
+        );
+
+        let read_back = std::fs::read(&dst).unwrap();
+        assert_eq!(
+            read_back, payload,
+            "clone produced different bytes than source"
+        );
+
+        // Cloning into an existing path must surface EEXIST as Err — the
+        // helper is not allowed to silently overwrite.
+        let again = try_apfs_clonefile(&src_c, &dst_c);
+        assert!(
+            matches!(&again, Err(e) if e.raw_os_error() == Some(libc::EEXIST)),
+            "second clone should EEXIST, got {again:?}",
+        );
     }
 }

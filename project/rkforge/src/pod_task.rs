@@ -149,10 +149,16 @@ impl TaskRunner {
         // 1. Get sandbox bundle path
         let sandbox_spec = ContainerSpec {
             name: "sandbox".to_string(),
-            // FIXME: SHOULD define a const variable image name
-            image: "pause:3.9".to_string(),
+            image: self
+                .task
+                .spec
+                .pause_image
+                .clone()
+                .unwrap_or_else(|| "pause:3.9".to_string()),
             ports: vec![],
             args: vec![],
+            tty: false,
+            gpus: None,
             resources: None,
             liveness_probe: None,
             readiness_probe: None,
@@ -162,7 +168,6 @@ impl TaskRunner {
             volume_mounts: None,
             command: None,
             working_dir: None,
-            tty: false,
         };
 
         let puller = RkforgeImagePuller {};
@@ -310,7 +315,7 @@ impl TaskRunner {
                 }
                 (Some(builder), bundle_path)
             } else {
-                (None, "".to_string())
+                (None, container.image.clone())
             }
         } else {
             sync_handle_image_typ(&puller, container)?

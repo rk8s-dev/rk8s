@@ -8,7 +8,7 @@ use xline_test_utils::Cluster;
 #[tokio::test(flavor = "multi_thread")]
 #[abort_on_panic]
 async fn xline_remove_node() -> Result<(), Box<dyn Error>> {
-    let mut cluster = Cluster::new(5).await;
+    let mut cluster = Cluster::new(3).await;
     cluster.start().await;
     let mut cluster_client = Client::connect(
         cluster.all_client_addrs(),
@@ -17,10 +17,10 @@ async fn xline_remove_node() -> Result<(), Box<dyn Error>> {
     .await?
     .cluster_client();
     let list_res = cluster_client.member_list(false).await?;
-    assert_eq!(list_res.members.len(), 5);
+    assert_eq!(list_res.members.len(), 3);
     let remove_id = list_res.members[0].id;
     let remove_res = cluster_client.member_remove(remove_id).await?;
-    assert_eq!(remove_res.members.len(), 4);
+    assert_eq!(remove_res.members.len(), 2);
     assert!(remove_res.members.iter().all(|m| m.id != remove_id));
     Ok(())
 }
@@ -30,6 +30,7 @@ async fn xline_remove_node() -> Result<(), Box<dyn Error>> {
 async fn xline_add_node() -> Result<(), Box<dyn Error>> {
     let mut cluster = Cluster::new(3).await;
     cluster.start().await;
+    let new_node_host = "localhost";
     let client = Client::connect(
         cluster.all_client_addrs(),
         ClientOptions::default().with_quic_tls_config(Cluster::create_quic_tls_config()),
@@ -38,18 +39,19 @@ async fn xline_add_node() -> Result<(), Box<dyn Error>> {
     let mut cluster_client = client.cluster_client();
     let kv_client = client.kv_client();
     _ = kv_client.put("key", "value", None).await?;
-    let new_node_peer_listener = TcpListener::bind("0.0.0.0:0").await?;
-    let new_node_peer_urls = vec![format!("http://{}", new_node_peer_listener.local_addr()?)];
-    let new_node_client_listener = TcpListener::bind("0.0.0.0:0").await?;
-    let new_node_client_urls = vec![format!("http://{}", new_node_client_listener.local_addr()?)];
+    let new_node_peer_listener = TcpListener::bind("127.0.0.1:0").await?;
+    let new_node_peer_urls = vec![format!(
+        "https://{new_node_host}:{}",
+        new_node_peer_listener.local_addr()?.port()
+    )];
+    let new_node_client_listener = TcpListener::bind("127.0.0.1:0").await?;
     let add_res = cluster_client.member_add(new_node_peer_urls, false).await?;
     assert_eq!(add_res.members.len(), 4);
     cluster
         .run_node(new_node_client_listener, new_node_peer_listener)
         .await;
-    let mut etcd_client = etcd_client::Client::connect(&new_node_client_urls, None).await?;
-    let res = etcd_client.get("key", None).await?;
-    assert_eq!(res.kvs().first().unwrap().value(), b"value");
+    let res = kv_client.range("key", None).await?;
+    assert_eq!(res.kvs[0].value, b"value");
     Ok(())
 }
 

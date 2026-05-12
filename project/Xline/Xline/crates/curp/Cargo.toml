@@ -46,7 +46,7 @@ utils = { path = "../utils", version = "0.1.0" }
 xlinerpc = { path = "../xlinerpc"}
 
 # QUIC dependencies
-gm-quic = { workspace = true }
+dquic = { workspace = true }
 
 [dev-dependencies]
 anyhow = { workspace = true }

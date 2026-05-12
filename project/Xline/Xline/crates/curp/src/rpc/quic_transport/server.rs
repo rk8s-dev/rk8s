@@ -5,8 +5,8 @@
 
 use std::{marker::PhantomData, sync::Arc, task::Poll};
 
+use dquic::prelude::{Connection, QuicListeners};
 use futures::{Stream, future::BoxFuture};
-use gm_quic::prelude::{Connection, QuicListeners};
 use prost::Message;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::task::JoinHandle;

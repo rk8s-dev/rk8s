@@ -808,6 +808,7 @@ mod tests {
                     ports: vec![],
                     args: vec![],
                     tty: false,
+                    gpus: None,
                     resources: None,
                     liveness_probe: None,
                     readiness_probe: None,

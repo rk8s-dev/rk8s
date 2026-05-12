@@ -20,6 +20,9 @@ rust_library(
     crate_root = "vendor/src/lib.rs",
     edition = "2024",
     rustc_flags = ["@$(location :manifest[env_flags])"],
+    os_deps = {
+        "macos": ["//third-party/rust/crates/lru/0.16.3:lru"],
+    },
     visibility = ["PUBLIC"],
     deps = [
         "//project/rfuse3:rfuse3",

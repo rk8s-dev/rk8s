@@ -24,6 +24,7 @@ use redis::AsyncCommands;
 use redis::aio::ConnectionManager;
 use serde::{Deserialize, Serialize};
 use std::any::Any;
+use std::collections::HashMap;
 use std::net::IpAddr;
 use std::path::Path;
 use std::str::FromStr;
@@ -51,6 +52,14 @@ const LINK_PARENT_KEY_PREFIX: &str = "lp:";
 const TRUNCATE_REWRITE_MAX_RETRIES: usize = 64;
 
 const CHUNK_ID_BASE: u64 = 1_000_000_000u64;
+
+const DELAYED_COUNTER_KEY: &str = "ds_counter";
+const DELAYED_KEY_PREFIX: &str = "ds";
+const DELAYED_INDEX_KEY: &str = "ds_idx";
+const UNCOMMITTED_KEY_PREFIX: &str = "uc";
+const UNCOMMITTED_PENDING_INDEX_KEY: &str = "uc_pending_idx";
+const UNCOMMITTED_ORPHAN_INDEX_KEY: &str = "uc_orphan_idx";
+const COMPACT_RETRY_LIMIT: usize = 64;
 
 // Lua script for atomically extending file size
 const EXTEND_FILE_SIZE_LUA: &str = r#"
@@ -96,6 +105,17 @@ const LINK_LUA: &str = r#"
         return cjson.encode({ok=false, error="corrupt_node"})
     end
 
+    -- Validate node state (defense against races)
+    if node.deleted or node.attr.nlink == 0 then
+        return cjson.encode({ok=false, error="node_not_found"})
+    end
+    if node.kind == "Dir" then
+        return cjson.encode({ok=false, error="is_directory"})
+    end
+    if node.kind == "Symlink" then
+        return cjson.encode({ok=false, error="is_symlink"})
+    end
+
     -- Check if link name already exists in directory
     local existing = redis.call('HEXISTS', dir_key, name)
     if existing == 1 then
@@ -136,23 +156,30 @@ const UNLINK_LUA: &str = r#"
     local parent_ino = ARGV[1]
     local name = ARGV[2]
     local timestamp = tonumber(ARGV[3])
+    local expected_ino = tonumber(ARGV[4])
 
-    -- Remove from directory (idempotent)
+    -- Validate dentry still points to expected inode
+    local dentry_ino = redis.call('HGET', dir_key, name)
+    if not dentry_ino or tonumber(dentry_ino) ~= expected_ino then
+        return cjson.encode({ok=false, error="not_found"})
+    end
+
+    -- Validate node exists before making any mutations
+    local node_json = redis.call('GET', node_key)
+    if not node_json then
+        return cjson.encode({ok=false, error="node_not_found"})
+    end
+    local ok, node = pcall(cjson.decode, node_json)
+    if not ok or not node or not node.attr then
+        return cjson.encode({ok=false, error="corrupt_node"})
+    end
+
+    -- Remove from directory
     redis.call('HDEL', dir_key, name)
 
     -- Remove from link_parents (idempotent)
     local member = parent_ino .. ":" .. name
     redis.call('SREM', lp_key, member)
-
-    -- Try to get node
-    local node_json = redis.call('GET', node_key)
-    if not node_json then
-        return cjson.encode({ok=true, nlink=0, deleted=true})
-    end
-    local ok, node = pcall(cjson.decode, node_json)
-    if not ok or not node or not node.attr then
-        return cjson.encode({ok=true, nlink=0, deleted=true})
-    end
 
     -- Decrement nlink
     if node.attr.nlink > 0 then
@@ -197,36 +224,39 @@ const RMDIR_LUA: &str = r#"
     local parent_ino = tonumber(ARGV[3])
     local timestamp = tonumber(ARGV[4])
 
-    -- 1. Check dentry exists
+    -- Check dentry exists and matches expected inode
     local dentry_ino = redis.call('HGET', parent_dir_key, name)
     if not dentry_ino then
         return cjson.encode({ok=false, error="not_found", ino=parent_ino})
     end
+    if tonumber(dentry_ino) ~= child_ino then
+        return cjson.encode({ok=false, error="not_found", ino=parent_ino})
+    end
 
-    -- 2. Get child node
+    -- Get child node
     local child_json = redis.call('GET', child_node_key)
     if not child_json then
         return cjson.encode({ok=false, error="node_not_found", ino=child_ino})
     end
 
-    -- 3. Decode child node with pcall
+    -- Decode child node with pcall
     local ok, child_node = pcall(cjson.decode, child_json)
     if not ok or not child_node or not child_node.attr then
         return cjson.encode({ok=false, error="corrupt_node"})
     end
 
-    -- 4. Check is directory
+    -- Check is directory
     if child_node.kind ~= "Dir" then
         return cjson.encode({ok=false, error="not_directory", ino=child_ino})
     end
 
-    -- 5. Check empty
+    -- Check empty
     local child_len = redis.call('HLEN', child_dir_key)
     if child_len > 0 then
         return cjson.encode({ok=false, error="dir_not_empty", ino=child_ino})
     end
 
-    -- 6. Get parent node and update
+    -- Get parent node and update
     local parent_json = redis.call('GET', parent_node_key)
     if parent_json then
         local ok_p, parent_node = pcall(cjson.decode, parent_json)
@@ -238,7 +268,7 @@ const RMDIR_LUA: &str = r#"
         end
     end
 
-    -- 7. Atomic delete
+    -- Atomic delete
     redis.call('HDEL', parent_dir_key, name)
     redis.call('DEL', child_node_key)
     redis.call('DEL', child_dir_key)
@@ -263,30 +293,30 @@ const CREATE_ENTRY_LUA: &str = r#"
     local parent_gid = tonumber(ARGV[8])
     local parent_has_setgid = tonumber(ARGV[9])
 
-    -- 1. Get parent node
+    -- Get parent node
     local parent_json = redis.call('GET', parent_node_key)
     if not parent_json then
         return cjson.encode({ok=false, error="parent_not_found"})
     end
 
-    -- 2. Decode parent node with pcall
+    -- Decode parent node with pcall
     local ok, parent_node = pcall(cjson.decode, parent_json)
     if not ok or not parent_node or not parent_node.attr then
         return cjson.encode({ok=false, error="corrupt_node"})
     end
 
-    -- 3. Check parent is directory
+    -- Check parent is directory
     if parent_node.kind ~= "Dir" then
         return cjson.encode({ok=false, error="parent_not_directory"})
     end
 
-    -- 4. Check entry doesn't already exist
+    -- Check entry doesn't already exist
     local existing = redis.call('HEXISTS', parent_dir_key, name)
     if existing == 1 then
         return cjson.encode({ok=false, error="already_exists"})
     end
 
-    -- 5. Allocate new inode atomically
+    -- Allocate new inode atomically
     local new_ino = redis.call('INCR', counter_key)
 
     local final_gid = gid
@@ -295,13 +325,13 @@ const CREATE_ENTRY_LUA: &str = r#"
         final_gid = parent_gid
     end
 
-    -- 7. Determine nlink based on kind
+    -- Determine nlink based on kind
     local nlink = 1
     if kind == "Dir" then
         nlink = 2
     end
 
-    -- 8. Create new node
+    -- Create new node
     local new_node = {
         ino = new_ino,
         parent = parent_ino,
@@ -320,18 +350,18 @@ const CREATE_ENTRY_LUA: &str = r#"
         deleted = false
     }
 
-    -- 9. Save new node
+    -- Save new node
     redis.call('SET', 'i' .. new_ino, cjson.encode(new_node))
 
-    -- 10. Add directory entry
+    -- Add directory entry
     redis.call('HSET', parent_dir_key, name, new_ino)
 
-    -- 11. Update parent if creating directory (nlink++)
+    -- Update parent if creating directory (nlink++)
     if kind == "Dir" then
         parent_node.attr.nlink = parent_node.attr.nlink + 1
     end
 
-    -- 12. Update parent timestamps
+    -- Update parent timestamps
     parent_node.attr.mtime = timestamp
     parent_node.attr.ctime = timestamp
     redis.call('SET', parent_node_key, cjson.encode(parent_node))
@@ -354,14 +384,18 @@ const RENAME_LUA: &str = r#"
     local old_parent_ino = tonumber(ARGV[3])
     local new_parent_ino = tonumber(ARGV[4])
     local timestamp = tonumber(ARGV[5])
+    local expected_ino = tonumber(ARGV[6])
 
-    -- 1. Check source dentry exists
+    -- Check source dentry exists and matches expected inode
     local dentry_ino = redis.call('HGET', old_parent_dir_key, old_name)
     if not dentry_ino then
         return cjson.encode({ok=false, error="not_found", ino=old_parent_ino})
     end
+    if tonumber(dentry_ino) ~= expected_ino then
+        return cjson.encode({ok=false, error="not_found", ino=old_parent_ino})
+    end
 
-    -- 2. Check new_parent exists and is directory
+    -- Check new_parent exists and is directory
     local new_parent_json = redis.call('GET', new_parent_node_key)
     if not new_parent_json then
         return cjson.encode({ok=false, error="parent_not_found", ino=new_parent_ino})
@@ -374,13 +408,13 @@ const RENAME_LUA: &str = r#"
         return cjson.encode({ok=false, error="parent_not_directory", ino=new_parent_ino})
     end
 
-    -- 3. Check target doesn't exist
+    -- Check target doesn't exist
     local target_exists = redis.call('HEXISTS', new_parent_dir_key, new_name)
     if target_exists == 1 then
         return cjson.encode({ok=false, error="already_exists"})
     end
 
-    -- 4. Get child node
+    -- Get child node
     local child_json = redis.call('GET', child_node_key)
     if not child_json then
         return cjson.encode({ok=false, error="node_not_found", ino=tonumber(dentry_ino)})
@@ -390,7 +424,7 @@ const RENAME_LUA: &str = r#"
         return cjson.encode({ok=false, error="corrupt_node"})
     end
 
-    -- 5. Update node parent/name OR link_parents based on node kind/nlink
+    -- Update node parent/name OR link_parents based on node kind/nlink
     -- Directories always track parent/name inline even though their nlink is >= 2.
     if child_node.kind == "Dir" or child_node.attr.nlink <= 1 then
         -- Single parent: update node directly
@@ -435,18 +469,18 @@ const RENAME_LUA: &str = r#"
         child_node.name = ""
     end
 
-    -- 6. Update child timestamps
+    -- Update child timestamps
     child_node.attr.mtime = timestamp
     child_node.attr.ctime = timestamp
 
-    -- 7. Remove old dentry and add new dentry
+    -- Remove old dentry and add new dentry
     redis.call('HDEL', old_parent_dir_key, old_name)
     redis.call('HSET', new_parent_dir_key, new_name, dentry_ino)
 
-    -- 8. Save updated child node
+    -- Save updated child node
     redis.call('SET', child_node_key, cjson.encode(child_node))
 
-    -- 9. Update parent directory timestamps and directory link counts
+    -- Update parent directory timestamps and directory link counts
     local old_parent_json = redis.call('GET', old_parent_node_key)
     if old_parent_json then
         local ok_op, old_parent_node = pcall(cjson.decode, old_parent_json)
@@ -486,19 +520,27 @@ const RENAME_EXCHANGE_LUA: &str = r#"
     local old_parent_ino = tonumber(ARGV[3])
     local new_parent_ino = tonumber(ARGV[4])
     local timestamp = tonumber(ARGV[5])
+    local expected_old_ino = tonumber(ARGV[6])
+    local expected_new_ino = tonumber(ARGV[7])
 
-    -- 1. Check both entries exist
+    -- Check both entries exist and match expected inodes
     local old_dentry_ino = redis.call('HGET', old_parent_dir_key, old_name)
     if not old_dentry_ino then
-        return cjson.encode({ok=false, error="internal", msg="Entry '" .. old_name .. "' not found in parent " .. old_parent_ino .. " for exchange"})
+        return cjson.encode({ok=false, error="not_found", ino=old_parent_ino})
+    end
+    if tonumber(old_dentry_ino) ~= expected_old_ino then
+        return cjson.encode({ok=false, error="stale_conflict"})
     end
 
     local new_dentry_ino = redis.call('HGET', new_parent_dir_key, new_name)
     if not new_dentry_ino then
-        return cjson.encode({ok=false, error="internal", msg="Entry '" .. new_name .. "' not found in parent " .. new_parent_ino .. " for exchange"})
+        return cjson.encode({ok=false, error="not_found", ino=new_parent_ino})
+    end
+    if tonumber(new_dentry_ino) ~= expected_new_ino then
+        return cjson.encode({ok=false, error="stale_conflict"})
     end
 
-    -- 2. GET both nodes
+    -- GET both nodes
     local old_node_json = redis.call('GET', old_node_key)
     if not old_node_json then
         return cjson.encode({ok=false, error="corrupt_node"})
@@ -517,14 +559,29 @@ const RENAME_EXCHANGE_LUA: &str = r#"
         return cjson.encode({ok=false, error="corrupt_node"})
     end
 
-    -- 3. Swap directory entries atomically
+    -- Pre-check link_parents for hardlinked nodes before swapping dentries
+    if old_node.kind ~= "Dir" and old_node.attr.nlink > 1 then
+        local old_member = old_parent_ino .. ":" .. old_name
+        if redis.call('SISMEMBER', old_link_parents_key, old_member) == 0 then
+            return cjson.encode({ok=false, error="link_parent_not_found"})
+        end
+    end
+    if new_node.kind ~= "Dir" and new_node.attr.nlink > 1 then
+        local new_member = new_parent_ino .. ":" .. new_name
+        if redis.call('SISMEMBER', new_link_parents_key, new_member) == 0 then
+            return cjson.encode({ok=false, error="link_parent_not_found"})
+        end
+    end
+
+    -- Swap directory entries atomically
     redis.call('HSET', old_parent_dir_key, old_name, new_dentry_ino)
     redis.call('HSET', new_parent_dir_key, new_name, old_dentry_ino)
 
-    -- 4. Update old_node (hardlinked files use link_parents; directories keep parent/name)
+    -- Update old_node (hardlinked files use link_parents; directories keep parent/name)
     if old_node.kind ~= "Dir" and old_node.attr.nlink > 1 then
         local old_members = redis.call('SMEMBERS', old_link_parents_key)
         local new_old_members = {}
+        local found = false
 
         for _, member in ipairs(old_members) do
             -- Find first colon only to handle filenames with colons
@@ -535,12 +592,17 @@ const RENAME_EXCHANGE_LUA: &str = r#"
                 local parent_num = tonumber(parent_str)
                 if parent_num == old_parent_ino and name_str == old_name then
                     table.insert(new_old_members, new_parent_ino .. ":" .. new_name)
+                    found = true
                 else
                     table.insert(new_old_members, member)
                 end
             else
                 table.insert(new_old_members, member)
             end
+        end
+
+        if not found then
+            return cjson.encode({ok=false, error="link_parent_not_found"})
         end
 
         redis.call('DEL', old_link_parents_key)
@@ -555,10 +617,11 @@ const RENAME_EXCHANGE_LUA: &str = r#"
         old_node.name = new_name
     end
 
-    -- 5. Update new_node (hardlinked files use link_parents; directories keep parent/name)
+    -- Update new_node (hardlinked files use link_parents; directories keep parent/name)
     if new_node.kind ~= "Dir" and new_node.attr.nlink > 1 then
         local new_members = redis.call('SMEMBERS', new_link_parents_key)
         local new_new_members = {}
+        local found = false
 
         for _, member in ipairs(new_members) do
             -- Find first colon only to handle filenames with colons
@@ -569,12 +632,17 @@ const RENAME_EXCHANGE_LUA: &str = r#"
                 local parent_num = tonumber(parent_str)
                 if parent_num == new_parent_ino and name_str == new_name then
                     table.insert(new_new_members, old_parent_ino .. ":" .. old_name)
+                    found = true
                 else
                     table.insert(new_new_members, member)
                 end
             else
                 table.insert(new_new_members, member)
             end
+        end
+
+        if not found then
+            return cjson.encode({ok=false, error="link_parent_not_found"})
         end
 
         redis.call('DEL', new_link_parents_key)
@@ -589,17 +657,17 @@ const RENAME_EXCHANGE_LUA: &str = r#"
         new_node.name = old_name
     end
 
-    -- 6. Update timestamps for both nodes
+    -- Update timestamps for both nodes
     old_node.attr.mtime = timestamp
     old_node.attr.ctime = timestamp
     new_node.attr.mtime = timestamp
     new_node.attr.ctime = timestamp
 
-    -- 7. SET both nodes
+    -- SET both nodes
     redis.call('SET', old_node_key, cjson.encode(old_node))
     redis.call('SET', new_node_key, cjson.encode(new_node))
 
-    -- 8. Update parent directory timestamps
+    -- Update parent directory timestamps
     local old_parent_json = redis.call('GET', old_parent_node_key)
     if old_parent_json then
         local ok_op, old_parent_node = pcall(cjson.decode, old_parent_json)
@@ -652,6 +720,10 @@ pub struct RedisMetaStore {
     conn: ConnectionManager,
     _config: Config,
     sid: std::sync::OnceLock<Uuid>,
+    chunk_scan_cursor: std::sync::Mutex<Option<String>>,
+    chunk_scan_buffer: std::sync::Mutex<Vec<u64>>,
+    chunk_scan_next_cursor: std::sync::Mutex<Option<String>>,
+    global_lock_tokens: std::sync::Mutex<HashMap<String, i64>>,
 }
 
 impl RedisMetaStore {
@@ -738,6 +810,10 @@ impl RedisMetaStore {
             conn,
             _config: config,
             sid: std::sync::OnceLock::new(),
+            chunk_scan_cursor: std::sync::Mutex::new(None),
+            chunk_scan_buffer: std::sync::Mutex::new(Vec::new()),
+            chunk_scan_next_cursor: std::sync::Mutex::new(None),
+            global_lock_tokens: std::sync::Mutex::new(HashMap::new()),
         };
         store.init_root_directory().await?;
         Ok(store)
@@ -805,6 +881,14 @@ impl RedisMetaStore {
             })
     }
 
+    fn parse_chunk_id_from_chunk_key(key: &str) -> Option<u64> {
+        let rest = key.strip_prefix(CHUNK_KEY_PREFIX)?;
+        let (ino_str, idx_str) = rest.split_once('_')?;
+        let ino: u64 = ino_str.parse().ok()?;
+        let idx: u64 = idx_str.parse().ok()?;
+        ino.checked_mul(CHUNK_ID_BASE)?.checked_add(idx)
+    }
+
     fn deleted_set_key(&self) -> &'static str {
         DELETED_SET_KEY
     }
@@ -820,6 +904,14 @@ impl RedisMetaStore {
             }
         };
         Ok(suffix)
+    }
+
+    fn delayed_key(&self, delayed_id: i64) -> String {
+        format!("{DELAYED_KEY_PREFIX}{delayed_id}")
+    }
+
+    fn uncommitted_key(&self, slice_id: u64) -> String {
+        format!("{UNCOMMITTED_KEY_PREFIX}{slice_id}")
     }
 
     fn locked_key(sid: Uuid) -> String {
@@ -1532,7 +1624,27 @@ impl MetaStore for RedisMetaStore {
 
     #[tracing::instrument(level = "trace", skip(self), fields(ino, parent, name))]
     async fn link(&self, ino: i64, parent: i64, name: &str) -> Result<FileAttr, MetaError> {
+        if ino == ROOT_INODE {
+            return Err(MetaError::NotSupported(
+                "cannot create hard links to the root inode".into(),
+            ));
+        }
         self.ensure_parent_dir(parent).await?;
+
+        let node = self.get_node(ino).await?.ok_or(MetaError::NotFound(ino))?;
+        if node.kind == NodeKind::Dir {
+            return Err(MetaError::NotSupported(
+                "cannot create hard links to directories".into(),
+            ));
+        }
+        if node.kind == NodeKind::Symlink {
+            return Err(MetaError::NotSupported(
+                "cannot create hard links to symbolic links".into(),
+            ));
+        }
+        if node.deleted || node.attr.nlink == 0 {
+            return Err(MetaError::NotFound(ino));
+        }
 
         let node_key = self.node_key(ino);
         let lp_key = Self::link_parent_key(ino);
@@ -1561,6 +1673,12 @@ impl MetaStore for RedisMetaStore {
                 parent,
                 name: name.to_string(),
             }),
+            Some("is_directory") => Err(MetaError::NotSupported(
+                "cannot create hard links to directories".into(),
+            )),
+            Some("is_symlink") => Err(MetaError::NotSupported(
+                "cannot create hard links to symbolic links".into(),
+            )),
             Some(other) => Err(MetaError::Internal(format!("Lua error: {other}"))),
             None if response.ok => {
                 let attr_json = response
@@ -1570,7 +1688,7 @@ impl MetaStore for RedisMetaStore {
                     .map_err(|e| MetaError::Internal(format!("attr parse error: {e}")))?;
 
                 self.bump_dir_times(parent, now).await?;
-                Ok(stored_attr.to_file_attr(ino, FileType::File))
+                Ok(stored_attr.to_file_attr(ino, node.kind.into()))
             }
             None => Err(MetaError::Internal("unexpected Lua response".into())),
         }
@@ -1643,6 +1761,7 @@ impl MetaStore for RedisMetaStore {
             .arg(parent)
             .arg(name)
             .arg(now)
+            .arg(child)
             .invoke_async(&mut self.conn.clone())
             .await
             .map_err(redis_err)?;
@@ -1650,47 +1769,52 @@ impl MetaStore for RedisMetaStore {
         let response: LuaResponse = serde_json::from_str(&result)
             .map_err(|e| MetaError::Internal(format!("Lua response parse error: {e}")))?;
 
-        if !response.ok {
-            let err = response
-                .error
-                .unwrap_or_else(|| "unknown error".to_string());
-            return Err(MetaError::Internal(format!("Lua error: {err}")));
-        }
+        match response.error.as_deref() {
+            Some("not_found") => Err(MetaError::NotFound(parent)),
+            Some("node_not_found") => Err(MetaError::NotFound(child)),
+            Some("corrupt_node") => Err(MetaError::Internal("corrupt node data".into())),
+            Some(other) => Err(MetaError::Internal(format!("Lua error: {other}"))),
+            None if response.ok => {
+                let nlink = response.nlink.unwrap_or(0);
+                let deleted = response.deleted.unwrap_or(false);
 
-        let nlink = response.nlink.unwrap_or(0);
-        let deleted = response.deleted.unwrap_or(false);
+                if deleted {
+                    let mut node_mut = self
+                        .get_node(child)
+                        .await?
+                        .ok_or(MetaError::NotFound(child))?;
+                    self.mark_deleted(child, &mut node_mut).await?;
+                } else if nlink <= 1 {
+                    let mut link_parents = self.load_link_parents(child).await?;
+                    link_parents.retain(|(p, n)| !(*p == parent && n.as_str() == name));
 
-        if deleted {
-            let mut node_mut = node;
-            self.mark_deleted(child, &mut node_mut).await?;
-        } else if nlink <= 1 {
-            let mut link_parents = self.load_link_parents(child).await?;
-            link_parents.retain(|(p, n)| !(*p == parent && n.as_str() == name));
+                    if let Some(remaining) = link_parents.into_iter().next() {
+                        let mut node_mut = node;
+                        node_mut.parent = remaining.0;
+                        node_mut.name = remaining.1;
+                        node_mut.attr.nlink = nlink;
+                        node_mut.attr.ctime = now;
 
-            if let Some(remaining) = link_parents.into_iter().next() {
-                let mut node_mut = node;
-                node_mut.parent = remaining.0;
-                node_mut.name = remaining.1;
-                node_mut.attr.nlink = nlink;
-                node_mut.attr.ctime = now;
+                        let key = Self::link_parent_key(child);
+                        let data = serde_json::to_vec(&node_mut)
+                            .map_err(|e| MetaError::Internal(e.to_string()))?;
 
-                let key = Self::link_parent_key(child);
-                let data = serde_json::to_vec(&node_mut)
-                    .map_err(|e| MetaError::Internal(e.to_string()))?;
+                        let mut conn = self.conn.clone();
+                        let _: () = redis::pipe()
+                            .atomic()
+                            .del(key)
+                            .set(self.node_key(node_mut.ino), data)
+                            .query_async(&mut conn)
+                            .await
+                            .map_err(redis_err)?;
+                    }
+                }
 
-                let mut conn = self.conn.clone();
-                let _: () = redis::pipe()
-                    .atomic()
-                    .del(key)
-                    .set(self.node_key(node_mut.ino), data)
-                    .query_async(&mut conn)
-                    .await
-                    .map_err(redis_err)?;
+                self.bump_dir_times(parent, now).await?;
+                Ok(())
             }
+            None => Err(MetaError::Internal("unexpected Lua response".into())),
         }
-
-        self.bump_dir_times(parent, now).await?;
-        Ok(())
     }
 
     #[tracing::instrument(
@@ -1738,6 +1862,7 @@ impl MetaStore for RedisMetaStore {
             .arg(old_parent) // ARGV[3]
             .arg(new_parent) // ARGV[4]
             .arg(now) // ARGV[5]
+            .arg(child) // ARGV[6] - expected inode
             .invoke_async(&mut self.conn.clone())
             .await
             .map_err(redis_err)?;
@@ -1820,6 +1945,8 @@ impl MetaStore for RedisMetaStore {
             .arg(old_parent)
             .arg(new_parent)
             .arg(now)
+            .arg(old_ino)
+            .arg(new_ino)
             .invoke_async(&mut self.conn.clone())
             .await
             .map_err(redis_err)?;
@@ -1827,11 +1954,16 @@ impl MetaStore for RedisMetaStore {
         let response: LuaResponse = serde_json::from_str(&result)
             .map_err(|e| MetaError::Internal(format!("Failed to parse Lua response: {e}")))?;
         match response.error.as_deref() {
+            Some("stale_conflict") => Err(MetaError::ContinueRetry),
+            Some("not_found") => Err(MetaError::NotFound(response.ino.unwrap_or(old_parent))),
             Some("internal") => {
                 let msg = response.msg.unwrap_or_else(|| "unknown error".to_string());
                 Err(MetaError::Internal(msg))
             }
             Some("corrupt_node") => Err(MetaError::Internal("corrupt node data".into())),
+            Some("link_parent_not_found") => Err(MetaError::Internal(
+                "expected link parent binding not found during exchange".into(),
+            )),
             Some(other) => Err(MetaError::Internal(format!("Lua error: {other}"))),
             None if response.ok => Ok(()),
             None => Err(MetaError::Internal("unexpected Lua response".into())),
@@ -2073,15 +2205,167 @@ impl MetaStore for RedisMetaStore {
         Ok(inodes)
     }
 
+    #[tracing::instrument(level = "trace", skip(self), fields(batch_size, max_age_secs))]
+    // GC Phase 1: find aged delayed slices, delete their chunk meta, and mark them for block deletion.
     async fn process_delayed_slices(
         &self,
-        _batch_size: usize,
-        _max_age_secs: i64,
+        batch_size: usize,
+        max_age_secs: i64,
     ) -> Result<Vec<(u64, u64, u64, i64)>, MetaError> {
-        Ok(Vec::new())
+        if batch_size == 0 {
+            return Ok(vec![]);
+        }
+
+        let mut conn = self.conn.clone();
+        let cutoff = Utc::now().timestamp() - max_age_secs;
+
+        let delayed_ids: Vec<i64> = redis::cmd("ZRANGEBYSCORE")
+            .arg(DELAYED_INDEX_KEY)
+            .arg("-inf")
+            .arg(cutoff)
+            .arg("LIMIT")
+            .arg(0)
+            .arg(batch_size)
+            .query_async(&mut conn)
+            .await
+            .map_err(redis_err)?;
+
+        if delayed_ids.is_empty() {
+            return Ok(vec![]);
+        }
+
+        let mut result = Vec::new();
+
+        for delayed_id in delayed_ids {
+            let ds_key = self.delayed_key(delayed_id);
+            let fields: std::collections::HashMap<String, String> =
+                conn.hgetall(&ds_key).await.map_err(redis_err)?;
+
+            if fields.is_empty() {
+                tracing::warn!(
+                    delayed_id = delayed_id,
+                    "delayed slice hash missing, cleaning up stale index"
+                );
+                let _: () = redis::pipe()
+                    .atomic()
+                    .cmd("DEL")
+                    .arg(&ds_key)
+                    .ignore()
+                    .cmd("ZREM")
+                    .arg(DELAYED_INDEX_KEY)
+                    .arg(delayed_id)
+                    .ignore()
+                    .query_async(&mut conn)
+                    .await
+                    .map_err(redis_err)?;
+                continue;
+            }
+
+            let status = fields.get("st").cloned().unwrap_or_default();
+            let slice_id = match fields.get("sid").and_then(|v| v.parse::<u64>().ok()) {
+                Some(v) => v,
+                None => {
+                    tracing::warn!(
+                        delayed_id = delayed_id,
+                        "failed to parse sid from delayed slice hash, cleaning up"
+                    );
+                    let _: () = redis::pipe()
+                        .atomic()
+                        .cmd("DEL")
+                        .arg(&ds_key)
+                        .ignore()
+                        .cmd("ZREM")
+                        .arg(DELAYED_INDEX_KEY)
+                        .arg(delayed_id)
+                        .ignore()
+                        .query_async(&mut conn)
+                        .await
+                        .map_err(redis_err)?;
+                    continue;
+                }
+            };
+            let offset = fields
+                .get("off")
+                .and_then(|v| v.parse::<u64>().ok())
+                .unwrap_or(0);
+            let size = fields
+                .get("sz")
+                .and_then(|v| v.parse::<u64>().ok())
+                .unwrap_or(0);
+
+            if status == "meta_deleted" {
+                result.push((slice_id, offset, size, delayed_id));
+                continue;
+            }
+
+            if status != "pending" {
+                continue;
+            }
+
+            let chunk_id = fields
+                .get("cid")
+                .and_then(|v| v.parse::<u64>().ok())
+                .unwrap_or(0);
+            let chunk_key = self.chunk_key(chunk_id);
+
+            let raw: Vec<Vec<u8>> = redis::cmd("LRANGE")
+                .arg(&chunk_key)
+                .arg(0)
+                .arg(-1)
+                .query_async(&mut conn)
+                .await
+                .map_err(redis_err)?;
+
+            let mut target_entry = None;
+            for entry in raw {
+                let desc: SliceDesc = crate::meta::serialization::deserialize_meta(&entry)?;
+                if desc.slice_id == slice_id {
+                    target_entry = Some(entry);
+                    break;
+                }
+            }
+
+            let mut pipe = redis::pipe();
+            pipe.atomic();
+
+            if let Some(entry_bytes) = target_entry {
+                pipe.cmd("LREM")
+                    .arg(&chunk_key)
+                    .arg(0)
+                    .arg(&entry_bytes)
+                    .ignore();
+            }
+
+            pipe.hset(&ds_key, "st", "meta_deleted").ignore();
+
+            let _: () = pipe.query_async(&mut conn).await.map_err(redis_err)?;
+            result.push((slice_id, offset, size, delayed_id));
+        }
+
+        Ok(result)
     }
 
-    async fn confirm_delayed_deleted(&self, _delayed_ids: &[i64]) -> Result<(), MetaError> {
+    #[tracing::instrument(level = "trace", skip(self), fields(delayed_count = delayed_ids.len()))]
+    // GC Phase 2: permanently remove delayed slice records after their blocks have been deleted.
+    async fn confirm_delayed_deleted(&self, delayed_ids: &[i64]) -> Result<(), MetaError> {
+        if delayed_ids.is_empty() {
+            return Ok(());
+        }
+
+        let mut conn = self.conn.clone();
+        let mut pipe = redis::pipe();
+        pipe.atomic();
+
+        for delayed_id in delayed_ids {
+            let ds_key = self.delayed_key(*delayed_id);
+            pipe.cmd("DEL").arg(&ds_key).ignore();
+            pipe.cmd("ZREM")
+                .arg(DELAYED_INDEX_KEY)
+                .arg(delayed_id)
+                .ignore();
+        }
+
+        let _: () = pipe.query_async(&mut conn).await.map_err(redis_err)?;
         Ok(())
     }
 
@@ -2152,9 +2436,614 @@ impl MetaStore for RedisMetaStore {
         self.extend_file_size(ino, new_size).await
     }
 
+    #[tracing::instrument(level = "trace", skip(self), fields(limit))]
+    async fn list_chunk_ids(&self, limit: usize) -> Result<Vec<u64>, MetaError> {
+        if limit == 0 {
+            return Ok(vec![]);
+        }
+
+        // Drain any buffered chunk IDs from a previous mid-page limit hit first.
+        {
+            let mut buffer = self.chunk_scan_buffer.lock().unwrap();
+            if !buffer.is_empty() {
+                let take = limit.min(buffer.len());
+                let result: Vec<u64> = buffer.drain(..take).collect();
+                if buffer.is_empty() {
+                    let mut cursor = self.chunk_scan_cursor.lock().unwrap();
+                    let mut next_cursor = self.chunk_scan_next_cursor.lock().unwrap();
+                    *cursor = next_cursor.take();
+                }
+                return Ok(result);
+            }
+        }
+
+        let page_size = limit.clamp(64, 256);
+        let mut start_key = self.chunk_scan_cursor.lock().unwrap().clone();
+        let started_from_cursor = start_key.is_some();
+        let mut chunk_ids = Vec::new();
+        let mut wrapped = false;
+        let mut conn = self.conn.clone();
+
+        loop {
+            let (next_cursor, keys): (String, Vec<String>) = redis::cmd("SCAN")
+                .arg(start_key.as_deref().unwrap_or("0"))
+                .arg("MATCH")
+                .arg(format!("{CHUNK_KEY_PREFIX}*"))
+                .arg("COUNT")
+                .arg(page_size)
+                .query_async(&mut conn)
+                .await
+                .map_err(redis_err)?;
+
+            let mut chunk_idx_in_page = 0;
+            for key in &keys {
+                if let Some(chunk_id) = Self::parse_chunk_id_from_chunk_key(key) {
+                    chunk_ids.push(chunk_id);
+                    chunk_idx_in_page += 1;
+                    if chunk_ids.len() == limit {
+                        // Any remaining chunk IDs in this SCAN page that we haven't
+                        // consumed need to be buffered so they aren't skipped.
+                        let remaining: Vec<u64> = keys
+                            .iter()
+                            .filter_map(|k| Self::parse_chunk_id_from_chunk_key(k))
+                            .skip(chunk_idx_in_page)
+                            .collect();
+                        if !remaining.is_empty() {
+                            let mut buffer = self.chunk_scan_buffer.lock().unwrap();
+                            buffer.extend(remaining);
+                            // Save the next cursor so we can resume from the following
+                            // page once the buffer is fully drained.
+                            let mut next_cursor_guard = self.chunk_scan_next_cursor.lock().unwrap();
+                            *next_cursor_guard = Some(next_cursor);
+                        } else {
+                            let mut cursor = self.chunk_scan_cursor.lock().unwrap();
+                            *cursor = Some(next_cursor);
+                            let mut next_cursor_guard = self.chunk_scan_next_cursor.lock().unwrap();
+                            *next_cursor_guard = None;
+                        }
+                        return Ok(chunk_ids);
+                    }
+                }
+            }
+
+            if next_cursor == "0" {
+                if wrapped || !started_from_cursor {
+                    let mut cursor = self.chunk_scan_cursor.lock().unwrap();
+                    *cursor = None;
+                    let mut next_cursor_guard = self.chunk_scan_next_cursor.lock().unwrap();
+                    *next_cursor_guard = None;
+                    break;
+                }
+                start_key = Some("0".to_string());
+                wrapped = true;
+                continue;
+            }
+
+            start_key = Some(next_cursor);
+        }
+
+        Ok(chunk_ids)
+    }
+
+    #[tracing::instrument(
+        level = "trace",
+        skip(self, new_slices, old_slices_to_delay),
+        fields(chunk_id)
+    )]
+    // Replace old chunk slices with new ones and create delayed records for the removed slices.
+    async fn replace_slices_for_compact(
+        &self,
+        chunk_id: u64,
+        new_slices: &[SliceDesc],
+        old_slices_to_delay: &[u8],
+    ) -> Result<(), MetaError> {
+        if !old_slices_to_delay.is_empty() && !old_slices_to_delay.len().is_multiple_of(20) {
+            tracing::warn!(
+                chunk_id = chunk_id,
+                delayed_len = old_slices_to_delay.len(),
+                "replace_slices_for_compact: invalid delayed data length"
+            );
+            return Err(MetaError::Internal(
+                "Invalid delayed data length".to_string(),
+            ));
+        }
+
+        let delayed_slices = SliceDesc::decode_delayed_data(old_slices_to_delay)
+            .ok_or_else(|| MetaError::Internal("Invalid delayed data length".to_string()))?;
+        let delayed_ids: std::collections::HashSet<u64> =
+            delayed_slices.iter().map(|(id, _, _)| *id).collect();
+
+        let chunk_key = self.chunk_key(chunk_id);
+
+        for _ in 0..COMPACT_RETRY_LIMIT {
+            let mut conn = Self::create_connection(&self._config).await?;
+
+            redis::cmd("WATCH")
+                .arg(&chunk_key)
+                .exec_async(&mut conn)
+                .await
+                .map_err(redis_err)?;
+
+            let raw: Vec<Vec<u8>> = redis::cmd("LRANGE")
+                .arg(&chunk_key)
+                .arg(0)
+                .arg(-1)
+                .query_async(&mut conn)
+                .await
+                .map_err(redis_err)?;
+
+            let mut kept = Vec::new();
+            for entry in raw {
+                let desc: SliceDesc = crate::meta::serialization::deserialize_meta(&entry)?;
+                if !delayed_ids.contains(&desc.slice_id) {
+                    kept.push(entry);
+                }
+            }
+
+            let now = Utc::now().timestamp();
+
+            let mut pipe = redis::pipe();
+            pipe.atomic();
+
+            // Replace chunk slices: keep non-delayed existing, append new
+            pipe.cmd("DEL").arg(&chunk_key).ignore();
+            for entry in &kept {
+                pipe.cmd("RPUSH").arg(&chunk_key).arg(entry).ignore();
+            }
+            for slice in new_slices {
+                let data = crate::meta::serialization::serialize_meta(slice)?;
+                pipe.cmd("RPUSH").arg(&chunk_key).arg(data).ignore();
+            }
+
+            // Create delayed records for old slices
+            if !delayed_slices.is_empty() {
+                for (slice_id, offset, size) in &delayed_slices {
+                    let delayed_id: i64 =
+                        conn.incr(DELAYED_COUNTER_KEY, 1).await.map_err(redis_err)?;
+                    let ds_key = self.delayed_key(delayed_id);
+                    pipe.hset(&ds_key, "sid", slice_id.to_string());
+                    pipe.hset(&ds_key, "off", offset.to_string());
+                    pipe.hset(&ds_key, "sz", u64::from(*size).to_string());
+                    pipe.hset(&ds_key, "st", "pending");
+                    pipe.hset(&ds_key, "ca", now.to_string());
+                    pipe.hset(&ds_key, "cid", chunk_id.to_string());
+                    pipe.cmd("ZADD")
+                        .arg(DELAYED_INDEX_KEY)
+                        .arg(now)
+                        .arg(delayed_id)
+                        .ignore();
+                }
+            }
+
+            let result: Option<()> = pipe.query_async(&mut conn).await.map_err(redis_err)?;
+            if result.is_some() {
+                return Ok(());
+            }
+        }
+
+        Err(MetaError::ContinueRetry)
+    }
+
+    #[tracing::instrument(
+        level = "trace",
+        skip(self, new_slices, old_slices_to_delay, expected_slices),
+        fields(chunk_id)
+    )]
+    // Versioned slice replacement: verify chunk state matches expectations before swapping slices.
+    async fn replace_slices_for_compact_with_version(
+        &self,
+        chunk_id: u64,
+        new_slices: &[SliceDesc],
+        old_slices_to_delay: &[u8],
+        expected_slices: &[SliceDesc],
+    ) -> Result<(), MetaError> {
+        if !old_slices_to_delay.is_empty() && !old_slices_to_delay.len().is_multiple_of(20) {
+            tracing::warn!(
+                chunk_id = chunk_id,
+                delayed_len = old_slices_to_delay.len(),
+                "replace_slices_for_compact_with_version: invalid delayed data length"
+            );
+            return Err(MetaError::Internal(
+                "Invalid delayed data length".to_string(),
+            ));
+        }
+
+        let delayed_slices = SliceDesc::decode_delayed_data(old_slices_to_delay)
+            .ok_or_else(|| MetaError::Internal("Invalid delayed data length".to_string()))?;
+
+        let chunk_key = self.chunk_key(chunk_id);
+
+        for _ in 0..COMPACT_RETRY_LIMIT {
+            let mut conn = Self::create_connection(&self._config).await?;
+
+            redis::cmd("WATCH")
+                .arg(&chunk_key)
+                .exec_async(&mut conn)
+                .await
+                .map_err(redis_err)?;
+
+            let raw: Vec<Vec<u8>> = redis::cmd("LRANGE")
+                .arg(&chunk_key)
+                .arg(0)
+                .arg(-1)
+                .query_async(&mut conn)
+                .await
+                .map_err(redis_err)?;
+
+            let mut current_slices = Vec::with_capacity(raw.len());
+            for entry in raw {
+                let desc: SliceDesc = crate::meta::serialization::deserialize_meta(&entry)?;
+                current_slices.push(desc);
+            }
+
+            if current_slices.len() != expected_slices.len() {
+                tracing::warn!(
+                    chunk_id = chunk_id,
+                    expected_count = expected_slices.len(),
+                    actual_count = current_slices.len(),
+                    "Concurrent modification detected: slice count mismatch"
+                );
+                continue;
+            }
+
+            let current_map: std::collections::HashMap<u64, (u64, u64)> = current_slices
+                .iter()
+                .map(|s| (s.slice_id, (s.offset, s.length)))
+                .collect();
+
+            let mut mismatch = false;
+            for expected in expected_slices {
+                match current_map.get(&expected.slice_id) {
+                    Some((offset, length)) => {
+                        if *offset != expected.offset || *length != expected.length {
+                            tracing::warn!(
+                                chunk_id = chunk_id,
+                                slice_id = expected.slice_id,
+                                "Concurrent modification detected: slice content changed"
+                            );
+                            mismatch = true;
+                            break;
+                        }
+                    }
+                    None => {
+                        tracing::warn!(
+                            chunk_id = chunk_id,
+                            slice_id = expected.slice_id,
+                            "Concurrent modification detected: slice missing"
+                        );
+                        mismatch = true;
+                        break;
+                    }
+                }
+            }
+
+            if mismatch {
+                continue;
+            }
+
+            let now = Utc::now().timestamp();
+
+            let mut pipe = redis::pipe();
+            pipe.atomic();
+
+            // Replace chunk slices
+            pipe.cmd("DEL").arg(&chunk_key).ignore();
+            for slice in new_slices {
+                let data = crate::meta::serialization::serialize_meta(slice)?;
+                pipe.cmd("RPUSH").arg(&chunk_key).arg(data).ignore();
+            }
+
+            // Create delayed records for old slices
+            if !delayed_slices.is_empty() {
+                for (slice_id, offset, size) in &delayed_slices {
+                    let delayed_id: i64 =
+                        conn.incr(DELAYED_COUNTER_KEY, 1).await.map_err(redis_err)?;
+                    let ds_key = self.delayed_key(delayed_id);
+                    pipe.hset(&ds_key, "sid", slice_id.to_string());
+                    pipe.hset(&ds_key, "off", offset.to_string());
+                    pipe.hset(&ds_key, "sz", u64::from(*size).to_string());
+                    pipe.hset(&ds_key, "st", "pending");
+                    pipe.hset(&ds_key, "ca", now.to_string());
+                    pipe.hset(&ds_key, "cid", chunk_id.to_string());
+                    pipe.cmd("ZADD")
+                        .arg(DELAYED_INDEX_KEY)
+                        .arg(now)
+                        .arg(delayed_id)
+                        .ignore();
+                }
+            }
+
+            // Clean up uncommitted records for new slices
+            for slice in new_slices {
+                let uc_key = self.uncommitted_key(slice.slice_id);
+                pipe.cmd("DEL").arg(&uc_key).ignore();
+                pipe.cmd("ZREM")
+                    .arg(UNCOMMITTED_PENDING_INDEX_KEY)
+                    .arg(slice.slice_id.to_string())
+                    .ignore();
+                pipe.cmd("ZREM")
+                    .arg(UNCOMMITTED_ORPHAN_INDEX_KEY)
+                    .arg(slice.slice_id.to_string())
+                    .ignore();
+            }
+
+            let result: Option<()> = pipe.query_async(&mut conn).await.map_err(redis_err)?;
+            if result.is_some() {
+                return Ok(());
+            }
+        }
+
+        Err(MetaError::ContinueRetry)
+    }
+
+    #[tracing::instrument(
+        level = "trace",
+        skip(self, operation),
+        fields(slice_id, chunk_id, size)
+    )]
+    // Track a newly written slice as uncommitted so GC can clean it up if the commit fails.
+    async fn record_uncommitted_slice(
+        &self,
+        slice_id: u64,
+        chunk_id: u64,
+        size: u64,
+        operation: &str,
+    ) -> Result<i64, MetaError> {
+        let mut conn = self.conn.clone();
+        let now = Utc::now().timestamp();
+        let uc_key = self.uncommitted_key(slice_id);
+
+        let mut pipe = redis::pipe();
+        pipe.atomic();
+        pipe.hset(&uc_key, "cid", chunk_id.to_string());
+        pipe.hset(&uc_key, "sz", size.to_string());
+        pipe.hset(&uc_key, "ca", now.to_string());
+        pipe.hset(&uc_key, "op", operation);
+        pipe.hset(&uc_key, "st", "pending");
+        pipe.cmd("ZADD")
+            .arg(UNCOMMITTED_PENDING_INDEX_KEY)
+            .arg(now)
+            .arg(slice_id.to_string())
+            .ignore();
+
+        let _: () = pipe.query_async(&mut conn).await.map_err(redis_err)?;
+        Ok(slice_id as i64)
+    }
+
+    #[tracing::instrument(level = "trace", skip(self), fields(slice_id))]
+    // Mark an uncommitted slice as committed by removing its tracking record.
+    async fn confirm_slice_committed(&self, slice_id: u64) -> Result<(), MetaError> {
+        let mut conn = self.conn.clone();
+        let uc_key = self.uncommitted_key(slice_id);
+
+        let mut pipe = redis::pipe();
+        pipe.atomic();
+        pipe.cmd("DEL").arg(&uc_key).ignore();
+        pipe.cmd("ZREM")
+            .arg(UNCOMMITTED_PENDING_INDEX_KEY)
+            .arg(slice_id.to_string())
+            .ignore();
+        pipe.cmd("ZREM")
+            .arg(UNCOMMITTED_ORPHAN_INDEX_KEY)
+            .arg(slice_id.to_string())
+            .ignore();
+
+        let _: () = pipe.query_async(&mut conn).await.map_err(redis_err)?;
+        Ok(())
+    }
+
+    #[tracing::instrument(level = "trace", skip(self), fields(max_age_secs, batch_size))]
+    // Scan for stale uncommitted slices: mark orphans for block cleanup and remove committed leftovers.
+    async fn cleanup_orphan_uncommitted_slices(
+        &self,
+        max_age_secs: i64,
+        batch_size: usize,
+    ) -> Result<Vec<(u64, u64)>, MetaError> {
+        if batch_size == 0 {
+            return Ok(vec![]);
+        }
+
+        let mut conn = self.conn.clone();
+        let cutoff = Utc::now().timestamp() - max_age_secs;
+
+        // Scan pending index
+        let pending_ids: Vec<u64> = redis::cmd("ZRANGEBYSCORE")
+            .arg(UNCOMMITTED_PENDING_INDEX_KEY)
+            .arg("-inf")
+            .arg(cutoff)
+            .arg("LIMIT")
+            .arg(0)
+            .arg(batch_size)
+            .query_async(&mut conn)
+            .await
+            .map_err(redis_err)?;
+
+        // Scan orphan index
+        let orphan_ids: Vec<u64> = redis::cmd("ZRANGE")
+            .arg(UNCOMMITTED_ORPHAN_INDEX_KEY)
+            .arg(0)
+            .arg(batch_size - 1)
+            .query_async(&mut conn)
+            .await
+            .map_err(redis_err)?;
+
+        if pending_ids.is_empty() && orphan_ids.is_empty() {
+            return Ok(vec![]);
+        }
+
+        let mut cleaned = Vec::new();
+        let mut seen = std::collections::HashSet::new();
+
+        for slice_id in pending_ids {
+            if !seen.insert(slice_id) {
+                continue;
+            }
+
+            let uc_key = self.uncommitted_key(slice_id);
+            let fields: std::collections::HashMap<String, String> =
+                conn.hgetall(&uc_key).await.map_err(redis_err)?;
+
+            if fields.is_empty() {
+                // Stale index entry, clean up
+                let _: () = redis::pipe()
+                    .atomic()
+                    .cmd("ZREM")
+                    .arg(UNCOMMITTED_PENDING_INDEX_KEY)
+                    .arg(slice_id.to_string())
+                    .ignore()
+                    .query_async(&mut conn)
+                    .await
+                    .map_err(redis_err)?;
+                continue;
+            }
+
+            let chunk_id = fields
+                .get("cid")
+                .and_then(|v| v.parse::<u64>().ok())
+                .unwrap_or(0);
+            let size = fields
+                .get("sz")
+                .and_then(|v| v.parse::<u64>().ok())
+                .unwrap_or(0);
+            let chunk_key = self.chunk_key(chunk_id);
+
+            let raw: Vec<Vec<u8>> = redis::cmd("LRANGE")
+                .arg(&chunk_key)
+                .arg(0)
+                .arg(-1)
+                .query_async(&mut conn)
+                .await
+                .map_err(redis_err)?;
+
+            let mut exists = false;
+            for entry in raw {
+                let desc: SliceDesc = crate::meta::serialization::deserialize_meta(&entry)?;
+                if desc.slice_id == slice_id {
+                    exists = true;
+                    break;
+                }
+            }
+
+            if exists {
+                // Committed, clean up
+                let _: () = redis::pipe()
+                    .atomic()
+                    .cmd("DEL")
+                    .arg(&uc_key)
+                    .ignore()
+                    .cmd("ZREM")
+                    .arg(UNCOMMITTED_PENDING_INDEX_KEY)
+                    .arg(slice_id.to_string())
+                    .ignore()
+                    .query_async(&mut conn)
+                    .await
+                    .map_err(redis_err)?;
+            } else {
+                // Orphan
+                cleaned.push((slice_id, size));
+                let mut pipe = redis::pipe();
+                pipe.atomic();
+                pipe.hset(&uc_key, "st", "orphan");
+                pipe.cmd("ZREM")
+                    .arg(UNCOMMITTED_PENDING_INDEX_KEY)
+                    .arg(slice_id.to_string())
+                    .ignore();
+                pipe.cmd("ZADD")
+                    .arg(UNCOMMITTED_ORPHAN_INDEX_KEY)
+                    .arg(0)
+                    .arg(slice_id.to_string())
+                    .ignore();
+                let _: () = pipe.query_async(&mut conn).await.map_err(redis_err)?;
+            }
+        }
+
+        for slice_id in orphan_ids {
+            if seen.insert(slice_id) {
+                let uc_key = self.uncommitted_key(slice_id);
+                let size: Option<String> = conn.hget(&uc_key, "sz").await.map_err(redis_err)?;
+                let size_val = size.and_then(|v| v.parse::<u64>().ok()).unwrap_or(0);
+                cleaned.push((slice_id, size_val));
+            }
+        }
+
+        Ok(cleaned)
+    }
+
+    #[tracing::instrument(level = "trace", skip(self), fields(slice_count = slice_ids.len()))]
+    // Delete uncommitted slice tracking records after their orphan blocks have been cleaned up.
+    async fn delete_uncommitted_slices(&self, slice_ids: &[u64]) -> Result<(), MetaError> {
+        if slice_ids.is_empty() {
+            return Ok(());
+        }
+
+        let mut conn = self.conn.clone();
+        let mut pipe = redis::pipe();
+        pipe.atomic();
+
+        for slice_id in slice_ids {
+            let uc_key = self.uncommitted_key(*slice_id);
+            pipe.cmd("DEL").arg(&uc_key).ignore();
+            pipe.cmd("ZREM")
+                .arg(UNCOMMITTED_PENDING_INDEX_KEY)
+                .arg(slice_id.to_string())
+                .ignore();
+            pipe.cmd("ZREM")
+                .arg(UNCOMMITTED_ORPHAN_INDEX_KEY)
+                .arg(slice_id.to_string())
+                .ignore();
+        }
+
+        let _: () = pipe.query_async(&mut conn).await.map_err(redis_err)?;
+        Ok(())
+    }
+
     #[tracing::instrument(level = "trace", skip(self), fields(key))]
     async fn next_id(&self, key: &str) -> Result<i64, MetaError> {
         self.alloc_id(key).await
+    }
+
+    #[tracing::instrument(level = "trace", skip(self), fields(name))]
+    async fn get_counter(&self, name: &str) -> Result<i64, MetaError> {
+        let mut conn = self.conn.clone();
+        let value: Option<i64> = conn.get(name).await.map_err(redis_err)?;
+        Ok(value.unwrap_or(0))
+    }
+
+    #[tracing::instrument(level = "trace", skip(self), fields(name, delta))]
+    async fn incr_counter(&self, name: &str, delta: i64) -> Result<i64, MetaError> {
+        let mut conn = self.conn.clone();
+        conn.incr(name, delta).await.map_err(redis_err)
+    }
+
+    #[tracing::instrument(level = "trace", skip(self), fields(name, value, diff))]
+    async fn set_counter_if_small(
+        &self,
+        name: &str,
+        value: i64,
+        diff: i64,
+    ) -> Result<bool, MetaError> {
+        let script = redis::Script::new(
+            r#"
+            local current = redis.call('GET', KEYS[1])
+            local curr_val = tonumber(current) or 0
+            local threshold = tonumber(ARGV[1]) - tonumber(ARGV[2])
+            if curr_val < threshold then
+                redis.call('SET', KEYS[1], tonumber(ARGV[1]))
+                return true
+            else
+                return false
+            end
+            "#,
+        );
+        let mut conn = self.conn.clone();
+        let result: bool = script
+            .key(name)
+            .arg(value)
+            .arg(diff)
+            .invoke_async(&mut conn)
+            .await
+            .map_err(redis_err)?;
+        Ok(result)
     }
 
     #[tracing::instrument(level = "trace", skip(self), fields(pid = session_info.process_id))]
@@ -2236,14 +3125,14 @@ impl MetaStore for RedisMetaStore {
 
             if last_updated == false then
                 redis.call("HSET", key, field, now_time)
-                return true
+                return now_time
             else
                 last_updated = tonumber(last_updated)
                 if now_time < last_updated + diff then
                     return false
                 else
                     redis.call("HSET", key, field, now_time)
-                    return true
+                    return now_time
                 end
             end
             "#,
@@ -2251,18 +3140,118 @@ impl MetaStore for RedisMetaStore {
 
         let diff = chrono::Duration::seconds(ttl_secs as i64).num_milliseconds();
 
-        let resp: Result<bool, _> = script
+        let resp: Result<redis::Value, _> = script
             .key(LOCKS_KEY)
-            .arg(lock_name)
+            .arg(&lock_name)
             .arg(now)
             .arg(diff)
             .invoke_async(&mut conn)
             .await;
 
         match resp {
-            Ok(v) => v,
+            Ok(redis::Value::BulkString(bytes)) => {
+                // Lua returns the token (timestamp) as a number, which redis-rs
+                // may encode as a bulk string in some versions.
+                if let Ok(token_str) = std::str::from_utf8(&bytes)
+                    && let Ok(token) = token_str.parse::<i64>()
+                {
+                    if let Ok(mut tokens) = self.global_lock_tokens.lock() {
+                        tokens.insert(lock_name, token);
+                    }
+                    return true;
+                }
+                false
+            }
+            Ok(redis::Value::Int(token)) => {
+                if let Ok(mut tokens) = self.global_lock_tokens.lock() {
+                    tokens.insert(lock_name, token);
+                }
+                true
+            }
+            Ok(redis::Value::SimpleString(s)) if s == "false" || s == "0" => false,
+            Ok(redis::Value::Nil) => false,
+            Ok(other) => {
+                tracing::warn!("Unexpected response from get_global_lock Lua: {:?}", other);
+                false
+            }
             Err(err) => {
                 error!("{}", err.to_string());
+                false
+            }
+        }
+    }
+
+    async fn is_global_lock_held(&self, lock_name: LockName, ttl_secs: u64) -> bool {
+        let lock_name = lock_name.to_string();
+        let mut conn = self.conn.clone();
+        let now = Utc::now().timestamp_millis();
+        let ttl_millis = chrono::Duration::seconds(ttl_secs as i64).num_milliseconds();
+
+        let locked_at: Option<i64> = conn
+            .hget(LOCKS_KEY, &lock_name)
+            .await
+            .map_err(redis_err)
+            .ok()
+            .flatten();
+
+        match locked_at {
+            Some(locked_at) => now <= locked_at + ttl_millis,
+            None => false,
+        }
+    }
+
+    async fn release_global_lock(&self, lock_name: LockName) -> bool {
+        let lock_name = lock_name.to_string();
+        let expected_token = match self.global_lock_tokens.lock() {
+            Ok(tokens) => tokens.get(&lock_name).copied(),
+            Err(err) => {
+                error!("Error reading local lock token {}: {}", lock_name, err);
+                None
+            }
+        };
+        let Some(expected_token) = expected_token else {
+            return false;
+        };
+
+        let mut conn = self.conn.clone();
+
+        let script = redis::Script::new(
+            r#"
+            local key = KEYS[1]
+            local field = ARGV[1]
+            local expected = tonumber(ARGV[2])
+
+            local current = redis.call("HGET", key, field)
+            if current == false then
+                return false
+            end
+
+            current = tonumber(current)
+            if current == expected then
+                redis.call("HDEL", key, field)
+                return true
+            else
+                return false
+            end
+            "#,
+        );
+
+        let resp: Result<bool, _> = script
+            .key(LOCKS_KEY)
+            .arg(&lock_name)
+            .arg(expected_token)
+            .invoke_async(&mut conn)
+            .await;
+
+        match resp {
+            Ok(released) => {
+                if released && let Ok(mut tokens) = self.global_lock_tokens.lock() {
+                    tokens.remove(&lock_name);
+                }
+                released
+            }
+            Err(err) => {
+                error!("Error releasing lock {}: {}", lock_name, err);
                 false
             }
         }

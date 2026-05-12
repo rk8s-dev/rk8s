@@ -1,7 +1,7 @@
 use std::{sync::Arc, time::Duration};
 
+use dquic::prelude::QuicClient;
 use futures::Stream;
-use gm_quic::prelude::QuicClient;
 use prost::Message;
 pub use xlinerpc::Streaming;
 use xlinerpc::{H3Channel, MethodId, status::Status};

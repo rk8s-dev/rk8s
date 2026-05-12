@@ -224,24 +224,27 @@ pub async fn handle_image_typ(
     puller: &impl ImagePuller,
     container_spec: &ContainerSpec,
 ) -> Result<(Option<ContainerConfigBuilder>, String)> {
-    if let ImageType::OCIImage = determine_image(&container_spec.image)? {
-        let (image_config, bundle_path) =
-            handle_oci_image(puller, &container_spec.image, container_spec.name.clone()).await?;
-        // handle image_config
-        debug!("successfully pull image");
-        let mut builder = ContainerConfigBuilder::default();
-        if let Some(config) = image_config.config() {
-            // add cmd to config
-            builder.args_from_image_config(config.entrypoint(), config.cmd());
-            // extend env
-            builder.envs_from_image_config(config.env());
-            // set work_dir
-            builder.work_dir(config.working_dir());
-            // builder.users(config.user());
+    match determine_image(&container_spec.image)? {
+        ImageType::OCIImage => {
+            let (image_config, bundle_path) =
+                handle_oci_image(puller, &container_spec.image, container_spec.name.clone())
+                    .await?;
+            // handle image_config
+            debug!("successfully pull image");
+            let mut builder = ContainerConfigBuilder::default();
+            if let Some(config) = image_config.config() {
+                // add cmd to config
+                builder.args_from_image_config(config.entrypoint(), config.cmd());
+                // extend env
+                builder.envs_from_image_config(config.env());
+                // set work_dir
+                builder.work_dir(config.working_dir());
+                // builder.users(config.user());
+            }
+            Ok((Some(builder), bundle_path))
         }
-        return Ok((Some(builder), bundle_path));
+        ImageType::Bundle => Ok((None, container_spec.image.clone())),
     }
-    Ok((None, "".to_string()))
 }
 
 // Helper to handle image type and pulling
@@ -249,21 +252,23 @@ pub fn sync_handle_image_typ(
     puller: &impl ImagePuller,
     container_spec: &ContainerSpec,
 ) -> Result<(Option<ContainerConfigBuilder>, String)> {
-    if let ImageType::OCIImage = determine_image(&container_spec.image)? {
-        let (image_config, bundle_path) =
-            sync_handle_oci_image(puller, &container_spec.image, container_spec.name.clone())?;
-        // handle image_config
-        let mut builder = ContainerConfigBuilder::default();
-        if let Some(config) = image_config.config() {
-            // add cmd to config
-            builder.args_from_image_config(config.entrypoint(), config.cmd());
-            // extend env
-            builder.envs_from_image_config(config.env());
-            // set work_dir
-            builder.work_dir(config.working_dir());
-            // builder.users(config.user());
+    match determine_image(&container_spec.image)? {
+        ImageType::OCIImage => {
+            let (image_config, bundle_path) =
+                sync_handle_oci_image(puller, &container_spec.image, container_spec.name.clone())?;
+            // handle image_config
+            let mut builder = ContainerConfigBuilder::default();
+            if let Some(config) = image_config.config() {
+                // add cmd to config
+                builder.args_from_image_config(config.entrypoint(), config.cmd());
+                // extend env
+                builder.envs_from_image_config(config.env());
+                // set work_dir
+                builder.work_dir(config.working_dir());
+                // builder.users(config.user());
+            }
+            Ok((Some(builder), bundle_path))
         }
-        return Ok((Some(builder), bundle_path));
+        ImageType::Bundle => Ok((None, container_spec.image.clone())),
     }
-    Ok((None, "".to_string()))
 }

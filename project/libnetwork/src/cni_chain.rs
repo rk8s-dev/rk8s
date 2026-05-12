@@ -232,7 +232,7 @@ pub fn build_delegate_add_config(
     if !delegate_mut.contains_key("ipMasq") {
         delegate_mut.insert(
             "ipMasq".into(),
-            Value::Bool(!subnet_env.ipmasq.unwrap_or(false)),
+            Value::Bool(subnet_env.ipmasq.unwrap_or(true)),
         );
     }
 
@@ -465,7 +465,10 @@ async fn cmd_add(mut config: FlannelNetConf, inputs: Inputs) -> Result<SuccessRe
         .or_insert("libbridge".into());
 
     if !delegate_mut.contains_key("ipMasq") {
-        delegate_mut.insert("ipMasq".into(), Value::Bool(!subnet_env.ipmasq.unwrap()));
+        delegate_mut.insert(
+            "ipMasq".into(),
+            Value::Bool(subnet_env.ipmasq.unwrap_or(true)),
+        );
     }
 
     delegate_mut

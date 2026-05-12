@@ -528,4 +528,30 @@ pub trait Filesystem {
     ) -> Result<ReplyCopyFileRange> {
         Err(libc::ENOSYS.into())
     }
+
+    /// macOS only: set the volume name displayed by Finder.
+    #[cfg(target_os = "macos")]
+    async fn setvolname(&self, req: Request, name: &OsStr) -> Result<()> {
+        Err(libc::ENOSYS.into())
+    }
+
+    /// macOS only: return the backup time and creation time of an inode.
+    #[cfg(target_os = "macos")]
+    async fn getxtimes(&self, req: Request, inode: Inode) -> Result<ReplyXTimes> {
+        Err(libc::ENOSYS.into())
+    }
+
+    /// macOS only: atomically swap two filesystem entries (HFS+/APFS exchangedata).
+    #[cfg(target_os = "macos")]
+    async fn exchange(
+        &self,
+        req: Request,
+        olddir: Inode,
+        oldname: &OsStr,
+        newdir: Inode,
+        newname: &OsStr,
+        options: u64,
+    ) -> Result<()> {
+        Err(libc::ENOSYS.into())
+    }
 }

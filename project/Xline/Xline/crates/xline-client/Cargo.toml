@@ -19,9 +19,9 @@ curp = { path = "../curp" }
 futures = { workspace = true }
 getrandom = "0.2"
 bytes = { workspace = true }
-gm-quic = { workspace = true }
+dquic = { workspace = true }
 h3 = "0.0.8"
-h3-shim = "0.4.0"
+h3-shim = { workspace = true }
 http = "1.0"
 prost = { workspace = true }
 rustls = { version = "0.23", default-features = false, features = ["std", "ring"] }

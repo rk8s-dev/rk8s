@@ -2,9 +2,16 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum ReadyStage {
+    VmmReady,
+    GuestAgentReady,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GuestReadyEvent {
     pub sandbox_id: String,
+    pub stage: ReadyStage,
     pub agent_version: String,
     pub transport: String,
     pub timestamp: DateTime<Utc>,

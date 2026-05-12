@@ -1,7 +1,12 @@
 #[cfg(target_os = "macos")]
 use std::env;
+#[cfg(target_os = "macos")]
+use std::ffi::OsStr;
+#[cfg(all(target_os = "linux", feature = "unprivileged"))]
+use std::ffi::OsString;
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 use std::fs::File;
+#[cfg(any(target_os = "linux", target_os = "freebsd"))]
 use std::fs::OpenOptions;
 use std::io;
 #[cfg(any(target_os = "linux", target_os = "macos"))]
@@ -11,50 +16,55 @@ use std::ops::{Deref, DerefMut};
 #[cfg(any(
     all(target_os = "linux", feature = "unprivileged"),
     target_os = "freebsd",
-    target_os = "macos",
 ))]
 use std::os::fd::OwnedFd;
 use std::os::fd::{AsFd, BorrowedFd};
-#[cfg(any(target_os = "freebsd", target_os = "macos"))]
+#[cfg(target_os = "freebsd")]
 use std::os::unix::fs::OpenOptionsExt;
 #[cfg(any(
-    all(target_os = "linux", feature = "unprivileged"),
-    target_os = "macos"
+    target_os = "macos",
+    all(target_os = "linux", feature = "unprivileged")
 ))]
 use std::os::unix::io::RawFd;
 #[cfg(target_os = "macos")]
 use std::os::unix::io::{AsRawFd, FromRawFd};
-use std::pin::pin;
-use std::sync::Arc;
 #[cfg(any(
     all(target_os = "linux", feature = "unprivileged"),
     target_os = "macos"
 ))]
-use std::{ffi::OsString, path::Path};
+use std::path::Path;
+use std::pin::pin;
+#[cfg(target_os = "macos")]
+use std::process::Stdio;
+use std::sync::Arc;
 
 use async_notify::Notify;
 use futures_util::lock::Mutex;
 use futures_util::{select, FutureExt};
 #[cfg(any(
     all(target_os = "linux", feature = "unprivileged"),
-    target_os = "freebsd",
-    target_os = "macos",
-))]
-use nix::sys::uio;
-#[cfg(any(
-    all(target_os = "linux", feature = "unprivileged"),
     target_os = "macos"
 ))]
+use nix::sys::socket::{self, AddressFamily, SockFlag, SockType};
+#[cfg(any(
+    all(target_os = "linux", feature = "unprivileged"),
+    target_os = "freebsd",
+))]
+use nix::sys::uio;
+#[cfg(all(target_os = "linux", feature = "unprivileged"))]
 use nix::{
     fcntl::{FcntlArg, OFlag},
-    sys::socket::{self, AddressFamily, ControlMessageOwned, MsgFlags, SockFlag, SockType},
+    sys::socket::{ControlMessageOwned, MsgFlags},
 };
 #[cfg(any(
     all(target_os = "linux", feature = "unprivileged"),
     target_os = "freebsd",
-    target_os = "macos",
 ))]
 use tokio::io::unix::AsyncFd;
+#[cfg(any(
+    all(target_os = "linux", feature = "unprivileged"),
+    target_os = "freebsd",
+))]
 use tokio::io::Interest;
 #[cfg(any(
     all(target_os = "linux", feature = "unprivileged"),
@@ -68,10 +78,12 @@ use tokio::task;
     target_os = "macos"
 ))]
 use tracing::debug;
-#[cfg(any(target_os = "freebsd", target_os = "macos"))]
+#[cfg(target_os = "freebsd")]
 use tracing::warn;
 
 use super::CompleteIoResult;
+#[cfg(target_os = "macos")]
+use super::{macfuse_command_failure_error, recv_fuse_fd_blocking, MACFUSE_COMMFD_TIMEOUT};
 #[cfg(all(target_os = "linux", feature = "unprivileged"))]
 use crate::find_fusermount3;
 #[cfg(any(
@@ -79,6 +91,66 @@ use crate::find_fusermount3;
     target_os = "macos"
 ))]
 use crate::MountOptions;
+
+#[cfg(target_os = "macos")]
+fn macfuse_fd_receive_error(binary_path: &Path, mount_path: &OsStr, err: io::Error) -> io::Error {
+    io::Error::new(
+        err.kind(),
+        format!(
+            "failed to receive FUSE fd from mount_macfuse: binary={}, mount={}: {}",
+            binary_path.display(),
+            mount_path.to_string_lossy(),
+            err
+        ),
+    )
+}
+
+#[cfg(target_os = "macos")]
+fn macfuse_fd_timeout_error(binary_path: &Path, mount_path: &OsStr) -> io::Error {
+    io::Error::new(
+        io::ErrorKind::TimedOut,
+        format!(
+            "timed out after {:?} waiting for mount_macfuse to send FUSE fd: binary={}, mount={}",
+            MACFUSE_COMMFD_TIMEOUT,
+            binary_path.display(),
+            mount_path.to_string_lossy()
+        ),
+    )
+}
+
+#[cfg(target_os = "macos")]
+async fn wait_for_macfuse_fd_task(
+    fd_task: &mut task::JoinHandle<io::Result<RawFd>>,
+    binary_path: &Path,
+    mount_path: &OsStr,
+) -> io::Result<RawFd> {
+    fd_task
+        .await
+        .map_err(|err| {
+            io::Error::other(format!("wait for mount_macfuse FUSE fd task failed: {err}"))
+        })?
+        .map_err(|err| macfuse_fd_receive_error(binary_path, mount_path, err))
+}
+
+#[cfg(target_os = "macos")]
+async fn wait_for_macfuse_fd_task_until_timeout(
+    fd_task: &mut task::JoinHandle<io::Result<RawFd>>,
+    binary_path: &Path,
+    mount_path: &OsStr,
+) -> io::Result<RawFd> {
+    match tokio::time::timeout(
+        MACFUSE_COMMFD_TIMEOUT,
+        wait_for_macfuse_fd_task(fd_task, binary_path, mount_path),
+    )
+    .await
+    {
+        Ok(result) => result,
+        Err(_) => {
+            fd_task.abort();
+            Err(macfuse_fd_timeout_error(binary_path, mount_path))
+        }
+    }
+}
 
 #[derive(Debug)]
 pub struct FuseConnection {
@@ -234,9 +306,6 @@ impl BlockFuseConnection {
         mount_options: MountOptions,
         mount_path: impl AsRef<Path>,
     ) -> io::Result<Self> {
-        use std::io::ErrorKind;
-        use std::{thread, time::Duration};
-
         use tokio::time::sleep;
 
         use crate::find_macfuse_mount;
@@ -266,73 +335,106 @@ impl BlockFuseConnection {
         };
 
         let mount_path = mount_path.as_ref().as_os_str().to_os_string();
-        // macfuse_mound will block until fuse init done, so we can not join it in the current function
-        tokio::spawn(async move {
-            debug!("mount_thread start");
-            let fd0 = sock0.as_raw_fd();
-            let mut binding = Command::new(binary_path);
-            let child = binding
-                .env(ENV, fd0.to_string())
-                .env("_FUSE_CALL_BY_LIB", "1")
-                .env("_FUSE_COMMVERS", "2")
-                .env("_FUSE_DAEMON_PATH", exec_path)
-                .args(vec![options, mount_path]);
-            let status = child.spawn()?.wait().await?;
+        let mount_path_for_error = mount_path.clone();
+        let binary_path_for_error = binary_path.clone();
 
-            if status.success() {
-                Ok(())
-            } else {
-                Err(io::Error::new(
-                    io::ErrorKind::Other,
-                    "fusermount run failed",
-                ))
-            }
+        let fd0 = sock0.as_raw_fd();
+        let mut binding = Command::new(&binary_path);
+        let child = binding
+            .env(ENV, fd0.to_string())
+            .env("_FUSE_CALL_BY_LIB", "1")
+            .env("_FUSE_COMMVERS", "2")
+            .env("_FUSE_DAEMON_PATH", exec_path)
+            .args(vec![options, mount_path])
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .kill_on_drop(true)
+            .spawn()
+            .map_err(|err| {
+                io::Error::new(
+                    err.kind(),
+                    format!(
+                        "spawn mount_macfuse failed: binary={}, mount={}: {}",
+                        binary_path_for_error.display(),
+                        mount_path_for_error.to_string_lossy(),
+                        err
+                    ),
+                )
+            })?;
+        drop(sock0);
+
+        let (child_result_tx, mut child_result_rx) = tokio::sync::oneshot::channel();
+        let child_task = tokio::spawn(async move {
+            let output = child.wait_with_output().await;
+            let _ = child_result_tx.send(output);
         });
 
-        let fd1 = sock1.as_raw_fd();
-        // wait for macfuse mount
-        let fd = task::spawn_blocking(move || {
+        let mut fd_task = task::spawn_blocking(move || {
             debug!("wait_thread start");
-            // wait for macfuse mount command start
-            // it seems that socket::recvmsg will not block to wait for the message
-            // so we need to sleep for a while
-            thread::sleep(Duration::from_secs(1));
-            // let mut buf = vec![0; 10000]; // buf should large enough
-            let mut buf = vec![]; // it seems 0 len still works well
+            recv_fuse_fd_blocking(sock1.as_raw_fd())
+        });
 
-            let mut cmsg_buf = nix::cmsg_space!([RawFd; 1]);
-
-            let mut bufs = [IoSliceMut::new(&mut buf)];
-
-            let msg = match socket::recvmsg::<()>(
-                fd1,
-                &mut bufs[..],
-                Some(&mut cmsg_buf),
-                MsgFlags::empty(),
-            ) {
-                Err(err) => return Err(err.into()),
-
-                Ok(msg) => msg,
-            };
-
-            let mut cmsgs = match msg.cmsgs() {
-                Err(err) => return Err(err.into()),
-                Ok(cmsgs) => cmsgs,
-            };
-            let fd = if let Some(ControlMessageOwned::ScmRights(fds)) = cmsgs.next() {
-                if fds.is_empty() {
-                    return Err(io::Error::new(ErrorKind::Other, "no fuse fd"));
+        let fd_result = tokio::select! {
+            fd_result = wait_for_macfuse_fd_task(
+                &mut fd_task,
+                &binary_path_for_error,
+                mount_path_for_error.as_os_str(),
+            ) => {
+                fd_result
+            }
+            child_result = &mut child_result_rx => {
+                match child_result {
+                    Ok(Ok(output)) if output.status.success() => {
+                        wait_for_macfuse_fd_task_until_timeout(
+                            &mut fd_task,
+                            &binary_path_for_error,
+                            mount_path_for_error.as_os_str(),
+                        ).await
+                    }
+                    Ok(Ok(output)) => {
+                        Err(macfuse_command_failure_error(
+                            &binary_path_for_error,
+                            mount_path_for_error.as_os_str(),
+                            &output,
+                        ))
+                    }
+                    Ok(Err(err)) => {
+                        Err(io::Error::new(
+                            err.kind(),
+                            format!(
+                                "wait for mount_macfuse failed: binary={}, mount={}: {}",
+                                binary_path_for_error.display(),
+                                mount_path_for_error.to_string_lossy(),
+                                err
+                            ),
+                        ))
+                    }
+                    Err(_) => {
+                        Err(io::Error::other(format!(
+                            "mount_macfuse monitor task dropped before sending FUSE fd: binary={}, mount={}",
+                            binary_path_for_error.display(),
+                            mount_path_for_error.to_string_lossy()
+                        )))
+                    }
                 }
+            }
+            _ = sleep(MACFUSE_COMMFD_TIMEOUT) => {
+                fd_task.abort();
+                Err(macfuse_fd_timeout_error(
+                    &binary_path_for_error,
+                    mount_path_for_error.as_os_str(),
+                ))
+            }
+        };
 
-                fds[0]
-            } else {
-                return Err(io::Error::new(ErrorKind::Other, "get fuse fd failed"));
-            };
-
-            Ok(fd)
-        })
-        .await
-        .unwrap()?;
+        let fd = match fd_result {
+            Ok(fd) => fd,
+            Err(err) => {
+                child_task.abort();
+                return Err(err);
+            }
+        };
 
         let file = unsafe { File::from_raw_fd(fd) };
         Ok(Self {
@@ -528,10 +630,7 @@ impl NonBlockFuseConnection {
         })
     }
 
-    #[cfg(any(
-        all(target_os = "linux", feature = "unprivileged"),
-        target_os = "macos"
-    ))]
+    #[cfg(all(target_os = "linux", feature = "unprivileged"))]
     fn set_fd_non_blocking(fd: RawFd) -> io::Result<()> {
         let flags = nix::fcntl::fcntl(fd, FcntlArg::F_GETFL).map_err(io::Error::from)?;
         debug!(

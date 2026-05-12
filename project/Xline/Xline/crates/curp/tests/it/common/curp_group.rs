@@ -17,9 +17,9 @@ use curp_test_utils::{
     TestRoleChange, TestRoleChangeInner,
     test_cmd::{TestCE, TestCommand, TestCommandResult},
 };
+use dquic::prelude::{QuicClient, QuicListeners};
 use engine::{EngineType, MemorySnapshotAllocator, RocksSnapshotAllocator, SnapshotAllocator};
 use futures::future::join_all;
-use gm_quic::prelude::{QuicClient, QuicListeners};
 use itertools::Itertools;
 use rcgen::{CertificateParams, KeyPair};
 use rustls::pki_types::CertificateDer;
@@ -163,7 +163,7 @@ impl CurpGroup {
                     key_der.as_slice(),
                     vec![
                         bind_uri_str
-                            .parse::<gm_quic::qbase::net::addr::BindUri>()
+                            .parse::<dquic::qbase::net::addr::BindUri>()
                             .unwrap(),
                     ],
                     None::<Vec<u8>>,
@@ -374,7 +374,7 @@ impl CurpGroup {
                 key_der.as_slice(),
                 vec![
                     bind_uri_str
-                        .parse::<gm_quic::qbase::net::addr::BindUri>()
+                        .parse::<dquic::qbase::net::addr::BindUri>()
                         .unwrap(),
                 ],
                 None::<Vec<u8>>,

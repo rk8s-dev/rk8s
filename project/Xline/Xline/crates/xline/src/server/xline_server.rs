@@ -73,7 +73,7 @@ pub struct XlineServer {
     /// Auth config
     auth_config: AuthConfig,
     /// QUIC client for curp peer communication
-    quic_client: Arc<gm_quic::prelude::QuicClient>,
+    quic_client: Arc<dquic::prelude::QuicClient>,
     /// Peer TLS certificate (DER) for QUIC server, None = self-signed fallback
     peer_cert_der: Option<Vec<u8>>,
     /// Peer TLS private key (DER) for QUIC server
@@ -688,7 +688,7 @@ impl XlineServer {
     /// `peer_key_path` are also set, mTLS client authentication is enabled.
     /// Without any peer TLS config, the client uses an empty trust store (no
     /// verification) and logs a warning.
-    async fn build_quic_client(tls_config: &TlsConfig) -> Result<gm_quic::prelude::QuicClient> {
+    async fn build_quic_client(tls_config: &TlsConfig) -> Result<dquic::prelude::QuicClient> {
         // Install the default crypto provider for rustls if not already installed.
         // This is required before any TLS operations (e.g., creating a QuicClient).
         let _ = rustls::crypto::ring::default_provider().install_default();
@@ -717,18 +717,16 @@ impl XlineServer {
             );
         }
 
-        let builder = gm_quic::prelude::QuicClient::builder()
+        let builder = dquic::prelude::QuicClient::builder()
             .with_root_certificates(root_store)
-            .bind(["inet://0.0.0.0:0"]);
+            .bind(["inet://0.0.0.0:0"])
+            .await;
 
         let client = match (tls_config.peer_cert_path(), tls_config.peer_key_path()) {
-            (Some(cert_path), Some(key_path)) => {
-                // gm-quic's with_cert accepts &Path directly (handles PEM/DER parsing)
-                builder
-                    .with_cert(cert_path.as_path(), key_path.as_path())
-                    .with_alpns(["h3"])
-                    .build()
-            }
+            (Some(cert_path), Some(key_path)) => builder
+                .with_cert(cert_path.as_path(), key_path.as_path())
+                .with_alpns(["h3"])
+                .build(),
             _ => builder.without_cert().with_alpns(["h3"]).build(),
         };
 
@@ -737,7 +735,7 @@ impl XlineServer {
 
     /// Read peer TLS certificate and private key files as raw bytes for the
     /// QUIC server. Returns `(None, None)` if not configured. The raw bytes
-    /// (PEM or DER) are passed directly to gm-quic which handles parsing.
+    /// (PEM or DER) are passed directly to dquic which handles parsing.
     async fn read_peer_tls_der(
         tls_config: &TlsConfig,
     ) -> Result<(Option<Vec<u8>>, Option<Vec<u8>>)> {

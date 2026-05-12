@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use curp::rpc::QuicGrpcServer;
-use gm_quic::prelude::{EndpointAddr, QuicListeners};
+use dquic::prelude::{EndpointAddr, QuicListeners};
 use h3::quic::{BidiStream, SendStream};
 use h3::server::RequestStream;
 use http::{Request, Response};
@@ -169,14 +169,11 @@ impl XlineH3Server {
             if guard.is_none() {
                 info!("Creating QuicListeners (FIRST server)");
                 let listeners = QuicListeners::builder()
-                    .map(|builder| {
-                        builder
-                            .without_client_cert_verifier()
-                            .with_parameters(gm_quic::prelude::handy::server_parameters())
-                            .enable_0rtt()
-                            .with_alpns(["h3"])
-                            .listen(4096)
-                    })
+                    .without_client_cert_verifier()
+                    .with_parameters(dquic::prelude::handy::server_parameters())
+                    .enable_0rtt()
+                    .with_alpns(["h3"])
+                    .listen(4096)
                     .map_err(|e| anyhow::anyhow!("QuicListeners::builder failed: {e}"))?;
 
                 let shared = SharedQuicState {
@@ -221,13 +218,15 @@ impl XlineH3Server {
                 .collect::<anyhow::Result<Vec<_>>>()?;
             debug!(server_name, ?bind_uris, "bind URIs parsed");
 
-            listeners.add_server(
-                server_name,
-                cert_path.as_path(),
-                key_path.as_path(),
-                bind_uris,
-                None,
-            )?;
+            listeners
+                .add_server(
+                    server_name,
+                    cert_path.as_path(),
+                    key_path.as_path(),
+                    bind_uris,
+                    None,
+                )
+                .await?;
             info!(server_name, "server add_server done");
 
             // Register the server_name itself as an SNI alias (e.g., "server0", "server1")
@@ -241,13 +240,16 @@ impl XlineH3Server {
                         .collect::<Result<Vec<_>, _>>()
                     {
                         debug!("Registering server_name '{}' as SNI alias", server_name);
-                        if let Err(e) = listeners.add_server(
-                            server_name,
-                            cert_path.as_path(),
-                            key_path.as_path(),
-                            bind_uris,
-                            None,
-                        ) {
+                        if let Err(e) = listeners
+                            .add_server(
+                                server_name,
+                                cert_path.as_path(),
+                                key_path.as_path(),
+                                bind_uris,
+                                None,
+                            )
+                            .await
+                        {
                             warn!(
                                 "server_name SNI alias '{}' registration failed: {}",
                                 server_name, e
@@ -273,13 +275,16 @@ impl XlineH3Server {
                         "Registering SNI alias '{}' for server '{}' with URL {}",
                         host, server_name, url_str
                     );
-                    match listeners.add_server(
-                        host,
-                        cert_path.as_path(),
-                        key_path.as_path(),
-                        bind_uris,
-                        None,
-                    ) {
+                    match listeners
+                        .add_server(
+                            host,
+                            cert_path.as_path(),
+                            key_path.as_path(),
+                            bind_uris,
+                            None,
+                        )
+                        .await
+                    {
                         Ok(()) => {
                             info!(
                                 "Registered SNI alias '{}' for server '{}'",
@@ -312,7 +317,7 @@ impl XlineH3Server {
                 .iter()
                 .next()
                 .ok_or_else(|| anyhow::anyhow!("server {} has no bound interfaces", server_name))?;
-            let _interface = state.borrow()?;
+            let _interface = state.borrow();
             debug!(server_name, "server interface bind verified");
         }
 

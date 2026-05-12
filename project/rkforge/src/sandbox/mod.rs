@@ -1,18 +1,28 @@
+pub mod agent;
 pub mod cli;
+pub mod guest;
+mod guest_image;
 pub mod protocol;
+mod runtime_assets;
+pub mod sdk;
+pub mod types;
 pub mod vm;
 
 use anyhow::{Context, Result, anyhow, bail};
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
-use protocol::{GuestExecRequest, GuestExecResponse};
+use protocol::{GuestExecRequest, GuestExecResponse, ReadyStage};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::fs;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use tracing::{debug, warn};
 use uuid::Uuid;
-use vm::{FirecrackerVmBackend, VmBackend, VmInstanceHandle, build_vm_spec};
+use vm::{
+    FirecrackerVmBackend, LibkrunVmBackend, VmBackend, VmInstanceHandle, VmmKind, build_vm_spec,
+};
 
 /// Current Single Sandbox State
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -106,14 +116,25 @@ pub trait SandboxBackend: Send + Sync {
 pub struct MicroVmSandboxBackend {
     vm_backend: Arc<dyn VmBackend>,
     root: PathBuf,
+    vmm_kind: VmmKind,
 }
 
 impl MicroVmSandboxBackend {
     pub fn new(root: PathBuf) -> Result<Self> {
+        let vmm_kind = VmmKind::from_env()?;
+        Self::new_with_vmm(root, vmm_kind)
+    }
+
+    pub fn new_with_vmm(root: PathBuf, vmm_kind: VmmKind) -> Result<Self> {
+        let vm_backend: Arc<dyn VmBackend> = match vmm_kind {
+            VmmKind::Firecracker => Arc::new(FirecrackerVmBackend::new(root.clone())?),
+            VmmKind::Libkrun => Arc::new(LibkrunVmBackend::new(root.clone())?),
+        };
+        debug!(root=%root.display(), ?vmm_kind, "initialized microvm sandbox backend");
         Ok(Self {
-            // TODO: Support other VmBackend in the future
-            vm_backend: Arc::new(FirecrackerVmBackend::new(root.clone())?),
+            vm_backend,
             root,
+            vmm_kind,
         })
     }
 
@@ -152,8 +173,18 @@ impl SandboxBackend for MicroVmSandboxBackend {
     async fn create(&self, info: &SandboxInfo) -> Result<()> {
         let existing = self.load_handle(&info.id)?;
         if existing.is_some() {
+            debug!(sandbox_id=%info.id, "reusing existing vm handle");
             return Ok(());
         }
+        debug!(
+            sandbox_id=%info.id,
+            image=%info.spec.image,
+            cpus=info.spec.cpus,
+            memory_mib=info.spec.memory_mib,
+            persistent=info.spec.persistent,
+            ?self.vmm_kind,
+            "building vm spec and booting sandbox vm"
+        );
         let spec = build_vm_spec(
             &self.root,
             &info.id,
@@ -161,8 +192,25 @@ impl SandboxBackend for MicroVmSandboxBackend {
             info.spec.cpus,
             info.spec.memory_mib,
             info.spec.persistent,
+            self.vmm_kind,
+        )?;
+        debug!(
+            sandbox_id=%info.id,
+            work_dir=%spec.work_dir.display(),
+            ready_file=%spec.ready_file.display(),
+            guest_image=?spec.guest_image_path,
+            kernel=?spec.kernel_path,
+            initrd=?spec.initrd_path,
+            "vm spec prepared"
         );
         let handle = self.vm_backend.boot(&spec).await?;
+        debug!(
+            sandbox_id=%info.id,
+            vm_id=%handle.vm_id,
+            pid=?handle.pid,
+            shim_pid=?handle.shim_pid,
+            "vm boot returned handle"
+        );
         self.save_handle(&handle)?;
         Ok(())
     }
@@ -171,26 +219,88 @@ impl SandboxBackend for MicroVmSandboxBackend {
         let handle = self
             .load_handle(&info.id)?
             .ok_or_else(|| anyhow!("vm handle missing for sandbox {}", info.id))?;
+        debug!(
+            sandbox_id=%info.id,
+            ready_file=%handle.ready_file.display(),
+            "waiting for sandbox readiness"
+        );
         let _ready = self.vm_backend.wait_ready(&handle).await?;
+        debug!(sandbox_id=%info.id, "sandbox reported ready");
         Ok(())
     }
 
     async fn exec(&self, info: &SandboxInfo, request: &ExecRequest) -> Result<ExecResult> {
-        let mut stderr = String::new();
-        stderr.push_str("microvm is booted, but guest-agent exec is not wired yet\n");
-        if request.inline_code.is_some() {
-            stderr.push_str("python code was accepted by the host runtime stub\n");
+        let handle = self
+            .load_handle(&info.id)?
+            .ok_or_else(|| anyhow!("vm handle missing for sandbox {}", info.id))?;
+        debug!(
+            sandbox_id=%info.id,
+            command=%request.command,
+            args=?request.args,
+            timeout_secs=?request.timeout_secs,
+            inline_code=request.inline_code.is_some(),
+            ?handle.vmm_kind,
+            "executing request in sandbox"
+        );
+
+        match handle.vmm_kind {
+            VmmKind::Libkrun => {
+                let socket_path = handle
+                    .agent_socket_path
+                    .as_ref()
+                    .ok_or_else(|| anyhow!("agent socket path missing for sandbox {}", info.id))?;
+                debug!(
+                    sandbox_id=%info.id,
+                    socket_path=%socket_path.display(),
+                    "connecting to libkrun guest agent socket"
+                );
+                let mut stream = connect_agent_socket(socket_path)?;
+                write_message(&mut stream, request)?;
+                stream.flush()?;
+                let response: ExecResult = read_message(&mut stream)?;
+                debug!(
+                    sandbox_id=%info.id,
+                    request_id=%response.request_id,
+                    exit_code=response.exit_code,
+                    stdout_len=response.stdout.len(),
+                    stderr_len=response.stderr.len(),
+                    "received guest exec response"
+                );
+                Ok(response)
+            }
+            VmmKind::Firecracker => {
+                debug!(sandbox_id=%info.id, "serving firecracker exec stub response");
+                let mut stderr = String::new();
+                stderr.push_str(
+                    "sandbox reached phase-1 VMM readiness, but Firecracker guest-agent exec is not wired yet\n",
+                );
+                if request.inline_code.is_some() {
+                    stderr.push_str(
+                        "python code was accepted by the host runtime stub and was not executed inside the guest\n",
+                    );
+                }
+                Ok(ExecResult {
+                    request_id: request.request_id.clone(),
+                    stdout: format!(
+                        "sandbox {} is {:?}; guest-agent integration is the next step\n",
+                        info.id,
+                        ReadyStage::VmmReady
+                    ),
+                    stderr,
+                    exit_code: 0,
+                })
+            }
         }
-        Ok(ExecResult {
-            request_id: request.request_id.clone(),
-            stdout: format!("sandbox {} is ready for guest-agent integration\n", info.id),
-            stderr,
-            exit_code: 0,
-        })
     }
 
     async fn stop(&self, info: &SandboxInfo) -> Result<()> {
         if let Some(handle) = self.load_handle(&info.id)? {
+            debug!(
+                sandbox_id=%info.id,
+                pid=?handle.pid,
+                shim_pid=?handle.shim_pid,
+                "stopping sandbox vm"
+            );
             self.vm_backend.stop(&handle).await?;
         }
         Ok(())
@@ -198,6 +308,7 @@ impl SandboxBackend for MicroVmSandboxBackend {
 
     async fn remove(&self, info: &SandboxInfo, force: bool) -> Result<()> {
         let _ = force;
+        debug!(sandbox_id=%info.id, force, "removing sandbox instance");
         self.stop(info).await?;
         let instance_dir = self.root.join("instances").join(&info.id);
         if instance_dir.exists() {
@@ -210,6 +321,51 @@ impl SandboxBackend for MicroVmSandboxBackend {
         }
         Ok(())
     }
+}
+
+fn connect_agent_socket(path: &Path) -> Result<std::os::unix::net::UnixStream> {
+    const CONNECT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+    const RETRY_INTERVAL: std::time::Duration = std::time::Duration::from_millis(100);
+
+    let deadline = std::time::Instant::now() + CONNECT_TIMEOUT;
+    loop {
+        match std::os::unix::net::UnixStream::connect(path) {
+            Ok(stream) => {
+                debug!(socket_path=%path.display(), "connected to guest agent socket");
+                return Ok(stream);
+            }
+            Err(err) if std::time::Instant::now() < deadline => {
+                let _ = err;
+                std::thread::sleep(RETRY_INTERVAL);
+            }
+            Err(err) => {
+                return Err(err).with_context(|| {
+                    format!(
+                        "failed to connect to guest agent socket {}; ensure the guest image starts `rkforge sandbox-agent`",
+                        path.display()
+                    )
+                });
+            }
+        }
+    }
+}
+
+fn write_message<T: Serialize>(writer: &mut impl Write, value: &T) -> Result<()> {
+    let payload = serde_json::to_vec(value)?;
+    let len = u32::try_from(payload.len()).context("message too large")?;
+    writer.write_all(&len.to_be_bytes())?;
+    writer.write_all(&payload)?;
+    Ok(())
+}
+
+fn read_message<T: for<'de> Deserialize<'de>>(reader: &mut impl Read) -> Result<T> {
+    let mut len_buf = [0_u8; 4];
+    reader.read_exact(&mut len_buf)?;
+    let len = u32::from_be_bytes(len_buf) as usize;
+    let mut payload = vec![0_u8; len];
+    reader.read_exact(&mut payload)?;
+    let value = serde_json::from_slice(&payload)?;
+    Ok(value)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -366,6 +522,7 @@ impl SandboxRuntime {
     }
 
     pub fn new_with_backend(root: PathBuf, backend: Arc<dyn SandboxBackend>) -> Result<Self> {
+        debug!(root=%root.display(), "creating sandbox runtime");
         Ok(Self {
             inner: Arc::new(SandboxRuntimeInner {
                 store: SandboxStore::new(root)?,
@@ -392,6 +549,14 @@ impl SandboxRuntime {
             last_error: None,
         };
 
+        debug!(
+            sandbox_id=%info.id,
+            image=%info.spec.image,
+            cpus=info.spec.cpus,
+            memory_mib=info.spec.memory_mib,
+            persistent=info.spec.persistent,
+            "creating sandbox record"
+        );
         self.inner.store.save(&info)?;
         Ok(SandboxBox {
             runtime: self.clone(),
@@ -419,6 +584,7 @@ impl SandboxRuntime {
     }
 
     pub async fn remove(&self, id: &str, force: bool) -> Result<()> {
+        debug!(sandbox_id=%id, force, "removing sandbox from runtime");
         let info = self
             .inner
             .store
@@ -436,6 +602,14 @@ impl SandboxRuntime {
 
 pub type SandboxManager = SandboxRuntime;
 
+#[allow(unused_imports)]
+pub use sdk::{SandboxClient, SandboxClientBuilder, SandboxHandle};
+#[allow(unused_imports)]
+pub use types::{
+    SandboxCreateOptions, SandboxExecOptions, SandboxExecResult, SandboxExecSpec,
+    SandboxExecTarget, SandboxMetadata,
+};
+
 #[derive(Clone)]
 pub struct SandboxBox {
     runtime: SandboxRuntime,
@@ -449,8 +623,10 @@ impl SandboxBox {
             .ok_or_else(|| anyhow!("sandbox {} not found", self.id))
     }
 
+    // Update current sandbox's state and try to start sandbox by create and start inner backend
     pub async fn start(&self) -> Result<()> {
         let mut info = self.info()?;
+        debug!(sandbox_id=%self.id, state=%info.state.to_string(), "starting sandbox");
         match info.state {
             SandboxState::Creating | SandboxState::Stopped | SandboxState::Failed => {}
             SandboxState::Booting | SandboxState::Ready | SandboxState::Running => return Ok(()),
@@ -471,6 +647,7 @@ impl SandboxBox {
         info.state = SandboxState::Ready;
         info.updated_at = Utc::now();
         self.runtime.save_info(&info)?;
+        debug!(sandbox_id=%self.id, "sandbox transitioned to ready");
         Ok(())
     }
 
@@ -492,15 +669,28 @@ impl SandboxBox {
         if matches!(info.state, SandboxState::Stopped) {
             return Ok(());
         }
+        debug!(sandbox_id=%self.id, state=%info.state.to_string(), "stopping sandbox");
         self.runtime.inner.backend.stop(&info).await?;
         info.state = SandboxState::Stopped;
         info.updated_at = Utc::now();
         self.runtime.save_info(&info)?;
+        debug!(sandbox_id=%self.id, "sandbox transitioned to stopped");
         Ok(())
     }
 
     pub async fn exec_request(&self, request: ExecRequest) -> Result<ExecResult> {
+        debug!(
+            sandbox_id=%self.id,
+            request_id=%request.request_id,
+            command=%request.command,
+            args=?request.args,
+            timeout_secs=?request.timeout_secs,
+            inline_code=request.inline_code.is_some(),
+            "processing sandbox exec request"
+        );
+
         self.start().await?;
+
         let mut info = self.info()?;
         info.state = SandboxState::Running;
         info.updated_at = Utc::now();
@@ -512,6 +702,12 @@ impl SandboxBox {
                 info.state = SandboxState::Ready;
                 info.updated_at = Utc::now();
                 self.runtime.save_info(&info)?;
+                debug!(
+                    sandbox_id=%self.id,
+                    request_id=%result.request_id,
+                    exit_code=result.exit_code,
+                    "sandbox exec request completed"
+                );
                 Ok(result)
             }
             Err(err) => self.fail(info, err),
@@ -519,6 +715,7 @@ impl SandboxBox {
     }
 
     fn fail<T>(&self, mut info: SandboxInfo, err: anyhow::Error) -> Result<T> {
+        warn!(sandbox_id=%self.id, error=%err, "sandbox transitioned to failed");
         info.state = SandboxState::Failed;
         info.updated_at = Utc::now();
         info.last_error = Some(err.to_string());

@@ -78,7 +78,7 @@ impl State {
         cluster_version: u64,
     ) -> Arc<Self> {
         use crate::rpc::quic_transport::channel::DnsFallback;
-        use gm_quic::prelude::QuicClient;
+        use dquic::prelude::QuicClient;
 
         let quic_client = Arc::new(
             QuicClient::builder()

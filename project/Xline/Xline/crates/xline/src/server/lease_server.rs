@@ -45,7 +45,7 @@ pub(crate) struct LeaseServer {
     /// cluster information
     cluster_info: Arc<ClusterInfo>,
     /// Shared QUIC client for direct RPC forwarding
-    quic_client: Arc<gm_quic::prelude::QuicClient>,
+    quic_client: Arc<dquic::prelude::QuicClient>,
     /// Task manager
     task_manager: Arc<TaskManager>,
 }
@@ -61,7 +61,7 @@ impl LeaseServer {
         client: Arc<CurpClient>,
         id_gen: Arc<IdGenerator>,
         cluster_info: Arc<ClusterInfo>,
-        quic_client: Arc<gm_quic::prelude::QuicClient>,
+        quic_client: Arc<dquic::prelude::QuicClient>,
         task_manager: &Arc<TaskManager>,
     ) -> Arc<Self> {
         let lease_server = Arc::new(Self {

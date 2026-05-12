@@ -8,8 +8,9 @@ use std::{
 };
 
 use bytes::{Buf, Bytes};
+use dquic::prelude::{Connection as GmConnection, QuicClient};
+use dquic::qresolve::Source;
 use futures::{Stream, StreamExt};
-use gm_quic::prelude::{Connection as GmConnection, QuicClient};
 use h3::client::RequestStream;
 use h3_shim::BidiStream;
 use prost::Message;
@@ -141,11 +142,9 @@ impl H3Channel {
         let client = self.pool.client();
         it_debug(format!("quic connect start endpoint={}", endpoint_str));
 
-        // Parse the endpoint to extract hostname (for SNI) and port, then resolve
-        // to a SocketAddr. This is necessary because gm-quic's connect() passes the
-        // raw server string including the port as the TLS server_name, which causes
-        // ServerName::try_from("host:port") to fail. By using connected_to() with
-        // just the hostname as server_name, we ensure a valid SNI is sent.
+        // Parse the endpoint to extract hostname (for SNI) and a resolved socket
+        // address. dquic 0.5 exposes the explicit endpoint API via
+        // connected_to_with_source(), which lets us keep the SNI as just the host.
         let (server_name, socket_addr) =
             self.parse_endpoint_for_quic(endpoint_str)
                 .await
@@ -161,14 +160,14 @@ impl H3Channel {
             endpoint_str, server_name, socket_addr
         ));
 
-        // connected_to() is synchronous in gm-quic 0.4.0 — it probes local
-        // interfaces and creates the connection object, but the QUIC handshake
-        // continues in the background. We wait for it below.
-        let conn = match client.connected_to(&server_name, [socket_addr]) {
+        let conn = match client
+            .connected_to_with_source(&server_name, [(Source::System, socket_addr.into())])
+            .await
+        {
             Ok(conn) => conn,
             Err(e) => {
                 it_debug(format!(
-                    "connected_to failed for server_name={}: {}",
+                    "connected_to_with_source failed for server_name={}: {}",
                     server_name, e
                 ));
                 return Err(Status::unavailable(format!(
