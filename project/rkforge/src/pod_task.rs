@@ -4,6 +4,7 @@ use json::JsonValue;
 use libcni::rust_cni::cni::Libcni;
 use libcontainer::syscall::syscall::create_syscall;
 use liboci_cli::{Create, Delete, Kill, Start};
+use libruntime::bundle_image_lock::with_image_bundle_lock;
 use libruntime::cri::config::ContainerConfigBuilder;
 use libruntime::cri::cri_api::{
     ContainerConfig, CreateContainerRequest, CreateContainerResponse, PodSandboxConfig,
@@ -186,14 +187,6 @@ impl TaskRunner {
             .generate()
             .map_err(|e| anyhow!("failed to generate sandbox pause oci spec: {e}"))?;
 
-        let config_path = format!("{bundle_path}/config.json");
-        if !Path::new(&config_path).exists() {
-            let file = File::create(&config_path)?;
-            let mut writer = BufWriter::new(file);
-            serde_json::to_writer_pretty(&mut writer, &oci_spec)?;
-            writer.flush()?;
-        }
-
         let bundle_dir = PathBuf::from(&bundle_path);
         if !bundle_dir.exists() {
             return Err(anyhow!("Bundle directory does not exist"));
@@ -201,22 +194,29 @@ impl TaskRunner {
 
         info!("Get sandbox {sandbox_id}'s bundle path: {bundle_path}");
 
-        // 3. Create container use cri
-        let create_args = Create {
-            bundle: bundle_dir.clone(),
-            console_socket: None,
-            pid_file: None,
-            no_pivot: false,
-            no_new_keyring: false,
-            preserve_fds: 0,
-            container_id: sandbox_id.clone(),
-        };
-
         let root_path = rootpath::determine(None, &*create_syscall())
             .map_err(|e| anyhow!("Failed to determine root path: {}", e))?;
 
-        create(create_args, root_path.clone(), false)
-            .map_err(|e| anyhow!("Failed to create container: {}", e))?;
+        with_image_bundle_lock(&bundle_dir, || -> Result<(), anyhow::Error> {
+            let config_path = bundle_dir.join("config.json");
+            let file = File::create(&config_path)?;
+            let mut writer = BufWriter::new(file);
+            serde_json::to_writer_pretty(&mut writer, &oci_spec)?;
+            writer.flush()?;
+
+            let create_args = Create {
+                bundle: bundle_dir.clone(),
+                console_socket: None,
+                pid_file: None,
+                no_pivot: false,
+                no_new_keyring: false,
+                preserve_fds: 0,
+                container_id: sandbox_id.clone(),
+            };
+            create(create_args, root_path.clone(), false)
+                .map_err(|e| anyhow!("Failed to create container: {}", e))?;
+            Ok(())
+        })?;
 
         // 4. Start container use cri
         let start_args = Start {
@@ -403,31 +403,29 @@ impl TaskRunner {
             return Err(anyhow!("Bundle directory does not exist"));
         }
 
-        // FIXME: If there is a config.json in bundle (which is unexpected in production), keep it
-        // Expected behavior: the container should own it's unique bundle path
-        let config_path = format!("{bundle_path}/config.json");
-        if !Path::new(&config_path).exists() {
+        let root_path = rootpath::determine(None, &*create_syscall())
+            .map_err(|e| anyhow!("Failed to determine root path: {}", e))?;
+
+        with_image_bundle_lock(&bundle_dir, || -> Result<(), anyhow::Error> {
+            let config_path = bundle_dir.join("config.json");
             let file = File::create(&config_path)?;
             let mut writer = BufWriter::new(file);
             serde_json::to_writer_pretty(&mut writer, &spec)?;
             writer.flush()?;
-        }
 
-        let create_args = Create {
-            bundle: bundle_path.clone().into(),
-            console_socket: None,
-            pid_file: None,
-            no_pivot: false,
-            no_new_keyring: false,
-            preserve_fds: 0,
-            container_id: container_id.clone(),
-        };
-
-        let root_path = rootpath::determine(None, &*create_syscall())
-            .map_err(|e| anyhow!("Failed to determine root path: {}", e))?;
-
-        create(create_args, root_path.clone(), false)
-            .map_err(|e| anyhow!("Failed to create container: {}", e))?;
+            let create_args = Create {
+                bundle: bundle_dir.clone(),
+                console_socket: None,
+                pid_file: None,
+                no_pivot: false,
+                no_new_keyring: false,
+                preserve_fds: 0,
+                container_id: container_id.clone(),
+            };
+            create(create_args, root_path.clone(), false)
+                .map_err(|e| anyhow!("Failed to create container: {}", e))?;
+            Ok(())
+        })?;
 
         Ok(CreateContainerResponse { container_id })
     }

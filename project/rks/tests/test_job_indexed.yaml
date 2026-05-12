@@ -1,0 +1,22 @@
+apiVersion: v1
+kind: Job
+metadata:
+  name: job-indexed
+  namespace: default
+spec:
+  completionMode: Indexed
+  completions: 3
+  parallelism: 2
+  backoffLimit: 2
+  template:
+    metadata:
+      labels: {}
+    spec:
+      restart_policy: Never
+      containers:
+        - name: worker
+          image: lingbou/perl:5.34.0
+          args:
+            - perl
+            - -e
+            - 'warn "[indexed] START index=".($ENV{JOB_COMPLETION_INDEX}//"<undef>")."\n"; sleep 5; warn "[indexed] END index=".($ENV{JOB_COMPLETION_INDEX}//"<undef>")."\n"; exit 0;'
