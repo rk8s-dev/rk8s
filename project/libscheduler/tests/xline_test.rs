@@ -5,9 +5,10 @@ use tokio::sync::mpsc;
 use tokio::time::timeout;
 
 use common::{
-    Affinity, ContainerRes, ContainerSpec, LabelSelector, Node, NodeAddress, NodeCondition,
-    NodeSpec as XlineNodeSpec, NodeStatus, ObjectMeta, PodAffinity, PodAffinityTerm,
-    PodSpec as XlinePodSpec, PodStatus, PodTask, Resource,
+    Affinity, ContainerRes, ContainerSpec, GangSpec as XlineGangSpec, LabelSelector, Node,
+    NodeAddress, NodeCondition, NodeSpec as XlineNodeSpec, NodeStatus, ObjectMeta, PodAffinity,
+    PodAffinityTerm, PodSpec as XlinePodSpec, PodStatus, PodTask, Resource,
+    TopologyConstraint as XlineTopologyConstraint,
 };
 use etcd_client::{Client, DeleteOptions};
 use libscheduler::plugins::Plugins;
@@ -795,4 +796,362 @@ async fn test_scheduler_with_xline_pod_affinity_scheduling() {
     assert_eq!(assignment.node_name, "node-zone-a");
 
     etcd_client.cleanup().await.expect("Failed to cleanup etcd");
+}
+
+// ─── GPU Gang scheduling helpers ────────────────────────────────────────────
+
+const NVLINK_KEY: &str = "topology.rk8s.io/nvlink-domain";
+
+/// Build a Node with GPU-capacity labels understood by the scheduler's
+/// `convert_k8s_node_to_node_info`:
+///   nvidia.com/gpu.count        → GpuResources::total
+///   nvidia.com/gpu.memory-gib   → GpuResources::memory_per_gpu (GiB → bytes)
+///   nvidia.com/gpu.product      → GpuResources::model
+///   topology.rk8s.io/nvlink-domain → used by TopologyCoAffinityFilter
+fn create_gpu_node(
+    name: &str,
+    gpu_count: u32,
+    mem_gib: u64,
+    model: &str,
+    nvlink_domain: &str,
+) -> Node {
+    let cpu = "128";
+    let memory = "512Gi";
+    let mut capacity = HashMap::new();
+    capacity.insert("cpu".to_string(), cpu.to_string());
+    capacity.insert("memory".to_string(), memory.to_string());
+    let mut allocatable = capacity.clone();
+    allocatable.insert("cpu".to_string(), cpu.to_string());
+    allocatable.insert("memory".to_string(), memory.to_string());
+
+    let mut labels = HashMap::new();
+    labels.insert("nvidia.com/gpu.count".to_string(), gpu_count.to_string());
+    labels.insert("nvidia.com/gpu.memory-gib".to_string(), mem_gib.to_string());
+    labels.insert("nvidia.com/gpu.product".to_string(), model.to_string());
+    labels.insert(NVLINK_KEY.to_string(), nvlink_domain.to_string());
+
+    Node {
+        api_version: "v1".to_string(),
+        kind: "Node".to_string(),
+        metadata: ObjectMeta {
+            name: name.to_string(),
+            namespace: "".to_string(),
+            labels,
+            annotations: HashMap::new(),
+            ..Default::default()
+        },
+        spec: XlineNodeSpec {
+            pod_cidr: "10.244.0.0/24".to_string(),
+            taints: vec![],
+        },
+        status: NodeStatus {
+            capacity,
+            allocatable,
+            addresses: vec![NodeAddress {
+                address_type: "Hostname".to_string(),
+                address: name.to_string(),
+            }],
+            conditions: vec![NodeCondition {
+                condition_type: common::NodeConditionType::Ready,
+                status: common::ConditionStatus::True,
+                last_heartbeat_time: None,
+            }],
+        },
+    }
+}
+
+/// Build a PodTask with:
+///   - container GPU resource limits  (read by `convert_pod_task_to_pod_info`)
+///   - gang spec                       (read by the scheduler for All-or-Nothing)
+///   - topology constraint on NVLink domain (read by TopologyCoAffinityFilter)
+fn create_gang_pod(
+    name: &str,
+    gpu_request: u32,
+    gpu_memory_gib: u64,
+    gang_id: &str,
+    gang_size: u32,
+) -> PodTask {
+    PodTask {
+        api_version: "v1".to_string(),
+        kind: "Pod".to_string(),
+        metadata: ObjectMeta {
+            name: name.to_string(),
+            namespace: "default".to_string(),
+            labels: HashMap::new(),
+            annotations: HashMap::new(),
+            ..Default::default()
+        },
+        spec: XlinePodSpec {
+            node_name: None,
+            containers: vec![ContainerSpec {
+                name: "inference".to_string(),
+                image: "nvidia/cuda:12.0-base".to_string(),
+                ports: vec![],
+                args: vec![],
+                tty: false,
+                resources: Some(ContainerRes {
+                    limits: Some(Resource {
+                        cpu: Some("8".to_string()),
+                        memory: Some("32Gi".to_string()),
+                        gpu: Some(gpu_request),
+                        gpu_memory: Some(format!("{gpu_memory_gib}Gi")),
+                    }),
+                }),
+                liveness_probe: None,
+                readiness_probe: None,
+                startup_probe: None,
+                security_context: None,
+                env: None,
+                volume_mounts: None,
+                command: None,
+                working_dir: None,
+            }],
+            init_containers: vec![],
+            tolerations: vec![],
+            affinity: None,
+            gang: Some(XlineGangSpec {
+                id: gang_id.to_string(),
+                size: gang_size,
+            }),
+            topology_constraints: vec![XlineTopologyConstraint {
+                topology_key: NVLINK_KEY.to_string(),
+                same_value: true,
+            }],
+            ..Default::default()
+        },
+        status: PodStatus::default(),
+    }
+}
+
+// ─── GPU Gang scheduling tests ───────────────────────────────────────────────
+
+/// TP=4 scenario (matching the HTML animation):
+///   node-A: 8 GPU, domain0  — can fit 4 pods × 2 GPU = 8 GPU
+///   node-B: 4 GPU, domain1  — cannot fit a 4-pod gang of 2 GPU each
+///
+/// TopologyCoAffinityFilter ensures that once pod-1 lands on domain0,
+/// pods 2-4 are constrained to domain0 as well.
+/// GangStateStore holds all 4 assumes and releases assignments atomically.
+/// Expected: all 4 assignments → node-A.
+#[tokio::test]
+#[serial]
+async fn test_gpu_gang_all_pods_land_on_same_nvlink_domain() {
+    let mut etcd = EtcdTestClient::new()
+        .await
+        .expect("Failed to connect to Xline/etcd");
+    etcd.cleanup().await.expect("cleanup failed");
+
+    // node-A: 8 GPU / 40 GiB per card / domain0
+    etcd.put_node(&create_gpu_node("gpu-node-a", 8, 40, "A800-SXM4-40GB", "domain0"))
+        .await
+        .expect("put gpu-node-a");
+    // node-B: 4 GPU / 40 GiB per card / domain1 — topology mismatch after pod-1 lands
+    etcd.put_node(&create_gpu_node("gpu-node-b", 4, 40, "A800-SXM4-40GB", "domain1"))
+        .await
+        .expect("put gpu-node-b");
+
+    // 4 pods forming gang "tp4-prefill", each requesting 2 GPU / 20 GiB
+    for i in 0..4u32 {
+        etcd.put_pod(&create_gang_pod(
+            &format!("tp4-pod-{i}"),
+            2,
+            20,
+            "tp4-prefill",
+            4,
+        ))
+        .await
+        .expect("put gang pod");
+    }
+
+    let (_unassume_tx, unassume_rx) = mpsc::unbounded_channel();
+    let mut rx = run_scheduler_with_xline(
+        xline_options(),
+        ScoringStrategy::LeastAllocated,
+        Plugins::default(),
+        unassume_rx,
+    )
+    .await
+    .expect("Failed to start scheduler");
+
+    let mut assignments = Vec::new();
+    for _ in 0..4 {
+        let res = timeout(Duration::from_secs(10), rx.recv())
+            .await
+            .expect("timed out — gang never filled")
+            .expect("scheduler channel closed")
+            .expect("scheduling error");
+        assignments.push(res);
+    }
+
+    // All four must land on node-A (domain0 is the only domain that can fit
+    // 4 pods × 2 GPU = 8 GPU, while node-B only has 4 GPU in domain1).
+    for a in &assignments {
+        assert_eq!(
+            a.node_name, "gpu-node-a",
+            "pod {} landed on wrong node (expected gpu-node-a)",
+            a.pod_name
+        );
+    }
+
+    // Verify every pod in the gang was assigned.
+    let mut names: Vec<_> = assignments.iter().map(|a| a.pod_name.clone()).collect();
+    names.sort();
+    assert_eq!(names, vec!["tp4-pod-0", "tp4-pod-1", "tp4-pod-2", "tp4-pod-3"]);
+
+    etcd.cleanup().await.expect("cleanup failed");
+}
+
+/// Gang scheduling without topology constraint — All-or-Nothing still applies.
+/// Three pods form a gang; no topology_constraints means any node is valid.
+/// With a single node that has enough resources, all three should be assigned.
+#[tokio::test]
+#[serial]
+async fn test_gpu_gang_without_topology_constraint_is_atomic() {
+    let mut etcd = EtcdTestClient::new()
+        .await
+        .expect("Failed to connect to Xline/etcd");
+    etcd.cleanup().await.expect("cleanup failed");
+
+    etcd.put_node(&create_gpu_node("single-gpu-node", 8, 40, "A800-SXM4-40GB", "domain0"))
+        .await
+        .expect("put node");
+
+    // 3 pods, no topology constraint (gang only, not topology-bound)
+    for i in 0..3u32 {
+        let pod = PodTask {
+            api_version: "v1".to_string(),
+            kind: "Pod".to_string(),
+            metadata: ObjectMeta {
+                name: format!("notopo-pod-{i}"),
+                namespace: "default".to_string(),
+                labels: HashMap::new(),
+                annotations: HashMap::new(),
+                ..Default::default()
+            },
+            spec: XlinePodSpec {
+                node_name: None,
+                containers: vec![ContainerSpec {
+                    name: "worker".to_string(),
+                    image: "nvidia/cuda:12.0-base".to_string(),
+                    ports: vec![],
+                    args: vec![],
+                    tty: false,
+                    resources: Some(ContainerRes {
+                        limits: Some(Resource {
+                            cpu: Some("4".to_string()),
+                            memory: Some("16Gi".to_string()),
+                            gpu: Some(2),
+                            gpu_memory: None,
+                        }),
+                    }),
+                    liveness_probe: None,
+                    readiness_probe: None,
+                    startup_probe: None,
+                    security_context: None,
+                    env: None,
+                    volume_mounts: None,
+                    command: None,
+                    working_dir: None,
+                }],
+                init_containers: vec![],
+                tolerations: vec![],
+                affinity: None,
+                gang: Some(XlineGangSpec {
+                    id: "no-topo-gang".to_string(),
+                    size: 3,
+                }),
+                topology_constraints: vec![], // no topology constraint
+                ..Default::default()
+            },
+            status: PodStatus::default(),
+        };
+        etcd.put_pod(&pod).await.expect("put pod");
+    }
+
+    let (_unassume_tx, unassume_rx) = mpsc::unbounded_channel();
+    let mut rx = run_scheduler_with_xline(
+        xline_options(),
+        ScoringStrategy::LeastAllocated,
+        Plugins::default(),
+        unassume_rx,
+    )
+    .await
+    .expect("Failed to start scheduler");
+
+    // All 3 must be assigned atomically (gang fills at 3/3).
+    let mut names = Vec::new();
+    for _ in 0..3 {
+        let res = timeout(Duration::from_secs(10), rx.recv())
+            .await
+            .expect("timed out — no-topology gang never filled")
+            .expect("scheduler channel closed")
+            .expect("scheduling error");
+        assert_eq!(res.node_name, "single-gpu-node");
+        names.push(res.pod_name);
+    }
+    names.sort();
+    assert_eq!(names, vec!["notopo-pod-0", "notopo-pod-1", "notopo-pod-2"]);
+
+    etcd.cleanup().await.expect("cleanup failed");
+}
+
+/// Insufficient resources — gang can never be fully assumed.
+///   node: 4 GPU, gang needs 4 pods × 2 GPU = 8 GPU → only 2 pods fit.
+///
+/// The gang times out, all assumes are rolled back, and no Assignment is
+/// ever sent.  We use the scheduler's shortened timeout via `with_gang_timeout`
+/// — but because `run_scheduler_with_xline` doesn't expose that knob, we
+/// verify the absence of assignments during a short observation window and
+/// accept that the real rollback happens later (the key invariant is that
+/// a partial gang does NOT generate assignments).
+#[tokio::test]
+#[serial]
+async fn test_gpu_gang_partial_fill_produces_no_assignment() {
+    let mut etcd = EtcdTestClient::new()
+        .await
+        .expect("Failed to connect to Xline/etcd");
+    etcd.cleanup().await.expect("cleanup failed");
+
+    // Only 4 GPU available — a 4-pod gang of 2 GPU each needs 8 GPU total.
+    etcd.put_node(&create_gpu_node(
+        "small-gpu-node",
+        4,
+        40,
+        "A800-SXM4-40GB",
+        "domain0",
+    ))
+    .await
+    .expect("put node");
+
+    for i in 0..4u32 {
+        etcd.put_pod(&create_gang_pod(
+            &format!("partial-pod-{i}"),
+            2,
+            20,
+            "partial-gang",
+            4,
+        ))
+        .await
+        .expect("put pod");
+    }
+
+    let (_unassume_tx, unassume_rx) = mpsc::unbounded_channel();
+    let mut rx = run_scheduler_with_xline(
+        xline_options(),
+        ScoringStrategy::LeastAllocated,
+        Plugins::default(),
+        unassume_rx,
+    )
+    .await
+    .expect("Failed to start scheduler");
+
+    // The gang can never fill (only 2 pods can be assumed), so no Assignment
+    // should appear within a reasonable observation window.
+    let result = timeout(Duration::from_secs(3), rx.recv()).await;
+    assert!(
+        result.is_err(),
+        "no Assignment should be produced for a gang that cannot fill"
+    );
+
+    etcd.cleanup().await.expect("cleanup failed");
 }

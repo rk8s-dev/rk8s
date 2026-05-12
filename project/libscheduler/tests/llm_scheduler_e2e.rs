@@ -69,9 +69,12 @@ async fn gang_with_topology_lands_on_same_domain() {
         .await;
 
     let mut rx = scheduler.run();
+    // update_cache_pod writes the pod into the cache *and* enqueues it.
+    // enqueue() alone only pushes the pod name into the queue; schedule_one
+    // then fetches the pod from cache and silently drops it when cache miss.
     for i in 0..4u32 {
         scheduler
-            .enqueue(gang_pod(&format!("p{i}"), 2, "g", 4))
+            .update_cache_pod(gang_pod(&format!("p{i}"), 2, "g", 4))
             .await;
     }
 
@@ -104,11 +107,13 @@ async fn gang_timeout_rolls_back_when_unable_to_satisfy() {
     let mut rx = scheduler.run();
     for i in 0..4u32 {
         scheduler
-            .enqueue(gang_pod(&format!("p{i}"), 2, "g", 4))
+            .update_cache_pod(gang_pod(&format!("p{i}"), 2, "g", 4))
             .await;
     }
 
-    // No assignment should be delivered: gang never fills, then times out.
+    // No assignment should be delivered: node-A has only 4 GPU so at most 2 pods
+    // (2 GPU each) can be assumed, gang-size=4 is never filled, then times out
+    // and all assumes are rolled back.
     let res = timeout(Duration::from_secs(2), rx.recv()).await;
     assert!(
         res.is_err(),
