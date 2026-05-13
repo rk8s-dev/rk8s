@@ -81,17 +81,22 @@ impl Pusher {
 fn format_push_error(e: &anyhow::Error) -> anyhow::Result<String> {
     match e.downcast_ref::<OciDistributionError>() {
         Some(OciDistributionError::ServerError { message, .. }) => {
-            let errors = serde_json::from_str::<ErrorResponse>(message)?;
-            let first_error = &errors.detail()[0];
-            first_error
-                .message()
-                .as_ref()
-                .map(|e| e.to_string())
-                .ok_or_else(|| {
-                    anyhow::anyhow!("response from distribution should include error message")
-                })
+            if let Ok(errors) = serde_json::from_str::<ErrorResponse>(message) {
+                if let Some(first) = errors.detail().first() {
+                    if let Some(msg) = first.message().as_ref() {
+                        return Ok(msg.to_string());
+                    }
+                }
+            }
+            Ok(format!("server error: {message}"))
         }
         Some(other) => Ok(other.to_string()),
-        None => Ok(e.to_string()),
+        None => {
+            let mut chain = Vec::new();
+            for cause in e.chain() {
+                chain.push(cause.to_string());
+            }
+            Ok(chain.join(": "))
+        }
     }
 }

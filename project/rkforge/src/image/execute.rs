@@ -284,7 +284,17 @@ impl<P: AsRef<Path>> InstructionExt<P> for FromInstruction {
     fn execute(&self, ctx: &mut Context<P>) -> Result<()> {
         let (_from_flags, image_parsed) = (&self.flags, &self.image_parsed);
 
-        let img_ref = full_image_ref(&image_parsed.image, image_parsed.tag.as_deref());
+        let img_ref = match image_parsed.registry.as_deref() {
+            Some(registry) => format!(
+                "{registry}/{}{}",
+                image_parsed.image,
+                match image_parsed.tag.as_deref() {
+                    Some(tag) => format!(":{tag}"),
+                    None => String::new(),
+                }
+            ),
+            None => full_image_ref(&image_parsed.image, image_parsed.tag.as_deref()),
+        };
 
         let layers = if !ctx.no_cache {
             if let Some(local_layers) = try_local_image_layers(&img_ref) {
