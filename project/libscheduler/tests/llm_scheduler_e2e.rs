@@ -59,8 +59,7 @@ fn gang_pod(name: &str, gpu: u32, gang_id: &str, gang_size: u32) -> PodInfo {
 async fn gang_with_topology_lands_on_same_domain() {
     // node-A: 8 GPU in domain0 (can fit 4 pods x 2 GPU = 8 GPU)
     // node-B: 4 GPU in domain1 (cannot fit a 4-pod gang of 2 GPU each)
-    let mut scheduler =
-        Scheduler::new(ScoringStrategy::LeastAllocated, Plugins::default());
+    let mut scheduler = Scheduler::new(ScoringStrategy::LeastAllocated, Plugins::default());
     scheduler
         .update_cache_node(gpu_node("node-A", 8, "domain0"))
         .await;

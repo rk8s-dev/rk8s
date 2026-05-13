@@ -942,13 +942,25 @@ async fn test_gpu_gang_all_pods_land_on_same_nvlink_domain() {
     etcd.cleanup().await.expect("cleanup failed");
 
     // node-A: 8 GPU / 40 GiB per card / domain0
-    etcd.put_node(&create_gpu_node("gpu-node-a", 8, 40, "A800-SXM4-40GB", "domain0"))
-        .await
-        .expect("put gpu-node-a");
+    etcd.put_node(&create_gpu_node(
+        "gpu-node-a",
+        8,
+        40,
+        "A800-SXM4-40GB",
+        "domain0",
+    ))
+    .await
+    .expect("put gpu-node-a");
     // node-B: 4 GPU / 40 GiB per card / domain1 — topology mismatch after pod-1 lands
-    etcd.put_node(&create_gpu_node("gpu-node-b", 4, 40, "A800-SXM4-40GB", "domain1"))
-        .await
-        .expect("put gpu-node-b");
+    etcd.put_node(&create_gpu_node(
+        "gpu-node-b",
+        4,
+        40,
+        "A800-SXM4-40GB",
+        "domain1",
+    ))
+    .await
+    .expect("put gpu-node-b");
 
     // 4 pods forming gang "tp4-prefill", each requesting 2 GPU / 20 GiB
     for i in 0..4u32 {
@@ -996,7 +1008,10 @@ async fn test_gpu_gang_all_pods_land_on_same_nvlink_domain() {
     // Verify every pod in the gang was assigned.
     let mut names: Vec<_> = assignments.iter().map(|a| a.pod_name.clone()).collect();
     names.sort();
-    assert_eq!(names, vec!["tp4-pod-0", "tp4-pod-1", "tp4-pod-2", "tp4-pod-3"]);
+    assert_eq!(
+        names,
+        vec!["tp4-pod-0", "tp4-pod-1", "tp4-pod-2", "tp4-pod-3"]
+    );
 
     etcd.cleanup().await.expect("cleanup failed");
 }
@@ -1012,9 +1027,15 @@ async fn test_gpu_gang_without_topology_constraint_is_atomic() {
         .expect("Failed to connect to Xline/etcd");
     etcd.cleanup().await.expect("cleanup failed");
 
-    etcd.put_node(&create_gpu_node("single-gpu-node", 8, 40, "A800-SXM4-40GB", "domain0"))
-        .await
-        .expect("put node");
+    etcd.put_node(&create_gpu_node(
+        "single-gpu-node",
+        8,
+        40,
+        "A800-SXM4-40GB",
+        "domain0",
+    ))
+    .await
+    .expect("put node");
 
     // 3 pods, no topology constraint (gang only, not topology-bound)
     for i in 0..3u32 {

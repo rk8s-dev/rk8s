@@ -515,9 +515,7 @@ impl Scheduler {
                     }
                     Some(g) => {
                         let full = gang_state.add_member(&g.id, g.size, &pod_name, &chosen);
-                        if full
-                            && let Some(members) = gang_state.take_and_clear(&g.id)
-                        {
+                        if full && let Some(members) = gang_state.take_and_clear(&g.id) {
                             for (p, n) in members {
                                 res_sx
                                     .send(Ok(Assignment {

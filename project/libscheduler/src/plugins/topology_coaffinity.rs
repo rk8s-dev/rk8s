@@ -5,9 +5,7 @@ use crate::{
     cycle_state::CycleState,
     gang_state::GangStateStore,
     models::{NodeInfo, PodInfo, TopologyConstraint},
-    plugins::{
-        Code, FilterPlugin, Plugin, PreFilterPlugin, PreFilterResult, Status,
-    },
+    plugins::{Code, FilterPlugin, Plugin, PreFilterPlugin, PreFilterResult, Status},
 };
 
 pub struct TopologyCoAffinityFilter {
@@ -188,9 +186,7 @@ mod tests {
     fn second_pod_constrained_to_first_member_topology() {
         let store = Arc::new(GangStateStore::default());
         store.add_member("g1", 4, "p1", "node-a");
-        let plugin = TopologyCoAffinityFilter {
-            gang_state: store,
-        };
+        let plugin = TopologyCoAffinityFilter { gang_state: store };
         let mut state = CycleState::default();
         let pod = pod_with_gang("g1", "topology.rk8s.io/nvlink-domain");
         let n_a = node("node-a", "topology.rk8s.io/nvlink-domain", "domain0");
@@ -209,9 +205,7 @@ mod tests {
     fn missing_topology_label_on_assumed_node_treats_as_unschedulable() {
         let store = Arc::new(GangStateStore::default());
         store.add_member("g1", 4, "p1", "node-a");
-        let plugin = TopologyCoAffinityFilter {
-            gang_state: store,
-        };
+        let plugin = TopologyCoAffinityFilter { gang_state: store };
         let mut state = CycleState::default();
         let pod = pod_with_gang("g1", "topology.rk8s.io/nvlink-domain");
         // node-a is provided in the snapshot but lacks the label.

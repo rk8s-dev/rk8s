@@ -51,9 +51,7 @@ fn is_schedulable_after_pod_event(pod: PodInfo, event: EventInner) -> Result<Que
     match event {
         EventInner::Pod(_, modified) => {
             if modified.is_none() {
-                log::trace!(
-                    "pod was deleted, may free GPU for unscheduled pod. pod {pod:?}"
-                );
+                log::trace!("pod was deleted, may free GPU for unscheduled pod. pod {pod:?}");
                 Ok(QueueingHint::Queue)
             } else {
                 Ok(QueueingHint::Skip)
@@ -179,10 +177,7 @@ impl ScorePlugin for NodeGpuResourcesFit {
         if gpu.total == 0 {
             return (0, Status::default());
         }
-        let used_after = gpu
-            .requested
-            .saturating_add(s.gpu_request)
-            .min(gpu.total);
+        let used_after = gpu.requested.saturating_add(s.gpu_request).min(gpu.total);
         // LeastAllocated: prefer nodes with more free GPUs after assignment.
         let free_after = gpu.total.saturating_sub(used_after);
         let score = (free_after as i64) * 100 / (gpu.total as i64);

@@ -45,9 +45,9 @@ async fn pull_concrete_manifest(
                 .map_err(|e| anyhow!("Failed to pull platform-specific manifest: {e}"))?;
             match inner {
                 OciManifest::Image(_) => Ok((inner, pinned, inner_digest)),
-                OciManifest::ImageIndex(_) => Err(anyhow!(
-                    "Nested image index manifests are not supported"
-                )),
+                OciManifest::ImageIndex(_) => {
+                    Err(anyhow!("Nested image index manifests are not supported"))
+                }
             }
         }
     }

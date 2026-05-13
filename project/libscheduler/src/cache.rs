@@ -193,7 +193,11 @@ mod tests {
         cache.update_pod(gpu_pod("p1", 4));
 
         assert!(cache.assume("p1", "n1"));
-        let n = cache.get_nodes().into_iter().find(|n| n.name == "n1").unwrap();
+        let n = cache
+            .get_nodes()
+            .into_iter()
+            .find(|n| n.name == "n1")
+            .unwrap();
         assert_eq!(n.gpu_resources.unwrap().requested, 4);
     }
 
@@ -205,7 +209,11 @@ mod tests {
 
         assert!(cache.assume("p1", "n1"));
         assert!(cache.assume("p1", "n1"));
-        let n = cache.get_nodes().into_iter().find(|n| n.name == "n1").unwrap();
+        let n = cache
+            .get_nodes()
+            .into_iter()
+            .find(|n| n.name == "n1")
+            .unwrap();
         assert_eq!(n.gpu_resources.unwrap().requested, 4);
     }
 
@@ -218,7 +226,11 @@ mod tests {
 
         let p = cache.unassume("p1");
         assert!(p.is_some());
-        let n = cache.get_nodes().into_iter().find(|n| n.name == "n1").unwrap();
+        let n = cache
+            .get_nodes()
+            .into_iter()
+            .find(|n| n.name == "n1")
+            .unwrap();
         assert_eq!(n.gpu_resources.unwrap().requested, 0);
     }
 
@@ -230,7 +242,11 @@ mod tests {
         cache.assume("p1", "n1");
 
         cache.remove_pod("p1");
-        let n = cache.get_nodes().into_iter().find(|n| n.name == "n1").unwrap();
+        let n = cache
+            .get_nodes()
+            .into_iter()
+            .find(|n| n.name == "n1")
+            .unwrap();
         assert_eq!(n.gpu_resources.unwrap().requested, 0);
     }
 
@@ -242,7 +258,11 @@ mod tests {
         cache.assume("p1", "n1");
 
         cache.update_node(gpu_node("n1", 16));
-        let n = cache.get_nodes().into_iter().find(|n| n.name == "n1").unwrap();
+        let n = cache
+            .get_nodes()
+            .into_iter()
+            .find(|n| n.name == "n1")
+            .unwrap();
         let g = n.gpu_resources.unwrap();
         assert_eq!(g.total, 16);
         assert_eq!(g.requested, 3);
