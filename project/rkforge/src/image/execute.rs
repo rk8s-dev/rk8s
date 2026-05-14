@@ -4,6 +4,8 @@ use dockerfile_parser::{
     EntrypointInstruction, EnvInstruction, FromInstruction, Instruction, LabelInstruction,
     RunInstruction, ShellOrExecExpr,
 };
+use oci_client::manifest::{OciImageManifest, OciManifest};
+use serde::Deserialize;
 use serde_json;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -16,16 +18,97 @@ use crate::{
     task::{CopyTask, RunTask, TaskExec},
 };
 
+/// Minimal OCI/Docker image config fields needed for base-image config inheritance.
+#[derive(Deserialize, Default)]
+struct OciConfigFile {
+    config: Option<OciConfigSection>,
+}
+
+#[derive(Deserialize, Default)]
+#[serde(rename_all = "PascalCase")]
+struct OciConfigSection {
+    env: Option<Vec<String>>,
+    entrypoint: Option<Vec<String>>,
+    cmd: Option<Vec<String>>,
+    working_dir: Option<String>,
+    user: Option<String>,
+}
+
+/// Reads the OCI image manifest from a path (stored as serialised `OciManifest`).
+fn read_manifest_from_path(path: &Path) -> anyhow::Result<OciImageManifest> {
+    let content = std::fs::read_to_string(path)
+        .map_err(|e| anyhow::anyhow!("failed to read manifest {}: {e}", path.display()))?;
+    match serde_json::from_str::<OciManifest>(&content)
+        .map_err(|e| anyhow::anyhow!("failed to parse manifest {}: {e}", path.display()))?
+    {
+        OciManifest::Image(m) => Ok(m),
+        OciManifest::ImageIndex(_) => {
+            anyhow::bail!("manifest at {} is an image index, not a concrete image", path.display())
+        }
+    }
+}
+
+/// Merges the base image's config (env, entrypoint, cmd, workdir, user) into `ctx.image_config`.
+/// This implements Docker's "FROM inherits parent config" semantics: the build starts with the
+/// parent's config as a baseline, and subsequent instructions (ENV, ENTRYPOINT, CMD, …) layer on top.
+fn inherit_base_image_config<P: AsRef<Path>>(
+    manifest_path: &Path,
+    ctx: &mut Context<P>,
+) -> anyhow::Result<()> {
+    let manifest = read_manifest_from_path(manifest_path)?;
+    let config_path = ultimate_blob_path(&manifest.config.digest)?;
+    if !config_path.exists() {
+        return Ok(());
+    }
+    let content = std::fs::read_to_string(&config_path)
+        .map_err(|e| anyhow::anyhow!("failed to read image config blob: {e}"))?;
+    let file: OciConfigFile = serde_json::from_str(&content)
+        .map_err(|e| anyhow::anyhow!("failed to parse image config blob: {e}"))?;
+
+    if let Some(cfg) = file.config {
+        // Replace envp with base image's env vars; clear the rkforge defaults so the base
+        // image's PATH / library paths are not shadowed.
+        ctx.image_config.envp.clear();
+        for env_str in cfg.env.unwrap_or_default() {
+            if let Some((k, v)) = env_str.split_once('=') {
+                ctx.image_config.envp.insert(k.to_string(), v.to_string());
+            }
+        }
+        // Inherit ENTRYPOINT and CMD (subsequent ENTRYPOINT/CMD instructions override these).
+        if let Some(ep) = cfg.entrypoint {
+            ctx.image_config.set_entrypoint(ep);
+        }
+        if let Some(cmd) = cfg.cmd {
+            ctx.image_config.set_cmd(cmd);
+        }
+        // Inherit WORKDIR.
+        if let Some(wd) = cfg.working_dir {
+            if !wd.is_empty() {
+                ctx.image_config.working_dir = Some(wd);
+            }
+        }
+        // Inherit USER.
+        if let Some(user) = cfg.user {
+            if !user.is_empty() {
+                ctx.image_config.user = Some(user);
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Check if an image's layers are all present in local storage.
 /// Returns layer paths if the image is fully cached, None otherwise.
-fn try_local_image_layers(img_ref: &str) -> Option<Vec<PathBuf>> {
+/// Returns `(manifest_path, layer_paths)` if the image is fully cached, else `None`.
+fn try_local_manifest_and_layers(img_ref: &str) -> Option<(PathBuf, Vec<PathBuf>)> {
     let repos = Repositories::load().ok()?;
     let digest = repos.get(img_ref).ok()??.to_string();
     let manifest = read_manifest(&digest).ok()?;
     let layers = match manifest {
-        oci_client::manifest::OciManifest::Image(m) => m.layers,
+        OciManifest::Image(m) => m.layers,
         _ => return None,
     };
+    let manifest_path = ultimate_blob_path(&digest).ok()?;
     let paths: Option<Vec<PathBuf>> = layers
         .iter()
         .map(|l| ultimate_blob_path(&l.digest).ok())
@@ -34,7 +117,7 @@ fn try_local_image_layers(img_ref: &str) -> Option<Vec<PathBuf>> {
     if paths.iter().any(|p| !p.exists()) {
         return None;
     }
-    Some(paths)
+    Some((manifest_path, paths))
 }
 
 /// Extract the argument string from a BreakableString (used for Misc instructions like WORKDIR, USER).
@@ -296,30 +379,33 @@ impl<P: AsRef<Path>> InstructionExt<P> for FromInstruction {
             None => full_image_ref(&image_parsed.image, image_parsed.tag.as_deref()),
         };
 
-        let layers = if !ctx.no_cache {
-            if let Some(local_layers) = try_local_image_layers(&img_ref) {
+        let (manifest_path, layers) = if !ctx.no_cache {
+            if let Some((mp, ll)) = try_local_manifest_and_layers(&img_ref) {
                 if !ctx.quiet {
                     println!("  -> Using local image: {img_ref}");
                 }
-                local_layers
+                (mp, ll)
             } else {
-                let (_, l) = sync_pull_or_get_image_with_policy_and_output(
+                sync_pull_or_get_image_with_policy_and_output(
                     &img_ref,
                     None::<String>,
                     ctx.no_cache,
                     ctx.quiet,
-                )?;
-                l
+                )?
             }
         } else {
-            let (_, l) = sync_pull_or_get_image_with_policy_and_output(
+            sync_pull_or_get_image_with_policy_and_output(
                 &img_ref,
                 None::<String>,
                 ctx.no_cache,
                 ctx.quiet,
-            )?;
-            l
+            )?
         };
+
+        // Inherit ENV/ENTRYPOINT/CMD/WORKDIR/USER from the base image config.
+        if let Err(e) = inherit_base_image_config(&manifest_path, ctx) {
+            eprintln!("Warning: could not read base image config for {img_ref}: {e}");
+        }
 
         // add image alias mapping
         if let Some(alias) = &self.alias {

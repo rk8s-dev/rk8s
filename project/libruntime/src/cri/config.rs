@@ -84,7 +84,11 @@ impl ContainerConfigBuilder {
 
         let log_path = format!("{}/0.log", spec.name);
         let linux = get_linux_container_config(spec.resources.clone())?;
-        if !spec.args.is_empty() {
+
+        // `command` overrides entrypoint+cmd entirely; `args` appends to the args list.
+        if let Some(cmd) = spec.command {
+            self.args = Some(cmd);
+        } else if !spec.args.is_empty() {
             self.args = Some(spec.args.clone());
         }
 
@@ -128,10 +132,10 @@ impl ContainerConfigBuilder {
                     //  pattern: KEY=VALUE
                     // vec[0] = KEY
                     // vec[1] = Vaule
-                    let vec: Vec<&str> = e.split("=").collect();
+                    let (key, value) = e.split_once('=').unwrap_or((e.as_str(), ""));
                     KeyValue {
-                        key: vec[0].to_string(),
-                        value: vec[1].to_string(),
+                        key: key.to_string(),
+                        value: value.to_string(),
                     }
                 })
                 .collect();

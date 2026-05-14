@@ -2,9 +2,6 @@
 
 ARG CUDA_VERSION=12.9.0
 ARG UBUNTU_VERSION=22.04
-# NEW: must be passed by build script (or defaults here)
-# - CUDA major >= 13: devel
-# - else: cudnn-devel
 ARG CUDA_FLAVOR=cudnn-devel
 
 FROM docker.io/nvidia/cuda:${CUDA_VERSION}-${CUDA_FLAVOR}-ubuntu${UBUNTU_VERSION}
@@ -13,6 +10,15 @@ ARG DEBIAN_FRONTEND=noninteractive
 
 # Toggle for China mirror mode (0=off, 1=on)
 ARG CHINA_MIRROR=0
+
+# Proxy args — available to RUN commands but NOT baked into the final image ENV.
+# Pass via: rkforge build --build-arg http_proxy=http://... --build-arg https_proxy=http://...
+ARG http_proxy
+ARG https_proxy
+ARG HTTP_PROXY
+ARG HTTPS_PROXY
+ARG no_proxy
+ARG NO_PROXY
 
 # Build/runtime deps (single-stage, keep it simple)
 RUN set -eux; \
