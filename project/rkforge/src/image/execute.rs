@@ -43,7 +43,10 @@ fn read_manifest_from_path(path: &Path) -> anyhow::Result<OciImageManifest> {
     {
         OciManifest::Image(m) => Ok(m),
         OciManifest::ImageIndex(_) => {
-            anyhow::bail!("manifest at {} is an image index, not a concrete image", path.display())
+            anyhow::bail!(
+                "manifest at {} is an image index, not a concrete image",
+                path.display()
+            )
         }
     }
 }
@@ -82,16 +85,16 @@ fn inherit_base_image_config<P: AsRef<Path>>(
             ctx.image_config.set_cmd(cmd);
         }
         // Inherit WORKDIR.
-        if let Some(wd) = cfg.working_dir {
-            if !wd.is_empty() {
-                ctx.image_config.working_dir = Some(wd);
-            }
+        if let Some(wd) = cfg.working_dir
+            && !wd.is_empty()
+        {
+            ctx.image_config.working_dir = Some(wd);
         }
         // Inherit USER.
-        if let Some(user) = cfg.user {
-            if !user.is_empty() {
-                ctx.image_config.user = Some(user);
-            }
+        if let Some(user) = cfg.user
+            && !user.is_empty()
+        {
+            ctx.image_config.user = Some(user);
         }
     }
     Ok(())

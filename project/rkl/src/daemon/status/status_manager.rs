@@ -1397,6 +1397,7 @@ mod tests {
             },
             spec: PodSpec {
                 node_name: None,
+                pause_image: None,
                 containers: container_names
                     .iter()
                     .map(|name| make_container_spec(name))
