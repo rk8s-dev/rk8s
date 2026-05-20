@@ -4,7 +4,7 @@ use clap::Args;
 use crate::commands::get::{ResourceArg, ResourceType, parse_resource_type};
 use crate::commands::pod::TLSConnectionArgs;
 use crate::commands::{
-    container::delete_container, deployment::deployment_delete, pod::pod_delete,
+    container::delete_container_in_cluster, deployment::deployment_delete, pod::pod_delete,
     replicaset::replicaset_delete, service::service_delete,
 };
 use tracing::warn;
@@ -39,7 +39,11 @@ pub fn delete_execute(cmd: DeleteCommand) -> Result<()> {
             // there is specified resource name, do delete
             for name in resource_arg.resource_name {
                 match resource_arg.resource_type {
-                    ResourceType::Container => delete_container(&name)?,
+                    ResourceType::Container => delete_container_in_cluster(
+                        &name,
+                        cmd.cluster.clone(),
+                        cmd.tls_cfg.clone(),
+                    )?,
                     ResourceType::Pod => {
                         pod_delete(&name, cmd.cluster.clone(), cmd.tls_cfg.clone())?
                     }

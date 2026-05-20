@@ -162,15 +162,15 @@ impl TaskRunner {
         })
     }
 
-    //get information from a file  record in Podtask
-    pub fn from_file(path: &str) -> Result<Self> {
-        let mut file = File::open(path)?;
-        let mut contents = String::new();
-        file.read_to_string(&mut contents)?;
-        let task: PodTask = serde_yaml::from_str(&contents)?;
-        debug!("{task:?}");
-        Self::from_task(task)
-    }
+    // get information from a file record in Podtask
+    // pub fn from_file(path: &str) -> Result<Self> {
+    //     let mut file = File::open(path)?;
+    //     let mut contents = String::new();
+    //     file.read_to_string(&mut contents)?;
+    //     let task: PodTask = serde_yaml::from_str(&contents)?;
+    //     debug!("{task:?}");
+    //     Self::from_task(task)
+    // }
 
     //get PodSandboxConfig
     pub fn create_pod_sandbox_config(

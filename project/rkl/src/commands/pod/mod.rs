@@ -1,5 +1,4 @@
 use crate::commands::ExecPod;
-use crate::commands::pod::standalone::{exec_pod, start_pod, state_pod};
 use crate::daemon;
 use crate::task::TaskRunner;
 use anyhow::{Result, anyhow};
@@ -43,11 +42,6 @@ pub struct TLSConnectionArgs {
 
 #[derive(Subcommand)]
 pub enum PodCommand {
-    #[command(about = "Run a pod from a YAML file using rkl run pod.yaml")]
-    Run {
-        #[arg(value_name = "POD_YAML")]
-        pod_yaml: String,
-    },
     #[command(about = "Create a pod from a YAML file using rkl create pod.yaml")]
     Create {
         #[arg(value_name = "POD_YAML")]
@@ -91,6 +85,17 @@ pub enum PodCommand {
     State {
         #[arg(value_name = "POD_NAME")]
         pod_name: String,
+
+        #[arg(
+            long,
+            value_name = "RKS_ADDRESS",
+            env = "RKS_ADDRESS",
+            required = false
+        )]
+        cluster: Option<String>,
+
+        #[clap(flatten)]
+        tls_cfg: TLSConnectionArgs,
     },
 
     #[command(about = "Execute a command inside a specific container of a pod")]
@@ -325,11 +330,6 @@ pub async fn run_pod_from_taskrunner(
     })
 }
 
-pub fn run_pod(pod_yaml: &str) -> Result<String, anyhow::Error> {
-    let task_runner = TaskRunner::from_file(pod_yaml)?;
-    sync_run_pod_from_taskrunner(task_runner).map(|res| res.pod_ip)
-}
-
 #[allow(dead_code)]
 pub fn set_daemonize() -> Result<(), anyhow::Error> {
     let log_path = PathBuf::from("/var/log/rk8s/");
@@ -358,10 +358,6 @@ pub fn start_daemon(tls_cfg: TLSConnectionArgs) -> Result<(), anyhow::Error> {
 
 pub fn pod_execute(cmd: PodCommand) -> Result<()> {
     match cmd {
-        PodCommand::Run { pod_yaml } => {
-            let _ = run_pod(&pod_yaml)?;
-            Ok(())
-        }
         PodCommand::Create {
             pod_yaml,
             cluster,
@@ -370,7 +366,10 @@ pub fn pod_execute(cmd: PodCommand) -> Result<()> {
             warn!("This command has been deprecated. Use 'rkl apply -f pod.yaml' instead.");
             pod_create(&pod_yaml, cluster, tls_cfg)
         }
-        PodCommand::Start { pod_name } => start_pod(&pod_name),
+        PodCommand::Start { pod_name } => Err(anyhow!(
+            "rkl pod start '{}' is not supported in cluster mode; create the Pod through rks with 'rkl apply -f'",
+            pod_name
+        )),
         PodCommand::Delete {
             pod_name,
             cluster,
@@ -379,14 +378,20 @@ pub fn pod_execute(cmd: PodCommand) -> Result<()> {
             warn!("This command has been deprecated. Use 'rkl delete pod POD_NAME' instead.");
             pod_delete(&pod_name, cluster, tls_cfg)
         }
-        PodCommand::State { pod_name } => {
-            warn!("This command has been deprecated. Use 'rkl get pod POD_NAME' instead.");
-            state_pod(&pod_name)
-        }
+        PodCommand::State {
+            pod_name,
+            cluster: _,
+            tls_cfg: _,
+        } => Err(anyhow!(
+            "rkl pod state '{}' is not a cluster operation yet; use 'rkl get pod POD_NAME' to get pod info instead",
+            pod_name
+        )),
         PodCommand::Exec(exec) => {
             warn!("This command has been deprecated. Use 'rkl exec POD_NAME -c' instead.");
-            let exit_code = exec_pod(*exec)?;
-            std::process::exit(exit_code);
+            Err(anyhow!(
+                "rkl pod exec '{}' is not a cluster operation yet; use 'rkl attach' to attach to the container and execute command instead",
+                exec.pod_name
+            ))
         }
         PodCommand::Daemon { tls_cfg } => start_daemon(tls_cfg),
         PodCommand::List { cluster, tls_cfg } => {
@@ -426,56 +431,27 @@ pub fn pod_execute(cmd: PodCommand) -> Result<()> {
 }
 
 pub fn pod_list(addr: Option<String>, tls_cfg: TLSConnectionArgs) -> Result<()> {
-    let env_addr = env::var("RKS_ADDRESS").ok();
+    let rks_addr = resolve_rks_addr(addr)?;
     let rt = tokio::runtime::Runtime::new()?;
-    match addr {
-        Some(rks_addr) => rt.block_on(cluster::list_pod(rks_addr.as_str(), tls_cfg)),
-        None => match env_addr {
-            Some(rks_addr) => rt.block_on(cluster::list_pod(rks_addr.as_str(), tls_cfg)),
-            None => Err(anyhow!(
-                "no rks address configuration find (Currently rkl does not support list cmd in standalone mode)"
-            )),
-        },
-    }
+    rt.block_on(cluster::list_pod(rks_addr.as_str(), tls_cfg))
 }
 
 pub fn pod_get(pod_name: &str, addr: Option<String>, tls_cfg: TLSConnectionArgs) -> Result<()> {
-    let env_addr = env::var("RKS_ADDRESS").ok();
+    let rks_addr = resolve_rks_addr(addr)?;
     let rt = tokio::runtime::Runtime::new()?;
-    match addr.or(env_addr) {
-        Some(rks_addr) => rt.block_on(cluster::get_pod(pod_name, &rks_addr, tls_cfg)),
-        None => Err(anyhow!(
-            "No RKS address provided. Set RKS_ADDRESS or use --cluster"
-        )),
-    }
+    rt.block_on(cluster::get_pod(pod_name, &rks_addr, tls_cfg))
 }
 
 pub fn pod_delete(pod_name: &str, addr: Option<String>, tls_cfg: TLSConnectionArgs) -> Result<()> {
-    let env_addr = env::var("RKS_ADDRESS").ok();
+    let rks_addr = resolve_rks_addr(addr)?;
     let rt = tokio::runtime::Runtime::new()?;
-    match addr {
-        Some(rks_addr) => rt.block_on(cluster::delete_pod(pod_name, rks_addr.as_str(), tls_cfg)),
-        None => match env_addr {
-            Some(rks_addr) => {
-                rt.block_on(cluster::delete_pod(pod_name, rks_addr.as_str(), tls_cfg))
-            }
-            None => standalone::delete_pod(pod_name),
-        },
-    }
+    rt.block_on(cluster::delete_pod(pod_name, rks_addr.as_str(), tls_cfg))
 }
 
 pub fn pod_create(pod_yaml: &str, addr: Option<String>, tls_cfg: TLSConnectionArgs) -> Result<()> {
-    let env_addr = env::var("RKS_ADDRESS").ok();
+    let rks_addr = resolve_rks_addr(addr)?;
     let rt = tokio::runtime::Runtime::new()?;
-    match addr {
-        Some(rks_addr) => rt.block_on(cluster::create_pod(pod_yaml, rks_addr.as_str(), tls_cfg)),
-        None => match env_addr {
-            Some(rks_addr) => {
-                rt.block_on(cluster::create_pod(pod_yaml, rks_addr.as_str(), tls_cfg))
-            }
-            None => standalone::create_pod(pod_yaml),
-        },
-    }
+    rt.block_on(cluster::create_pod(pod_yaml, rks_addr.as_str(), tls_cfg))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -490,14 +466,14 @@ fn pod_logs(
     addr: Option<String>,
     tls_cfg: TLSConnectionArgs,
 ) -> Result<()> {
-    let env_addr = env::var("RKS_ADDRESS").ok();
+    let rks_addr = resolve_rks_addr(addr)?;
     let rt = tokio::runtime::Runtime::new()?;
-    match addr.or(env_addr) {
-        Some(rks_addr) => rt.block_on(cluster::get_pod_logs(
-            pod_name, container, follow, tail, since, timestamps, previous, &rks_addr, tls_cfg,
-        )),
-        None => Err(anyhow!(
-            "No RKS address provided. Set RKS_ADDRESS or use --cluster"
-        )),
-    }
+    rt.block_on(cluster::get_pod_logs(
+        pod_name, container, follow, tail, since, timestamps, previous, &rks_addr, tls_cfg,
+    ))
+}
+
+pub fn resolve_rks_addr(addr: Option<String>) -> Result<String> {
+    addr.or_else(|| env::var("RKS_ADDRESS").ok())
+        .ok_or_else(|| anyhow!("No RKS address provided. Set RKS_ADDRESS or use --cluster"))
 }

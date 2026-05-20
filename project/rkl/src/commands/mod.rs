@@ -1,32 +1,21 @@
 use clap::Parser;
 use std::fs;
-use std::io;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
 use anyhow::{Context, Result, anyhow, bail};
 use libcontainer::container::Container;
 use libcontainer::container::builder::ContainerBuilder;
-use libcontainer::container::state;
 use libcontainer::syscall::syscall::SyscallType;
-use liboci_cli::Create;
 use liboci_cli::Delete;
 use liboci_cli::Kill;
-use liboci_cli::{List, Start, State};
 use nix::sys::wait::WaitStatus;
 use nix::sys::wait::waitpid;
 use std::error::Error;
 
-use std::fmt::Write as _;
-use std::io::Write;
-
 use libcontainer::container::ContainerStatus;
 use libcontainer::signal::Signal;
 use std::convert::TryInto;
-
-use chrono::{DateTime, Local};
-use tabwriter::TabWriter;
-use tracing::info;
 
 pub mod apply;
 pub mod attach;
@@ -82,69 +71,69 @@ fn container_exists<P: AsRef<Path>>(root_path: P, container_id: &str) -> Result<
     Ok(container_root.exists())
 }
 
-pub fn start(args: Start, root_path: PathBuf) -> Result<()> {
-    let mut container = load_container(root_path, &args.container_id)?;
-    container
-        .start()
-        .map_err(|e| anyhow!("failed to start container {}, {}", args.container_id, e))
-}
+// pub fn start(args: Start, root_path: PathBuf) -> Result<()> {
+//     let mut container = load_container(root_path, &args.container_id)?;
+//     container
+//         .start()
+//         .map_err(|e| anyhow!("failed to start container {}, {}", args.container_id, e))
+// }
 
-//
-pub fn state(args: State, root_path: PathBuf) -> Result<()> {
-    let container = load_container(root_path, &args.container_id)?;
-    info!("{}", serde_json::to_string_pretty(&container.state)?);
-    //std::process::exit(0);
-    Ok(())
-}
+// //
+// pub fn state(args: State, root_path: PathBuf) -> Result<()> {
+//     let container = load_container(root_path, &args.container_id)?;
+//     info!("{}", serde_json::to_string_pretty(&container.state)?);
+//     //std::process::exit(0);
+//     Ok(())
+// }
 
-/// lists all existing containers
-pub fn list(_: List, root_path: PathBuf) -> Result<()> {
-    let root_path = fs::canonicalize(root_path)?;
-    let mut content = String::new();
-    // all containers' data is stored in their respective dir in root directory
-    // so we iterate through each and print the various info
-    for container_dir in fs::read_dir(root_path)? {
-        let container_dir = container_dir?.path();
-        let state_file = state::State::file_path(&container_dir);
-        if !state_file.exists() {
-            continue;
-        }
+// /// lists all existing containers
+// pub fn list(_: List, root_path: PathBuf) -> Result<()> {
+//     let root_path = fs::canonicalize(root_path)?;
+//     let mut content = String::new();
+//     // all containers' data is stored in their respective dir in root directory
+//     // so we iterate through each and print the various info
+//     for container_dir in fs::read_dir(root_path)? {
+//         let container_dir = container_dir?.path();
+//         let state_file = state::State::file_path(&container_dir);
+//         if !state_file.exists() {
+//             continue;
+//         }
 
-        let container = Container::load(container_dir)?;
-        let pid = if let Some(pid) = container.pid() {
-            pid.to_string()
-        } else {
-            "".to_owned()
-        };
+//         let container = Container::load(container_dir)?;
+//         let pid = if let Some(pid) = container.pid() {
+//             pid.to_string()
+//         } else {
+//             "".to_owned()
+//         };
 
-        let user_name = container.creator().unwrap_or_default();
+//         let user_name = container.creator().unwrap_or_default();
 
-        let created = if let Some(utc) = container.created() {
-            let local: DateTime<Local> = DateTime::from(utc);
-            local.to_rfc3339_opts(chrono::SecondsFormat::Secs, false)
-        } else {
-            "".to_owned()
-        };
+//         let created = if let Some(utc) = container.created() {
+//             let local: DateTime<Local> = DateTime::from(utc);
+//             local.to_rfc3339_opts(chrono::SecondsFormat::Secs, false)
+//         } else {
+//             "".to_owned()
+//         };
 
-        let _ = writeln!(
-            content,
-            "{}\t{}\t{}\t{}\t{}\t{}",
-            container.id(),
-            pid,
-            container.status(),
-            container.bundle().display(),
-            created,
-            user_name.to_string_lossy()
-        );
-    }
+//         let _ = writeln!(
+//             content,
+//             "{}\t{}\t{}\t{}\t{}\t{}",
+//             container.id(),
+//             pid,
+//             container.status(),
+//             container.bundle().display(),
+//             created,
+//             user_name.to_string_lossy()
+//         );
+//     }
 
-    let mut tab_writer = TabWriter::new(io::stdout());
-    writeln!(&mut tab_writer, "ID\tPID\tSTATUS\tBUNDLE\tCREATED\tCREATOR")?;
-    write!(&mut tab_writer, "{content}")?;
-    tab_writer.flush()?;
+//     let mut tab_writer = TabWriter::new(io::stdout());
+//     writeln!(&mut tab_writer, "ID\tPID\tSTATUS\tBUNDLE\tCREATED\tCREATOR")?;
+//     write!(&mut tab_writer, "{content}")?;
+//     tab_writer.flush()?;
 
-    Ok(())
-}
+//     Ok(())
+// }
 
 #[allow(dead_code)]
 pub fn kill(args: Kill, root_path: PathBuf) -> Result<()> {
@@ -167,22 +156,22 @@ pub fn kill(args: Kill, root_path: PathBuf) -> Result<()> {
 // can be given impression that is is running on a complete system, but on the system which
 // it is running, it is just another process, and has attributes such as pid, file descriptors, etc.
 // associated with it like any other process.
-pub fn create(args: Create, root_path: PathBuf, systemd_cgroup: bool) -> Result<()> {
-    ContainerBuilder::new(args.container_id.clone(), SyscallType::default())
-        .with_executor(libcontainer::workload::default::DefaultExecutor {})
-        .with_pid_file(args.pid_file.as_ref())?
-        .with_console_socket(args.console_socket.as_ref())
-        .with_root_path(root_path)?
-        .with_preserved_fds(args.preserve_fds)
-        .validate_id()?
-        .as_init(&args.bundle)
-        .with_systemd(systemd_cgroup)
-        .with_detach(true)
-        .with_no_pivot(args.no_pivot)
-        .build()?;
+// pub fn create(args: Create, root_path: PathBuf, systemd_cgroup: bool) -> Result<()> {
+//     ContainerBuilder::new(args.container_id.clone(), SyscallType::default())
+//         .with_executor(libcontainer::workload::default::DefaultExecutor {})
+//         .with_pid_file(args.pid_file.as_ref())?
+//         .with_console_socket(args.console_socket.as_ref())
+//         .with_root_path(root_path)?
+//         .with_preserved_fds(args.preserve_fds)
+//         .validate_id()?
+//         .as_init(&args.bundle)
+//         .with_systemd(systemd_cgroup)
+//         .with_detach(true)
+//         .with_no_pivot(args.no_pivot)
+//         .build()?;
 
-    Ok(())
-}
+//     Ok(())
+// }
 
 pub fn delete(args: Delete, root_path: PathBuf) -> Result<()> {
     tracing::debug!("start deleting {}", args.container_id);
