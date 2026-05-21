@@ -687,6 +687,7 @@ mod tests {
             metadata,
             spec: PodSpec {
                 node_name: None,
+                pause_image: None,
                 containers: vec![
                     ContainerSpec {
                         name: "app".to_string(),
