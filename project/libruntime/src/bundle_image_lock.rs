@@ -24,9 +24,7 @@ fn bundle_lock_key(bundle_path: &Path) -> String {
 pub fn with_image_bundle_lock<R>(bundle_path: &Path, f: impl FnOnce() -> R) -> R {
     let key = bundle_lock_key(bundle_path);
     let lock = {
-        let mut map = IMAGE_BUNDLE_LOCKS
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
+        let mut map = IMAGE_BUNDLE_LOCKS.lock().unwrap_or_else(|e| e.into_inner());
         map.entry(key)
             .or_insert_with(|| Arc::new(Mutex::new(())))
             .clone()
