@@ -155,7 +155,7 @@ impl TaskRunner {
                 .spec
                 .pause_image
                 .clone()
-                .unwrap_or_else(|| "pause:3.9".to_string()),
+                .unwrap_or_else(|| "lingbou/pause:3.9".to_string()),
             ports: vec![],
             args: vec![],
             tty: false,

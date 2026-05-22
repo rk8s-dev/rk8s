@@ -771,12 +771,6 @@ impl TaskRunner {
             anyhow!("failed to canonicalize rootfs for container {container_id}: {e}")
         })?;
 
-        let config_path = format!("{bundle_path}/config.json");
-        let file = File::create(&config_path)?;
-        let mut writer = BufWriter::new(file);
-        serde_json::to_writer_pretty(&mut writer, &spec)?;
-        writer.flush()?;
-
         // If container requests a TTY, pass a console_socket path to create_with_log
         // so it can receive the pty master fd from libcontainer via SCM_RIGHTS.
         // Otherwise (tty=false) the original pipe-based log capture is used.
