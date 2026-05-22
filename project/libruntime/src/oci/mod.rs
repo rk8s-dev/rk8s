@@ -56,15 +56,22 @@ pub struct OCISpecGenerator {
     container_config: ContainerConfig,
     container_spec: ContainerSpec,
     pause_pid: Option<i32>,
+    hostname: String,
 }
 
 impl OCISpecGenerator {
-    pub fn new(config: &ContainerConfig, spec: &ContainerSpec, pause_pid: Option<i32>) -> Self {
+    pub fn new(
+        config: &ContainerConfig,
+        spec: &ContainerSpec,
+        pause_pid: Option<i32>,
+        hostname: String,
+    ) -> Self {
         Self {
             inner_spec: Spec::default(),
             container_config: config.clone(),
             container_spec: spec.clone(),
             pause_pid,
+            hostname,
         }
     }
 
@@ -129,6 +136,7 @@ impl OCISpecGenerator {
     pub fn generate(mut self) -> Result<Spec> {
         let root = RootBuilder::default().readonly(false).build()?;
         self.inner_spec.set_root(Some(root));
+        self.inner_spec.set_hostname(Some(self.hostname.clone()));
 
         let namespaces = self
             .create_container_namespaces()
@@ -220,6 +228,11 @@ impl OCISpecGenerator {
             )
         })?;
 
+        // Requires cgroupsv2_devices feature enabled for libcontainer so that
+        // youki pre-loads a BPF cgroup device program. nvidia-container-cli
+        // then adds GPU device rules to the existing program. Without it, the
+        // "generate new" code path in nvidia-container-cli produces a broken
+        // BPF program that the kernel verifier rejects.
         let hook = HookBuilder::default()
             .path(hook_path)
             .args(vec![

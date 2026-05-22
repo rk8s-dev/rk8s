@@ -806,6 +806,7 @@ mod tests {
             },
             spec: PodSpec {
                 node_name: None,
+                pause_image: None,
                 containers: vec![ContainerSpec {
                     name: "c1".to_string(),
                     image: "bundle".to_string(),
