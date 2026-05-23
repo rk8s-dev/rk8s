@@ -5,11 +5,11 @@ use libcontainer::oci_spec::runtime::{
 };
 use tracing::debug;
 
-use crate::cri::cri_api::ContainerConfig;
+use crate::cri::cri_api::{ContainerConfig, KeyValue};
 use anyhow::{Result, anyhow};
 use common::ContainerSpec;
 use oci_spec::runtime::{HookBuilder, HooksBuilder, LinuxNamespace, RootBuilder};
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::env;
 use std::path::{Path, PathBuf};
 
@@ -35,20 +35,43 @@ lazy_static! {
     };
 }
 
+/// Build OCI `process.env` entries. When the same key appears multiple times (default PATH, image,
+/// pod), the **last** entry in `envs` wins.
+fn env_kv_list_to_oci_strings(envs: &[KeyValue]) -> Vec<String> {
+    let mut last_idx: HashMap<&str, usize> = HashMap::new();
+    for (i, kv) in envs.iter().enumerate() {
+        last_idx.insert(kv.key.as_str(), i);
+    }
+    let mut out = Vec::new();
+    for (i, kv) in envs.iter().enumerate() {
+        if last_idx.get(kv.key.as_str()) == Some(&i) {
+            out.push(format!("{}={}", kv.key, kv.value));
+        }
+    }
+    out
+}
+
 pub struct OCISpecGenerator {
     inner_spec: Spec,
     container_config: ContainerConfig,
     container_spec: ContainerSpec,
     pause_pid: Option<i32>,
+    hostname: String,
 }
 
 impl OCISpecGenerator {
-    pub fn new(config: &ContainerConfig, spec: &ContainerSpec, pause_pid: Option<i32>) -> Self {
+    pub fn new(
+        config: &ContainerConfig,
+        spec: &ContainerSpec,
+        pause_pid: Option<i32>,
+        hostname: String,
+    ) -> Self {
         Self {
             inner_spec: Spec::default(),
             container_config: config.clone(),
             container_spec: spec.clone(),
             pause_pid,
+            hostname,
         }
     }
 
@@ -99,6 +122,13 @@ impl OCISpecGenerator {
         let capabilities = self.get_capabilities()?;
         process.set_capabilities(Some(capabilities));
 
+        // Wire CRI `ContainerConfig.envs` into OCI `process.env`. Dedupe by key so later entries
+        // win (same as Kubernetes); avoids duplicate keys confusing the runtime.
+        if !self.container_config.envs.is_empty() {
+            let env_strings = env_kv_list_to_oci_strings(&self.container_config.envs);
+            process.set_env(Some(env_strings));
+        }
+
         self.inner_spec.set_process(Some(process));
         Ok(())
     }
@@ -106,6 +136,7 @@ impl OCISpecGenerator {
     pub fn generate(mut self) -> Result<Spec> {
         let root = RootBuilder::default().readonly(false).build()?;
         self.inner_spec.set_root(Some(root));
+        self.inner_spec.set_hostname(Some(self.hostname.clone()));
 
         let namespaces = self
             .create_container_namespaces()
@@ -197,6 +228,11 @@ impl OCISpecGenerator {
             )
         })?;
 
+        // Requires cgroupsv2_devices feature enabled for libcontainer so that
+        // youki pre-loads a BPF cgroup device program. nvidia-container-cli
+        // then adds GPU device rules to the existing program. Without it, the
+        // "generate new" code path in nvidia-container-cli produces a broken
+        // BPF program that the kernel verifier rejects.
         let hook = HookBuilder::default()
             .path(hook_path)
             .args(vec![

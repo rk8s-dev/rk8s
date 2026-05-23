@@ -3,7 +3,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE-BSD-3-Clause file.
 
-#![cfg(target_os = "linux")]
 //! `name_to_handle_at`/`open_by_handle_at` based inode identity.
 //!
 //! **Linux-only.** macOS lacks an equivalent kernel API. Compilation is

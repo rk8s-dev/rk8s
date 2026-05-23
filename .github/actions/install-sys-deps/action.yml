@@ -13,5 +13,5 @@ runs:
       shell: bash
 
     - name: Install System Libraries
-      run: sudo apt-get install -y seccomp libseccomp-dev openssl libssl-dev
+      run: sudo apt-get install -y seccomp libseccomp-dev libelf-dev openssl libssl-dev
       shell: bash

@@ -6,6 +6,7 @@ use std::fs::File;
 
 use crate::commands::container::create_container;
 use crate::commands::deployment::deployment_apply;
+use crate::commands::job::job_apply;
 use crate::commands::pod::{TLSConnectionArgs, pod_create};
 use crate::commands::replicaset::replicaset_apply;
 use crate::commands::service::service_apply;
@@ -22,7 +23,7 @@ pub struct ApplyCommand {
     #[arg(long, short = 'f', required = true)]
     pub filename: Vec<String>,
 
-    /// RKS control-plane address (required for Deployment, ReplicaSet, Service and cluster-mode Pod).
+    /// RKS control-plane address (required for Deployment, ReplicaSet, Job, Service and cluster-mode Pod).
     #[arg(
         long,
         value_name = "RKS_ADDRESS",
@@ -71,10 +72,11 @@ fn apply_single_file(
         // for deployment/replicaset/service Apply command is already idempotent
         "Deployment" => deployment_apply(filename, cluster, tls_cfg),
         "ReplicaSet" => replicaset_apply(filename, cluster, tls_cfg),
+        "Job" => job_apply(filename, cluster, tls_cfg),
         "Service" => service_apply(filename, cluster, tls_cfg),
         other => Err(anyhow!(
             "Unsupported resource kind '{}' in '{}'. \
-            Supported kinds: Pod, Container, Deployment, ReplicaSet, Service",
+            Supported kinds: Pod, Container, Deployment, ReplicaSet, Job, Service",
             other,
             filename
         )),

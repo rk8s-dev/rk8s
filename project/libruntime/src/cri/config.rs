@@ -97,6 +97,20 @@ impl ContainerConfigBuilder {
         self.log_path = log_path;
         self.linux = linux;
 
+        // Pod/Job container env (e.g. JOB_COMPLETION_INDEX). Applied after image env in the
+        // builder pipeline so same key overrides image defaults (Kubernetes semantics).
+        if let Some(pod_env) = spec.env.as_ref() {
+            for ev in pod_env {
+                if let Some(ref v) = ev.value {
+                    self.envs.retain(|e| e.key != ev.name);
+                    self.envs.push(KeyValue {
+                        key: ev.name.clone(),
+                        value: v.clone(),
+                    });
+                }
+            }
+        }
+
         Ok(self)
     }
 
@@ -129,9 +143,6 @@ impl ContainerConfigBuilder {
             let key_vaule_vecs: Vec<KeyValue> = env
                 .iter()
                 .map(move |e| {
-                    //  pattern: KEY=VALUE
-                    // vec[0] = KEY
-                    // vec[1] = Vaule
                     let (key, value) = e.split_once('=').unwrap_or((e.as_str(), ""));
                     KeyValue {
                         key: key.to_string(),

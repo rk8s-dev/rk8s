@@ -1069,6 +1069,121 @@ impl ControllerManager {
                 backoff_ms = (backoff_ms * 2).min(30_000);
             }
         });
+
+        // Jobs informer (JobController reconciles on Job Add/Update; mirrors ReplicaSet/Deployment pattern)
+        let mgr_job = self.clone();
+        let store_job = store.clone();
+        tokio::spawn(async move {
+            let mut backoff_ms = 100u64;
+            loop {
+                match store_job.jobs_snapshot_with_rev().await {
+                    Ok((items, rev)) => {
+                        for (name, yaml) in items.into_iter() {
+                            let senders = mgr_job.get_senders_by_kind(ResourceKind::Job).await;
+                            for sender in senders {
+                                let _ = sender
+                                    .send(ResourceWatchResponse {
+                                        kind: ResourceKind::Job,
+                                        key: name.clone(),
+                                        event: WatchEvent::Add { yaml: yaml.clone() },
+                                    })
+                                    .await;
+                            }
+                        }
+
+                        match store_job.watch_jobs(rev + 1).await {
+                            Ok((_watcher, mut stream)) => {
+                                backoff_ms = 100;
+                                loop {
+                                    match stream.message().await {
+                                        Ok(Some(resp)) => {
+                                            for ev in resp.events() {
+                                                if let Some(kv) = ev.kv() {
+                                                    let key = String::from_utf8_lossy(kv.key())
+                                                        .replace("/registry/jobs/", "");
+                                                    let event_opt = match ev.event_type() {
+                                                        etcd_client::EventType::Put => {
+                                                            if let Some(prev_kv) = ev.prev_kv() {
+                                                                Some(WatchEvent::Update {
+                                                                    old_yaml:
+                                                                        String::from_utf8_lossy(
+                                                                            prev_kv.value(),
+                                                                        )
+                                                                        .to_string(),
+                                                                    new_yaml:
+                                                                        String::from_utf8_lossy(
+                                                                            kv.value(),
+                                                                        )
+                                                                        .to_string(),
+                                                                })
+                                                            } else {
+                                                                Some(WatchEvent::Add {
+                                                                    yaml: String::from_utf8_lossy(
+                                                                        kv.value(),
+                                                                    )
+                                                                    .to_string(),
+                                                                })
+                                                            }
+                                                        }
+                                                        etcd_client::EventType::Delete => {
+                                                            if let Some(prev_kv) = ev.prev_kv() {
+                                                                Some(WatchEvent::Delete {
+                                                                    yaml: String::from_utf8_lossy(
+                                                                        prev_kv.value(),
+                                                                    )
+                                                                    .to_string(),
+                                                                })
+                                                            } else {
+                                                                log::warn!(
+                                                                    "job watch delete event missing prev_kv for key {}",
+                                                                    key
+                                                                );
+                                                                None
+                                                            }
+                                                        }
+                                                    };
+                                                    let Some(event) = event_opt else {
+                                                        continue;
+                                                    };
+                                                    let senders = mgr_job
+                                                        .get_senders_by_kind(ResourceKind::Job)
+                                                        .await;
+                                                    for sender in senders {
+                                                        let _ = sender
+                                                            .send(ResourceWatchResponse {
+                                                                kind: ResourceKind::Job,
+                                                                key: key.clone(),
+                                                                event: event.clone(),
+                                                            })
+                                                            .await;
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        Ok(None) => {
+                                            log::info!("job watch stream closed, will reconnect");
+                                            break;
+                                        }
+                                        Err(e) => {
+                                            log::error!("job watch error: {:?}, will reconnect", e);
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                log::error!("failed to start job watch: {:?}", e);
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        log::error!("failed to snapshot jobs: {:?}", e);
+                    }
+                }
+                sleep(Duration::from_millis(backoff_ms)).await;
+                backoff_ms = (backoff_ms * 2).min(30_000);
+            }
+        });
         Ok(())
     }
 

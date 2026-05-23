@@ -954,6 +954,7 @@ pub enum RksMessage {
 
     // Job operations
     CreateJob(Box<Job>),
+    UpdateJob(Box<Job>),
     DeleteJob(String),
     GetJob(String),
     ListJob,
@@ -1251,6 +1252,7 @@ impl std::fmt::Debug for RksMessage {
                 namespace, pod_name, error
             ),
             Self::CreateJob(_) => f.write_str("RksMessage::CreateJob { .. }"),
+            Self::UpdateJob(_) => f.write_str("RksMessage::UpdateJob { .. }"),
             Self::DeleteJob(name) => write!(f, "RksMessage::DeleteJob {{ name: {} }}", name),
             Self::GetJob(name) => write!(f, "RksMessage::GetJob {{ name: {} }}", name),
             Self::ListJob => f.write_str("RksMessage::ListJob"),
@@ -1516,6 +1518,7 @@ impl Display for RksMessage {
                 write!(f, "Log error for {}/{}: {}", namespace, pod_name, error)
             }
             Self::CreateJob(job) => write!(f, "Create job '{}'", job.metadata.name),
+            Self::UpdateJob(job) => write!(f, "Update job '{}'", job.metadata.name),
             Self::DeleteJob(name) => write!(f, "Delete job '{}'", name),
             Self::GetJob(name) => write!(f, "Get job '{}'", name),
             Self::ListJob => f.write_str("List jobs"),

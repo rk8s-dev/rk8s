@@ -1,4 +1,5 @@
 pub mod bundle;
+pub mod bundle_image_lock;
 pub mod cri;
 pub mod network;
 pub mod oci;

@@ -37,7 +37,7 @@ use crate::{
             probe_manager::{ProbeManager, ProbeResult, ProbeResultType},
             prober::match_container_name,
         },
-        status_manager::StatusManager,
+        status_manager::{self, StatusManager},
     },
     quic::client::{Cli, QUICClient},
     task::TaskRunner,
@@ -586,6 +586,10 @@ async fn apply_pod_lifecycle_event(
             );
         }
     }
+
+    // Pause/sandbox shares the pod's container_status list from PLEG; it stays Running while the
+    // workload exits. Phase must only consider spec workload containers (same rule as StatusManager).
+    status_manager::filter_non_workload_container_statuses(pod_task, pod_status);
 
     // update pod phase to Succeeded or Failed if all containers are terminated
     if !pod_status.container_statuses.is_empty()
