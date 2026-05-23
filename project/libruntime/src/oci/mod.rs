@@ -5,11 +5,11 @@ use libcontainer::oci_spec::runtime::{
 };
 use tracing::debug;
 
-use crate::cri::cri_api::ContainerConfig;
+use crate::cri::cri_api::{ContainerConfig, KeyValue};
 use anyhow::{Result, anyhow};
 use common::ContainerSpec;
 use oci_spec::runtime::{HookBuilder, HooksBuilder, LinuxNamespace, RootBuilder};
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::env;
 use std::path::{Path, PathBuf};
 
@@ -33,6 +33,22 @@ lazy_static! {
             Capability::AuditWrite,
         ]
     };
+}
+
+/// Build OCI `process.env` entries. When the same key appears multiple times (default PATH, image,
+/// pod), the **last** entry in `envs` wins.
+fn env_kv_list_to_oci_strings(envs: &[KeyValue]) -> Vec<String> {
+    let mut last_idx: HashMap<&str, usize> = HashMap::new();
+    for (i, kv) in envs.iter().enumerate() {
+        last_idx.insert(kv.key.as_str(), i);
+    }
+    let mut out = Vec::new();
+    for (i, kv) in envs.iter().enumerate() {
+        if last_idx.get(kv.key.as_str()) == Some(&i) {
+            out.push(format!("{}={}", kv.key, kv.value));
+        }
+    }
+    out
 }
 
 pub struct OCISpecGenerator {
@@ -105,6 +121,13 @@ impl OCISpecGenerator {
 
         let capabilities = self.get_capabilities()?;
         process.set_capabilities(Some(capabilities));
+
+        // Wire CRI `ContainerConfig.envs` into OCI `process.env`. Dedupe by key so later entries
+        // win (same as Kubernetes); avoids duplicate keys confusing the runtime.
+        if !self.container_config.envs.is_empty() {
+            let env_strings = env_kv_list_to_oci_strings(&self.container_config.envs);
+            process.set_env(Some(env_strings));
+        }
 
         self.inner_spec.set_process(Some(process));
         Ok(())

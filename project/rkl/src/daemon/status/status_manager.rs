@@ -1228,7 +1228,7 @@ fn resolve_container_status_name(
     match_container_name(container_name, &candidates).unwrap_or_else(|| container_name.to_string())
 }
 
-fn filter_non_workload_container_statuses(pod: &PodTask, status: &mut PodStatus) {
+pub(crate) fn filter_non_workload_container_statuses(pod: &PodTask, status: &mut PodStatus) {
     if status.container_statuses.is_empty() {
         return;
     }

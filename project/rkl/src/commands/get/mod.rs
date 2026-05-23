@@ -3,6 +3,7 @@ use clap::Args;
 
 use crate::commands::container::{list_container, state_container};
 use crate::commands::deployment::{deployment_get, deployment_list};
+use crate::commands::job::{job_get, job_list};
 use crate::commands::pod::TLSConnectionArgs;
 use crate::commands::pod::{pod_get, pod_list};
 use crate::commands::replicaset::{replicaset_get, replicaset_list};
@@ -19,7 +20,7 @@ pub struct GetCommand {
     #[arg(long)]
     pub subresource: Option<String>,
 
-    /// RKS control-plane address (required for Deployment, ReplicaSet, Service and cluster-mode Pod).
+    /// RKS control-plane address (required for Deployment, ReplicaSet, Job, Service and cluster-mode Pod).
     #[arg(
         long,
         value_name = "RKS_ADDRESS",
@@ -37,6 +38,7 @@ pub enum ResourceType {
     Container,
     Deployment,
     ReplicaSet,
+    Job,
     Service,
 }
 
@@ -106,6 +108,7 @@ fn parse_single_resource_type(s: &str) -> Option<ResourceType> {
         "container" | "c" | "containers" => Some(ResourceType::Container),
         "deployment" | "deploy" | "deployments" => Some(ResourceType::Deployment),
         "replicaset" | "rs" | "replicasets" => Some(ResourceType::ReplicaSet),
+        "job" | "jobs" => Some(ResourceType::Job),
         "service" | "svc" | "services" => Some(ResourceType::Service),
         other => {
             warn!("{} is not a known resource type.", other);
@@ -130,6 +133,7 @@ pub fn get_execute(cmd: GetCommand) -> Result<(), Error> {
                     ResourceType::ReplicaSet => {
                         replicaset_get(&name, cmd.cluster.clone(), cmd.tls_cfg.clone())?
                     }
+                    ResourceType::Job => job_get(&name, cmd.cluster.clone(), cmd.tls_cfg.clone())?,
                     ResourceType::Service => {
                         service_get(&name, cmd.cluster.clone(), cmd.tls_cfg.clone())?
                     }
@@ -146,6 +150,7 @@ pub fn get_execute(cmd: GetCommand) -> Result<(), Error> {
                 ResourceType::ReplicaSet => {
                     replicaset_list(cmd.cluster.clone(), cmd.tls_cfg.clone())?
                 }
+                ResourceType::Job => job_list(cmd.cluster.clone(), cmd.tls_cfg.clone())?,
                 ResourceType::Service => service_list(cmd.cluster.clone(), cmd.tls_cfg.clone())?,
             }
         }
@@ -169,6 +174,7 @@ mod tests {
                 ResourceType::Container => "container",
                 ResourceType::Deployment => "deployment",
                 ResourceType::ReplicaSet => "replicaset",
+                ResourceType::Job => "job",
                 ResourceType::Service => "service",
             })
             .collect()
@@ -198,6 +204,8 @@ mod tests {
             (vec!["replicasets"], "replicaset"),
             (vec!["svc"], "service"),
             (vec!["services"], "service"),
+            (vec!["job"], "job"),
+            (vec!["jobs"], "job"),
         ];
         for (input, expected_type) in cases {
             let args: Vec<String> = input.iter().map(|s| s.to_string()).collect();

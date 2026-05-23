@@ -1,7 +1,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE-BSD-3-Clause file.
 
-#![cfg(target_os = "linux")]
 //! Mount-fd registry used by `open_by_handle_at` for cross-mount inode resolution.
 //!
 //! **Linux-only.** macOS lacks the `name_to_handle_at` / `open_by_handle_at`

@@ -997,6 +997,33 @@ pub async fn dispatch_user(
             conn.send_msg(&RksMessage::Ack).await?;
         }
 
+        RksMessage::UpdateJob(incoming_job) => {
+            let name = incoming_job.metadata.name.clone();
+            if let Some(existing_yaml) = xline_store.get_job_yaml(&name).await? {
+                let mut final_job: Job = serde_yaml::from_str(&existing_yaml)?;
+                if final_job.spec != incoming_job.spec {
+                    let current_gen = final_job.metadata.generation.unwrap_or(0);
+                    final_job.metadata.generation = Some(current_gen + 1);
+                    final_job.spec = incoming_job.spec.clone();
+                    info!(target: "rks::node::user_dispatch", "Job {name} spec updated");
+                }
+                let yaml = serde_yaml::to_string(&final_job)?;
+                xline_store.insert_job_yaml(&name, &yaml).await?;
+            } else {
+                let mut new_job = *incoming_job;
+                if new_job.metadata.creation_timestamp.is_none() {
+                    new_job.metadata.creation_timestamp = Some(Utc::now());
+                }
+                let yaml = serde_yaml::to_string(&new_job)?;
+                xline_store.insert_job_yaml(&name, &yaml).await?;
+                info!(
+                    target: "rks::node::user_dispatch",
+                    "created Job {name} via apply"
+                );
+            }
+            conn.send_msg(&RksMessage::Ack).await?;
+        }
+
         RksMessage::DeleteJob(name) => {
             xline_store.delete_job(&name).await?;
             info!(
