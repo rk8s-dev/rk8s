@@ -6,11 +6,11 @@ use crate::config::auth::AuthConfig;
 use crate::pull::layer::pull_layers;
 use crate::registry::{parse_registry_host_arg, resolve_client_ref_auth as resolve_ref_with_auth};
 use crate::storage::write_manifest;
-use anyhow::Context;
 use anyhow::anyhow;
 use clap::Parser;
 use oci_client::Client;
 use oci_client::Reference;
+use oci_client::client::linux_amd64_resolver;
 use oci_client::manifest::OciManifest;
 use oci_client::secrets::RegistryAuth;
 use std::path::PathBuf;
@@ -19,6 +19,39 @@ use std::thread;
 use tokio::runtime::{Handle, Runtime};
 
 static RUNTIME: OnceLock<Runtime> = OnceLock::new();
+
+/// Pull a manifest and, when it is an Image Index (multi-arch manifest list),
+/// re-pull the entry that matches linux/amd64 so callers always receive a
+/// concrete Image manifest.
+async fn pull_concrete_manifest(
+    client: &Client,
+    image_ref: &Reference,
+    auth_method: &RegistryAuth,
+) -> anyhow::Result<(OciManifest, Reference, String)> {
+    let (manifest, digest) = client
+        .pull_manifest(image_ref, auth_method)
+        .await
+        .map_err(|e| anyhow!("Failed to pull manifest: {e}"))?;
+
+    match manifest {
+        OciManifest::Image(_) => Ok((manifest, image_ref.clone(), digest)),
+        OciManifest::ImageIndex(index) => {
+            let entry_digest = linux_amd64_resolver(&index.manifests)
+                .ok_or_else(|| anyhow!("Image index has no linux/amd64 entry"))?;
+            let pinned = image_ref.clone_with_digest(entry_digest.clone());
+            let (inner, inner_digest) = client
+                .pull_manifest(&pinned, auth_method)
+                .await
+                .map_err(|e| anyhow!("Failed to pull platform-specific manifest: {e}"))?;
+            match inner {
+                OciManifest::Image(_) => Ok((inner, pinned, inner_digest)),
+                OciManifest::ImageIndex(_) => {
+                    Err(anyhow!("Nested image index manifests are not supported"))
+                }
+            }
+        }
+    }
+}
 
 fn has_explicit_tag(raw: &str) -> bool {
     let raw_without_digest = raw.split_once('@').map(|(name, _)| name).unwrap_or(raw);
@@ -134,14 +167,12 @@ fn sync_pull_or_get_image_with_policy_and_output_with_tls(
     let (client, image_ref, auth_method) =
         resolve_client_ref_auth(image_ref, url, skip_tls_verify)?;
     let do_pull = async move {
-        let (manifest, digest) = client
-            .pull_manifest(&image_ref, &auth_method)
-            .await
-            .map_err(|e| anyhow!("Failed to pull manifest: {e}"))?;
+        let (manifest, resolved_ref, digest) =
+            pull_concrete_manifest(&client, &image_ref, &auth_method).await?;
 
         let layers = match &manifest {
             OciManifest::Image(manifest) => {
-                pull_layers(&client, &image_ref, manifest, no_cache, quiet).await
+                pull_layers(&client, &resolved_ref, manifest, no_cache, quiet).await
             }
             OciManifest::ImageIndex(_) => anyhow::bail!("Image indexes are not supported yet"),
         }?;
@@ -222,14 +253,12 @@ async fn pull_or_get_image_with_policy_and_tls(
     let url = url.map(|u| u.as_ref().to_string());
     let (client, image_ref, auth_method) =
         resolve_client_ref_auth(image_ref, url, skip_tls_verify)?;
-    let (manifest, digest) = client
-        .pull_manifest(&image_ref, &auth_method)
-        .await
-        .with_context(|| "Failed to pull manifest")?;
+    let (manifest, resolved_ref, digest) =
+        pull_concrete_manifest(&client, &image_ref, &auth_method).await?;
 
     let layers = match &manifest {
         OciManifest::Image(manifest) => {
-            pull_layers(&client, &image_ref, manifest, no_cache, false).await
+            pull_layers(&client, &resolved_ref, manifest, no_cache, false).await
         }
         OciManifest::ImageIndex(_) => anyhow::bail!("Image indexes are not supported yet"),
     }?;
@@ -253,14 +282,12 @@ pub fn sync_pull_or_get_image_with_config(
     let (client, image_ref, auth_method) =
         resolve_ref_with_auth(auth_config, &resolved_url, &normalized_image_ref, false)?;
     let do_pull = async move {
-        let (manifest, digest) = client
-            .pull_manifest(&image_ref, &auth_method)
-            .await
-            .map_err(|e| anyhow!("Failed to pull manifest: {e}"))?;
+        let (manifest, resolved_ref, digest) =
+            pull_concrete_manifest(&client, &image_ref, &auth_method).await?;
 
         let layers = match &manifest {
             OciManifest::Image(manifest) => {
-                pull_layers(&client, &image_ref, manifest, false, false).await
+                pull_layers(&client, &resolved_ref, manifest, false, false).await
             }
             OciManifest::ImageIndex(_) => anyhow::bail!("Image indexes are not supported yet"),
         }?;
@@ -298,14 +325,12 @@ pub async fn pull_or_get_image_with_config(
     let (client, image_ref, auth_method) =
         resolve_ref_with_auth(auth_config, &resolved_url, &normalized_image_ref, false)?;
 
-    let (manifest, digest) = client
-        .pull_manifest(&image_ref, &auth_method)
-        .await
-        .with_context(|| "Failed to pull manifest")?;
+    let (manifest, resolved_ref, digest) =
+        pull_concrete_manifest(&client, &image_ref, &auth_method).await?;
 
     let layers = match &manifest {
         OciManifest::Image(manifest) => {
-            pull_layers(&client, &image_ref, manifest, false, false).await
+            pull_layers(&client, &resolved_ref, manifest, false, false).await
         }
         OciManifest::ImageIndex(_) => anyhow::bail!("Image indexes are not supported yet"),
     }?;

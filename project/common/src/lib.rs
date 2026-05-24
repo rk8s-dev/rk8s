@@ -451,6 +451,23 @@ pub struct PodSpec {
     pub restart_policy: RestartPolicy,
     #[serde(default)]
     pub volumes: Vec<Volume>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gang: Option<GangSpec>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub topology_constraints: Vec<TopologyConstraint>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq, Default)]
+pub struct GangSpec {
+    pub id: String,
+    pub size: u32,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq, Default)]
+pub struct TopologyConstraint {
+    pub topology_key: String,
+    #[serde(default)]
+    pub same_value: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq, Default)]
@@ -466,10 +483,14 @@ pub struct ContainerRes {
     pub limits: Option<Resource>,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq, Default)]
 pub struct Resource {
     pub cpu: Option<String>,
     pub memory: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gpu: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gpu_memory: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq, Default)]
@@ -2170,4 +2191,56 @@ pub struct Job {
     pub spec: JobSpec,
     #[serde(default)]
     pub status: JobStatus,
+}
+
+#[cfg(test)]
+mod pod_spec_tests {
+    use super::*;
+
+    #[test]
+    fn pod_spec_omits_gang_when_absent() {
+        let s = PodSpec::default();
+        let j = serde_json::to_string(&s).unwrap();
+        assert!(!j.contains("gang"));
+        assert!(!j.contains("topology_constraints"));
+    }
+
+    #[test]
+    fn pod_spec_roundtrip_with_gang() {
+        let s = PodSpec {
+            gang: Some(GangSpec {
+                id: "g1".into(),
+                size: 4,
+            }),
+            topology_constraints: vec![TopologyConstraint {
+                topology_key: "topology.rk8s.io/nvlink-domain".into(),
+                same_value: true,
+            }],
+            ..PodSpec::default()
+        };
+        let j = serde_json::to_string(&s).unwrap();
+        let back: PodSpec = serde_json::from_str(&j).unwrap();
+        assert_eq!(back.gang.as_ref().unwrap().size, 4);
+        assert_eq!(back.gang.as_ref().unwrap().id, "g1");
+        assert_eq!(back.topology_constraints.len(), 1);
+        assert_eq!(
+            back.topology_constraints[0].topology_key,
+            "topology.rk8s.io/nvlink-domain"
+        );
+        assert!(back.topology_constraints[0].same_value);
+    }
+
+    #[test]
+    fn resource_roundtrip_with_gpu() {
+        let r = Resource {
+            cpu: Some("2".into()),
+            memory: Some("4Gi".into()),
+            gpu: Some(2),
+            gpu_memory: Some("80Gi".into()),
+        };
+        let j = serde_json::to_string(&r).unwrap();
+        let back: Resource = serde_json::from_str(&j).unwrap();
+        assert_eq!(back.gpu, Some(2));
+        assert_eq!(back.gpu_memory, Some("80Gi".to_string()));
+    }
 }

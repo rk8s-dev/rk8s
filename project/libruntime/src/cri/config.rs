@@ -84,7 +84,11 @@ impl ContainerConfigBuilder {
 
         let log_path = format!("{}/0.log", spec.name);
         let linux = get_linux_container_config(spec.resources.clone())?;
-        if !spec.args.is_empty() {
+
+        // `command` overrides entrypoint+cmd entirely; `args` appends to the args list.
+        if let Some(cmd) = spec.command {
+            self.args = Some(cmd);
+        } else if !spec.args.is_empty() {
             self.args = Some(spec.args.clone());
         }
 
@@ -139,11 +143,11 @@ impl ContainerConfigBuilder {
             let key_vaule_vecs: Vec<KeyValue> = env
                 .iter()
                 .map(move |e| {
-                    // OCI image config env entries are KEY=VALUE; VALUE may contain '='.
-                    let mut parts = e.splitn(2, '=');
-                    let key = parts.next().unwrap_or("").to_string();
-                    let value = parts.next().unwrap_or("").to_string();
-                    KeyValue { key, value }
+                    let (key, value) = e.split_once('=').unwrap_or((e.as_str(), ""));
+                    KeyValue {
+                        key: key.to_string(),
+                        value: value.to_string(),
+                    }
                 })
                 .collect();
             self.envs.extend(key_vaule_vecs);

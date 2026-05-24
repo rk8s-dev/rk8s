@@ -61,6 +61,7 @@ fn pod_with_meta(name: &str, uid: Uuid, owners: Option<Vec<OwnerReference>>) -> 
             limits: Some(Resource {
                 cpu: Some("100m".to_string()),
                 memory: Some("50Mi".to_string()),
+                ..Default::default()
             }),
         }),
         liveness_probe: None,
@@ -137,6 +138,7 @@ fn replicaset_with_meta(name: &str, uid: Uuid, replicas: i32) -> ReplicaSet {
                             limits: Some(Resource {
                                 cpu: Some("100m".to_string()),
                                 memory: Some("50Mi".to_string()),
+                                ..Default::default()
                             }),
                         }),
                         liveness_probe: None,
