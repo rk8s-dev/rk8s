@@ -506,11 +506,11 @@ fn test_generate_and_check_nftables() {
         serde_json::from_str(&json).expect("generated nftables payload must be valid json");
 
     assert!(
-        has_dnat_map_rule_in_chain(&parsed, "svc-default-mysvc-80"),
+        has_dnat_map_rule_in_chain(&parsed, "svc-default-mysvc-tcp-80"),
         "service chain must use numgen+dnat-map for endpoint load balancing"
     );
     assert!(
-        has_chain_object(&parsed, "mark-svc-default-mysvc-80"),
+        has_chain_object(&parsed, "mark-svc-default-mysvc-tcp-80"),
         "full sync should create mark chain for ClusterIP traffic"
     );
     assert!(
@@ -524,8 +524,8 @@ fn test_generate_and_check_nftables() {
 
     let snapshot = render_key_fragments_snapshot(&parsed);
     let expected = [
-        "mark-svc-default-mysvc-80: mark set -> svc-default-mysvc-80",
-        "svc-default-mysvc-80: numgen random mod 2 dnat-map",
+        "mark-svc-default-mysvc-tcp-80: mark set -> svc-default-mysvc-tcp-80",
+        "svc-default-mysvc-tcp-80: numgen random mod 2 dnat-map",
     ]
     .join("\n");
     assert_eq!(snapshot, expected, "key nft rule snapshot changed");
@@ -643,11 +643,11 @@ fn test_incremental_update_uses_vmap_semantics() {
         "incremental endpoint update should not rewrite shared services dispatch chain"
     );
     assert!(
-        has_dnat_map_rule_in_chain(&parsed, "svc-default-mysvc-80"),
+        has_dnat_map_rule_in_chain(&parsed, "svc-default-mysvc-tcp-80"),
         "incremental service chain must use numgen+dnat-map"
     );
     assert!(
-        has_chain_object(&parsed, "mark-svc-default-mysvc-80"),
+        has_chain_object(&parsed, "mark-svc-default-mysvc-tcp-80"),
         "incremental update should include mark chain for ClusterIP path"
     );
     assert!(
