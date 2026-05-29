@@ -14,6 +14,7 @@ const CHAIN_SERVICES: &str = "services";
 const CHAIN_MASQUERADE: &str = "masquerade";
 const MAP_CLUSTER_IPS: &str = "cluster_ips";
 const MAP_NODE_PORTS: &str = "node_ports";
+const MAP_HOST_PORTS: &str = "host_ports";
 const ENV_LEGACY_ENDPOINT_CHAINS: &str = "RK8S_NFTABLES_LEGACY_ENDPOINT_CHAINS";
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
@@ -79,6 +80,15 @@ pub fn generate_verdict_maps_init_raw_json() -> Result<String> {
                     "table": TABLE_NAME,
                     "name": MAP_NODE_PORTS,
                     "type": ["inet_proto", "inet_service"],
+                    "map": "verdict"
+                }
+            },
+            {
+                "map": {
+                    "family": "ip",
+                    "table": TABLE_NAME,
+                    "name": MAP_HOST_PORTS,
+                    "type": ["ipv4_addr", "inet_service"],
                     "map": "verdict"
                 }
             }

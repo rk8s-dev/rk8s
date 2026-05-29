@@ -33,6 +33,7 @@ use std::path::{Path, PathBuf};
 use tracing::{debug, error, info};
 
 use crate::network::plugin_chain;
+use crate::network::port_forward;
 
 /// Error indicating pause container is dead, Pod needs to be rebuilt
 #[derive(Debug, Error)]
@@ -364,6 +365,9 @@ impl TaskRunner {
             .to_string();
         self.pause_pid = Some(pid_i32);
         // let podip = runner.ip().unwrap().to_string();
+        if let Some(config) = &self.sandbox_config {
+            port_forward::apply_port_mappings(&config.port_mappings, &podip)?;
+        }
 
         info!("podip:{podip}");
         let response = RunPodSandboxResponse {
