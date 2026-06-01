@@ -1,42 +1,100 @@
 use anyhow::Result;
 use libruntime::cri::cri_api::PortMapping;
 use nftables::{
-    expr::{self, Expression, Map, NamedExpression, Payload, PayloadField},
+    expr::{self, Expression, NamedExpression, Payload, PayloadField, Verdict},
     schema::{self, NfCmd, NfListObject, Nftables, Rule},
-    stmt::{self, Statement, VerdictMap},
+    stmt::{self, JumpTarget, Statement, VerdictMap},
     types,
 };
-use std::borrow::Cow;
+use std::sync::atomic::AtomicUsize;
+use std::{borrow::Cow, collections::HashSet};
 
 const TABLE_NAME: &str = "rk8s";
 const CHAIN_DNAT: &str = "dnat";
 const MAP_HOST_PORTS: &str = "host_ports";
 
-fn create_port_mapping_exprs<'a>(
-    port_mappings: &'a [PortMapping],
-    container_ip: &'a str,
-) -> Vec<expr::Expression<'a>> {
-    port_mappings
-        .iter()
-        .map(|mapping| {
-            Expression::List(vec![Expression::Named(NamedExpression::Map(Box::new(
-                Map {
-                    key: Expression::Named(NamedExpression::Concat(vec![
-                        Expression::String(Cow::Borrowed(&mapping.host_ip)),
+fn create_unique_chain_name() -> String {
+    static COUNTER: AtomicUsize = AtomicUsize::new(0);
+    let count = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    format!("dnat_{}", count.to_string())
+}
+
+fn add_elements_to_map<'a, 'b>(
+    port_mapping_and_chain_bindings: &'a [(&PortMapping, String)],
+    objects: &'b mut Vec<schema::NfObject<'a>>,
+) {
+    for (mapping, chain) in port_mapping_and_chain_bindings {
+        objects.push(schema::NfObject::CmdObject(NfCmd::Add(
+            schema::NfListObject::Element(schema::Element {
+                family: types::NfFamily::IP,
+                table: Cow::Borrowed(TABLE_NAME),
+                name: Cow::Borrowed(MAP_HOST_PORTS),
+                elem: Cow::Owned(vec![Expression::List(vec![
+                    Expression::Named(NamedExpression::Concat(vec![
+                        Expression::String(Cow::Borrowed(mapping.host_ip.as_str())),
                         Expression::Number(mapping.host_port as _),
                     ])),
-                    data: Expression::Named(NamedExpression::Concat(vec![
-                        Expression::String(Cow::Borrowed(container_ip)),
-                        Expression::Number(mapping.container_port as _),
-                    ])),
-                },
-            )))])
-        })
-        .collect::<Vec<_>>()
+                    Expression::Verdict(Verdict::Goto(JumpTarget {
+                        target: Cow::Borrowed(chain),
+                    })),
+                ])]),
+            }),
+        )));
+    }
+}
+
+fn add_chain_for_each_port_mapping<'a, 'b>(
+    port_mapping_and_chain_bindings: &'a [(&'a PortMapping, String)],
+    container_ip: &'a str,
+    objects: &'b mut Vec<schema::NfObject<'a>>,
+) {
+    for (mapping, chain) in port_mapping_and_chain_bindings {
+        objects.push(schema::NfObject::CmdObject(NfCmd::Add(
+            schema::NfListObject::Chain(schema::Chain {
+                family: types::NfFamily::IP,
+                table: Cow::Borrowed(TABLE_NAME),
+                name: Cow::Borrowed(chain),
+                ..Default::default()
+            }),
+        )));
+
+        objects.push(schema::NfObject::ListObject(schema::NfListObject::Rule(
+            schema::Rule {
+                family: types::NfFamily::IP,
+                table: Cow::Borrowed(TABLE_NAME),
+                chain: Cow::Borrowed(chain),
+                expr: Cow::Owned(vec![stmt::Statement::DNAT(Some(stmt::NAT {
+                    addr: Some(expr::Expression::String(Cow::Borrowed(container_ip))),
+                    family: Some(stmt::NATFamily::IP),
+                    port: Some(expr::Expression::Number(mapping.container_port as _)),
+                    flags: None,
+                }))]),
+                ..Default::default()
+            },
+        )));
+    }
 }
 
 pub fn apply_port_mappings(port_mappings: &[PortMapping], container_ip: &str) -> Result<()> {
     let mut objects: Vec<schema::NfObject> = Vec::new();
+
+    // detects collisions in port mapping and returns an error
+    let mut seen = HashSet::new();
+    for mapping in port_mappings {
+        let key = (mapping.host_ip.as_str(), mapping.host_port);
+        if !seen.insert(key) {
+            anyhow::bail!(
+                "Found conflicting port mapping: {}:{}",
+                mapping.host_ip,
+                mapping.host_port
+            );
+        }
+    }
+
+    let port_mapping_and_chain_bindings = port_mappings
+        .iter()
+        .map(|mapping| (mapping, create_unique_chain_name()))
+        .collect::<Vec<_>>();
 
     objects.push(schema::NfObject::CmdObject(NfCmd::Add(
         schema::NfListObject::Chain(schema::Chain {
@@ -50,62 +108,34 @@ pub fn apply_port_mappings(port_mappings: &[PortMapping], container_ip: &str) ->
         }),
     )));
 
-    // this is completely wrong, I was thinking if I could get away without creating a separate chain for 
-    // each mapping but I would have to create the chains...working on this...
     objects.push(schema::NfObject::CmdObject(NfCmd::Add(NfListObject::Rule(
         Rule {
             family: types::NfFamily::IP,
             table: Cow::Borrowed(TABLE_NAME),
             chain: Cow::Borrowed(CHAIN_DNAT),
-            expr: Cow::Owned(vec![
-                stmt::Statement::DNAT(Some(stmt::NAT {
-                    addr: Some(Expression::Named(NamedExpression::Payload(
-                        Payload::PayloadField(PayloadField {
+            expr: Cow::Owned(vec![Statement::VerdictMap(VerdictMap {
+                key: Expression::Named(NamedExpression::Concat(vec![
+                    Expression::Named(NamedExpression::Payload(Payload::PayloadField(
+                        PayloadField {
                             protocol: Cow::Borrowed("ip"),
                             field: Cow::Borrowed("daddr"),
-                        }),
+                        },
                     ))),
-                    family: Some(stmt::NATFamily::IP),
-                    port: Some(Expression::Named(NamedExpression::Payload(
-                        Payload::PayloadField(PayloadField {
+                    Expression::Named(NamedExpression::Payload(Payload::PayloadField(
+                        PayloadField {
                             protocol: Cow::Borrowed("tcp"),
                             field: Cow::Borrowed("dport"),
-                        }),
+                        },
                     ))),
-                    flags: None,
-                })),
-                Statement::VerdictMap(VerdictMap {
-                    key: Expression::Named(NamedExpression::Concat(vec![
-                        Expression::Named(NamedExpression::Payload(Payload::PayloadField(
-                            PayloadField {
-                                protocol: Cow::Borrowed("ip"),
-                                field: Cow::Borrowed("daddr"),
-                            },
-                        ))),
-                        Expression::Named(NamedExpression::Payload(Payload::PayloadField(
-                            PayloadField {
-                                protocol: Cow::Borrowed("tcp"),
-                                field: Cow::Borrowed("dport"),
-                            },
-                        ))),
-                    ])),
-                    data: Expression::String(Cow::Borrowed("@host_ports")),
-                }),
-            ]),
+                ])),
+                data: Expression::String(Cow::Borrowed("@port_mappings")),
+            })]),
             ..Default::default()
         },
     ))));
 
-    let port_mapping_exprs = create_port_mapping_exprs(port_mappings, container_ip);
-    // add elements to the map
-    objects.push(schema::NfObject::CmdObject(NfCmd::Add(
-        schema::NfListObject::Element(schema::Element {
-            family: types::NfFamily::IP,
-            table: Cow::Borrowed(TABLE_NAME),
-            name: Cow::Borrowed(MAP_HOST_PORTS),
-            elem: Cow::Borrowed(&port_mapping_exprs),
-        }),
-    )));
+    add_elements_to_map(port_mapping_and_chain_bindings.as_slice(), &mut objects);
+    add_chain_for_each_port_mapping(&port_mapping_and_chain_bindings, container_ip, &mut objects);
 
     let nftables = Nftables {
         objects: Cow::Borrowed(&objects),
