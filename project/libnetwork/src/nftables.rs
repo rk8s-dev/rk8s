@@ -88,7 +88,7 @@ pub fn generate_verdict_maps_init_raw_json() -> Result<String> {
                     "family": "ip",
                     "table": TABLE_NAME,
                     "name": MAP_HOST_PORTS,
-                    "type": ["ipv4_addr", "inet_service"],
+                    "type": ["inet_proto", "ipv4_addr", "inet_service"],
                     "map": "verdict"
                 }
             }

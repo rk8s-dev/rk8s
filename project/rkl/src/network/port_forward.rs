@@ -23,7 +23,7 @@ fn add_elements_to_map<'a, 'b>(
     port_mapping_and_chain_bindings: &'a [(&PortMapping, String)],
     objects: &'b mut Vec<schema::NfObject<'a>>,
 ) {
-    for (mapping, chain) in port_mapping_and_chain_bindings {
+    for (port_mapping, chain) in port_mapping_and_chain_bindings {
         objects.push(schema::NfObject::CmdObject(NfCmd::Add(
             schema::NfListObject::Element(schema::Element {
                 family: types::NfFamily::IP,
@@ -31,8 +31,9 @@ fn add_elements_to_map<'a, 'b>(
                 name: Cow::Borrowed(MAP_HOST_PORTS),
                 elem: Cow::Owned(vec![Expression::List(vec![
                     Expression::Named(NamedExpression::Concat(vec![
-                        Expression::String(Cow::Borrowed(mapping.host_ip.as_str())),
-                        Expression::Number(mapping.host_port as _),
+                        Expression::Number(port_mapping.protocol as _),
+                        Expression::String(Cow::Borrowed(port_mapping.host_ip.as_str())),
+                        Expression::Number(port_mapping.host_port as _),
                     ])),
                     Expression::Verdict(Verdict::Goto(JumpTarget {
                         target: Cow::Borrowed(chain),
@@ -48,7 +49,7 @@ fn add_chain_for_each_port_mapping<'a, 'b>(
     container_ip: &'a str,
     objects: &'b mut Vec<schema::NfObject<'a>>,
 ) {
-    for (mapping, chain) in port_mapping_and_chain_bindings {
+    for (port_mapping, chain) in port_mapping_and_chain_bindings {
         objects.push(schema::NfObject::CmdObject(NfCmd::Add(
             schema::NfListObject::Chain(schema::Chain {
                 family: types::NfFamily::IP,
@@ -66,7 +67,7 @@ fn add_chain_for_each_port_mapping<'a, 'b>(
                 expr: Cow::Owned(vec![stmt::Statement::DNAT(Some(stmt::NAT {
                     addr: Some(expr::Expression::String(Cow::Borrowed(container_ip))),
                     family: Some(stmt::NATFamily::IP),
-                    port: Some(expr::Expression::Number(mapping.container_port as _)),
+                    port: Some(expr::Expression::Number(port_mapping.container_port as _)),
                     flags: None,
                 }))]),
                 ..Default::default()
@@ -80,13 +81,13 @@ pub fn apply_port_mappings(port_mappings: &[PortMapping], container_ip: &str) ->
 
     // detects collisions in port mapping and returns an error
     let mut seen = HashSet::new();
-    for mapping in port_mappings {
-        let key = (mapping.host_ip.as_str(), mapping.host_port);
+    for port_mapping in port_mappings {
+        let key = (port_mapping.host_ip.as_str(), port_mapping.host_port);
         if !seen.insert(key) {
             anyhow::bail!(
                 "Found conflicting port mapping: {}:{}",
-                mapping.host_ip,
-                mapping.host_port
+                port_mapping.host_ip,
+                port_mapping.host_port
             );
         }
     }
@@ -118,17 +119,23 @@ pub fn apply_port_mappings(port_mappings: &[PortMapping], container_ip: &str) ->
                     Expression::Named(NamedExpression::Payload(Payload::PayloadField(
                         PayloadField {
                             protocol: Cow::Borrowed("ip"),
+                            field: Cow::Borrowed("protocol"),
+                        },
+                    ))),
+                    Expression::Named(NamedExpression::Payload(Payload::PayloadField(
+                        PayloadField {
+                            protocol: Cow::Borrowed("ip"),
                             field: Cow::Borrowed("daddr"),
                         },
                     ))),
                     Expression::Named(NamedExpression::Payload(Payload::PayloadField(
                         PayloadField {
-                            protocol: Cow::Borrowed("tcp"),
+                            protocol: Cow::Borrowed("th"),
                             field: Cow::Borrowed("dport"),
                         },
                     ))),
                 ])),
-                data: Expression::String(Cow::Borrowed("@port_mappings")),
+                data: Expression::String(Cow::Borrowed("@host_ports")),
             })]),
             ..Default::default()
         },
