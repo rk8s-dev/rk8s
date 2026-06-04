@@ -365,7 +365,9 @@ impl TaskRunner {
             .to_string();
         self.pause_pid = Some(pid_i32);
         // let podip = runner.ip().unwrap().to_string();
-        if let Some(config) = &self.sandbox_config {
+        if let Some(config) = &self.sandbox_config
+            && config.port_mappings.len() != 0
+        {
             port_forward::apply_port_mappings(&config.port_mappings, &podip)?;
         }
 

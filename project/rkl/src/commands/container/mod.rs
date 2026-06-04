@@ -1,7 +1,10 @@
 use crate::{
     commands::{Exec, ExecContainer, create, delete, exec, list, load_container, start},
     config::OVERLAY_CONFIG,
-    network::plugin_chain,
+    network::{
+        plugin_chain,
+        port_forward::{apply_port_mappings, remove_port_mappings},
+    },
 };
 use libruntime::volume::parse_key_val;
 
@@ -25,7 +28,7 @@ use libruntime::utils::{
 };
 use libruntime::volume::{VolumeManager, VolumePattern, string_to_pattern};
 use libruntime::{
-    cri::cri_api::{ContainerConfig, CreateContainerResponse, Mount},
+    cri::cri_api::{ContainerConfig, CreateContainerResponse, Mount, PortMapping},
     utils::ImagePuller,
 };
 use nix::unistd::Pid;
@@ -474,6 +477,26 @@ impl ContainerRunner {
         let setup_result = self.setup_container_network()?;
         self.retrieve_container_ip(setup_result)?;
 
+        if let Some(container_ip) = self.ip {
+            let port_mappings = self
+                .spec
+                .ports
+                .iter()
+                .map(|port| PortMapping {
+                    container_port: port.container_port,
+                    protocol: match port.protocol.as_str() {
+                        "TCP" => 0,
+                        "UDP" => 1,
+                        _ => 0,
+                    },
+                    host_ip: port.host_ip.clone(),
+                    host_port: port.host_port,
+                })
+                .collect::<Vec<_>>();
+
+            apply_port_mappings(&port_mappings, &container_ip.to_string())?;
+        }
+
         match id {
             None => {
                 let id = self.get_container_id()?;
@@ -648,6 +671,7 @@ pub fn delete_container(id: &str) -> Result<()> {
         force: true,
     };
     delete(delete_args, root_path)?;
+    remove_port_mappings()?;
 
     // Stop overlay rootfs mount if present
     if let Some(rootfs_mount) = RootfsMount::load(&bundle_path)?

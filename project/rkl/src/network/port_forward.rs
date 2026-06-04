@@ -13,8 +13,9 @@ const TABLE_NAME: &str = "rk8s";
 const CHAIN_DNAT: &str = "dnat";
 const MAP_HOST_PORTS: &str = "host_ports";
 
+static COUNTER: AtomicUsize = AtomicUsize::new(0);
+
 fn create_unique_chain_name() -> String {
-    static COUNTER: AtomicUsize = AtomicUsize::new(0);
     let count = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     format!("dnat_{}", count.to_string())
 }
@@ -160,7 +161,43 @@ pub fn apply_port_mappings(port_mappings: &[PortMapping], container_ip: &str) ->
     Ok(())
 }
 
-#[allow(unused)]
-pub fn remove_port_mappings(port_mappings: &[PortMapping], container_ip: &str) -> Result<()> {
-    todo!();
+pub fn remove_port_mappings() -> Result<()> {
+    let mut objects: Vec<schema::NfObject> = Vec::new();
+
+    objects.push(schema::NfObject::CmdObject(schema::NfCmd::Delete(
+        schema::NfListObject::Chain(schema::Chain {
+            family: types::NfFamily::IP,
+            table: Cow::Borrowed(TABLE_NAME),
+            name: Cow::Borrowed(CHAIN_DNAT),
+            ..Default::default()
+        }),
+    )));
+
+    for chain_number in 0..COUNTER.load(std::sync::atomic::Ordering::Relaxed) {
+        objects.push(schema::NfObject::CmdObject(schema::NfCmd::Delete(
+            schema::NfListObject::Chain(schema::Chain {
+                family: types::NfFamily::IP,
+                table: Cow::Borrowed(TABLE_NAME),
+                name: Cow::Owned(format!("dnat_{chain_number}")),
+                ..Default::default()
+            }),
+        )));
+    }
+
+    objects.push(schema::NfObject::CmdObject(schema::NfCmd::Delete(
+        schema::NfListObject::Map(Box::new(schema::Map {
+            family: types::NfFamily::IP,
+            table: Cow::Borrowed(TABLE_NAME),
+            name: Cow::Borrowed(MAP_HOST_PORTS),
+            ..Default::default()
+        })),
+    )));
+
+    let nftables = Nftables {
+        objects: Cow::Borrowed(&objects),
+    };
+
+    nftables::helper::apply_ruleset(&nftables)?;
+
+    Ok(())
 }
