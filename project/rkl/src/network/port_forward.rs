@@ -19,6 +19,13 @@ fn create_unique_chain_name() -> String {
     format!("dnat_{}", count.to_string())
 }
 
+fn l4proto_number(protocol: i32) -> u32 {
+    match protocol {
+        1 => 17,
+        _ => 6,
+    }
+}
+
 fn add_elements_to_map<'a, 'b>(
     port_mapping_and_chain_bindings: &'a [(&PortMapping, String)],
     objects: &'b mut Vec<schema::NfObject<'a>>,
@@ -31,7 +38,7 @@ fn add_elements_to_map<'a, 'b>(
                 name: Cow::Borrowed(MAP_HOST_PORTS),
                 elem: Cow::Owned(vec![Expression::List(vec![
                     Expression::Named(NamedExpression::Concat(vec![
-                        Expression::Number(port_mapping.protocol as _),
+                        Expression::Number(l4proto_number(port_mapping.protocol)),
                         Expression::String(Cow::Borrowed(port_mapping.host_ip.as_str())),
                         Expression::Number(port_mapping.host_port as _),
                     ])),
