@@ -161,18 +161,10 @@ pub fn apply_port_mappings(port_mappings: &[PortMapping], container_ip: &str) ->
     Ok(())
 }
 
-pub fn remove_port_mappings() -> Result<()> {
+pub fn remove_port_mappings(port_mappings: &[PortMapping]) -> Result<()> {
     let mut objects: Vec<schema::NfObject> = Vec::new();
 
-    objects.push(schema::NfObject::CmdObject(schema::NfCmd::Delete(
-        schema::NfListObject::Chain(schema::Chain {
-            family: types::NfFamily::IP,
-            table: Cow::Borrowed(TABLE_NAME),
-            name: Cow::Borrowed(CHAIN_DNAT),
-            ..Default::default()
-        }),
-    )));
-
+    // remove all the mapped chains
     for chain_number in 0..COUNTER.load(std::sync::atomic::Ordering::Relaxed) {
         objects.push(schema::NfObject::CmdObject(schema::NfCmd::Delete(
             schema::NfListObject::Chain(schema::Chain {
@@ -184,14 +176,21 @@ pub fn remove_port_mappings() -> Result<()> {
         )));
     }
 
-    objects.push(schema::NfObject::CmdObject(schema::NfCmd::Delete(
-        schema::NfListObject::Map(Box::new(schema::Map {
-            family: types::NfFamily::IP,
-            table: Cow::Borrowed(TABLE_NAME),
-            name: Cow::Borrowed(MAP_HOST_PORTS),
-            ..Default::default()
-        })),
-    )));
+    // remove the specified elements from the verdict map
+    for port_mapping in port_mappings {
+        objects.push(schema::NfObject::CmdObject(schema::NfCmd::Delete(
+            schema::NfListObject::Element(schema::Element {
+                family: types::NfFamily::IP,
+                table: Cow::Borrowed(TABLE_NAME),
+                name: Cow::Borrowed(MAP_HOST_PORTS),
+                elem: Cow::Owned(vec![Expression::Named(NamedExpression::Concat(vec![
+                    Expression::Number(l4proto_number(port_mapping.protocol)),
+                    Expression::String(Cow::Borrowed(port_mapping.host_ip.as_str())),
+                    Expression::Number(port_mapping.host_port as _),
+                ]))]),
+            }),
+        )));
+    }
 
     let nftables = Nftables {
         objects: Cow::Borrowed(&objects),

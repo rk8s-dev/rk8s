@@ -493,8 +493,9 @@ impl ContainerRunner {
                     host_port: port.host_port,
                 })
                 .collect::<Vec<_>>();
-
-            apply_port_mappings(&port_mappings, &container_ip.to_string())?;
+            if !port_mappings.is_empty() {
+                apply_port_mappings(&port_mappings, &container_ip.to_string())?;
+            }
         }
 
         match id {
@@ -659,6 +660,25 @@ pub fn delete_container(id: &str) -> Result<()> {
     let root_path = rootpath::determine(None, &*create_syscall())?;
     is_container_exist(id, &root_path)?;
 
+    // remove all the port mappings
+    let container_runner = ContainerRunner::from_container_id(id, Some(root_path.clone()))?;
+    let port_mappings = container_runner
+        .spec
+        .ports
+        .iter()
+        .map(|port| PortMapping {
+            container_port: port.container_port,
+            protocol: match port.protocol.as_str() {
+                "TCP" => 0,
+                "UDP" => 1,
+                _ => 0,
+            },
+            host_ip: port.host_ip.clone(),
+            host_port: port.host_port,
+        })
+        .collect::<Vec<_>>();
+    remove_port_mappings(&port_mappings)?;
+
     // Get bundle_path before delete (container state will be cleaned up after delete)
     let container = load_container(&root_path, id)?;
     let bundle_path = container.bundle().to_path_buf();
@@ -670,8 +690,7 @@ pub fn delete_container(id: &str) -> Result<()> {
         container_id: id.to_string(),
         force: true,
     };
-    delete(delete_args, root_path)?;
-    remove_port_mappings()?;
+    delete(delete_args, root_path.clone())?;
 
     // Stop overlay rootfs mount if present
     if let Some(rootfs_mount) = RootfsMount::load(&bundle_path)?
