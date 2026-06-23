@@ -1306,6 +1306,7 @@ impl OverlayFs {
 
         let mut real_inodes = node.real_inodes.lock().await;
         real_inodes.retain(|ri| !ri.in_upper_layer);
+        node.whiteout.store(real_inode.whiteout, Ordering::Relaxed);
         let real_inode = Arc::new(real_inode);
         real_inodes.insert(0, real_inode.clone());
         trace!(
