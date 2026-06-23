@@ -16,11 +16,12 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
+  CARGO_NET_RETRY: 10
 
 jobs:
   format:
     name: Rustfmt Check
-    runs-on: rk8s-runner-set
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
       - run: |
@@ -31,16 +32,17 @@ jobs:
     name: Clippy Check
     strategy:
       fail-fast: true
-    runs-on: rk8s-runner-set
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+      - uses: ./.github/actions/install-sys-deps
       - run: |
           cd project
           cargo clippy --workspace -- -D warnings
 
   redundancy:
     name: Redundancy Check
-    runs-on: rk8s-runner-set
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
       - run: |
@@ -58,14 +60,18 @@ jobs:
 
   build:
     name: Buck2 Build
-    runs-on: rk8s-runner-set
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+      - uses: ./.github/actions/install-sys-deps
+      - uses: ./.github/actions/install-buck2
+        with:
+          version: 2026-04-15
       - run: buck2 build //project/...
 
   test:
     name: Buck2 Test
-    runs-on: rk8s-runner-set
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
       - run: |
