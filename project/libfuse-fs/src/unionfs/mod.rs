@@ -1385,11 +1385,9 @@ impl OverlayFs {
             {
                 let marker_name = oci_whiteout_name(OsStr::new(name));
                 let marker_name = marker_name.to_string_lossy();
-                if let Some(marker) = ri.lookup_child(ctx, marker_name.as_ref()).await? {
-                    real_inodes.push(RealInode {
-                        whiteout: true,
-                        ..marker
-                    });
+                if let Some(mut marker) = ri.lookup_child(ctx, marker_name.as_ref()).await? {
+                    marker.whiteout = true;
+                    real_inodes.push(marker);
                     break;
                 }
             }
@@ -1419,7 +1417,7 @@ impl OverlayFs {
         }
 
         let ino = inode_store.alloc_inode(&path)?;
-        let mut ovi = OverlayInode::new_from_real_inodes(name, ino, path, real_inodes).await?;
+        let ovi = OverlayInode::new_from_real_inodes(name, ino, path, real_inodes).await?;
         *ovi.parent.lock().await = Arc::downgrade(parent);
         let arc_child = Arc::new(ovi);
         let active_child = inode_store.insert_inode(ino, arc_child).await;
@@ -2362,7 +2360,7 @@ impl OverlayFs {
         };
         let linked_ri = parent_real_inode.link(ctx, src_ino, name).await?;
         let path = format!("{}/{}", new_parent.path.read().await, name);
-        let mut linked_node =
+        let linked_node =
             OverlayInode::new_from_real_inode(name, src_node.inode, path, linked_ri).await;
         *linked_node.parent.lock().await = Arc::downgrade(&new_parent);
         let active_node = self
