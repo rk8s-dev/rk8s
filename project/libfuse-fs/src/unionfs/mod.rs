@@ -1380,6 +1380,19 @@ impl OverlayFs {
             if ri.whiteout {
                 break;
             }
+            if ri.in_upper_layer
+                && matches!(ri.layer.whiteout_format(), WhiteoutFormat::OciWhiteout)
+            {
+                let marker_name = oci_whiteout_name(OsStr::new(name));
+                let marker_name = marker_name.to_string_lossy();
+                if let Some(marker) = ri.lookup_child(ctx, marker_name.as_ref()).await? {
+                    real_inodes.push(RealInode {
+                        whiteout: true,
+                        ..marker
+                    });
+                    break;
+                }
+            }
             if let Some(child_ri) = ri.lookup_child(ctx, name).await? {
                 real_inodes.push(child_ri);
             }
@@ -1406,7 +1419,8 @@ impl OverlayFs {
         }
 
         let ino = inode_store.alloc_inode(&path)?;
-        let ovi = OverlayInode::new_from_real_inodes(name, ino, path, real_inodes).await?;
+        let mut ovi = OverlayInode::new_from_real_inodes(name, ino, path, real_inodes).await?;
+        *ovi.parent.lock().await = Arc::downgrade(parent);
         let arc_child = Arc::new(ovi);
         let active_child = inode_store.insert_inode(ino, arc_child).await;
         node_children.insert(name.to_string(), active_child.clone());
@@ -2336,23 +2350,24 @@ impl OverlayFs {
                 .await?;
         }
 
-        new_parent
-            .handle_upper_inode_locked(&mut |parent_real_inode: Option<Arc<RealInode>>| async {
-                let parent_real_inode = match parent_real_inode {
-                    Some(inode) => inode,
-                    None => {
-                        error!("BUG: parent doesn't have upper inode after copied up");
-                        return Err(Error::from_raw_os_error(libc::EINVAL));
-                    }
-                };
-
-                parent_real_inode.link(ctx, src_ino, name).await?;
-
-                Ok(false)
-            })
-            .await?;
-
-        let active_node = self.insert_inode(src_node.inode, src_node).await;
+        let parent_real_inode = {
+            let real_inodes = new_parent.real_inodes.lock().await;
+            match real_inodes.first().filter(|inode| inode.in_upper_layer) {
+                Some(inode) => inode.clone(),
+                None => {
+                    error!("BUG: parent doesn't have upper inode after copied up");
+                    return Err(Error::from_raw_os_error(libc::EINVAL));
+                }
+            }
+        };
+        let linked_ri = parent_real_inode.link(ctx, src_ino, name).await?;
+        let path = format!("{}/{}", new_parent.path.read().await, name);
+        let mut linked_node =
+            OverlayInode::new_from_real_inode(name, src_node.inode, path, linked_ri).await;
+        *linked_node.parent.lock().await = Arc::downgrade(&new_parent);
+        let active_node = self
+            .insert_inode(src_node.inode, Arc::new(linked_node))
+            .await;
         new_parent.insert_child(name, active_node).await;
 
         Ok(())
