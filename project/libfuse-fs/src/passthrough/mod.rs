@@ -77,6 +77,11 @@ pub const CURRENT_DIR_CSTR: &[u8] = b".\0";
 /// Parent directory
 pub const PARENT_DIR_CSTR: &[u8] = b"..\0";
 pub const VFS_MAX_INO: u64 = 0xff_ffff_ffff_ffff;
+
+#[cfg(target_os = "linux")]
+fn is_file_handle_permission_error(error: &io::Error) -> bool {
+    matches!(error.raw_os_error(), Some(libc::EPERM | libc::EACCES))
+}
 /// Path to `/proc/self/mountinfo`, consumed by the Linux-only file-handle
 /// path (`mount_fd::MountFds`). Linux-only — macOS lacks `/proc`.
 #[cfg(target_os = "linux")]
@@ -107,6 +112,25 @@ where
 {
     pub root_dir: P,
     pub mapping: Option<M>,
+}
+
+pub async fn new_antares_passthroughfs_layer<P: AsRef<Path>>(root_dir: P) -> Result<PassthroughFs> {
+    // Use libfuse-fs default dentry/attr TTL (5s) and cache policy. Correctness after
+    // kernel FORGET is handled by unionfs `materialize_child_from_layers()`.
+    let config = Config {
+        root_dir: root_dir.as_ref().to_path_buf(),
+        xattr: true,
+        do_import: true,
+        writeback: false,
+        ..Default::default()
+    };
+
+    let fs = PassthroughFs::<()>::new(config)?;
+    #[cfg(target_os = "linux")]
+    if fs.cfg.do_import {
+        fs.import().await?;
+    }
+    Ok(fs)
 }
 
 pub async fn new_passthroughfs_layer<P: AsRef<Path>, M: AsRef<str>>(
@@ -886,6 +910,11 @@ pub struct PassthroughFs<S: BitmapSlice + Send + Sync = ()> {
     #[cfg(target_os = "linux")]
     mount_fds: MountFds,
 
+    // open_by_handle_at requires CAP_DAC_READ_SEARCH. If this process lacks it,
+    // fall back to fd-backed inode handles for this passthrough instance.
+    #[cfg(target_os = "linux")]
+    file_handles_available: AtomicBool,
+
     // File descriptor pointing to the `/proc/self/fd` directory. This is used to convert an fd from
     // `inodes` into one that can go into `handles`. This is accomplished by reading the
     // `/proc/self/fd/{}` symlink. We keep an open fd here in case the file system tree that we are meant
@@ -1022,6 +1051,8 @@ impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
 
             #[cfg(target_os = "linux")]
             mount_fds,
+            #[cfg(target_os = "linux")]
+            file_handles_available: AtomicBool::new(true),
             proc_self_fd,
 
             writeback: AtomicBool::new(false),
@@ -1272,6 +1303,10 @@ impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
             let path_file = self.open_file_restricted(dir, name, libc::O_PATH, 0)?;
             let st = statx::statx(&path_file, None)?;
 
+            if !self.file_handles_available.load(Ordering::Relaxed) {
+                return Ok((InodeHandle::File(path_file), st));
+            }
+
             let btime_is_valid = match st.btime {
                 Some(ts) => ts.tv_sec != 0 || ts.tv_nsec != 0,
                 None => false,
@@ -1282,19 +1317,19 @@ impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
                 let cache = self.handle_cache.clone();
                 if let Some(h) = cache.get(&key).await {
                     let openable = self.to_openable_handle(h)?;
-                    Ok((InodeHandle::Handle(openable), st))
+                    self.finish_linux_inode_handle(openable, path_file, st)
                 } else if let Some(handle_from_fd) = FileHandle::from_fd(&path_file)? {
                     let handle_arc = Arc::new(handle_from_fd);
                     cache.insert(key, Arc::clone(&handle_arc)).await;
                     let openable = self.to_openable_handle(handle_arc)?;
-                    Ok((InodeHandle::Handle(openable), st))
+                    self.finish_linux_inode_handle(openable, path_file, st)
                 } else {
                     Ok((InodeHandle::File(path_file), st))
                 }
             } else if let Some(handle_from_fd) = FileHandle::from_fd(&path_file)? {
                 let handle_arc = Arc::new(handle_from_fd);
                 let openable = self.to_openable_handle(handle_arc)?;
-                Ok((InodeHandle::Handle(openable), st))
+                self.finish_linux_inode_handle(openable, path_file, st)
             } else {
                 Ok((InodeHandle::File(path_file), st))
             }
@@ -1307,6 +1342,26 @@ impl<S: BitmapSlice + Send + Sync> PassthroughFs<S> {
             let path_file = self.open_file_restricted(dir, name, libc::O_RDONLY, 0)?;
             let st = statx::statx(&path_file, None)?;
             Ok((InodeHandle::File(path_file), st))
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    fn finish_linux_inode_handle(
+        &self,
+        openable: Arc<OpenableFileHandle>,
+        path_file: File,
+        st: StatExt,
+    ) -> io::Result<(InodeHandle, StatExt)> {
+        match openable.open(libc::O_PATH | libc::O_CLOEXEC) {
+            Ok(_probe) => Ok((InodeHandle::Handle(openable), st)),
+            Err(err) if is_file_handle_permission_error(&err) => {
+                warn!(
+                    "passthroughfs: open_by_handle_at unavailable ({err}); falling back to fd-backed inodes for this layer"
+                );
+                self.file_handles_available.store(false, Ordering::Relaxed);
+                Ok((InodeHandle::File(path_file), st))
+            }
+            Err(err) => Err(err),
         }
     }
 

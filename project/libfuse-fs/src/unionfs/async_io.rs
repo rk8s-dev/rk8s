@@ -1,5 +1,5 @@
 use super::utils;
-use super::{CachePolicy, HandleData, Inode, OverlayFs, RealHandle};
+use super::{CachePolicy, HandleData, Inode, OverlayFs, RealHandle, is_recoverable_lookup_miss};
 use crate::util::open_options::OpenOptions;
 use rfuse3::raw::prelude::*;
 use rfuse3::*;
@@ -81,7 +81,7 @@ impl Filesystem for OverlayFs {
         req: Request,
         inode: Inode,
         fh: Option<u64>,
-        flags: u32,
+        _flags: u32,
     ) -> Result<ReplyAttr> {
         if !self.no_open.load(Ordering::Relaxed)
             && let Some(h) = fh
@@ -100,8 +100,10 @@ impl Filesystem for OverlayFs {
         }
 
         let node: Arc<super::OverlayInode> = self.lookup_node(req, inode, "").await?;
-        let (layer, _, lower_inode) = node.first_layer_inode().await;
-        let mut re = layer.getattr(req, lower_inode, None, flags).await?;
+        if !node.whiteout.load(Ordering::Relaxed) && node.in_upper_layer().await {
+            let _ = self.materialize_upper_inode_for_node(req, &node).await?;
+        }
+        let mut re = self.stat_node_with_upper_fallback(req, &node).await?;
         re.attr.ino = inode;
         Ok(re)
     }
@@ -136,7 +138,7 @@ impl Filesystem for OverlayFs {
                             req,
                             rhd.inode,
                             Some(rhd.handle.load(Ordering::Relaxed)),
-                            set_attr,
+                            set_attr.clone(),
                         )
                         .await?;
                     rep.attr.ino = inode;
@@ -147,13 +149,34 @@ impl Filesystem for OverlayFs {
 
         let mut node = self.lookup_node(req, inode, "").await?;
 
-        if !node.in_upper_layer().await {
+        if node.in_upper_layer().await {
+            let _ = self.materialize_upper_inode_for_node(req, &node).await?;
+        } else if self
+            .materialize_upper_inode_for_node(req, &node)
+            .await?
+            .is_none()
+        {
             node = self.copy_node_up(req, node.clone()).await?
         }
 
         let (layer, _, real_inode) = node.first_layer_inode().await;
-        // layer.setattr(req, real_inode, None, set_attr).await
-        let mut rep = layer.setattr(req, real_inode, None, set_attr).await?;
+        let mut rep = match layer.setattr(req, real_inode, None, set_attr.clone()).await {
+            Ok(rep) => rep,
+            Err(err) => {
+                let ioerror: Error = err.into();
+                if is_recoverable_lookup_miss(&ioerror)
+                    && self
+                        .materialize_upper_inode_for_node(req, &node)
+                        .await?
+                        .is_some()
+                {
+                    let (layer, _, real_inode) = node.first_layer_inode().await;
+                    layer.setattr(req, real_inode, None, set_attr).await?
+                } else {
+                    return Err(ioerror.into());
+                }
+            }
+        };
         rep.attr.ino = inode;
         Ok(rep)
     }
@@ -212,11 +235,30 @@ impl Filesystem for OverlayFs {
             return Err(Error::from_raw_os_error(libc::ENOENT).into());
         }
 
-        self.do_mknod(req, &pnode, sname.as_str(), mode, rdev, 0)
-            .await?;
-        self.do_lookup(req, parent, sname.as_str())
+        if let Err(err) = self
+            .do_mknod(req, &pnode, sname.as_str(), mode, rdev, 0)
             .await
-            .map_err(|e| e.into())
+        {
+            tracing::error!(
+                "unionfs mknod failed in do_mknod: parent={} name={:?}: {}",
+                parent,
+                name,
+                err
+            );
+            return Err(err.into());
+        }
+        match self.do_lookup(req, parent, sname.as_str()).await {
+            Ok(entry) => Ok(entry),
+            Err(err) => {
+                tracing::error!(
+                    "unionfs mknod failed in post-mknod lookup: parent={} name={:?}: {}",
+                    parent,
+                    name,
+                    err
+                );
+                Err(err.into())
+            }
+        }
     }
 
     /// create a directory.
@@ -353,9 +395,51 @@ impl Filesystem for OverlayFs {
             // copy up to upper layer
             self.copy_node_up(req, node.clone()).await?;
         }
+        if node.in_upper_layer().await {
+            let _ = self.materialize_upper_inode_for_node(req, &node).await?;
+        }
 
         // assign a handle in overlayfs and open it
-        let (_l, h) = node.open(req, flags as u32, 0).await?;
+        let (_l, h) = match node.open(req, flags as u32, 0).await {
+            Ok(opened) => opened,
+            Err(err) if is_recoverable_lookup_miss(&err) => {
+                if self
+                    .materialize_upper_inode_for_node(req, &node)
+                    .await?
+                    .is_some()
+                {
+                    match node.open(req, flags as u32, 0).await {
+                        Ok(opened) => opened,
+                        Err(retry_err) => {
+                            tracing::error!(
+                                "unionfs open failed after rematerialize: inode={} flags={}: {}",
+                                inode,
+                                flags,
+                                retry_err
+                            );
+                            return Err(retry_err.into());
+                        }
+                    }
+                } else {
+                    tracing::error!(
+                        "unionfs open failed on stale/missing inode without upper fallback: inode={} flags={}: {}",
+                        inode,
+                        flags,
+                        err
+                    );
+                    return Err(err.into());
+                }
+            }
+            Err(err) => {
+                tracing::error!(
+                    "unionfs open failed: inode={} flags={}: {}",
+                    inode,
+                    flags,
+                    err
+                );
+                return Err(err.into());
+            }
+        };
 
         let hd = self.next_handle.fetch_add(1, Ordering::Relaxed);
         let (layer, in_upper_layer, inode) = node.first_layer_inode().await;
@@ -947,8 +1031,24 @@ impl Filesystem for OverlayFs {
             return Err(Error::from_raw_os_error(libc::ENOENT).into());
         }
 
-        let (layer, real_inode) = self.find_real_inode(inode).await?;
-        layer.access(req, real_inode, mask).await
+        let (layer, _, real_inode) = node.first_layer_inode().await;
+        match layer.access(req, real_inode, mask).await {
+            Ok(()) => Ok(()),
+            Err(err) => {
+                let ioerror: Error = err.into();
+                if is_recoverable_lookup_miss(&ioerror)
+                    && self
+                        .materialize_upper_inode_for_node(req, &node)
+                        .await?
+                        .is_some()
+                {
+                    let (layer, _, real_inode) = node.first_layer_inode().await;
+                    layer.access(req, real_inode, mask).await
+                } else {
+                    Err(ioerror.into())
+                }
+            }
+        }
     }
 
     /// create and open a file. If the file does not exist, first create it with the specified
@@ -1001,12 +1101,41 @@ impl Filesystem for OverlayFs {
         let name_str = name
             .to_str()
             .ok_or_else(|| Error::from_raw_os_error(libc::EINVAL))?;
-        let final_handle = self
+        let final_handle = match self
             .do_create(req, &pnode, name, mode, flags.try_into().unwrap())
-            .await?;
-        let entry = self.do_lookup(req, parent, name_str).await?;
-        let fh = final_handle
-            .ok_or_else(|| std::io::Error::new(ErrorKind::NotFound, "Handle not found"))?;
+            .await
+        {
+            Ok(handle) => handle,
+            Err(err) => {
+                tracing::error!(
+                    "unionfs create failed in do_create: parent={} name={:?}: {}",
+                    parent,
+                    name,
+                    err
+                );
+                return Err(err.into());
+            }
+        };
+        let entry = match self.do_lookup(req, parent, name_str).await {
+            Ok(entry) => entry,
+            Err(err) => {
+                tracing::error!(
+                    "unionfs create failed in post-create lookup: parent={} name={:?}: {}",
+                    parent,
+                    name,
+                    err
+                );
+                return Err(err.into());
+            }
+        };
+        let fh = final_handle.ok_or_else(|| {
+            tracing::error!(
+                "unionfs create did not return a handle: parent={} name={:?}",
+                parent,
+                name
+            );
+            std::io::Error::new(ErrorKind::NotFound, "Handle not found")
+        })?;
 
         let mut opts = OpenOptions::empty();
         match self.config.cache_policy {
