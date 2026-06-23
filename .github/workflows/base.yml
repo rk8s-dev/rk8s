@@ -67,7 +67,20 @@ jobs:
       - uses: ./.github/actions/install-buck2
         with:
           version: 2026-04-15
-      - run: buck2 build //project/...
+      - name: Run Buck2 build
+        run: |
+          set -euo pipefail
+          for attempt in 1 2; do
+            if buck2 build //project/...; then
+              exit 0
+            fi
+            if [ "$attempt" -eq 2 ]; then
+              exit 1
+            fi
+            echo "Buck2 build failed; clearing local state and retrying once"
+            buck2 kill || true
+            rm -rf buck-out/v2
+          done
 
   test:
     name: Buck2 Test
