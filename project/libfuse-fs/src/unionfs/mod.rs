@@ -1380,9 +1380,7 @@ impl OverlayFs {
             if ri.whiteout {
                 break;
             }
-            if ri.in_upper_layer
-                && matches!(ri.layer.whiteout_format(), WhiteoutFormat::OciWhiteout)
-            {
+            if matches!(ri.layer.whiteout_format(), WhiteoutFormat::OciWhiteout) {
                 let marker_name = oci_whiteout_name(OsStr::new(name));
                 let marker_name = marker_name.to_string_lossy();
                 if let Some(mut marker) = ri.lookup_child(ctx, marker_name.as_ref()).await? {
@@ -1528,7 +1526,7 @@ impl OverlayFs {
         match pnode.child(name).await {
             // Child is found.
             Some(v) => {
-                if !v.whiteout.load(Ordering::Relaxed) && v.in_upper_layer().await {
+                if !v.whiteout.load(Ordering::Relaxed) {
                     let _ = self.materialize_upper_inode_for_node(ctx, &v).await?;
                 }
                 Ok(v)
