@@ -3,12 +3,15 @@ use libcontainer::oci_spec::runtime::{
     Capability, LinuxBuilder, LinuxCapabilities, LinuxNamespaceBuilder, LinuxNamespaceType,
     MountBuilder, ProcessBuilder, Spec,
 };
+use tracing::debug;
 
-use crate::cri::cri_api::ContainerConfig;
+use crate::cri::cri_api::{ContainerConfig, KeyValue};
 use anyhow::{Result, anyhow};
 use common::ContainerSpec;
-use oci_spec::runtime::{LinuxNamespace, RootBuilder};
-use std::collections::HashSet;
+use oci_spec::runtime::{HookBuilder, HooksBuilder, LinuxNamespace, RootBuilder};
+use std::collections::{BTreeMap, HashMap, HashSet};
+use std::env;
+use std::path::{Path, PathBuf};
 
 // Default supported capabilities (from docker's implementation)
 lazy_static! {
@@ -32,20 +35,43 @@ lazy_static! {
     };
 }
 
+/// Build OCI `process.env` entries. When the same key appears multiple times (default PATH, image,
+/// pod), the **last** entry in `envs` wins.
+fn env_kv_list_to_oci_strings(envs: &[KeyValue]) -> Vec<String> {
+    let mut last_idx: HashMap<&str, usize> = HashMap::new();
+    for (i, kv) in envs.iter().enumerate() {
+        last_idx.insert(kv.key.as_str(), i);
+    }
+    let mut out = Vec::new();
+    for (i, kv) in envs.iter().enumerate() {
+        if last_idx.get(kv.key.as_str()) == Some(&i) {
+            out.push(format!("{}={}", kv.key, kv.value));
+        }
+    }
+    out
+}
+
 pub struct OCISpecGenerator {
     inner_spec: Spec,
     container_config: ContainerConfig,
     container_spec: ContainerSpec,
     pause_pid: Option<i32>,
+    hostname: String,
 }
 
 impl OCISpecGenerator {
-    pub fn new(config: &ContainerConfig, spec: &ContainerSpec, pause_pid: Option<i32>) -> Self {
+    pub fn new(
+        config: &ContainerConfig,
+        spec: &ContainerSpec,
+        pause_pid: Option<i32>,
+        hostname: String,
+    ) -> Self {
         Self {
             inner_spec: Spec::default(),
             container_config: config.clone(),
             container_spec: spec.clone(),
             pause_pid,
+            hostname,
         }
     }
 
@@ -91,9 +117,17 @@ impl OCISpecGenerator {
         };
         process.set_args(Some(arg));
         process.set_terminal(Some(self.container_spec.tty));
+        process.set_env(Some(self.build_process_env(&process)));
 
         let capabilities = self.get_capabilities()?;
         process.set_capabilities(Some(capabilities));
+
+        // Wire CRI `ContainerConfig.envs` into OCI `process.env`. Dedupe by key so later entries
+        // win (same as Kubernetes); avoids duplicate keys confusing the runtime.
+        if !self.container_config.envs.is_empty() {
+            let env_strings = env_kv_list_to_oci_strings(&self.container_config.envs);
+            process.set_env(Some(env_strings));
+        }
 
         self.inner_spec.set_process(Some(process));
         Ok(())
@@ -102,6 +136,7 @@ impl OCISpecGenerator {
     pub fn generate(mut self) -> Result<Spec> {
         let root = RootBuilder::default().readonly(false).build()?;
         self.inner_spec.set_root(Some(root));
+        self.inner_spec.set_hostname(Some(self.hostname.clone()));
 
         let namespaces = self
             .create_container_namespaces()
@@ -148,7 +183,92 @@ impl OCISpecGenerator {
             self.inner_spec.set_mounts(Some(oci_mounts));
         }
 
+        if let Some(hooks) = self.build_gpu_hooks()? {
+            self.inner_spec.set_hooks(Some(hooks));
+            debug!("GPU hooks added to OCI spec: {:?}", self.inner_spec.hooks());
+        }
+
         Ok(self.inner_spec)
+    }
+
+    fn build_process_env(&self, process: &oci_spec::runtime::Process) -> Vec<String> {
+        let mut env_map = BTreeMap::new();
+
+        for entry in process.env().as_ref().cloned().unwrap_or_default() {
+            if let Some((key, value)) = split_env_entry(&entry) {
+                env_map.insert(key.to_string(), value.to_string());
+            }
+        }
+
+        for entry in self.gpu_env_vars() {
+            if let Some((key, value)) = split_env_entry(&entry) {
+                env_map.insert(key.to_string(), value.to_string());
+            }
+        }
+
+        env_map
+            .into_iter()
+            .map(|(key, value)| format!("{key}={value}"))
+            .collect()
+    }
+
+    fn build_gpu_hooks(&self) -> Result<Option<oci_spec::runtime::Hooks>> {
+        let Some(gpu_spec) = &self.container_spec.gpus else {
+            return Ok(None);
+        };
+        debug!("In build_gpu_hooks() GPU spec found: {:?}", gpu_spec);
+        if !gpu_spec.enabled {
+            return Ok(None);
+        }
+
+        let hook_path = find_nvidia_container_runtime_hook().ok_or_else(|| {
+            anyhow!(
+                "GPU support requested for container '{}' but nvidia-container-runtime-hook was not found in PATH or standard locations",
+                self.container_spec.name
+            )
+        })?;
+
+        // Requires cgroupsv2_devices feature enabled for libcontainer so that
+        // youki pre-loads a BPF cgroup device program. nvidia-container-cli
+        // then adds GPU device rules to the existing program. Without it, the
+        // "generate new" code path in nvidia-container-cli produces a broken
+        // BPF program that the kernel verifier rejects.
+        let hook = HookBuilder::default()
+            .path(hook_path)
+            .args(vec![
+                "nvidia-container-runtime-hook".to_string(),
+                "prestart".to_string(),
+            ])
+            .build()?;
+
+        let hooks = HooksBuilder::default().create_runtime(vec![hook]).build()?;
+        Ok(Some(hooks))
+    }
+
+    fn gpu_env_vars(&self) -> Vec<String> {
+        let Some(gpu_spec) = &self.container_spec.gpus else {
+            return vec![];
+        };
+        if !gpu_spec.enabled {
+            return vec![];
+        }
+
+        let visible_devices = if gpu_spec.device_ids.is_empty() {
+            "all".to_string()
+        } else {
+            gpu_spec.device_ids.join(",")
+        };
+
+        let driver_capabilities = if gpu_spec.driver_capabilities.is_empty() {
+            "utility,compute".to_string()
+        } else {
+            gpu_spec.driver_capabilities.join(",")
+        };
+
+        vec![
+            format!("NVIDIA_VISIBLE_DEVICES={visible_devices}"),
+            format!("NVIDIA_DRIVER_CAPABILITIES={driver_capabilities}"),
+        ]
     }
 
     fn create_container_namespaces(&self) -> Result<Vec<LinuxNamespace>> {
@@ -216,6 +336,36 @@ impl OCISpecGenerator {
 
         Ok(namespaces)
     }
+}
+
+fn find_nvidia_container_runtime_hook() -> Option<PathBuf> {
+    const CANDIDATES: &[&str] = &[
+        "/usr/bin/nvidia-container-runtime-hook",
+        "/usr/local/bin/nvidia-container-runtime-hook",
+        "/bin/nvidia-container-runtime-hook",
+    ];
+
+    if let Some(path) = env::var_os("PATH") {
+        for dir in env::split_paths(&path) {
+            let candidate = dir.join("nvidia-container-runtime-hook");
+            if is_executable_file(&candidate) {
+                return Some(candidate);
+            }
+        }
+    }
+
+    CANDIDATES
+        .iter()
+        .map(PathBuf::from)
+        .find(|candidate| is_executable_file(candidate))
+}
+
+fn is_executable_file(path: &Path) -> bool {
+    path.is_file()
+}
+
+fn split_env_entry(entry: &str) -> Option<(&str, &str)> {
+    entry.split_once('=')
 }
 
 macro_rules! drop_capability_from_set {

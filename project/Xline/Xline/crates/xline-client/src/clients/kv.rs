@@ -4,11 +4,12 @@ use xlineapi::{
     CompactionResponse, DeleteRangeResponse, PutResponse, RangeResponse, RequestWrapper,
     TxnResponse, command::Command,
 };
+use xlinerpc::MethodId;
 
 use crate::{
     CurpClient,
     error::Result,
-    transport::{Channel, MethodId},
+    transport::Channel,
     types::kv::{DeleteRangeOptions, PutOptions, RangeOptions, TxnRequest},
 };
 

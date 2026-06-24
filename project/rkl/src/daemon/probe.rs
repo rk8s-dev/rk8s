@@ -851,6 +851,7 @@ mod tests {
                     image: "busybox".to_string(),
                     ports: vec![],
                     args: vec![],
+                    tty: false,
                     resources: None,
                     liveness_probe: Some(Probe {
                         action: Some(ProbeAction::HttpGet(HttpGetAction {

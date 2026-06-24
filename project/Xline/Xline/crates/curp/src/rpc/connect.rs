@@ -370,8 +370,8 @@ mod quic_connect_impl {
     };
 
     use async_trait::async_trait;
+    use dquic::prelude::QuicClient;
     use futures::Stream;
-    use gm_quic::prelude::QuicClient;
 
     use crate::{
         members::ServerId,

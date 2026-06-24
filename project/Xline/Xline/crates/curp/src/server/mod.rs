@@ -1,5 +1,3 @@
-use std::{fmt::Debug, sync::Arc};
-
 use self::curp_node::CurpNode;
 pub use self::{
     conflict::{spec_pool_new::SpObject, uncommitted_pool::UcpObject},
@@ -11,6 +9,7 @@ use crate::{
     role_change::RoleChange,
 };
 use engine::SnapshotAllocator;
+use std::{fmt::Debug, sync::Arc};
 use tokio::sync::broadcast;
 use utils::{config::CurpConfig, task_manager::TaskManager};
 
@@ -81,7 +80,7 @@ impl<C: Command, CE: CommandExecutor<C>, RC: RoleChange> Rpc<C, CE, RC> {
         task_manager: Arc<TaskManager>,
         sps: Vec<SpObject<C>>,
         ucps: Vec<UcpObject<C>>,
-        quic_client: Arc<gm_quic::prelude::QuicClient>,
+        quic_client: Arc<dquic::prelude::QuicClient>,
     ) -> Result<Self, crate::rpc::CurpError> {
         Self::new_inner(
             cluster_info,
@@ -116,7 +115,7 @@ impl<C: Command, CE: CommandExecutor<C>, RC: RoleChange> Rpc<C, CE, RC> {
         task_manager: Arc<TaskManager>,
         sps: Vec<SpObject<C>>,
         ucps: Vec<UcpObject<C>>,
-        quic_client: Arc<gm_quic::prelude::QuicClient>,
+        quic_client: Arc<dquic::prelude::QuicClient>,
     ) -> Result<Self, crate::rpc::CurpError> {
         Self::new_inner(
             cluster_info,

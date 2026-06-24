@@ -1,5 +1,11 @@
 use crate::commands::{ComposeCommand, PodCommand, VolumeCommand, config_cli::ConfigArgs};
+#[cfg(feature = "sandbox")]
+use crate::sandbox::agent::SandboxAgentArgs;
+#[cfg(feature = "sandbox")]
 use crate::sandbox::cli::SandboxCommand;
+#[cfg(feature = "sandbox")]
+use crate::sandbox::guest::SandboxGuestInitArgs;
+#[cfg(feature = "sandbox")]
 use crate::sandbox::vm::SandboxShimArgs;
 use crate::{copy, image, images, login, logout, overlayfs, pull, push, repo, run};
 use clap::{ArgAction, Parser, Subcommand};
@@ -67,10 +73,18 @@ pub enum Commands {
     /// Save an image to a tar archive
     Save(images::SaveArgs),
     /// Manage AI sandboxes
+    #[cfg(feature = "sandbox")]
     #[command(subcommand)]
     Sandbox(SandboxCommand),
+    #[cfg(feature = "sandbox")]
     #[command(hide = true, name = "sandbox-shim")]
     SandboxShim(SandboxShimArgs),
+    #[cfg(feature = "sandbox")]
+    #[command(hide = true, name = "sandbox-agent")]
+    SandboxAgent(SandboxAgentArgs),
+    #[cfg(feature = "sandbox")]
+    #[command(hide = true, name = "sandbox-guest-init")]
+    SandboxGuestInit(SandboxGuestInitArgs),
     /// Start one or more containers
     Start(StartArgs),
     /// Display the status of a container

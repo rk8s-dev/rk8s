@@ -1,11 +1,14 @@
+use crate::chunk::SliceDesc;
 use crate::meta::MetaStore;
 use crate::meta::config::Config;
 use crate::meta::config::{
     CacheConfig, ClientOptions, CompactConfig, DatabaseConfig, DatabaseType,
 };
 use crate::meta::file_lock::{FileLockQuery, FileLockRange, FileLockType};
-use crate::meta::store::{MetaError, SetAttrFlags, SetAttrRequest};
+use crate::meta::store::{LockName, MetaError, SetAttrFlags, SetAttrRequest};
 use crate::meta::stores::EtcdMetaStore;
+use crate::vfs::chunk_id_for;
+use chrono::Utc;
 use serial_test::serial;
 use tokio::time;
 use uuid::Uuid;
@@ -72,7 +75,7 @@ async fn new_test_store() -> EtcdMetaStore {
 
     EtcdMetaStore::from_config(test_config())
         .await
-        .expect("Failed to create test database store")
+        .expect("Failed to create test etcd store")
 }
 
 /// Create a new test store with pre-configured session ID
@@ -114,7 +117,7 @@ impl TestSessionManager {
         let config = shared_db_config();
         let first_store = EtcdMetaStore::from_config(config.clone())
             .await
-            .expect("Failed to create shared test database store");
+            .expect("Failed to create shared test etcd store");
 
         let first_session_id = Uuid::now_v7();
         first_store
@@ -127,7 +130,7 @@ impl TestSessionManager {
         for _ in 1..session_count {
             let store = EtcdMetaStore::from_config(config.clone())
                 .await
-                .expect("Failed to create shared test database store");
+                .expect("Failed to create shared test etcd store");
 
             let session_id = Uuid::now_v7();
             store.set_sid(session_id).expect("Failed to set session ID");
@@ -217,6 +220,28 @@ async fn test_hardlink_dentry_binding_cross_dir_move_rename() {
     assert_eq!(store.lookup(dir_b, "y").await.unwrap(), None);
     assert_eq!(store.lookup(dir_c, "z").await.unwrap(), Some(ino));
     assert_eq!(store.lookup(dir_a, "x").await.unwrap(), Some(ino));
+}
+
+#[serial]
+#[tokio::test]
+#[ignore]
+async fn test_directory_same_parent_rename_updates_lookup() {
+    let store = new_test_store().await;
+    let root = store.root_ino();
+
+    let parent = store.mkdir(root, "parent".to_string()).await.unwrap();
+    let dir_ino = store.mkdir(parent, "old_dir".to_string()).await.unwrap();
+
+    store
+        .rename(parent, "old_dir", parent, "new_dir".to_string())
+        .await
+        .unwrap();
+
+    assert_eq!(store.lookup(parent, "old_dir").await.unwrap(), None);
+    assert_eq!(
+        store.lookup(parent, "new_dir").await.unwrap(),
+        Some(dir_ino)
+    );
 }
 
 #[serial]
@@ -819,4 +844,676 @@ async fn test_chmod_nonexistent_inode() {
     let store = new_test_store().await;
     let result = store.chmod(999999, 0o644).await;
     assert!(result.is_err(), "chmod on nonexistent inode should fail");
+}
+
+#[serial]
+#[tokio::test]
+#[ignore]
+async fn test_compaction_gc_roundtrip_etcd() {
+    let store = new_test_store().await;
+
+    store
+        .append_slice(
+            11,
+            SliceDesc {
+                slice_id: 101,
+                chunk_id: 11,
+                offset: 0,
+                length: 4096,
+            },
+        )
+        .await
+        .unwrap();
+    store
+        .append_slice(
+            22,
+            SliceDesc {
+                slice_id: 202,
+                chunk_id: 22,
+                offset: 0,
+                length: 1024,
+            },
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(store.list_chunk_ids(10).await.unwrap(), vec![11, 22]);
+    assert_eq!(store.list_chunk_ids(1).await.unwrap().len(), 1);
+
+    let current = store.get_slices(11).await.unwrap();
+    let delayed = SliceDesc::encode_delayed_data(&current, &[101]);
+    let replacement = SliceDesc {
+        slice_id: 303,
+        chunk_id: 11,
+        offset: 0,
+        length: 2048,
+    };
+
+    store
+        .replace_slices_for_compact(11, &[replacement], &delayed)
+        .await
+        .unwrap();
+
+    assert_eq!(store.get_slices(11).await.unwrap(), vec![replacement]);
+
+    let pending = store.process_delayed_slices(10, -1).await.unwrap();
+    assert_eq!(pending.len(), 1);
+    assert_eq!(pending[0].0, 101);
+    assert_eq!(pending[0].1, 0);
+    assert_eq!(pending[0].2, 4096);
+
+    store
+        .confirm_delayed_deleted(&[pending[0].3])
+        .await
+        .unwrap();
+    assert!(
+        store
+            .process_delayed_slices(10, -1)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[serial]
+#[tokio::test]
+#[ignore]
+async fn test_light_compaction_preserves_unreplaced_slices_etcd() {
+    let store = new_test_store().await;
+
+    let retained = SliceDesc {
+        slice_id: 501,
+        chunk_id: 55,
+        offset: 0,
+        length: 4096,
+    };
+    let replaced = SliceDesc {
+        slice_id: 502,
+        chunk_id: 55,
+        offset: 1024,
+        length: 1024,
+    };
+
+    store.append_slice(55, retained).await.unwrap();
+    store.append_slice(55, replaced).await.unwrap();
+
+    let current = store.get_slices(55).await.unwrap();
+    let delayed = SliceDesc::encode_delayed_data(&current, &[502]);
+
+    store
+        .replace_slices_for_compact(55, &[], &delayed)
+        .await
+        .unwrap();
+
+    assert_eq!(store.get_slices(55).await.unwrap(), vec![retained]);
+
+    let pending = store.process_delayed_slices(10, -1).await.unwrap();
+    assert_eq!(pending.len(), 1);
+    assert_eq!(pending[0].0, 502);
+    assert_eq!(pending[0].1, 1024);
+    assert_eq!(pending[0].2, 1024);
+}
+
+#[serial]
+#[tokio::test]
+#[ignore]
+async fn test_process_delayed_slices_removes_empty_chunk_key_etcd() {
+    let store = new_test_store().await;
+
+    let original = SliceDesc {
+        slice_id: 601,
+        chunk_id: 66,
+        offset: 0,
+        length: 512,
+    };
+    store.append_slice(66, original).await.unwrap();
+
+    let delayed = SliceDesc::encode_delayed_data(&[original], &[601]);
+    store
+        .replace_slices_for_compact(66, &[], &delayed)
+        .await
+        .unwrap();
+
+    assert!(store.get_slices(66).await.unwrap().is_empty());
+    assert_eq!(store.list_chunk_ids(10).await.unwrap(), Vec::<u64>::new());
+
+    let pending = store.process_delayed_slices(10, -1).await.unwrap();
+    assert_eq!(pending.len(), 1);
+    assert_eq!(pending[0].0, 601);
+
+    assert!(store.get_slices(66).await.unwrap().is_empty());
+    assert_eq!(store.list_chunk_ids(10).await.unwrap(), Vec::<u64>::new());
+}
+
+#[serial]
+#[tokio::test]
+#[ignore]
+async fn test_uncommitted_gc_and_version_conflict_etcd() {
+    let store = new_test_store().await;
+
+    let initial = SliceDesc {
+        slice_id: 401,
+        chunk_id: 33,
+        offset: 0,
+        length: 512,
+    };
+    store.append_slice(33, initial).await.unwrap();
+
+    let replacement = SliceDesc {
+        slice_id: 402,
+        chunk_id: 33,
+        offset: 0,
+        length: 256,
+    };
+    let delayed = SliceDesc::encode_delayed_data(&[initial], &[401]);
+
+    let err = store
+        .replace_slices_for_compact_with_version(33, &[replacement], &delayed, &[])
+        .await
+        .unwrap_err();
+    assert!(matches!(err, MetaError::ContinueRetry));
+
+    store
+        .record_uncommitted_slice(402, 33, 256, "compact_heavy")
+        .await
+        .unwrap();
+    assert!(
+        store
+            .etcd_get_json_serde_only::<serde_json::Value>("gc/uncommitted/pending/402")
+            .await
+            .unwrap()
+            .is_some()
+    );
+
+    store
+        .replace_slices_for_compact_with_version(33, &[replacement], &delayed, &[initial])
+        .await
+        .unwrap();
+    assert_eq!(store.get_slices(33).await.unwrap(), vec![replacement]);
+    assert!(
+        store
+            .etcd_get_json_serde_only::<serde_json::Value>("gc/uncommitted/pending/402")
+            .await
+            .unwrap()
+            .is_none()
+    );
+
+    let first_id = store
+        .record_uncommitted_slice(9001, 33, 8192, "compact_heavy")
+        .await
+        .unwrap();
+    assert!(first_id > 0);
+
+    let orphans = store
+        .cleanup_orphan_uncommitted_slices(-1, 10)
+        .await
+        .unwrap();
+    assert_eq!(orphans, vec![(9001, 8192)]);
+
+    store.delete_uncommitted_slices(&[9001]).await.unwrap();
+    assert!(
+        store
+            .cleanup_orphan_uncommitted_slices(-1, 10)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+
+    let second_id = store
+        .record_uncommitted_slice(9002, 33, 4096, "compact_heavy")
+        .await
+        .unwrap();
+    assert!(second_id > first_id);
+    store.confirm_slice_committed(9002).await.unwrap();
+    assert!(
+        store
+            .cleanup_orphan_uncommitted_slices(-1, 10)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[serial]
+#[tokio::test]
+#[ignore]
+async fn test_chunk_compact_lock_blocks_write_until_release_etcd() {
+    let store = new_test_store().await;
+    let ino = store
+        .create_file(store.root_ino(), "lock_write.txt".to_string())
+        .await
+        .unwrap();
+
+    assert!(
+        store
+            .get_global_lock(LockName::ChunkCompactLock(44), 30)
+            .await
+    );
+    assert!(
+        store
+            .is_global_lock_held(LockName::ChunkCompactLock(44), 30)
+            .await
+    );
+
+    let blocked = store
+        .write(
+            ino,
+            44,
+            SliceDesc {
+                slice_id: 7001,
+                chunk_id: 44,
+                offset: 0,
+                length: 128,
+            },
+            128,
+        )
+        .await
+        .unwrap_err();
+    assert!(matches!(blocked, MetaError::ContinueRetry));
+
+    assert!(
+        store
+            .release_global_lock(LockName::ChunkCompactLock(44))
+            .await
+    );
+    assert!(
+        !store
+            .is_global_lock_held(LockName::ChunkCompactLock(44), 30)
+            .await
+    );
+
+    store
+        .write(
+            ino,
+            44,
+            SliceDesc {
+                slice_id: 7002,
+                chunk_id: 44,
+                offset: 0,
+                length: 128,
+            },
+            128,
+        )
+        .await
+        .unwrap();
+
+    let slices = store.get_slices(44).await.unwrap();
+    assert_eq!(slices.len(), 1);
+    assert_eq!(slices[0].slice_id, 7002);
+}
+
+#[serial]
+#[tokio::test]
+#[ignore]
+async fn test_stale_compact_lock_release_does_not_delete_reacquired_lock_etcd() {
+    let stale_holder = new_test_store().await;
+    let current_holder = EtcdMetaStore::from_config(test_config())
+        .await
+        .expect("Failed to create second etcd store");
+
+    assert!(
+        stale_holder
+            .get_global_lock(LockName::ChunkCompactLock(77), 0)
+            .await
+    );
+    time::sleep(std::time::Duration::from_millis(2)).await;
+
+    assert!(
+        current_holder
+            .get_global_lock(LockName::ChunkCompactLock(77), 0)
+            .await
+    );
+
+    assert!(
+        !stale_holder
+            .release_global_lock(LockName::ChunkCompactLock(77))
+            .await
+    );
+    assert!(
+        current_holder
+            .is_global_lock_held(LockName::ChunkCompactLock(77), 30)
+            .await
+    );
+
+    assert!(
+        current_holder
+            .release_global_lock(LockName::ChunkCompactLock(77))
+            .await
+    );
+    assert!(
+        !current_holder
+            .is_global_lock_held(LockName::ChunkCompactLock(77), 30)
+            .await
+    );
+}
+
+#[serial]
+#[tokio::test]
+#[ignore]
+async fn test_expired_compact_lock_does_not_block_write_etcd() {
+    let store = new_test_store().await;
+    let ino = store
+        .create_file(store.root_ino(), "expired_lock_write.txt".to_string())
+        .await
+        .unwrap();
+    let expired_at =
+        chrono::Utc::now().timestamp_millis() - chrono::Duration::days(1).num_milliseconds();
+
+    store
+        .etcd_put_json_serde_only(
+            LockName::ChunkCompactLock(91).to_string(),
+            &expired_at,
+            None,
+        )
+        .await
+        .unwrap();
+
+    store
+        .write(
+            ino,
+            91,
+            SliceDesc {
+                slice_id: 7101,
+                chunk_id: 91,
+                offset: 0,
+                length: 128,
+            },
+            128,
+        )
+        .await
+        .unwrap();
+
+    let slices = store.get_slices(91).await.unwrap();
+    assert_eq!(slices.len(), 1);
+    assert_eq!(slices[0].slice_id, 7101);
+}
+
+#[serial]
+#[tokio::test]
+#[ignore]
+async fn test_truncate_updates_size_and_prunes_slices_etcd() {
+    let store = new_test_store().await;
+    let ino = store
+        .create_file(store.root_ino(), "truncate.txt".to_string())
+        .await
+        .unwrap();
+    let chunk_size = 1024;
+    let chunk0 = chunk_id_for(ino, 0).unwrap();
+    let chunk1 = chunk_id_for(ino, 1).unwrap();
+
+    store
+        .write(
+            ino,
+            chunk0,
+            SliceDesc {
+                slice_id: 8001,
+                chunk_id: chunk0,
+                offset: 0,
+                length: 1024,
+            },
+            2048,
+        )
+        .await
+        .unwrap();
+    store
+        .write(
+            ino,
+            chunk1,
+            SliceDesc {
+                slice_id: 8002,
+                chunk_id: chunk1,
+                offset: 0,
+                length: 1024,
+            },
+            2048,
+        )
+        .await
+        .unwrap();
+
+    store.truncate(ino, 512, chunk_size).await.unwrap();
+
+    assert_eq!(store.stat(ino).await.unwrap().unwrap().size, 512);
+    assert_eq!(
+        store.get_slices(chunk0).await.unwrap(),
+        vec![SliceDesc {
+            slice_id: 8001,
+            chunk_id: chunk0,
+            offset: 0,
+            length: 512,
+        }]
+    );
+    assert!(store.get_slices(chunk1).await.unwrap().is_empty());
+}
+
+#[serial]
+#[tokio::test]
+#[ignore]
+async fn test_truncate_batches_large_chunk_deletes_etcd() {
+    let store = new_test_store().await;
+    let ino = store
+        .create_file(store.root_ino(), "truncate_large.txt".to_string())
+        .await
+        .unwrap();
+    let chunk_size = 1024;
+    let chunk_count = 60;
+
+    for idx in 0..chunk_count {
+        let chunk_id = chunk_id_for(ino, idx).unwrap();
+        store
+            .write(
+                ino,
+                chunk_id,
+                SliceDesc {
+                    slice_id: 9000 + idx,
+                    chunk_id,
+                    offset: 0,
+                    length: chunk_size,
+                },
+                (idx + 1) * chunk_size,
+            )
+            .await
+            .unwrap();
+    }
+
+    store.truncate(ino, 0, chunk_size).await.unwrap();
+
+    assert_eq!(store.stat(ino).await.unwrap().unwrap().size, 0);
+    for idx in 0..chunk_count {
+        let chunk_id = chunk_id_for(ino, idx).unwrap();
+        assert!(store.get_slices(chunk_id).await.unwrap().is_empty());
+    }
+}
+
+#[serial]
+#[tokio::test]
+#[ignore]
+async fn test_replace_slices_for_compact_rejects_non_atomic_large_delayed_batch_etcd() {
+    let store = new_test_store().await;
+    let chunk_id = 88;
+    let slice_count = 60;
+    let mut slices = Vec::new();
+    let mut replaced_ids = Vec::new();
+
+    for idx in 0..slice_count {
+        let slice = SliceDesc {
+            slice_id: 10_000 + idx,
+            chunk_id,
+            offset: idx * 1024,
+            length: 1024,
+        };
+        store.append_slice(chunk_id, slice).await.unwrap();
+        slices.push(slice);
+        replaced_ids.push(slice.slice_id);
+    }
+
+    let delayed = SliceDesc::encode_delayed_data(&slices, &replaced_ids);
+    let err = store
+        .replace_slices_for_compact(chunk_id, &[], &delayed)
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, MetaError::Internal(message) if message.contains("Atomic compaction requires"))
+    );
+
+    assert_eq!(store.get_slices(chunk_id).await.unwrap(), slices);
+    assert!(
+        store
+            .process_delayed_slices(10, -1)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[serial]
+#[tokio::test]
+#[ignore]
+async fn test_cleanup_orphan_uncommitted_slices_pages_and_keeps_oldest_ids_etcd() {
+    let store = new_test_store().await;
+    let chunk_id = 89;
+
+    for idx in 0..130u64 {
+        store
+            .record_uncommitted_slice(20_000 + idx, chunk_id, 512 + idx, "compact_heavy")
+            .await
+            .unwrap();
+    }
+
+    let cleaned = store
+        .cleanup_orphan_uncommitted_slices(-1, 3)
+        .await
+        .unwrap();
+    assert_eq!(cleaned, vec![(20_000, 512), (20_001, 513), (20_002, 514)]);
+}
+
+#[serial]
+#[tokio::test]
+#[ignore]
+async fn test_list_chunk_ids_rotates_scan_window_etcd() {
+    let store = new_test_store().await;
+
+    for chunk_id in [1u64, 2, 3, 4] {
+        store
+            .append_slice(
+                chunk_id,
+                SliceDesc {
+                    slice_id: 30_000 + chunk_id,
+                    chunk_id,
+                    offset: 0,
+                    length: 512,
+                },
+            )
+            .await
+            .unwrap();
+    }
+
+    assert_eq!(store.list_chunk_ids(2).await.unwrap(), vec![1, 2]);
+    assert_eq!(store.list_chunk_ids(2).await.unwrap(), vec![3, 4]);
+    assert_eq!(store.list_chunk_ids(2).await.unwrap(), vec![1, 2]);
+}
+
+#[serial]
+#[tokio::test]
+#[ignore]
+async fn test_list_chunk_ids_does_not_duplicate_short_prefix_scan_etcd() {
+    let store = new_test_store().await;
+
+    for chunk_id in [1u64, 2, 3, 4] {
+        store
+            .append_slice(
+                chunk_id,
+                SliceDesc {
+                    slice_id: 31_000 + chunk_id,
+                    chunk_id,
+                    offset: 0,
+                    length: 512,
+                },
+            )
+            .await
+            .unwrap();
+    }
+
+    assert_eq!(store.list_chunk_ids(10).await.unwrap(), vec![1, 2, 3, 4]);
+    assert_eq!(store.list_chunk_ids(10).await.unwrap(), vec![1, 2, 3, 4]);
+}
+
+#[serial]
+#[tokio::test]
+#[ignore]
+async fn test_process_delayed_slices_filters_by_age_before_limit_etcd() {
+    let store = new_test_store().await;
+    let chunk_id = 90;
+
+    for idx in 0..6u64 {
+        let slice = SliceDesc {
+            slice_id: 40_000 + idx,
+            chunk_id,
+            offset: idx * 10,
+            length: 64,
+        };
+        store.append_slice(chunk_id, slice).await.unwrap();
+        let delayed = SliceDesc::encode_delayed_data(&[slice], &[slice.slice_id]);
+        store
+            .replace_slices_for_compact(chunk_id, &[], &delayed)
+            .await
+            .unwrap();
+    }
+
+    let stale_pending_keys = [
+        "gc/delayed/pending/1",
+        "gc/delayed/pending/2",
+        "gc/delayed/pending/3",
+    ];
+    let recent_pending_keys = [
+        "gc/delayed/pending/4",
+        "gc/delayed/pending/5",
+        "gc/delayed/pending/6",
+    ];
+
+    let now = Utc::now().timestamp();
+    let stale_created_at = now - 7200;
+    let recent_created_at = now;
+
+    for key in stale_pending_keys {
+        let mut record = store
+            .etcd_get_json_serde_only::<serde_json::Value>(key)
+            .await
+            .unwrap()
+            .unwrap();
+        record["created_at"] = serde_json::Value::from(stale_created_at);
+        store
+            .etcd_put_json_serde_only(key, &record, None)
+            .await
+            .unwrap();
+    }
+
+    for key in recent_pending_keys {
+        let mut record = store
+            .etcd_get_json_serde_only::<serde_json::Value>(key)
+            .await
+            .unwrap()
+            .unwrap();
+        record["created_at"] = serde_json::Value::from(recent_created_at);
+        store
+            .etcd_put_json_serde_only(key, &record, None)
+            .await
+            .unwrap();
+    }
+
+    let ready = store.process_delayed_slices(3, 3600).await.unwrap();
+    assert_eq!(ready.len(), 3);
+    assert_eq!(ready[0].0, 40_000);
+    assert_eq!(ready[1].0, 40_001);
+    assert_eq!(ready[2].0, 40_002);
+
+    let processed_ids: Vec<i64> = ready.iter().map(|entry| entry.3).collect();
+    store.confirm_delayed_deleted(&processed_ids).await.unwrap();
+
+    assert!(
+        store
+            .process_delayed_slices(10, 3600)
+            .await
+            .unwrap()
+            .is_empty()
+    );
 }

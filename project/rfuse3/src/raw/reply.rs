@@ -447,3 +447,25 @@ impl From<ReplyCopyFileRange> for fuse_write_out {
         }
     }
 }
+
+#[cfg(target_os = "macos")]
+#[derive(Debug, Copy, Clone, Ord, PartialOrd, Eq, PartialEq, Hash)]
+/// macOS GETXTIMES reply: backup and create timestamps.
+pub struct ReplyXTimes {
+    /// backup time.
+    pub bkuptime: Timestamp,
+    /// creation time.
+    pub crtime: Timestamp,
+}
+
+#[cfg(target_os = "macos")]
+impl From<ReplyXTimes> for crate::raw::abi::fuse_getxtimes_out {
+    fn from(t: ReplyXTimes) -> Self {
+        crate::raw::abi::fuse_getxtimes_out {
+            bkuptime: t.bkuptime.sec as u64,
+            crtime: t.crtime.sec as u64,
+            bkuptimensec: t.bkuptime.nsec,
+            crtimensec: t.crtime.nsec,
+        }
+    }
+}

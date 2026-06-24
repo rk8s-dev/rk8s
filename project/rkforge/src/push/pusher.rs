@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use std::pin::Pin;
 use std::time::Duration;
 
-type BoxedFuture = Pin<Box<dyn Future<Output = Result<PushResponse, OciDistributionError>> + Send>>;
+type BoxedFuture = Pin<Box<dyn Future<Output = anyhow::Result<PushResponse>> + Send>>;
 
 pub struct PushTask {
     digest: String,
@@ -78,19 +78,24 @@ impl Pusher {
     }
 }
 
-fn format_push_error(e: &OciDistributionError) -> anyhow::Result<String> {
-    match e {
-        OciDistributionError::ServerError { message, .. } => {
-            let errors = serde_json::from_str::<ErrorResponse>(message)?;
-            let first_error = &errors.detail()[0];
-            first_error
-                .message()
-                .as_ref()
-                .map(|e| e.to_string())
-                .ok_or_else(|| {
-                    anyhow::anyhow!("response from distribution should include error message")
-                })
+fn format_push_error(e: &anyhow::Error) -> anyhow::Result<String> {
+    match e.downcast_ref::<OciDistributionError>() {
+        Some(OciDistributionError::ServerError { message, .. }) => {
+            if let Ok(errors) = serde_json::from_str::<ErrorResponse>(message)
+                && let Some(first) = errors.detail().first()
+                && let Some(msg) = first.message().as_ref()
+            {
+                return Ok(msg.to_string());
+            }
+            Ok(format!("server error: {message}"))
         }
-        _ => Ok(e.to_string()),
+        Some(other) => Ok(other.to_string()),
+        None => {
+            let mut chain = Vec::new();
+            for cause in e.chain() {
+                chain.push(cause.to_string());
+            }
+            Ok(chain.join(": "))
+        }
     }
 }

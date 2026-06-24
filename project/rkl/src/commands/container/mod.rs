@@ -203,6 +203,7 @@ impl ContainerRunner {
                 ports: vec![],
                 args: vec![],
                 tty: false,
+                gpus: None,
                 resources: None,
                 liveness_probe: None,
                 readiness_probe: None,
@@ -638,10 +639,9 @@ pub fn delete_container(id: &str) -> Result<()> {
     // Get bundle_path before delete (container state will be cleaned up after delete)
     let container = load_container(&root_path, id)?;
     let bundle_path = container.bundle().to_path_buf();
-    let pid = container
-        .pid()
-        .ok_or(anyhow!("invalid container {} can't find pid", id))?;
-    remove_container_network(pid)?;
+    if let Some(pid) = container.pid() {
+        remove_container_network(pid)?;
+    }
 
     let delete_args = Delete {
         container_id: id.to_string(),
@@ -922,17 +922,8 @@ mod test {
         let spec = ContainerSpec {
             name: "demo1".to_string(),
             image: image_dir.path().to_string_lossy().to_string(),
-            ports: vec![],
             args: vec!["/bin/echo".to_string(), "hi".to_string()],
-            resources: None,
-            liveness_probe: None,
-            readiness_probe: None,
-            startup_probe: None,
-            security_context: None,
-            env: None,
-            volume_mounts: None,
-            command: None,
-            working_dir: None,
+            ..Default::default()
         };
         let runner = ContainerRunner::from_spec(spec.clone(), None).unwrap();
         assert_eq!(runner.container_id, "demo1");
@@ -954,17 +945,7 @@ mod test {
             ContainerSpec {
                 name: "demo2".to_string(),
                 image: image_dir.path().to_string_lossy().to_string(),
-                ports: vec![],
-                args: vec![],
-                resources: None,
-                liveness_probe: None,
-                readiness_probe: None,
-                startup_probe: None,
-                security_context: None,
-                env: None,
-                volume_mounts: None,
-                command: None,
-                working_dir: None,
+                ..Default::default()
             },
             None,
         )

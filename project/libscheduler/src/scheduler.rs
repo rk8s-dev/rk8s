@@ -7,6 +7,7 @@ use tokio::time::{Duration, Instant};
 
 use crate::cache::Cache;
 use crate::cycle_state::CycleState;
+use crate::gang_state::GangStateStore;
 use crate::models::{Assignment, BackOffPod, PodNameWithPriority};
 use crate::models::{NodeInfo, PodInfo};
 use crate::plugins::node_resources_fit::ScoringStrategy;
@@ -15,12 +16,18 @@ use crate::plugins::{
     PreFilterPlugin, PreScorePlugin, QueueingHint, Registry, ScorePlugin, Status,
 };
 
+pub const GANG_TIMEOUT_DEFAULT: Duration = Duration::from_secs(60);
+pub const GANG_TIMEOUT_CHECK_INTERVAL_DEFAULT: Duration = Duration::from_secs(1);
+
 pub struct Scheduler {
     cache: Arc<RwLock<Cache>>,
     queue: Arc<SchedulingQueue>,
     // Differ to k8s, we don't have profile cofig now
     strategy: ScoringStrategy,
     enabled_plugins: EnabledPlugins,
+    gang_state: Arc<GangStateStore>,
+    gang_timeout: Duration,
+    gang_timeout_check_interval: Duration,
 }
 
 type ActiveQueue = Arc<Mutex<BinaryHeap<PodNameWithPriority>>>;
@@ -254,7 +261,8 @@ impl Default for Scheduler {
 
 impl Scheduler {
     pub fn new(strategy: ScoringStrategy, plugins: Plugins) -> Self {
-        let registry = Registry::default();
+        let gang_state = Arc::new(GangStateStore::default());
+        let registry = Registry::new(gang_state.clone());
         let mut enabled = EnabledPlugins::default();
 
         macro_rules! enable_plugins {
@@ -301,7 +309,17 @@ impl Scheduler {
             queue: Arc::new(SchedulingQueue::new(queueing_hints)),
             strategy,
             enabled_plugins: enabled,
+            gang_state,
+            gang_timeout: GANG_TIMEOUT_DEFAULT,
+            gang_timeout_check_interval: GANG_TIMEOUT_CHECK_INTERVAL_DEFAULT,
         }
+    }
+
+    /// Test hook: override gang timeout & check interval to avoid waiting 60s in tests.
+    pub fn with_gang_timeout(mut self, timeout: Duration, check_interval: Duration) -> Self {
+        self.gang_timeout = timeout;
+        self.gang_timeout_check_interval = check_interval;
+        self
     }
 
     fn run_prefilter_plugin(
@@ -402,6 +420,7 @@ impl Scheduler {
         queue: Arc<SchedulingQueue>,
         res_sx: UnboundedSender<Result<Assignment, anyhow::Error>>,
         strategy: ScoringStrategy,
+        gang_state: Arc<GangStateStore>,
     ) {
         let (pod_priority, pod_name) = queue.next_pod().await;
         let cache_read = cache.read().await;
@@ -481,14 +500,33 @@ impl Scheduler {
                 &filtered,
             );
             scores.sort_by_key(|b| std::cmp::Reverse(b.0));
+            let chosen = scores[0].1.name.clone();
             let mut cache_write = cache.write().await;
-            if cache_write.assume(&pod_name, &scores[0].1.name) {
-                res_sx
-                    .send(Ok(Assignment {
-                        pod_name,
-                        node_name: scores[0].1.name.clone(),
-                    }))
-                    .expect("scheduling result rx closed before scheduler closed");
+            if cache_write.assume(&pod_name, &chosen) {
+                drop(cache_write);
+                match pod_info.spec.gang.as_ref() {
+                    None => {
+                        res_sx
+                            .send(Ok(Assignment {
+                                pod_name,
+                                node_name: chosen,
+                            }))
+                            .expect("scheduling result rx closed before scheduler closed");
+                    }
+                    Some(g) => {
+                        let full = gang_state.add_member(&g.id, g.size, &pod_name, &chosen);
+                        if full && let Some(members) = gang_state.take_and_clear(&g.id) {
+                            for (p, n) in members {
+                                res_sx
+                                    .send(Ok(Assignment {
+                                        pod_name: p,
+                                        node_name: n,
+                                    }))
+                                    .expect("scheduling result rx closed before scheduler closed");
+                            }
+                        }
+                    }
+                }
             }
         }
     }
@@ -509,6 +547,7 @@ impl Scheduler {
         let enabled_plugins = self.enabled_plugins.clone();
         let (sx, rx) = unbounded_channel();
         let strategy = self.strategy.clone();
+        let gang_state = self.gang_state.clone();
         tokio::spawn(async move {
             loop {
                 Self::schedule_one(
@@ -517,10 +556,43 @@ impl Scheduler {
                     queue.clone(),
                     sx.clone(),
                     strategy.clone(),
+                    gang_state.clone(),
                 )
                 .await;
             }
         });
+
+        // Gang timeout watchdog: roll back assumes for incomplete gangs that didn't fill in time.
+        let gang_state_bg = self.gang_state.clone();
+        let cache_bg = self.cache.clone();
+        let queue_bg = self.queue.clone();
+        let timeout = self.gang_timeout;
+        let check_interval = self.gang_timeout_check_interval;
+        tokio::spawn(async move {
+            let mut t = interval(check_interval);
+            loop {
+                t.tick().await;
+                let timed_out = gang_state_bg.take_timed_out(timeout);
+                if timed_out.is_empty() {
+                    continue;
+                }
+                let mut to_requeue: Vec<(String, u64)> = Vec::new();
+                {
+                    let mut cache_w = cache_bg.write().await;
+                    for (_gang_id, members) in timed_out {
+                        for pod_name in members.keys() {
+                            if let Some(p) = cache_w.unassume(pod_name) {
+                                to_requeue.push((p.name, p.spec.priority));
+                            }
+                        }
+                    }
+                }
+                for (name, priority) in to_requeue {
+                    queue_bg.push(name, priority).await;
+                }
+            }
+        });
+
         rx
     }
 
@@ -835,6 +907,7 @@ mod tests {
             scheduler.queue.clone(),
             sx,
             scheduler.strategy,
+            scheduler.gang_state.clone(),
         )
         .await;
         let res = rx.recv().await.unwrap();
@@ -842,5 +915,76 @@ mod tests {
         let assignment = res.unwrap();
         assert_eq!(assignment.pod_name, "pod");
         assert_eq!(assignment.node_name, "node");
+    }
+
+    #[tokio::test]
+    async fn test_schedule_one_gang_holds_until_full() {
+        use crate::models::GangSpec;
+
+        let scheduler: Scheduler =
+            Scheduler::new(ScoringStrategy::LeastAllocated, Plugins::default());
+
+        {
+            let mut cache = scheduler.cache.write().await;
+            cache.update_node(NodeInfo {
+                name: "node".to_string(),
+                allocatable: ResourcesRequirements {
+                    cpu: 100,
+                    memory: 1000,
+                },
+                ..Default::default()
+            });
+            for i in 0..3u32 {
+                cache.update_pod(PodInfo {
+                    name: format!("p{i}"),
+                    labels: std::collections::HashMap::new(),
+                    spec: PodSpec {
+                        resources: ResourcesRequirements { cpu: 1, memory: 1 },
+                        priority: 1,
+                        gang: Some(GangSpec {
+                            id: "g".into(),
+                            size: 3,
+                        }),
+                        ..Default::default()
+                    },
+                    queued_info: QueuedInfo::default(),
+                    scheduled: None,
+                });
+            }
+        }
+
+        let (sx, mut rx) = unbounded_channel();
+        for i in 0..3u32 {
+            scheduler.queue.push(format!("p{i}"), 1).await;
+        }
+        // First two schedule_one calls: nothing should be sent.
+        for _ in 0..2 {
+            Scheduler::schedule_one(
+                scheduler.enabled_plugins.clone(),
+                scheduler.cache.clone(),
+                scheduler.queue.clone(),
+                sx.clone(),
+                scheduler.strategy.clone(),
+                scheduler.gang_state.clone(),
+            )
+            .await;
+            assert!(rx.try_recv().is_err());
+        }
+        // Third call closes the gang: expect 3 assignments drained.
+        Scheduler::schedule_one(
+            scheduler.enabled_plugins,
+            scheduler.cache.clone(),
+            scheduler.queue.clone(),
+            sx,
+            scheduler.strategy,
+            scheduler.gang_state.clone(),
+        )
+        .await;
+        let mut got = Vec::new();
+        for _ in 0..3 {
+            got.push(rx.recv().await.unwrap().unwrap().pod_name);
+        }
+        got.sort();
+        assert_eq!(got, vec!["p0", "p1", "p2"]);
     }
 }

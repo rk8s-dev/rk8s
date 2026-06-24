@@ -21,6 +21,7 @@ mod registry;
 mod repo;
 mod rt;
 mod run;
+#[cfg(feature = "sandbox")]
 mod sandbox;
 mod storage;
 mod task;
@@ -29,6 +30,8 @@ use crate::args::{Cli, Commands};
 use crate::commands::{compose, config_cli, container, pod, volume};
 use anyhow::Result;
 use clap::Parser;
+#[cfg(feature = "sandbox")]
+use std::path::Path;
 use tracing_subscriber::prelude::*;
 
 fn main() -> Result<()> {
@@ -36,6 +39,28 @@ fn main() -> Result<()> {
         .with(tracing_subscriber::fmt::layer().with_thread_ids(true))
         .with(tracing_subscriber::EnvFilter::from_default_env())
         .init();
+
+    #[cfg(feature = "sandbox")]
+    {
+        if let Some(helper_name) = std::env::args_os().next().and_then(|arg0| {
+            Path::new(&arg0)
+                .file_name()
+                .and_then(|name| name.to_str())
+                .map(str::to_string)
+        }) {
+            match helper_name.as_str() {
+                "rkforge-sandbox-shim" => return sandbox::vm::run_shim_binary(),
+                "rkforge-sandbox-agent" => return sandbox::agent::run_binary(),
+                "rkforge-sandbox-guest-init" => return sandbox::guest::run_binary(),
+                _ => {}
+            }
+        }
+
+        if sandbox::guest::should_run_as_init() {
+            return sandbox::guest::run_as_init();
+        }
+    }
+
     let cli = Cli::parse();
 
     match cli.command {
@@ -93,8 +118,16 @@ fn main() -> Result<()> {
             container::run_container(&args.container_yaml, args.volumes, args.device)
         }
         Commands::Save(args) => images::save_image(args),
+
+        #[cfg(feature = "sandbox")]
         Commands::Sandbox(cmd) => sandbox::cli::execute(cmd),
+        #[cfg(feature = "sandbox")]
         Commands::SandboxShim(args) => sandbox::vm::run_shim_command(args),
+        #[cfg(feature = "sandbox")]
+        Commands::SandboxAgent(args) => sandbox::agent::run_command(args),
+        #[cfg(feature = "sandbox")]
+        Commands::SandboxGuestInit(args) => sandbox::guest::run_command(args),
+
         Commands::Start(args) => container::start_container(&args.container_name),
         Commands::State(args) => container::state_container(&args.container_name),
         Commands::Tag(args) => images::tag_image(args),

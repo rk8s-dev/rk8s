@@ -4,8 +4,8 @@ use anyhow::Result;
 use async_trait::async_trait;
 use chrono::Utc;
 use common::{
-    CompletionMode, ConditionStatus, Job, JobCondition, JobConditionType, OwnerReference, PodPhase,
-    PodTask, ResourceKind,
+    CompletionMode, ConditionStatus, ContainerState, Job, JobCondition, JobConditionType,
+    OwnerReference, PodPhase, PodTask, ResourceKind,
 };
 use log::{debug, info, warn};
 use rand::random;
@@ -19,6 +19,68 @@ pub struct JobController {
 impl JobController {
     pub fn new(store: Arc<XlineStore>) -> Self {
         Self { store }
+    }
+
+    /// Runtime reports container ids as `{pod.metadata.name}-{container_spec.name}` (see rkl).
+    fn expected_container_status_name(pod: &PodTask, container_name: &str) -> String {
+        format!("{}-{}", pod.metadata.name, container_name)
+    }
+
+    /// All init + app containers from spec have a matching `ContainerStatus` that is `Terminated`
+    /// with exit code 0. Used when `Pod.status.phase` lags behind the node (e.g. stuck `Running`).
+    fn pod_all_workload_containers_succeeded(pod: &PodTask) -> bool {
+        let specs = pod
+            .spec
+            .init_containers
+            .iter()
+            .chain(pod.spec.containers.iter());
+        let mut any = false;
+        for c in specs {
+            any = true;
+            let expected = Self::expected_container_status_name(pod, &c.name);
+            let ok = pod.status.container_statuses.iter().any(|cs| {
+                cs.name == expected
+                    && matches!(
+                        &cs.state,
+                        Some(ContainerState::Terminated { exit_code, .. }) if *exit_code == 0
+                    )
+            });
+            if !ok {
+                return false;
+            }
+        }
+        any
+    }
+
+    fn pod_any_workload_container_failed(pod: &PodTask) -> bool {
+        let names: Vec<String> = pod
+            .spec
+            .init_containers
+            .iter()
+            .chain(pod.spec.containers.iter())
+            .map(|c| Self::expected_container_status_name(pod, &c.name))
+            .collect();
+        pod.status.container_statuses.iter().any(|cs| {
+            names.iter().any(|n| n == &cs.name)
+                && matches!(
+                    &cs.state,
+                    Some(ContainerState::Terminated { exit_code, .. }) if *exit_code != 0
+                )
+        })
+    }
+
+    /// Completion accounting: trust `phase`, but when phase is wrong still infer success/failure
+    /// from container exit state (Indexed Jobs otherwise stall on `active` for one index).
+    fn pod_counts_as_succeeded(pod: &PodTask) -> bool {
+        pod.status.phase == PodPhase::Succeeded || Self::pod_all_workload_containers_succeeded(pod)
+    }
+
+    fn pod_counts_as_failed(pod: &PodTask) -> bool {
+        pod.status.phase == PodPhase::Failed || Self::pod_any_workload_container_failed(pod)
+    }
+
+    fn pod_counts_as_active(pod: &PodTask) -> bool {
+        !Self::pod_counts_as_succeeded(pod) && !Self::pod_counts_as_failed(pod)
     }
 
     // load the Job and drive its state machine.
@@ -43,6 +105,11 @@ impl JobController {
     async fn reconcile_job(&self, mut job: Job) -> Result<()> {
         let job_name = job.metadata.name.clone();
         info!("Reconciling job: {}", job_name);
+
+        let prev_start_time = job.status.start_time;
+        let prev_succeeded = job.status.succeeded;
+        let prev_failed = job.status.failed;
+        let prev_active = job.status.active;
 
         // Set start_time on first reconcile.
         if job.status.start_time.is_none() {
@@ -89,11 +156,12 @@ impl JobController {
                     continue;
                 }
 
-                match pod.status.phase {
-                    PodPhase::Succeeded => s[idx] = true,
-                    PodPhase::Failed => f[idx] += 1,
-                    PodPhase::Running | PodPhase::Pending => a[idx] = true,
-                    _ => {}
+                if Self::pod_counts_as_succeeded(pod) {
+                    s[idx] = true;
+                } else if Self::pod_counts_as_failed(pod) {
+                    f[idx] += 1;
+                } else if Self::pod_counts_as_active(pod) {
+                    a[idx] = true;
                 }
             }
 
@@ -108,17 +176,15 @@ impl JobController {
             // Non-indexed mode: only total counts matter.
             succeeded = owned_pods
                 .iter()
-                .filter(|p| p.status.phase == PodPhase::Succeeded)
+                .filter(|p| Self::pod_counts_as_succeeded(p))
                 .count() as i32;
             failed = owned_pods
                 .iter()
-                .filter(|p| p.status.phase == PodPhase::Failed)
+                .filter(|p| Self::pod_counts_as_failed(p))
                 .count() as i32;
             active = owned_pods
                 .iter()
-                .filter(|p| {
-                    p.status.phase == PodPhase::Running || p.status.phase == PodPhase::Pending
-                })
+                .filter(|p| Self::pod_counts_as_active(p))
                 .count() as i32;
         }
 
@@ -285,9 +351,21 @@ impl JobController {
             }
         }
 
-        // Persist updated status.
-        let yaml = serde_yaml::to_string(&job)?;
-        self.store.insert_job_yaml(&job_name, &yaml).await?;
+        // Only persist when status counters or start_time actually changed. Otherwise every
+        // no-op reconcile would write the Job and re-trigger the Job watch (self-feedback loop).
+        let status_changed = job.status.start_time != prev_start_time
+            || succeeded != prev_succeeded
+            || failed != prev_failed
+            || active != prev_active;
+        if status_changed {
+            let yaml = serde_yaml::to_string(&job)?;
+            self.store.insert_job_yaml(&job_name, &yaml).await?;
+        } else {
+            debug!(
+                "Job {} reconcile: status unchanged (active={} succeeded={} failed={}), skip persist",
+                job_name, active, succeeded, failed
+            );
+        }
         Ok(())
     }
 
@@ -371,10 +449,10 @@ impl JobController {
         Ok(())
     }
 
-    /// Delete all still-active (Pending/Running) Pods owned by this Job.
+    /// Delete all Pods owned by this Job that are still considered active for completion accounting.
     async fn terminate_active_pods(&self, owned_pods: &[&PodTask]) -> Result<()> {
         for pod in owned_pods {
-            if (pod.status.phase == PodPhase::Running || pod.status.phase == PodPhase::Pending)
+            if Self::pod_counts_as_active(pod)
                 && let Err(e) = self.store.delete_pod(&pod.metadata.name).await
             {
                 warn!(

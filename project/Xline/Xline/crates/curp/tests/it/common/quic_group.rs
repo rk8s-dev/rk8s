@@ -9,7 +9,7 @@ use std::{collections::HashMap, sync::Arc, time::Duration};
 use curp::{
     client::{ClientApi, ClientBuilder},
     members::{ClusterInfo, ServerId},
-    rpc::{FetchClusterRequest, FetchClusterResponse, MethodId, QuicChannel, QuicGrpcServer},
+    rpc::{FetchClusterRequest, FetchClusterResponse, QuicChannel, QuicGrpcServer},
     server::{
         DB, Rpc,
         conflict::test_pools::{TestSpecPool, TestUncomPool},
@@ -19,8 +19,8 @@ use curp_test_utils::{
     TestRoleChange, TestRoleChangeInner,
     test_cmd::{TestCE, TestCommand, TestCommandResult},
 };
+use dquic::prelude::{QuicClient, QuicListeners};
 use engine::MemorySnapshotAllocator;
-use gm_quic::prelude::{QuicClient, QuicListeners};
 use rcgen::{CertificateParams, KeyPair};
 use rustls::pki_types::CertificateDer;
 use tokio::{net::TcpListener, sync::mpsc, task::JoinHandle};
@@ -29,6 +29,7 @@ use utils::{
     config::{ClientConfig, CurpConfig, EngineConfig},
     task_manager::TaskManager,
 };
+use xlinerpc::MethodId;
 
 /// A QUIC-based test node
 pub struct QuicCurpNode {
@@ -122,7 +123,7 @@ impl QuicCurpGroup {
                     key_der.as_slice(),
                     vec![
                         bind_uri_str
-                            .parse::<gm_quic::qbase::net::addr::BindUri>()
+                            .parse::<dquic::qbase::net::addr::BindUri>()
                             .unwrap(),
                     ],
                     None::<Vec<u8>>,
@@ -139,6 +140,8 @@ impl QuicCurpGroup {
             QuicClient::builder()
                 .with_root_certificates(root_store)
                 .without_cert()
+                .bind(["inet://0.0.0.0:0"])
+                .with_alpns(["h3"])
                 .build(),
         );
 

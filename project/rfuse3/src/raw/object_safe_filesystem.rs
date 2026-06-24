@@ -534,6 +534,29 @@ pub trait ObjectSafeFilesystem: Send + Sync {
     ) -> Result<ReplyCopyFileRange> {
         Err(libc::ENOSYS.into())
     }
+
+    #[cfg(target_os = "macos")]
+    async fn setvolname(&self, req: Request, name: &OsStr) -> Result<()> {
+        Err(libc::ENOSYS.into())
+    }
+
+    #[cfg(target_os = "macos")]
+    async fn getxtimes(&self, req: Request, inode: Inode) -> Result<ReplyXTimes> {
+        Err(libc::ENOSYS.into())
+    }
+
+    #[cfg(target_os = "macos")]
+    async fn exchange(
+        &self,
+        req: Request,
+        olddir: Inode,
+        oldname: &OsStr,
+        newdir: Inode,
+        newname: &OsStr,
+        options: u64,
+    ) -> Result<()> {
+        Err(libc::ENOSYS.into())
+    }
 }
 
 #[async_trait]
@@ -904,5 +927,28 @@ where
             self, req, inode, fh_in, off_in, inode_out, fh_out, off_out, length, flags,
         )
         .await
+    }
+
+    #[cfg(target_os = "macos")]
+    async fn setvolname(&self, req: Request, name: &OsStr) -> Result<()> {
+        Filesystem::setvolname(self, req, name).await
+    }
+
+    #[cfg(target_os = "macos")]
+    async fn getxtimes(&self, req: Request, inode: Inode) -> Result<ReplyXTimes> {
+        Filesystem::getxtimes(self, req, inode).await
+    }
+
+    #[cfg(target_os = "macos")]
+    async fn exchange(
+        &self,
+        req: Request,
+        olddir: Inode,
+        oldname: &OsStr,
+        newdir: Inode,
+        newname: &OsStr,
+        options: u64,
+    ) -> Result<()> {
+        Filesystem::exchange(self, req, olddir, oldname, newdir, newname, options).await
     }
 }

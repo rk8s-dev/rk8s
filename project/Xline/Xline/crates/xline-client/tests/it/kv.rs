@@ -12,6 +12,7 @@ use super::common::get_cluster_client;
 
 #[tokio::test(flavor = "multi_thread")]
 #[abort_on_panic]
+#[serial_test::serial]
 async fn put_should_success_in_normal_path() -> Result<()> {
     let (_cluster, client) = get_cluster_client().await.unwrap();
     let client = client.kv_client();
@@ -47,6 +48,7 @@ async fn put_should_success_in_normal_path() -> Result<()> {
 
 #[tokio::test(flavor = "multi_thread")]
 #[abort_on_panic]
+#[serial_test::serial]
 async fn range_should_fetches_previously_put_keys() -> Result<()> {
     let (_cluster, client) = get_cluster_client().await.unwrap();
     let client = client.kv_client();
@@ -101,6 +103,7 @@ async fn range_should_fetches_previously_put_keys() -> Result<()> {
 
 #[tokio::test(flavor = "multi_thread")]
 #[abort_on_panic]
+#[serial_test::serial]
 async fn delete_should_remove_previously_put_kvs() -> Result<()> {
     let (_cluster, client) = get_cluster_client().await.unwrap();
     let client = client.kv_client();
@@ -187,6 +190,7 @@ async fn delete_should_remove_previously_put_kvs() -> Result<()> {
 
 #[tokio::test(flavor = "multi_thread")]
 #[abort_on_panic]
+#[serial_test::serial]
 async fn txn_should_execute_as_expected() -> Result<()> {
     let (_cluster, client) = get_cluster_client().await.unwrap();
     let client = client.kv_client();
@@ -254,6 +258,7 @@ async fn txn_should_execute_as_expected() -> Result<()> {
 
 #[tokio::test(flavor = "multi_thread")]
 #[abort_on_panic]
+#[serial_test::serial]
 async fn compact_should_remove_previous_revision() -> Result<()> {
     let (_cluster, client) = get_cluster_client().await.unwrap();
     let client = client.kv_client();

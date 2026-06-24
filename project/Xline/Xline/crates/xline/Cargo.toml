@@ -28,9 +28,9 @@ engine = { path = "../engine" }
 event-listener = { workspace = true }
 flume = { workspace = true }
 futures = { workspace = true }
-gm-quic = { workspace = true }
+dquic = { workspace = true }
 h3 = "0.0.8"
-h3-shim = "0.4.0"
+h3-shim = { workspace = true }
 http = "1.4.0"
 http-body = "1.0.1"
 hyper = "1.0.0"

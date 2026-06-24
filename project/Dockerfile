@@ -47,6 +47,7 @@ RUN apt-get update && apt-get install --fix-missing -y \
     protobuf-compiler \
     seccomp \
     libseccomp-dev \
+    libelf-dev \
     libpython3-dev \
     openssl \
     libssl-dev \

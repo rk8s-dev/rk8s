@@ -6,13 +6,14 @@ use std::{sync::Arc, time::Duration};
 
 use curp::{
     client::ClientApi,
-    rpc::{FetchClusterRequest, FetchClusterResponse, MethodId, QuicChannel},
+    rpc::{FetchClusterRequest, FetchClusterResponse, QuicChannel},
 };
 use curp_test_utils::{
     init_logger,
     test_cmd::{TestCommand, TestCommandResult},
 };
 use test_macros::abort_on_panic;
+use xlinerpc::MethodId;
 
 use crate::common::quic_group::QuicCurpGroup;
 

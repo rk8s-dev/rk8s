@@ -4,6 +4,7 @@ use json::JsonValue;
 use libcni::rust_cni::cni::Libcni;
 use libcontainer::syscall::syscall::create_syscall;
 use liboci_cli::{Create, Delete, Kill, Start};
+use libruntime::bundle_image_lock::with_image_bundle_lock;
 use libruntime::cri::config::ContainerConfigBuilder;
 use libruntime::cri::cri_api::{
     ContainerConfig, CreateContainerRequest, CreateContainerResponse, PodSandboxConfig,
@@ -20,7 +21,7 @@ use libruntime::utils::{
 
 use crate::commands::container::rootfs_mount::RootfsMount;
 use crate::config::image::CONFIG;
-use oci_spec::runtime::RootBuilder;
+use oci_spec::runtime::{MountBuilder, RootBuilder};
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::{BufWriter, Read, Write};
@@ -149,10 +150,16 @@ impl TaskRunner {
         // 1. Get sandbox bundle path
         let sandbox_spec = ContainerSpec {
             name: "sandbox".to_string(),
-            // FIXME: SHOULD define a const variable image name
-            image: "pause:3.9".to_string(),
+            image: self
+                .task
+                .spec
+                .pause_image
+                .clone()
+                .unwrap_or_else(|| "lingbou/pause:3.9".to_string()),
             ports: vec![],
             args: vec![],
+            tty: false,
+            gpus: None,
             resources: None,
             liveness_probe: None,
             readiness_probe: None,
@@ -162,7 +169,6 @@ impl TaskRunner {
             volume_mounts: None,
             command: None,
             working_dir: None,
-            tty: false,
         };
 
         let puller = RkforgeImagePuller {};
@@ -170,6 +176,7 @@ impl TaskRunner {
             .map_err(|e| anyhow!("failed to get pause container's bundle_path: {e}"))?;
 
         // 2. build final oci specification config.json
+        let hostname = config.hostname.clone();
         let mut config = ContainerConfig::default();
         if let Some(mut config_b) = config_builder {
             config = config_b
@@ -177,17 +184,9 @@ impl TaskRunner {
                 .clone()
                 .build();
         }
-        let oci_spec = oci::OCISpecGenerator::new(&config, &sandbox_spec, None)
+        let oci_spec = oci::OCISpecGenerator::new(&config, &sandbox_spec, None, hostname.clone())
             .generate()
             .map_err(|e| anyhow!("failed to generate sandbox pause oci spec: {e}"))?;
-
-        let config_path = format!("{bundle_path}/config.json");
-        if !Path::new(&config_path).exists() {
-            let file = File::create(&config_path)?;
-            let mut writer = BufWriter::new(file);
-            serde_json::to_writer_pretty(&mut writer, &oci_spec)?;
-            writer.flush()?;
-        }
 
         let bundle_dir = PathBuf::from(&bundle_path);
         if !bundle_dir.exists() {
@@ -196,22 +195,40 @@ impl TaskRunner {
 
         info!("Get sandbox {sandbox_id}'s bundle path: {bundle_path}");
 
-        // 3. Create container use cri
-        let create_args = Create {
-            bundle: bundle_dir.clone(),
-            console_socket: None,
-            pid_file: None,
-            no_pivot: false,
-            no_new_keyring: false,
-            preserve_fds: 0,
-            container_id: sandbox_id.clone(),
-        };
-
         let root_path = rootpath::determine(None, &*create_syscall())
             .map_err(|e| anyhow!("Failed to determine root path: {}", e))?;
 
-        create(create_args, root_path.clone(), false)
-            .map_err(|e| anyhow!("Failed to create container: {}", e))?;
+        with_image_bundle_lock(&bundle_dir, || -> Result<(), anyhow::Error> {
+            let config_path = bundle_dir.join("config.json");
+            if !config_path.exists() {
+                let file = File::create(&config_path)?;
+                let mut writer = BufWriter::new(file);
+                serde_json::to_writer_pretty(&mut writer, &oci_spec)?;
+                writer.flush()?;
+            }
+            if !hostname.is_empty() {
+                let content = std::fs::read_to_string(&config_path)?;
+                let mut json: serde_json::Value = serde_json::from_str(&content)?;
+                json["hostname"] = serde_json::Value::String(hostname.clone());
+                let file = File::create(&config_path)?;
+                let mut writer = BufWriter::new(file);
+                serde_json::to_writer_pretty(&mut writer, &json)?;
+                writer.flush()?;
+            }
+
+            let create_args = Create {
+                bundle: bundle_dir.clone(),
+                console_socket: None,
+                pid_file: None,
+                no_pivot: false,
+                no_new_keyring: false,
+                preserve_fds: 0,
+                container_id: sandbox_id.clone(),
+            };
+            create(create_args, root_path.clone(), false)
+                .map_err(|e| anyhow!("Failed to create container: {}", e))?;
+            Ok(())
+        })?;
 
         // 4. Start container use cri
         let start_args = Start {
@@ -310,7 +327,7 @@ impl TaskRunner {
                 }
                 (Some(builder), bundle_path)
             } else {
-                (None, "".to_string())
+                (None, container.image.clone())
             }
         } else {
             sync_handle_image_typ(&puller, container)?
@@ -366,7 +383,13 @@ impl TaskRunner {
             .pause_pid
             .ok_or_else(|| anyhow!("Pause container PID is not set"))?;
 
-        let generator = OCISpecGenerator::new(config, container_spec, Some(pause_pid));
+        let hostname = self
+            .sandbox_config
+            .as_ref()
+            .map(|c| c.hostname.clone())
+            .unwrap_or_default();
+        let generator =
+            OCISpecGenerator::new(config, container_spec, Some(pause_pid), hostname.clone());
         let mut spec = generator.generate().map_err(|e| {
             anyhow!("failed to build OCI Specification for container {container_id}: {e}")
         })?;
@@ -398,31 +421,48 @@ impl TaskRunner {
             return Err(anyhow!("Bundle directory does not exist"));
         }
 
-        // FIXME: If there is a config.json in bundle (which is unexpected in production), keep it
-        // Expected behavior: the container should own it's unique bundle path
-        let config_path = format!("{bundle_path}/config.json");
-        if !Path::new(&config_path).exists() {
-            let file = File::create(&config_path)?;
-            let mut writer = BufWriter::new(file);
-            serde_json::to_writer_pretty(&mut writer, &spec)?;
-            writer.flush()?;
+        if !hostname.is_empty() {
+            let hosts_content = format!("127.0.0.1 localhost {}\n", hostname);
+            let hosts_file = bundle_dir.join("hosts");
+            std::fs::write(&hosts_file, &hosts_content)
+                .map_err(|e| anyhow!("failed to write hosts file: {e}"))?;
+            let hosts_mount = MountBuilder::default()
+                .typ("bind")
+                .destination("/etc/hosts")
+                .source(hosts_file.to_str().unwrap())
+                .options(vec!["rw".to_string(), "bind".to_string()])
+                .build()
+                .map_err(|e| anyhow!("failed to build hosts mount: {e}"))?;
+            let mut mounts = spec.mounts().clone().unwrap_or_default();
+            mounts.push(hosts_mount);
+            spec.set_mounts(Some(mounts));
         }
-
-        let create_args = Create {
-            bundle: bundle_path.clone().into(),
-            console_socket: None,
-            pid_file: None,
-            no_pivot: false,
-            no_new_keyring: false,
-            preserve_fds: 0,
-            container_id: container_id.clone(),
-        };
 
         let root_path = rootpath::determine(None, &*create_syscall())
             .map_err(|e| anyhow!("Failed to determine root path: {}", e))?;
 
-        create(create_args, root_path.clone(), false)
-            .map_err(|e| anyhow!("Failed to create container: {}", e))?;
+        with_image_bundle_lock(&bundle_dir, || -> Result<(), anyhow::Error> {
+            let config_path = bundle_dir.join("config.json");
+            if !config_path.exists() {
+                let file = File::create(&config_path)?;
+                let mut writer = BufWriter::new(file);
+                serde_json::to_writer_pretty(&mut writer, &spec)?;
+                writer.flush()?;
+            }
+
+            let create_args = Create {
+                bundle: bundle_dir.clone(),
+                console_socket: None,
+                pid_file: None,
+                no_pivot: false,
+                no_new_keyring: false,
+                preserve_fds: 0,
+                container_id: container_id.clone(),
+            };
+            create(create_args, root_path.clone(), false)
+                .map_err(|e| anyhow!("Failed to create container: {}", e))?;
+            Ok(())
+        })?;
 
         Ok(CreateContainerResponse { container_id })
     }

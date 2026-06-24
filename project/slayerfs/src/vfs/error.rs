@@ -312,3 +312,31 @@ impl From<VfsError> for std::io::Error {
         std::io::Error::new(kind, value.to_string())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{PathHint, VfsError};
+    use crate::meta::store::MetaError;
+    use std::io::ErrorKind;
+
+    #[test]
+    fn from_meta_preserves_not_directory_semantics() {
+        let err = VfsError::from_meta(PathHint::some("/tmp/dst"), MetaError::NotDirectory(123));
+        assert!(matches!(err, VfsError::NotADirectory { .. }));
+
+        let io_err: std::io::Error = err.into();
+        assert_eq!(io_err.kind(), ErrorKind::NotADirectory);
+    }
+
+    #[test]
+    fn from_meta_preserves_directory_not_empty_semantics() {
+        let err = VfsError::from_meta(
+            PathHint::some("/tmp/dst"),
+            MetaError::DirectoryNotEmpty(123),
+        );
+        assert!(matches!(err, VfsError::DirectoryNotEmpty { .. }));
+
+        let io_err: std::io::Error = err.into();
+        assert_eq!(io_err.kind(), ErrorKind::DirectoryNotEmpty);
+    }
+}

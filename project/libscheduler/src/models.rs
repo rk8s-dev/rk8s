@@ -12,6 +12,27 @@ pub struct ResourcesRequirements {
 }
 
 #[derive(Clone, Default, Debug)]
+pub struct GpuResources {
+    pub total: u32,
+    pub requested: u32,
+    pub memory_per_gpu: u64,
+    pub model: String,
+}
+
+#[derive(Clone, Default, Debug)]
+pub struct GangSpec {
+    pub id: String,
+    pub size: u32,
+}
+
+#[derive(Clone, Default, Debug)]
+pub struct TopologyConstraint {
+    pub topology_key: String,
+    /// MVP only supports same_value=true (co-affinity).
+    pub same_value: bool,
+}
+
+#[derive(Clone, Default, Debug)]
 pub struct PodSpec {
     pub resources: ResourcesRequirements,
     /// Priority to the scheduler.
@@ -21,6 +42,10 @@ pub struct PodSpec {
     pub node_name: Option<String>,
     pub node_selector: HashMap<String, String>,
     pub affinity: Option<Affinity>,
+    pub gpu_request: u32,
+    pub gpu_memory_request: Option<u64>,
+    pub gang: Option<GangSpec>,
+    pub topology_constraints: Vec<TopologyConstraint>,
 }
 
 #[derive(Clone, Default, Debug)]
@@ -264,6 +289,7 @@ pub struct NodeInfo {
     pub spec: NodeSpec,
     pub requested: ResourcesRequirements,
     pub allocatable: ResourcesRequirements,
+    pub gpu_resources: Option<GpuResources>,
 }
 
 pub type PodNameWithPriority = (u64, String);
@@ -442,5 +468,25 @@ impl From<common::PreferredSchedulingTerm> for PreferredSchedulingTerm {
             match_label,
             weight: term.weight,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pod_spec_default_has_no_gang() {
+        let s = PodSpec::default();
+        assert!(s.gang.is_none());
+        assert_eq!(s.gpu_request, 0);
+        assert!(s.gpu_memory_request.is_none());
+        assert!(s.topology_constraints.is_empty());
+    }
+
+    #[test]
+    fn node_info_default_has_no_gpu_resources() {
+        let n = NodeInfo::default();
+        assert!(n.gpu_resources.is_none());
     }
 }

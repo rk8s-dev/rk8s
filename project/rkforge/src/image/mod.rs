@@ -25,8 +25,8 @@ use crate::push::push_from_layout;
 use anyhow::{Context, Result, bail};
 use clap::{Parser, ValueEnum};
 use dockerfile_parser::Dockerfile;
+use oci_client::Reference;
 use oci_client::manifest::OciImageIndex;
-use oci_spec::distribution::Reference;
 use rand::{Rng, distr::Alphanumeric};
 
 pub static BLOBS: &str = "blobs/sha256";

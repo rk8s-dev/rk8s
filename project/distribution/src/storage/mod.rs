@@ -84,6 +84,12 @@ pub async fn verify_file_digest(path: &str, expected: &Digest) -> Result<()> {
 pub trait Storage: Send + Sync {
     async fn get_blob(&self, digest: &Digest) -> Result<StorageObject>;
 
+    async fn get_blob_range(
+        &self,
+        digest: &Digest,
+        range: std::ops::Range<u64>,
+    ) -> Result<StorageObject>;
+
     async fn blob_exists(&self, digest: &Digest) -> Result<bool>;
 
     async fn blob_size(&self, digest: &Digest) -> Result<u64>;

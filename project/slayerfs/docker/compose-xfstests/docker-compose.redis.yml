@@ -1,0 +1,118 @@
+services:
+  redis:
+    image: docker.io/library/redis:7.2-alpine
+    container_name: redis-slayerfs-xfstests
+    command: >
+      redis-server
+      --appendonly yes
+      --appendfsync everysec
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+    networks:
+      - slayerfs-xfstests
+
+  rustfs:
+    image: rustfs/rustfs:latest
+    container_name: rustfs-slayerfs-xfstests
+    expose:
+      - "9000"
+      - "9001"
+    environment:
+      RUSTFS_ACCESS_KEY: ${RUSTFS_ACCESS_KEY:-rustfsadmin}
+      RUSTFS_SECRET_KEY: ${RUSTFS_SECRET_KEY:-rustfsadmin}
+      RUSTFS_CONSOLE_ENABLE: ${RUSTFS_CONSOLE_ENABLE:-true}
+      RUSTFS_SERVER_DOMAINS: ${RUSTFS_SERVER_DOMAINS:-rustfs}
+    command:
+      - --address
+      - :9000
+      - --console-enable
+      - --server-domains
+      - ${RUSTFS_SERVER_DOMAINS:-rustfs}
+      - --access-key
+      - ${RUSTFS_ACCESS_KEY:-rustfsadmin}
+      - --secret-key
+      - ${RUSTFS_SECRET_KEY:-rustfsadmin}
+      - /data
+    volumes:
+      - rustfs-data:/data
+    networks:
+      - slayerfs-xfstests
+
+  rustfs-init:
+    image: amazon/aws-cli:latest
+    depends_on:
+      rustfs:
+        condition: service_started
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - |
+        mkdir -p /root/.aws
+        printf '[default]\ns3 =\n  addressing_style = path\n' > /root/.aws/config
+        timeout 180 sh -ec '
+          while true; do
+            aws --endpoint-url http://rustfs:9000 s3api create-bucket --bucket ${SLAYERFS_S3_BUCKET:-slayerfs-data} >/dev/null 2>&1 && exit 0
+            aws --endpoint-url http://rustfs:9000 s3api head-bucket --bucket ${SLAYERFS_S3_BUCKET:-slayerfs-data} >/dev/null 2>&1 && exit 0
+            sleep 2
+          done
+        '
+    environment:
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-rustfsadmin}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-rustfsadmin}
+      AWS_DEFAULT_REGION: ${AWS_DEFAULT_REGION:-us-east-1}
+      AWS_EC2_METADATA_DISABLED: ${AWS_EC2_METADATA_DISABLED:-true}
+    networks:
+      - slayerfs-xfstests
+
+  xfstests:
+    image: slayerfs-xfstests:local
+    build:
+      context: ../../..
+      dockerfile: slayerfs/docker/compose-xfstests/Dockerfile
+    depends_on:
+      redis:
+        condition: service_healthy
+      rustfs-init:
+        condition: service_completed_successfully
+    environment:
+      SLAYERFS_META_BACKEND: redis
+      SLAYERFS_META_URL: redis://redis:6379/0
+      SLAYERFS_DATA_BACKEND: ${SLAYERFS_DATA_BACKEND:-local-fs}
+      SLAYERFS_DATA_DIR: /var/lib/slayerfs/data
+      SLAYERFS_S3_BUCKET: ${SLAYERFS_S3_BUCKET:-slayerfs-data}
+      SLAYERFS_S3_ENDPOINT: ${SLAYERFS_S3_ENDPOINT:-http://rustfs:9000}
+      SLAYERFS_S3_REGION: ${SLAYERFS_S3_REGION:-us-east-1}
+      SLAYERFS_S3_FORCE_PATH_STYLE: ${SLAYERFS_S3_FORCE_PATH_STYLE:-true}
+      SLAYERFS_CONFIG_PATH: /run/slayerfs/config.yaml
+      SLAYERFS_LOG_FILE: /artifacts/slayerfs.log
+      SLAYERFS_ARTIFACT_DIR: ${SLAYERFS_ARTIFACT_DIR:-}
+      SLAYERFS_ARTIFACT_ROOT: /artifacts
+      XFSTESTS_CASES: ${XFSTESTS_CASES:-}
+      XFSTESTS_SKIP_CASES: ${XFSTESTS_SKIP_CASES:-0}
+      XFSTESTS_CHECK_ARGS: ${XFSTESTS_CHECK_ARGS:-}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-rustfsadmin}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-rustfsadmin}
+      AWS_DEFAULT_REGION: ${AWS_DEFAULT_REGION:-us-east-1}
+      AWS_EC2_METADATA_DISABLED: ${AWS_EC2_METADATA_DISABLED:-true}
+    privileged: true
+    devices:
+      - /dev/fuse:/dev/fuse
+    cap_add:
+      - SYS_ADMIN
+    security_opt:
+      - apparmor=unconfined
+    volumes:
+      - ./artifacts:/artifacts
+      - slayerfs-state:/var/lib/slayerfs
+    networks:
+      - slayerfs-xfstests
+
+networks:
+  slayerfs-xfstests:
+    driver: bridge
+
+volumes:
+  slayerfs-state:
+  rustfs-data:

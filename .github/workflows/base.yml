@@ -1,8 +1,12 @@
 on:
   pull_request:
-    paths-ignore:
-      - 'docs/**'
-      - 'project/tools/**'
+    paths:
+      - 'project/**'
+      - 'third-party/**'
+      - 'platforms/**'
+      - 'toolchains/**'
+      - '.buckconfig'
+      - '.github/workflows/base.yml'
 
 name: Check, Build and Test
 
@@ -10,18 +14,16 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_NET_RETRY: 10
+
 jobs:
   format:
     name: Rustfmt Check
-    runs-on: rk8s-runner-set
-    env:
-      CARGO_TERM_COLOR: always
+    runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt
-      - uses: ./.github/actions/install-sys-deps
+      - uses: actions/checkout@v6
       - run: |
           cd project
           cargo fmt --all --check
@@ -30,15 +32,9 @@ jobs:
     name: Clippy Check
     strategy:
       fail-fast: true
-    runs-on: rk8s-runner-set
-    env:
-      CARGO_TERM_COLOR: always
-      RUSTUP_TOOLCHAIN: stable
+    runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy
+      - uses: actions/checkout@v6
       - uses: ./.github/actions/install-sys-deps
       - run: |
           cd project
@@ -46,9 +42,9 @@ jobs:
 
   redundancy:
     name: Redundancy Check
-    runs-on: rk8s-runner-set
+    runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - run: |
           x=$(find third-party/rust/crates -mindepth 2 -maxdepth 2 -type d -exec bash -c '
             n=$(find "$1" -maxdepth 1 -type f | wc -l)
@@ -64,25 +60,32 @@ jobs:
 
   build:
     name: Buck2 Build
-    runs-on: rk8s-runner-set
-    env:
-      CARGO_TERM_COLOR: always
-      RUSTUP_TOOLCHAIN: stable
-
+    runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@v6
       - uses: ./.github/actions/install-sys-deps
       - uses: ./.github/actions/install-buck2
-      - run: buck2 build //project/...
+        with:
+          version: 2026-04-15
+      - name: Run Buck2 build
+        run: |
+          set -euo pipefail
+          for attempt in 1 2; do
+            if buck2 build //project/...; then
+              exit 0
+            fi
+            if [ "$attempt" -eq 2 ]; then
+              exit 1
+            fi
+            echo "Buck2 build failed; clearing local state and retrying once"
+            buck2 kill || true
+            rm -rf buck-out/v2
+          done
 
   test:
     name: Buck2 Test
-    runs-on: rk8s-runner-set
-    env:
-      CARGO_TERM_COLOR: always
-      RUSTUP_TOOLCHAIN: stable
+    runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - run: |
           echo "buck2 test"

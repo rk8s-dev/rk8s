@@ -1,0 +1,45 @@
+name: slayerfs xfstests
+
+on:
+  pull_request:
+    paths:
+      - 'project/slayerfs/**'
+      - '.github/workflows/slayerfs-docker.yml'
+  # Just run on pull requests as the main branch is protected and requires CI to pass before merging.
+  # This avoids redundant runs on pushes to main.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  xfstests:
+    if: false
+    name: slayerfs xfstests (redis + etcd)
+    runs-on: [self-hosted]
+    timeout-minutes: 240
+    env:
+      CARGO_TERM_COLOR: always
+      RUSTUP_TOOLCHAIN: stable
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+
+      - name: Fetch LFS assets for xfstests
+        env:
+          LFS_ASSETS: project/slayerfs/tests/scripts/xfstests-prebuilt/*.tar.gz,project/slayerfs/tests/scripts/fuse3-bundle/fusermount3
+        run: |
+          git lfs install --local
+          git lfs pull --include="$LFS_ASSETS"
+
+      - name: Run redis xfstests
+        working-directory: project/slayerfs/docker
+        run: |
+          bash compose-xfstests/run_redis_xfstests.sh
+
+      - name: Run etcd xfstests
+        working-directory: project/slayerfs/docker
+        run: |
+          bash compose-xfstests/run_etcd_xfstests.sh

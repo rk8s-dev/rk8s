@@ -4,7 +4,7 @@ use clap::Args;
 use crate::commands::get::{ResourceArg, ResourceType, parse_resource_type};
 use crate::commands::pod::TLSConnectionArgs;
 use crate::commands::{
-    container::delete_container, deployment::deployment_delete, pod::pod_delete,
+    container::delete_container, deployment::deployment_delete, job::job_delete, pod::pod_delete,
     replicaset::replicaset_delete, service::service_delete,
 };
 use tracing::warn;
@@ -18,7 +18,7 @@ pub struct DeleteCommand {
     #[arg(long)]
     pub all: bool,
 
-    /// RKS control-plane address (required for Deployment, ReplicaSet, Service and cluster-mode Pod).
+    /// RKS control-plane address (required for Deployment, ReplicaSet, Job, Service and cluster-mode Pod).
     #[arg(
         long,
         value_name = "RKS_ADDRESS",
@@ -48,6 +48,9 @@ pub fn delete_execute(cmd: DeleteCommand) -> Result<()> {
                     }
                     ResourceType::ReplicaSet => {
                         replicaset_delete(&name, cmd.cluster.clone(), cmd.tls_cfg.clone())?
+                    }
+                    ResourceType::Job => {
+                        job_delete(&name, cmd.cluster.clone(), cmd.tls_cfg.clone())?
                     }
                     ResourceType::Service => {
                         service_delete(&name, cmd.cluster.clone(), cmd.tls_cfg.clone())?

@@ -81,6 +81,7 @@ install_system_deps() {
                 protobuf-compiler \
                 seccomp \
                 libseccomp-dev \
+                libelf-dev \
                 libpython3-dev \
                 openssl \
                 libssl-dev \
@@ -101,6 +102,7 @@ install_system_deps() {
                 protobuf-compiler \
                 libseccomp \
                 libseccomp-devel \
+                elfutils-libelf-devel \
                 python3-devel \
                 openssl \
                 openssl-devel \
@@ -121,6 +123,7 @@ install_system_deps() {
                 protobuf \
                 protobuf-c \
                 libseccomp \
+                libelf \
                 python \
                 python-setuptools \
                 openssl \

@@ -1,11 +1,9 @@
-use crate::{
-    error::Result,
-    transport::{Channel, MethodId},
-};
+use crate::{error::Result, transport::Channel};
 use xlineapi::{
     MemberAddResponse, MemberListResponse, MemberPromoteResponse, MemberRemoveResponse,
     MemberUpdateResponse,
 };
+use xlinerpc::MethodId;
 
 /// Client for Cluster operations.
 #[derive(Clone, Debug)]

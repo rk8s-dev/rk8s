@@ -10,11 +10,12 @@ use xlineapi::{
     AuthenticateResponse, RequestWrapper, ResponseWrapper, Type as PermissionType,
     command::Command,
 };
+use xlinerpc::MethodId;
 
 use crate::{
     CurpClient,
     error::{Result, XlineClientError},
-    transport::{Channel, MethodId},
+    transport::Channel,
     types::{auth::Permission, range_end::RangeOption},
 };
 
