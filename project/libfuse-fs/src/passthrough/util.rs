@@ -413,17 +413,26 @@ pub fn osstr_to_cstr(os_str: &OsStr) -> Result<CString, std::ffi::NulError> {
 
 #[cfg(target_os = "linux")]
 macro_rules! scoped_cred {
-    ($name:ident, $ty:ty, $syscall_nr:expr) => {
+    ($name:ident, $ty:ty, $syscall_nr:expr, $current:expr) => {
         #[derive(Debug)]
-        pub struct $name;
+        pub struct $name {
+            old: $ty,
+        }
 
         impl $name {
-            // Changes the effective uid/gid of the current thread to `val`.  Changes
-            // the thread's credentials back to root when the returned struct is dropped.
+            // Changes the effective uid/gid of the current thread to `val` and
+            // restores the previous effective credential when the guard drops.
             fn new(val: $ty) -> io::Result<Option<$name>> {
-                if val == 0 {
-                    // Nothing to do since we are already uid 0.
+                let old = unsafe { $current() as $ty };
+                if val == old {
                     return Ok(None);
+                }
+
+                // An unprivileged passthrough process cannot impersonate another
+                // uid/gid. Surface that instead of installing a guard that later
+                // tries to restore root and logs EPERM for every request.
+                if old != 0 {
+                    return Err(io::Error::from_raw_os_error(libc::EPERM));
                 }
 
                 // We want credential changes to be per-thread because otherwise
@@ -442,7 +451,7 @@ macro_rules! scoped_cred {
                 // check the return value.
                 let res = unsafe { libc::syscall($syscall_nr, -1, val, -1) };
                 if res == 0 {
-                    Ok(Some($name))
+                    Ok(Some($name { old }))
                 } else {
                     Err(io::Error::last_os_error())
                 }
@@ -451,10 +460,11 @@ macro_rules! scoped_cred {
 
         impl Drop for $name {
             fn drop(&mut self) {
-                let res = unsafe { libc::syscall($syscall_nr, -1, 0, -1) };
+                let res = unsafe { libc::syscall($syscall_nr, -1, self.old, -1) };
                 if res < 0 {
                     error!(
-                        "fuse: failed to change credentials back to root: {}",
+                        "fuse: failed to restore credentials to {}: {}",
+                        self.old,
                         io::Error::last_os_error(),
                     );
                 }
@@ -463,9 +473,9 @@ macro_rules! scoped_cred {
     };
 }
 #[cfg(target_os = "linux")]
-scoped_cred!(ScopedUid, libc::uid_t, libc::SYS_setresuid);
+scoped_cred!(ScopedUid, libc::uid_t, libc::SYS_setresuid, libc::geteuid);
 #[cfg(target_os = "linux")]
-scoped_cred!(ScopedGid, libc::gid_t, libc::SYS_setresgid);
+scoped_cred!(ScopedGid, libc::gid_t, libc::SYS_setresgid, libc::getegid);
 
 // Dummy implementation for macOS (or use setreuid/setregid if needed, but for now stub to compile)
 #[cfg(target_os = "macos")]
