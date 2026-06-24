@@ -1372,15 +1372,25 @@ impl OverlayFs {
             return Err(Error::from_raw_os_error(libc::ENOENT));
         }
 
-        let mut st = node.stat64(ctx).await?;
+        node.lookups.fetch_add(1, Ordering::AcqRel);
+        trace!("lookup count: {}", node.lookups.load(Ordering::Relaxed));
+
+        let mut st = match node.stat64(ctx).await {
+            Ok(st) => st,
+            Err(e) => {
+                self.forget_one(node.inode, 1).await;
+                return Err(e);
+            }
+        };
         st.attr.ino = node.inode;
-        if utils::is_dir(&st.attr.kind) && !node.loaded.load(Ordering::Relaxed) {
-            self.load_directory(ctx, &node).await?;
+        if utils::is_dir(&st.attr.kind)
+            && !node.loaded.load(Ordering::Relaxed)
+            && let Err(e) = self.load_directory(ctx, &node).await
+        {
+            self.forget_one(node.inode, 1).await;
+            return Err(e);
         }
 
-        // FIXME: can forget happen between found and increase reference counter?
-        let tmp = node.lookups.fetch_add(1, Ordering::Relaxed);
-        trace!("lookup count: {}", tmp + 1);
         Ok(ReplyEntry {
             ttl: st.ttl,
             attr: st.attr,

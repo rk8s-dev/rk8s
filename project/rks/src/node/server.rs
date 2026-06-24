@@ -1,6 +1,8 @@
 use crate::node::Shared;
 use crate::node::cert::build_quic_config;
-use crate::node::dispatch::{dispatch_user, dispatch_user_bistream, dispatch_worker};
+use crate::node::dispatch::{
+    dispatch_user, dispatch_user_bistream, dispatch_worker, dispatch_worker_bi,
+};
 use crate::node::register::NodeRegister;
 use crate::node::server::private::Sealed;
 use crate::node::watcher::PodsWatcher;
@@ -107,16 +109,20 @@ impl QUICServer {
                 match incoming.await {
                     Ok(connection) => {
                         let cfg = config_ref();
-                        let result = if !cfg.tls_config.enable
-                            || connection.peer_identity().is_some()
-                        {
-                            let conn = AuthConnection::<Verified>::new(connection, shared.clone());
-                            conn.serve().await
-                        } else {
-                            let conn =
-                                AuthConnection::<Unauthenticated>::new(connection, shared.clone());
-                            conn.serve().await
-                        };
+                        let result =
+                            if !cfg.tls_config.enable || connection.peer_identity().is_some() {
+                                let conn = Arc::new(AuthConnection::<Verified>::new(
+                                    connection,
+                                    shared.clone(),
+                                ));
+                                conn.clone().serve().await
+                            } else {
+                                let conn = Arc::new(AuthConnection::<Unauthenticated>::new(
+                                    connection,
+                                    shared.clone(),
+                                ));
+                                conn.clone().serve().await
+                            };
                         if let Err(e) = result {
                             let msg = e.to_string();
                             // "closed by peer: 0" means normal QUIC NO_ERROR close
@@ -148,7 +154,7 @@ impl Sealed for Verified {}
 
 #[async_trait]
 pub trait ConnectionState: Sealed {
-    async fn serve(conn: AuthConnection<Self>) -> anyhow::Result<()>
+    async fn serve(conn: Arc<AuthConnection<Self>>) -> anyhow::Result<()>
     where
         Self: Sized;
 }
@@ -173,7 +179,7 @@ impl<State: Sealed> AuthConnection<State> {
 }
 
 impl<State: ConnectionState> AuthConnection<State> {
-    pub async fn serve(self) -> anyhow::Result<()> {
+    pub async fn serve(self: Arc<Self>) -> anyhow::Result<()> {
         State::serve(self).await
     }
 }
@@ -199,19 +205,61 @@ impl AuthConnection<Verified> {
         }
     }
 
-    async fn dispatch_loop(&self, is_worker: bool) -> anyhow::Result<()> {
-        // Main loop: accept application messages for ongoing communication
+    async fn run_user_uni_dispatch(self: Arc<Self>) -> anyhow::Result<()> {
         loop {
             let msg = self.conn.fetch_msg().await?;
             info!("fetched message: {msg}");
-
-            if is_worker {
-                log_error!(dispatch_worker(msg, &self.conn, &self.shared).await);
-                continue;
-            }
-
             log_error!(dispatch_user(msg, &self.conn, &self.shared).await)
         }
+        #[allow(unreachable_code)]
+        Ok::<(), anyhow::Error>(())
+    }
+
+    async fn run_worker_uni_dispatch(self: Arc<Self>) -> anyhow::Result<()> {
+        loop {
+            let msg = self.conn.fetch_msg().await?;
+            info!("fetched message: {msg}");
+            log_error!(dispatch_worker(msg, &self.conn, &self.shared).await);
+        }
+        #[allow(unreachable_code)]
+        Ok::<(), anyhow::Error>(())
+    }
+
+    async fn run_worker_bi_dispatch(self: Arc<Self>) -> anyhow::Result<()> {
+        loop {
+            let mut stream = self.conn.accept_bi().await?;
+            let msg = stream.fetch_msg().await?;
+            info!("fetched bi stream message: {msg}");
+            log_error!(dispatch_worker_bi(msg, &mut stream, &self.shared).await);
+        }
+        #[allow(unreachable_code)]
+        Ok::<(), anyhow::Error>(())
+    }
+
+    async fn run_worker_dispatch(self: Arc<Self>) -> anyhow::Result<()> {
+        let self_cloned = self.clone();
+        let mut uni_stream_task =
+            tokio::spawn(async move { self_cloned.run_worker_uni_dispatch().await });
+
+        let self_cloned = self.clone();
+        let mut bi_stream_task =
+            tokio::spawn(async move { self_cloned.run_worker_bi_dispatch().await });
+
+        let first_result = tokio::select! {
+            uni_result = &mut uni_stream_task => {
+                bi_stream_task.abort();
+                let _ = bi_stream_task.await;
+                uni_result
+            }
+            bi_result = &mut bi_stream_task => {
+                uni_stream_task.abort();
+                let _ = uni_stream_task.await;
+                bi_result
+            }
+        };
+
+        first_result??;
+        Ok(())
     }
 
     fn spawn_user_bistream_loop(&self) {
@@ -240,7 +288,7 @@ impl AuthConnection<Verified> {
 
 #[async_trait]
 impl ConnectionState for Unauthenticated {
-    async fn serve(conn: AuthConnection<Self>) -> anyhow::Result<()> {
+    async fn serve(conn: Arc<AuthConnection<Self>>) -> anyhow::Result<()> {
         debug!("waiting for auth request from client");
 
         let msg = conn.conn.fetch_msg().await?;
@@ -279,7 +327,7 @@ impl ConnectionState for Unauthenticated {
 impl ConnectionState for Verified {
     /// Handle an individual connection (worker or user).
     /// Classifies client type and spawns watchers for workers.
-    async fn serve(conn: AuthConnection<Self>) -> anyhow::Result<()> {
+    async fn serve(conn: Arc<AuthConnection<Self>>) -> anyhow::Result<()> {
         let (is_worker, node_id) = conn.classify_connection().await?;
 
         let worker_session = if is_worker {
@@ -299,7 +347,11 @@ impl ConnectionState for Verified {
             watcher.spawn()?;
         }
 
-        let dispatch_result = conn.dispatch_loop(is_worker).await;
+        let dispatch_result = if is_worker {
+            conn.clone().run_worker_dispatch().await
+        } else {
+            conn.clone().run_user_uni_dispatch().await
+        };
 
         if is_worker
             && let (Some(node_id), Some(worker_session)) =
@@ -318,5 +370,86 @@ impl ConnectionState for Verified {
         }
 
         dispatch_result
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    };
+
+    struct DropFlag(Arc<AtomicBool>);
+
+    impl Drop for DropFlag {
+        fn drop(&mut self) {
+            self.0.store(true, Ordering::SeqCst);
+        }
+    }
+
+    async fn select_worker_tasks_for_test(
+        mut uni_stream_task: tokio::task::JoinHandle<anyhow::Result<()>>,
+        mut bi_stream_task: tokio::task::JoinHandle<anyhow::Result<()>>,
+    ) -> anyhow::Result<()> {
+        let first_result = tokio::select! {
+            uni_result = &mut uni_stream_task => {
+                bi_stream_task.abort();
+                let _ = bi_stream_task.await;
+                uni_result
+            }
+            bi_result = &mut bi_stream_task => {
+                uni_stream_task.abort();
+                let _ = uni_stream_task.await;
+                bi_result
+            }
+        };
+
+        first_result??;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn worker_dispatch_returns_uni_error_and_aborts_bi_task() {
+        let bi_task_dropped = Arc::new(AtomicBool::new(false));
+        let bi_task_flag = DropFlag(bi_task_dropped.clone());
+
+        let uni_stream_task =
+            tokio::spawn(async { Err::<(), _>(anyhow::anyhow!("uni dispatch failed")) });
+        let bi_stream_task = tokio::spawn(async move {
+            let _guard = bi_task_flag;
+            std::future::pending::<()>().await;
+            #[allow(unreachable_code)]
+            Ok::<(), anyhow::Error>(())
+        });
+
+        let err = select_worker_tasks_for_test(uni_stream_task, bi_stream_task)
+            .await
+            .expect_err("worker dispatch should return the first task error");
+
+        assert!(err.to_string().contains("uni dispatch failed"));
+        assert!(bi_task_dropped.load(Ordering::SeqCst));
+    }
+
+    #[tokio::test]
+    async fn worker_dispatch_returns_bi_error_and_aborts_uni_task() {
+        let uni_task_dropped = Arc::new(AtomicBool::new(false));
+        let uni_task_flag = DropFlag(uni_task_dropped.clone());
+
+        let uni_stream_task = tokio::spawn(async move {
+            let _guard = uni_task_flag;
+            std::future::pending::<()>().await;
+            #[allow(unreachable_code)]
+            Ok::<(), anyhow::Error>(())
+        });
+        let bi_stream_task =
+            tokio::spawn(async { Err::<(), _>(anyhow::anyhow!("bi dispatch failed")) });
+
+        let err = select_worker_tasks_for_test(uni_stream_task, bi_stream_task)
+            .await
+            .expect_err("worker dispatch should return the first task error");
+
+        assert!(err.to_string().contains("bi dispatch failed"));
+        assert!(uni_task_dropped.load(Ordering::SeqCst));
     }
 }

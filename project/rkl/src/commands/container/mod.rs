@@ -965,19 +965,8 @@ mod test {
         let spec = ContainerSpec {
             name: "demo1".to_string(),
             image: image_dir.path().to_string_lossy().to_string(),
-            ports: vec![],
             args: vec!["/bin/echo".to_string(), "hi".to_string()],
-            tty: false,
-            gpus: None,
-            resources: None,
-            liveness_probe: None,
-            readiness_probe: None,
-            startup_probe: None,
-            security_context: None,
-            env: None,
-            volume_mounts: None,
-            command: None,
-            working_dir: None,
+            ..Default::default()
         };
         let runner = ContainerRunner::from_spec(spec.clone(), None).unwrap();
         assert_eq!(runner.container_id, "demo1");
@@ -999,19 +988,7 @@ mod test {
             ContainerSpec {
                 name: "demo2".to_string(),
                 image: image_dir.path().to_string_lossy().to_string(),
-                ports: vec![],
-                args: vec![],
-                tty: false,
-                gpus: None,
-                resources: None,
-                liveness_probe: None,
-                readiness_probe: None,
-                startup_probe: None,
-                security_context: None,
-                env: None,
-                volume_mounts: None,
-                command: None,
-                working_dir: None,
+                ..Default::default()
             },
             None,
         )

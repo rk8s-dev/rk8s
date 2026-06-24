@@ -5,7 +5,6 @@ use netavark::commands::teardown::Teardown;
 use netavark::network::types::{Network, NetworkOptions, PerNetworkOptions, Subnet};
 use nix::mount;
 use std::collections::HashMap;
-use std::ffi::OsString;
 use std::fs;
 use std::net::{IpAddr, Ipv4Addr};
 use std::os::unix::fs::OpenOptionsExt;
@@ -13,34 +12,7 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tracing::{debug, warn};
 
-fn default_netavark_config_dir() -> OsString {
-    if let Some(v) = std::env::var_os("NETAVARK_CONFIG") {
-        return v;
-    }
-    OsString::from("/run/containers/networks")
-}
-
-fn default_aardvark_bin() -> Result<OsString> {
-    if let Some(v) = std::env::var_os("AARDVARK_DNS_BIN") {
-        return Ok(v);
-    }
-    if let Some(v) = std::env::var_os("AARDVARK_BIN") {
-        return Ok(v);
-    }
-
-    let candidates = [
-        "/usr/libexec/podman/aardvark-dns",
-        "/usr/lib/podman/aardvark-dns",
-        "/usr/bin/aardvark-dns",
-    ];
-    for c in candidates {
-        if Path::new(c).exists() {
-            return Ok(OsString::from(c));
-        }
-    }
-
-    Err(anyhow!("aardvark-dns not found"))
-}
+use crate::commands::network_paths::{default_aardvark_bin, default_netavark_config_dir};
 
 fn state_dir() -> PathBuf {
     if let Some(v) = std::env::var_os("RKFORGE_NET_STATE_DIR") {
