@@ -1,11 +1,10 @@
 use crate::commands::pod::PodInfo;
-use crate::commands::{Exec, ExecPod};
-use crate::commands::{delete, exec, kill, load_container, start, state};
+use crate::commands::{delete, kill, load_container};
 use crate::daemon::tty::unregister_tty_local;
-use crate::{network::plugin_chain, task::TaskRunner};
+use crate::network::plugin_chain;
 use anyhow::{Result, anyhow};
 use libcontainer::container::ContainerStatus;
-use liboci_cli::{Delete, Kill, Start, State};
+use liboci_cli::{Delete, Kill};
 use libruntime::rootpath;
 use rkforge::commands::container::rootfs_mount::RootfsMount;
 use std::thread;
@@ -72,9 +71,9 @@ fn cleanup_container_tty(container_name: &str) {
     }
 }
 
-pub fn delete_pod(pod_name: &str) -> Result<(), anyhow::Error> {
-    delete_pod_inner(pod_name, false)
-}
+// pub fn delete_pod(pod_name: &str) -> Result<(), anyhow::Error> {
+//     delete_pod_inner(pod_name, false)
+// }
 
 pub async fn delete_pod_async(pod_name: &str) -> Result<(), anyhow::Error> {
     let root_path = rootpath::determine(None, &*create_syscall())?;
@@ -195,111 +194,111 @@ pub async fn remove_pod_network_async(pid: i32) -> Result<(), anyhow::Error> {
     Ok(())
 }
 
-pub fn create_pod(pod_yaml: &str) -> Result<(), anyhow::Error> {
-    let mut task_runner = TaskRunner::from_file(pod_yaml)?;
-    let pod_name = task_runner.task.metadata.name.clone();
+// pub fn create_pod(pod_yaml: &str) -> Result<(), anyhow::Error> {
+//     let mut task_runner = TaskRunner::from_file(pod_yaml)?;
+//     let pod_name = task_runner.task.metadata.name.clone();
 
-    let pod_request = task_runner.build_run_pod_sandbox_request();
-    let config = pod_request
-        .config
-        .as_ref()
-        .ok_or_else(|| anyhow!("PodSandbox config is required"))?;
-    task_runner.sandbox_config = Some(config.clone());
-    let (pod_response, _) = task_runner.sync_run_pod_sandbox(pod_request)?;
-    let pod_sandbox_id = pod_response.pod_sandbox_id;
+//     let pod_request = task_runner.build_run_pod_sandbox_request();
+//     let config = pod_request
+//         .config
+//         .as_ref()
+//         .ok_or_else(|| anyhow!("PodSandbox config is required"))?;
+//     task_runner.sandbox_config = Some(config.clone());
+//     let (pod_response, _) = task_runner.sync_run_pod_sandbox(pod_request)?;
+//     let pod_sandbox_id = pod_response.pod_sandbox_id;
 
-    let pause_pid = task_runner.pause_pid.ok_or_else(|| {
-        anyhow!(
-            "Pause container PID not found for PodSandbox ID: {}",
-            pod_sandbox_id
-        )
-    })?;
-    info!(
-        "PodSandbox (Pause) created: {}, pid: {}\n",
-        pod_sandbox_id, pause_pid
-    );
+//     let pause_pid = task_runner.pause_pid.ok_or_else(|| {
+//         anyhow!(
+//             "Pause container PID not found for PodSandbox ID: {}",
+//             pod_sandbox_id
+//         )
+//     })?;
+//     info!(
+//         "PodSandbox (Pause) created: {}, pid: {}\n",
+//         pod_sandbox_id, pause_pid
+//     );
 
-    let mut container_ids = Vec::new();
-    let containers = task_runner.task.spec.containers.clone();
-    for container in &containers {
-        let create_request =
-            task_runner.sync_build_create_container_request(&pod_sandbox_id, container)?;
-        let create_response = task_runner.create_container(create_request)?;
-        container_ids.push(create_response.container_id.clone());
-        info!(
-            "Container created: {} (ID: {})",
-            container.name, create_response.container_id
-        );
-    }
+//     let mut container_ids = Vec::new();
+//     let containers = task_runner.task.spec.containers.clone();
+//     for container in &containers {
+//         let create_request =
+//             task_runner.sync_build_create_container_request(&pod_sandbox_id, container)?;
+//         let create_response = task_runner.create_container(create_request)?;
+//         container_ids.push(create_response.container_id.clone());
+//         info!(
+//             "Container created: {} (ID: {})",
+//             container.name, create_response.container_id
+//         );
+//     }
 
-    let root_path = rootpath::determine(None, &*create_syscall())?;
-    let pod_info = PodInfo {
-        pod_sandbox_id,
-        container_names: container_ids,
-    };
-    pod_info.save(&root_path, &pod_name)?;
+//     let root_path = rootpath::determine(None, &*create_syscall())?;
+//     let pod_info = PodInfo {
+//         pod_sandbox_id,
+//         container_names: container_ids,
+//     };
+//     pod_info.save(&root_path, &pod_name)?;
 
-    info!("Pod {} created successfully", pod_name);
-    Ok(())
-}
+//     info!("Pod {} created successfully", pod_name);
+//     Ok(())
+// }
 
-pub fn start_pod(pod_name: &str) -> Result<(), anyhow::Error> {
-    let root_path = rootpath::determine(None, &*create_syscall())?;
-    let pod_info = PodInfo::load(&root_path, pod_name)?;
+// pub fn start_pod(pod_name: &str) -> Result<(), anyhow::Error> {
+//     let root_path = rootpath::determine(None, &*create_syscall())?;
+//     let pod_info = PodInfo::load(&root_path, pod_name)?;
 
-    if pod_info.container_names.is_empty() {
-        return Err(anyhow!("No containers found for Pod {}", pod_name));
-    }
+//     if pod_info.container_names.is_empty() {
+//         return Err(anyhow!("No containers found for Pod {}", pod_name));
+//     }
 
-    for container_name in &pod_info.container_names {
-        let start_args = Start {
-            container_id: container_name.clone(),
-        };
-        start(start_args, root_path.clone())
-            .map_err(|e| anyhow!("Failed to start container {}: {}", container_name, e))?;
-        info!("Container started: {}", container_name);
-    }
+//     for container_name in &pod_info.container_names {
+//         let start_args = Start {
+//             container_id: container_name.clone(),
+//         };
+//         start(start_args, root_path.clone())
+//             .map_err(|e| anyhow!("Failed to start container {}: {}", container_name, e))?;
+//         info!("Container started: {}", container_name);
+//     }
 
-    info!("Pod {} started successfully", pod_name);
-    Ok(())
-}
+//     info!("Pod {} started successfully", pod_name);
+//     Ok(())
+// }
 
-pub fn state_pod(pod_name: &str) -> Result<(), anyhow::Error> {
-    let root_path = rootpath::determine(None, &*create_syscall())?;
-    let pod_info = PodInfo::load(&root_path, pod_name)?;
+// pub fn state_pod(pod_name: &str) -> Result<(), anyhow::Error> {
+//     let root_path = rootpath::determine(None, &*create_syscall())?;
+//     let pod_info = PodInfo::load(&root_path, pod_name)?;
 
-    info!("Pod: {pod_name}");
+//     info!("Pod: {pod_name}");
 
-    info!("PodSandbox ID: {}", pod_info.pod_sandbox_id);
-    let _ = state(
-        State {
-            container_id: pod_info.pod_sandbox_id.clone(),
-        },
-        root_path.clone(),
-    );
+//     info!("PodSandbox ID: {}", pod_info.pod_sandbox_id);
+//     let _ = state(
+//         State {
+//             container_id: pod_info.pod_sandbox_id.clone(),
+//         },
+//         root_path.clone(),
+//     );
 
-    info!("Containers:");
-    for container_name in &pod_info.container_names {
-        let _container_state = state(
-            State {
-                container_id: container_name.clone(),
-            },
-            root_path.clone(),
-        );
-    }
+//     info!("Containers:");
+//     for container_name in &pod_info.container_names {
+//         let _container_state = state(
+//             State {
+//                 container_id: container_name.clone(),
+//             },
+//             root_path.clone(),
+//         );
+//     }
 
-    // TODO: show probe status
+//     // TODO: show probe status
 
-    Ok(())
-}
+//     Ok(())
+// }
 
-pub fn exec_pod(args: ExecPod) -> Result<i32> {
-    let root_path = rootpath::determine(None, &*create_syscall())?;
-    let pod_info_path = root_path.join("pods").join(&args.pod_name);
-    if !pod_info_path.exists() {
-        return Err(anyhow::anyhow!("Pod {} not found", args.pod_name));
-    }
-    let args = Exec::from(args);
-    let exit_code = exec(args, root_path)?;
-    Ok(exit_code)
-}
+// pub fn exec_pod(args: ExecPod) -> Result<i32> {
+//     let root_path = rootpath::determine(None, &*create_syscall())?;
+//     let pod_info_path = root_path.join("pods").join(&args.pod_name);
+//     if !pod_info_path.exists() {
+//         return Err(anyhow::anyhow!("Pod {} not found", args.pod_name));
+//     }
+//     let args = Exec::from(args);
+//     let exit_code = exec(args, root_path)?;
+//     Ok(exit_code)
+// }

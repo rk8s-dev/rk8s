@@ -164,15 +164,15 @@ impl TaskRunner {
         })
     }
 
-    //get information from a file  record in Podtask
-    pub fn from_file(path: &str) -> Result<Self> {
-        let mut file = File::open(path)?;
-        let mut contents = String::new();
-        file.read_to_string(&mut contents)?;
-        let task: PodTask = serde_yaml::from_str(&contents)?;
-        debug!("{task:?}");
-        Self::from_task(task)
-    }
+    // get information from a file record in Podtask
+    // pub fn from_file(path: &str) -> Result<Self> {
+    //     let mut file = File::open(path)?;
+    //     let mut contents = String::new();
+    //     file.read_to_string(&mut contents)?;
+    //     let task: PodTask = serde_yaml::from_str(&contents)?;
+    //     debug!("{task:?}");
+    //     Self::from_task(task)
+    // }
 
     //get PodSandboxConfig
     pub fn create_pod_sandbox_config(
@@ -917,6 +917,15 @@ impl TaskRunner {
         };
         kill(kill_args, root_path.clone())
             .map_err(|e| anyhow!("Failed to stop PodSandbox {}: {}", pod_sandbox_id, e))?;
+
+        // Remove any port mappings applied for this sandbox (mirror of run_pod_sandbox).
+        if let Some(config) = &self.sandbox_config
+            && !config.port_mappings.is_empty()
+            && let Err(e) = port_forward::remove_port_mappings(&config.port_mappings)
+        {
+            error!("Failed to remove port mappings for PodSandbox {pod_sandbox_id}: {e}");
+        }
+
         Ok(StopPodSandboxResponse {})
     }
     //delete pause container

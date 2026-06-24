@@ -1,7 +1,8 @@
 use anyhow::Result;
 use clap::Args;
 
-use super::container::run_container;
+use super::container::run_container_in_cluster;
+use super::pod::TLSConnectionArgs;
 
 #[derive(Args, Debug, Clone)]
 pub struct RunCommand {
@@ -10,9 +11,21 @@ pub struct RunCommand {
 
     #[arg(long, short = 'v')]
     pub volumes: Option<Vec<String>>,
+
+    /// RKS control-plane address.
+    #[arg(
+        long,
+        value_name = "RKS_ADDRESS",
+        env = "RKS_ADDRESS",
+        required = false
+    )]
+    pub cluster: Option<String>,
+
+    #[clap(flatten)]
+    pub tls_cfg: TLSConnectionArgs,
 }
 
-/// TODO: In RunCommand, remove usage of yaml, name a container by options directly.
+/// Create a single-container Pod through the rks control plane.
 pub fn run_execute(cmd: RunCommand) -> Result<(), anyhow::Error> {
-    run_container(&cmd.container_yaml, cmd.volumes)
+    run_container_in_cluster(&cmd.container_yaml, cmd.volumes, cmd.cluster, cmd.tls_cfg)
 }

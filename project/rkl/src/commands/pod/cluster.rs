@@ -26,15 +26,28 @@ pub async fn delete_pod(pod_name: &str, addr: &str, tls_cfg: TLSConnectionArgs) 
 }
 
 pub async fn create_pod(pod_yaml: &str, addr: &str, tls_cfg: TLSConnectionArgs) -> Result<()> {
-    let cli = QUICClient::<Cli>::connect(addr, &tls_cfg).await.unwrap();
+    let task = pod_task_from_path(pod_yaml).map_err(|e| anyhow!("invalid pod yaml: {}", e))?;
+    create_pod_task(task, addr, tls_cfg).await
+}
+
+pub async fn create_pod_task(
+    task: Box<PodTask>,
+    addr: &str,
+    tls_cfg: TLSConnectionArgs,
+) -> Result<()> {
+    let cli = QUICClient::<Cli>::connect(addr, &tls_cfg).await?;
     info!("RKL connected to RKS at {addr}");
 
-    let task = pod_task_from_path(pod_yaml).map_err(|e| anyhow!("invalid pod yaml: {}", e))?;
     let pod_name = task.metadata.name.clone();
     cli.send_msg(&RksMessage::CreatePod(task)).await?;
-    let _ = cli.fetch_msg().await?;
-    info!("pod {pod_name} created");
-    Ok(())
+    match cli.fetch_msg().await? {
+        RksMessage::Ack => {
+            info!("pod {pod_name} created");
+            Ok(())
+        }
+        RksMessage::Error(err) => Err(anyhow!("Failed to create pod: {}", err)),
+        msg => Err(anyhow!("unexpected response {:?} ", msg)),
+    }
 }
 
 pub async fn list_pod(addr: &str, tls_cfg: TLSConnectionArgs) -> Result<()> {

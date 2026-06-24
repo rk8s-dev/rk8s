@@ -4,7 +4,7 @@ use libruntime::volume::parse_key_val;
 use serde::Deserialize;
 use std::fs::File;
 
-use crate::commands::container::create_container;
+use crate::commands::container::create_container_in_cluster;
 use crate::commands::deployment::deployment_apply;
 use crate::commands::job::job_apply;
 use crate::commands::pod::{TLSConnectionArgs, pod_create};
@@ -68,7 +68,7 @@ fn apply_single_file(
     match hint.kind.as_str() {
         // for pod and container, apply means create.
         "Pod" => pod_create(filename, cluster, tls_cfg),
-        "Container" => create_container(filename, volumes),
+        "Container" => create_container_in_cluster(filename, volumes, cluster, tls_cfg),
         // for deployment/replicaset/service Apply command is already idempotent
         "Deployment" => deployment_apply(filename, cluster, tls_cfg),
         "ReplicaSet" => replicaset_apply(filename, cluster, tls_cfg),
