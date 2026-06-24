@@ -574,7 +574,7 @@ pub struct VolumeMount {
     pub sub_path: Option<String>,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq, Default)]
 pub struct ContainerSpec {
     pub name: String,
 
