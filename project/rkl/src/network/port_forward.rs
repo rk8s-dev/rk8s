@@ -90,7 +90,13 @@ pub fn apply_port_mappings(port_mappings: &[PortMapping], container_ip: &str) ->
     // detects collisions in port mapping and returns an error
     let mut seen = HashSet::new();
     for port_mapping in port_mappings {
-        let key = (port_mapping.host_ip.as_str(), port_mapping.host_port);
+        // Include protocol: the nft host_ports map key is (l4proto, host_ip, host_port),
+        // so the same host ip/port on different protocols (TCP+UDP) is not a collision.
+        let key = (
+            port_mapping.protocol,
+            port_mapping.host_ip.as_str(),
+            port_mapping.host_port,
+        );
         if !seen.insert(key) {
             anyhow::bail!(
                 "Found conflicting port mapping: {}:{}",
