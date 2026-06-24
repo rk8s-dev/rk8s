@@ -32,6 +32,7 @@ use tracing::info;
 pub mod compose;
 pub mod config_cli;
 pub mod container;
+pub(crate) mod network_paths;
 pub mod pod;
 pub mod volume;
 

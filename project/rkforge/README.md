@@ -79,6 +79,21 @@ Build rkforge from source code.
 cargo build
 ```
 
+If you use `rkforge` container networking (`run`, `create`, `compose up`), build
+`aardvark-dns` together with `rkforge`:
+
+```sh
+cargo build -p aardvark-dns -p rkforge
+```
+
+At runtime, `rkforge` looks for `aardvark-dns` in this order:
+
+1. `AARDVARK_DNS_BIN` or `AARDVARK_BIN`
+2. The same directory as the `rkforge` binary
+3. `../libexec/rkforge/aardvark-dns` relative to the `rkforge` install prefix
+4. `PATH`
+5. System paths such as `/usr/libexec/podman/aardvark-dns` and `/usr/bin/aardvark-dns`
+
 Create a sample Dockerfile named `example-Dockerfile` in the current working directory with the following content:
 
 ```Dockerfile
