@@ -17,7 +17,7 @@ static COUNTER: AtomicUsize = AtomicUsize::new(0);
 
 fn create_unique_chain_name() -> String {
     let count = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    format!("dnat_{}", count.to_string())
+    format!("dnat_{}", count)
 }
 
 fn l4proto_number(protocol: i32) -> u32 {
@@ -27,9 +27,9 @@ fn l4proto_number(protocol: i32) -> u32 {
     }
 }
 
-fn add_elements_to_map<'a, 'b>(
+fn add_elements_to_map<'a>(
     port_mapping_and_chain_bindings: &'a [(&PortMapping, String)],
-    objects: &'b mut Vec<schema::NfObject<'a>>,
+    objects: &mut Vec<schema::NfObject<'a>>,
 ) {
     for (port_mapping, chain) in port_mapping_and_chain_bindings {
         objects.push(schema::NfObject::CmdObject(NfCmd::Add(
@@ -52,10 +52,10 @@ fn add_elements_to_map<'a, 'b>(
     }
 }
 
-fn add_chain_for_each_port_mapping<'a, 'b>(
+fn add_chain_for_each_port_mapping<'a>(
     port_mapping_and_chain_bindings: &'a [(&'a PortMapping, String)],
     container_ip: &'a str,
-    objects: &'b mut Vec<schema::NfObject<'a>>,
+    objects: &mut Vec<schema::NfObject<'a>>,
 ) {
     for (port_mapping, chain) in port_mapping_and_chain_bindings {
         objects.push(schema::NfObject::CmdObject(NfCmd::Add(
