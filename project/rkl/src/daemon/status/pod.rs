@@ -11,10 +11,7 @@ use libruntime::rootpath;
 use tracing::debug;
 use uuid::Uuid;
 
-use crate::{
-    commands::pod::{PodInfo, TLSConnectionArgs},
-    quic::client::{Cli, QUICClient},
-};
+use crate::{commands::pod::PodInfo, daemon::client::try_get_daemon_client};
 
 /// A snapshot of a pod on the local node, including its runtime containers and
 /// sandbox(es).
@@ -53,17 +50,16 @@ impl Pod {
 ///
 /// Pods whose local [`PodInfo`] cannot be loaded (e.g. not yet scheduled to
 /// this node) are skipped with a warning log.
-pub async fn get_pods(server_addr: &str, tls_cfg: &TLSConnectionArgs) -> anyhow::Result<Vec<Pod>> {
-    debug!(
-        server_addr,
-        "[status::pod] Loading pods from rks and local runtime"
-    );
+pub async fn list_pods() -> anyhow::Result<Vec<Pod>> {
+    debug!("[status::pod] Loading pods from rks and local runtime");
     let root_path = rootpath::determine(None, &*create_syscall())?;
 
     // get pod list from rks server
-    let client = QUICClient::<Cli>::connect(server_addr, tls_cfg).await?;
-    client.send_msg(&RksMessage::ListPod).await?;
-    let server_pods = match client.fetch_msg().await? {
+    let client = try_get_daemon_client().await?;
+    let mut stream = client.open_bi().await?;
+    stream.send_msg(&RksMessage::ListPod).await?;
+    stream.sender().finish()?;
+    let server_pods = match stream.fetch_msg().await? {
         RksMessage::ListPodRes(pods) => pods,
         msg => anyhow::bail!("unexpected response {:?} ", msg),
     };

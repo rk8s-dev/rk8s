@@ -2,6 +2,7 @@ use anyhow::Result;
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Seek, SeekFrom};
 use std::{env, fs, net::SocketAddr, path::Path, sync::Arc, time::Duration};
+use tokio::sync::RwLock;
 
 use tokio::time;
 
@@ -27,6 +28,8 @@ use libcontainer::syscall::syscall::create_syscall;
 use libruntime::rootpath;
 use sysinfo::{Disks, System};
 use tracing::{error, info, warn};
+
+pub static DAEMON_CLIENT: RwLock<Option<Arc<QUICClient<ClientDaemon>>>> = RwLock::const_new(None);
 
 fn nft_rules_phase(rules: &str) -> &'static str {
     if rules.contains("\"map\":\"verdict\"")
@@ -134,6 +137,7 @@ pub async fn run_forever(tls_cfg: TLSConnectionArgs) -> Result<()> {
         } else {
             time::sleep(Duration::from_secs(1)).await;
         }
+        clear_daemon_client().await;
     }
 }
 
@@ -177,6 +181,7 @@ pub async fn run_once(
 
     let client = QUICClient::<ClientDaemon>::connect(server_addr.to_string(), &tls_cfg).await?;
     info!("[worker] connected to RKS at {server_addr}");
+    set_daemon_client(Arc::new(client.clone())).await;
 
     // register to rks by sending RegisterNode(Box<Node>)
     let register_msg = RksMessage::RegisterNode(Box::new(node.clone()));
@@ -871,6 +876,29 @@ pub fn network_condition() -> NodeCondition {
 
 async fn handle_dns_config(_dns_ip: String, _dns_port: u16) -> Result<()> {
     Ok(())
+}
+
+/// Try get daemon_client
+pub async fn try_get_daemon_client() -> Result<Arc<QUICClient<ClientDaemon>>> {
+    let mut try_count: i32 = 0;
+
+    while try_count < 10 {
+        if let Some(client) = DAEMON_CLIENT.read().await.clone() {
+            return Ok(client);
+        }
+        try_count += 1;
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+
+    Err(anyhow::anyhow!("Failed to get daemon client"))
+}
+
+async fn set_daemon_client(client: Arc<QUICClient<ClientDaemon>>) {
+    *DAEMON_CLIENT.write().await = Some(client);
+}
+
+async fn clear_daemon_client() {
+    *DAEMON_CLIENT.write().await = None;
 }
 
 /// Find the log file for a pod/container by scanning /var/log/pods/

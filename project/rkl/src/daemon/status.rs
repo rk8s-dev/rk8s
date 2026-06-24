@@ -39,7 +39,7 @@
 use common::{PodTask, RksMessage};
 use uuid::Uuid;
 
-use crate::quic::client::{Cli, QUICClient};
+use crate::daemon::client::try_get_daemon_client;
 
 pub mod pleg;
 pub mod pod;
@@ -51,12 +51,12 @@ pub mod status_manager;
 /// Sends a [`RksMessage::GetPodByUid`] request over the given QUIC client and
 /// returns `Ok(Some(pod))` when the server responds with
 /// [`RksMessage::GetPodByUidRes`], or `Ok(None)` for any other response type.
-pub async fn get_pod_by_uid(
-    client: &QUICClient<Cli>,
-    uid: &Uuid,
-) -> anyhow::Result<Option<PodTask>> {
-    client.send_msg(&RksMessage::GetPodByUid(*uid)).await?;
-    let pod = match client.fetch_msg().await? {
+pub async fn get_pod_task_by_uid(uid: &Uuid) -> anyhow::Result<Option<PodTask>> {
+    let client = try_get_daemon_client().await?;
+    let mut stream = client.open_bi().await?;
+    stream.send_msg(&RksMessage::GetPodByUid(*uid)).await?;
+    stream.sender().finish()?;
+    let pod = match stream.fetch_msg().await? {
         RksMessage::GetPodByUidRes(res) => Some(*res),
         _ => None,
     };
