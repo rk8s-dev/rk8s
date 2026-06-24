@@ -1,7 +1,7 @@
 use anyhow::{Error, Result};
 use clap::Args;
 
-use crate::commands::container::{list_container, state_container};
+use crate::commands::container::{list_container_in_cluster, state_container_in_cluster};
 use crate::commands::deployment::{deployment_get, deployment_list};
 use crate::commands::job::{job_get, job_list};
 use crate::commands::pod::TLSConnectionArgs;
@@ -125,7 +125,9 @@ pub fn get_execute(cmd: GetCommand) -> Result<(), Error> {
             // there is specified resource name, do get or state
             for name in resource_arg.resource_name {
                 match resource_arg.resource_type {
-                    ResourceType::Container => state_container(&name)?,
+                    ResourceType::Container => {
+                        state_container_in_cluster(&name, cmd.cluster.clone(), cmd.tls_cfg.clone())?
+                    }
                     ResourceType::Pod => pod_get(&name, cmd.cluster.clone(), cmd.tls_cfg.clone())?,
                     ResourceType::Deployment => {
                         deployment_get(&name, cmd.cluster.clone(), cmd.tls_cfg.clone())?
@@ -142,7 +144,9 @@ pub fn get_execute(cmd: GetCommand) -> Result<(), Error> {
         } else {
             // no specified resource name, do list
             match resource_arg.resource_type {
-                ResourceType::Container => list_container(None, None)?,
+                ResourceType::Container => {
+                    list_container_in_cluster(None, None, cmd.cluster.clone(), cmd.tls_cfg.clone())?
+                }
                 ResourceType::Pod => pod_list(cmd.cluster.clone(), cmd.tls_cfg.clone())?,
                 ResourceType::Deployment => {
                     deployment_list(cmd.cluster.clone(), cmd.tls_cfg.clone())?
