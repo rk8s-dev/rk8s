@@ -39,14 +39,14 @@ sha2 = "0.10.8"
 thiserror = { workspace = true }
 tokio = { workspace = true }
 tokio-stream = { workspace = true }
-tokio-util = { workspace = true }
+tokio-util = { workspace = true, features = ["codec"] }
 tracing = { version = "0.1.37", features = ["std", "log", "attributes"] }
 tracing-opentelemetry = { workspace = true }
 utils = { path = "../utils", version = "0.1.0" }
 xlinerpc = { path = "../xlinerpc"}
 
 # QUIC dependencies
-gm-quic = { workspace = true }
+dquic = { workspace = true }
 
 [dev-dependencies]
 anyhow = { workspace = true }

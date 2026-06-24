@@ -9,6 +9,7 @@ use std::time::Duration;
 
 use crate::context::OperationContext;
 use crate::passthrough::PassthroughFs;
+use crate::util::whiteout::{OCI_OPAQUE_MARKER, WhiteoutFormat, oci_whiteout_name};
 pub const OPAQUE_XATTR_LEN: u32 = 16;
 pub const OPAQUE_XATTR: &str = "user.fuseoverlayfs.opaque";
 pub const UNPRIVILEGED_OPAQUE_XATTR: &str = "user.overlay.opaque";
@@ -24,6 +25,20 @@ type Stat64 = libc::stat64;
 pub trait Layer: ObjectSafeFilesystem {
     /// Return the root inode number
     fn root_inode(&self) -> Inode;
+
+    /// Whiteout format used by this layer. Default is `CharDev` on Linux and
+    /// `OciWhiteout` on macOS; backends may override via config.
+    fn whiteout_format(&self) -> WhiteoutFormat {
+        WhiteoutFormat::default()
+    }
+
+    /// Resolve `inode` to the absolute host filesystem path that backs it,
+    /// if such a mapping exists. Returns `None` for layers that lack a 1:1
+    /// host-fs mapping. See `overlayfs::Layer::host_path_of` for details.
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+    async fn host_path_of(&self, _inode: Inode) -> Option<std::path::PathBuf> {
+        None
+    }
     /// Create whiteout file with name <name>.
     ///
     /// If this call is successful then the lookup count of the `Inode` associated with the returned
@@ -34,105 +49,162 @@ pub trait Layer: ObjectSafeFilesystem {
         parent: Inode,
         name: &OsStr,
     ) -> Result<ReplyEntry> {
-        // Use temp value to avoid moved 'parent'.
         let ino: u64 = parent;
-        match self.lookup(ctx, ino, name).await {
-            Ok(v) => {
-                // Find whiteout char dev.
-                if is_whiteout(&v.attr) {
-                    return Ok(v);
-                }
-                // Non-negative entry with inode larger than 0 indicates file exists.
-                if v.attr.ino != 0 {
-                    // Decrease the refcount.
-                    self.forget(ctx, v.attr.ino, 1).await;
-                    // File exists with same name, create whiteout file is not allowed.
-                    return Err(Error::from_raw_os_error(libc::EEXIST).into());
-                }
-            }
-            Err(e) => {
-                let e: std::io::Error = e.into();
-                match e.raw_os_error() {
-                    Some(raw_error) => {
-                        // We expect ENOENT error.
-                        if raw_error != libc::ENOENT {
-                            return Err(e.into());
+        match self.whiteout_format() {
+            WhiteoutFormat::CharDev => {
+                match self.lookup(ctx, ino, name).await {
+                    Ok(v) => {
+                        if is_whiteout(&v.attr) {
+                            return Ok(v);
+                        }
+                        if v.attr.ino != 0 {
+                            self.forget(ctx, v.attr.ino, 1).await;
+                            return Err(Error::from_raw_os_error(libc::EEXIST).into());
                         }
                     }
-                    None => return Err(e.into()),
+                    Err(e) => {
+                        let e: std::io::Error = e.into();
+                        match e.raw_os_error() {
+                            Some(raw_error) => {
+                                if raw_error != libc::ENOENT {
+                                    return Err(e.into());
+                                }
+                            }
+                            None => return Err(e.into()),
+                        }
+                    }
                 }
+                let dev = libc::makedev(0, 0);
+                let mode = (libc::S_IFCHR as u32) | 0o777;
+                self.mknod(ctx, ino, name, mode, dev as u32).await
+            }
+            WhiteoutFormat::OciWhiteout => {
+                oci_create_marker(self, ctx, ino, &oci_whiteout_name(name)).await
             }
         }
-
-        // Try to create whiteout char device with 0/0 device number.
-        let dev = libc::makedev(0, 0);
-        let mode = (libc::S_IFCHR as u32) | 0o777;
-        self.mknod(ctx, ino, name, mode, dev as u32).await
     }
 
     /// Delete whiteout file with name <name>.
     async fn delete_whiteout(&self, ctx: Request, parent: Inode, name: &OsStr) -> Result<()> {
-        // Use temp value to avoid moved 'parent'.
         let ino: u64 = parent;
-        match self.lookup(ctx, ino, name).await {
-            Ok(v) => {
-                if v.attr.ino != 0 {
-                    // Decrease the refcount since we make a lookup call.
-                    self.forget(ctx, v.attr.ino, 1).await;
+        match self.whiteout_format() {
+            WhiteoutFormat::CharDev => {
+                match self.lookup(ctx, ino, name).await {
+                    Ok(v) => {
+                        if v.attr.ino != 0 {
+                            self.forget(ctx, v.attr.ino, 1).await;
+                        }
+                        if is_whiteout(&v.attr) {
+                            return match self.unlink(ctx, ino, name).await {
+                                Ok(()) => Ok(()),
+                                Err(e) => {
+                                    let ie: std::io::Error = e.into();
+                                    if ie.raw_os_error() == Some(libc::ENOENT) {
+                                        Ok(())
+                                    } else {
+                                        Err(ie.into())
+                                    }
+                                }
+                            };
+                        }
+                        if v.attr.ino != 0 {
+                            return Err(Error::from_raw_os_error(libc::EINVAL).into());
+                        }
+                    }
+                    Err(e) => {
+                        let ie: std::io::Error = e.into();
+                        if ie.raw_os_error() != Some(libc::ENOENT) {
+                            return Err(ie.into());
+                        }
+                    }
                 }
-
-                // Find whiteout so we can safely delete it.
-                if is_whiteout(&v.attr) {
-                    return self.unlink(ctx, ino, name).await;
-                }
-                //  Non-negative entry with inode larger than 0 indicates file exists.
-                if v.attr.ino != 0 {
-                    // File exists but not whiteout file.
-                    return Err(Error::from_raw_os_error(libc::EINVAL).into());
+                Ok(())
+            }
+            WhiteoutFormat::OciWhiteout => {
+                let wh = oci_whiteout_name(name);
+                match self.unlink(ctx, ino, &wh).await {
+                    Ok(()) => Ok(()),
+                    Err(e) => {
+                        let ie: std::io::Error = e.into();
+                        if ie.raw_os_error() == Some(libc::ENOENT) {
+                            Ok(())
+                        } else {
+                            Err(ie.into())
+                        }
+                    }
                 }
             }
-            Err(e) => return Err(e),
         }
-        Ok(())
     }
 
-    /// Check if the Inode is a whiteout file
+    /// Check if the Inode is a whiteout file.
+    ///
+    /// **Note**: this overload is `CharDev`-only by design — see the trait
+    /// definition for explanation. In `OciWhiteout` mode this returns
+    /// `Ok(false)`.
     async fn is_whiteout(&self, ctx: Request, inode: Inode) -> Result<bool> {
-        let rep = self.getattr(ctx, inode, None, 0).await?;
-
-        // Check attributes of the inode to see if it's a whiteout char device.
-        Ok(is_whiteout(&rep.attr))
+        match self.whiteout_format() {
+            WhiteoutFormat::CharDev => {
+                let rep = self.getattr(ctx, inode, None, 0).await?;
+                Ok(is_whiteout(&rep.attr))
+            }
+            WhiteoutFormat::OciWhiteout => Ok(false),
+        }
     }
 
     /// Set the directory to opaque.
     async fn set_opaque(&self, ctx: Request, inode: Inode) -> Result<()> {
-        // Use temp value to avoid moved 'parent'.
         let ino: u64 = inode;
 
-        // Get attributes and check if it's directory.
         let rep = self.getattr(ctx, ino, None, 0).await?;
         if !is_dir(&rep.attr) {
-            // Only directory can be set to opaque.
             return Err(Error::from_raw_os_error(libc::ENOTDIR).into());
         }
-        // A directory is made opaque by setting the xattr "trusted.overlay.opaque" to "y".
-        // See ref: https://docs.kernel.org/filesystems/overlayfs.html#whiteouts-and-opaque-directories
-        self.setxattr(ctx, ino, OsStr::new(OPAQUE_XATTR), b"y", 0, 0)
-            .await
+
+        match self.whiteout_format() {
+            WhiteoutFormat::CharDev => {
+                self.setxattr(ctx, ino, OsStr::new(OPAQUE_XATTR), b"y", 0, 0)
+                    .await
+            }
+            WhiteoutFormat::OciWhiteout => {
+                oci_create_marker(self, ctx, ino, OsStr::new(OCI_OPAQUE_MARKER))
+                    .await
+                    .map(|_| ())
+            }
+        }
     }
 
     /// Check if the directory is opaque.
     async fn is_opaque(&self, ctx: Request, inode: Inode) -> Result<bool> {
-        // Use temp value to avoid moved 'parent'.
         let ino: u64 = inode;
 
-        // Get attributes of the directory.
         let attr: rfuse3::raw::prelude::ReplyAttr = self.getattr(ctx, ino, None, 0).await?;
         if !is_dir(&attr.attr) {
             return Err(Error::from_raw_os_error(libc::ENOTDIR).into());
         }
 
-        // Return Result<is_opaque>.
+        if matches!(self.whiteout_format(), WhiteoutFormat::OciWhiteout) {
+            let marker = OsStr::new(OCI_OPAQUE_MARKER);
+            return match self.lookup(ctx, ino, marker).await {
+                Ok(v) => {
+                    if v.attr.ino == 0 {
+                        Ok(false)
+                    } else {
+                        self.forget(ctx, v.attr.ino, 1).await;
+                        Ok(true)
+                    }
+                }
+                Err(e) => {
+                    let ie: std::io::Error = e.into();
+                    if ie.raw_os_error() == Some(libc::ENOENT) {
+                        Ok(false)
+                    } else {
+                        Err(ie.into())
+                    }
+                }
+            };
+        }
+
         let check_attr = |inode: Inode, attr_name: &'static str, attr_size: u32| async move {
             let cname = OsStr::new(attr_name);
             match self.getxattr(ctx, inode, cname, attr_size).await {
@@ -244,6 +316,14 @@ impl Layer for PassthroughFs {
         1
     }
 
+    fn whiteout_format(&self) -> WhiteoutFormat {
+        self.config().whiteout_format
+    }
+
+    async fn host_path_of(&self, inode: Inode) -> Option<std::path::PathBuf> {
+        self.passthrough_host_path(inode).await
+    }
+
     async fn create_with_context(
         &self,
         ctx: OperationContext,
@@ -330,6 +410,39 @@ pub(crate) fn is_whiteout(st: &FileAttr) -> bool {
     is_chardev(st) && major == 0 && minor == 0
 }
 
+/// Create an OCI whiteout / opaque-marker file (regular file, mode 0).
+///
+/// Uses `ObjectSafeFilesystem::create` rather than `mknod(S_IFREG, ..)`
+/// because Darwin's `mknod(2)` rejects regular-file modes with EINVAL. The fh
+/// from `create` is released immediately — callers only want the entry attrs.
+async fn oci_create_marker<F: ObjectSafeFilesystem + ?Sized>(
+    fs: &F,
+    ctx: Request,
+    parent: Inode,
+    marker: &OsStr,
+) -> Result<ReplyEntry> {
+    match fs.lookup(ctx, parent, marker).await {
+        Ok(v) if v.attr.ino != 0 => return Ok(v),
+        Ok(_) => {}
+        Err(e) => {
+            let ie: std::io::Error = e.into();
+            if ie.raw_os_error() != Some(libc::ENOENT) {
+                return Err(ie.into());
+            }
+        }
+    }
+    let flags = (libc::O_CREAT | libc::O_EXCL | libc::O_WRONLY) as u32;
+    let created = fs.create(ctx, parent, marker, 0o000, flags).await?;
+    let _ = fs
+        .release(ctx, created.attr.ino, created.fh, flags, 0, false)
+        .await;
+    Ok(ReplyEntry {
+        ttl: created.ttl,
+        attr: created.attr,
+        generation: created.generation,
+    })
+}
+
 #[cfg(test)]
 mod test {
     use std::{ffi::OsStr, path::PathBuf};
@@ -337,10 +450,29 @@ mod test {
     use rfuse3::raw::{Filesystem as _, Request};
 
     use crate::{
-        passthrough::{PassthroughArgs, new_passthroughfs_layer},
+        passthrough::{PassthroughArgs, PassthroughFs, config::Config, new_passthroughfs_layer},
         unionfs::layer::Layer,
         unwrap_or_skip_eperm,
+        util::whiteout::WhiteoutFormat,
     };
+
+    #[tokio::test]
+    async fn delete_missing_oci_whiteout_is_idempotent() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let fs = PassthroughFs::<()>::new(Config {
+            root_dir: temp_dir.path().to_path_buf(),
+            do_import: true,
+            whiteout_format: WhiteoutFormat::OciWhiteout,
+            ..Default::default()
+        })
+        .unwrap();
+        unwrap_or_skip_eperm!(fs.init(Request::default()).await, "fs init");
+        unwrap_or_skip_eperm!(
+            fs.delete_whiteout(Request::default(), 1, OsStr::new("missing"))
+                .await,
+            "delete_whiteout missing OCI marker"
+        );
+    }
 
     // Mark as ignored by default; run with: RUN_PRIVILEGED_TESTS=1 cargo test -- --ignored
     #[ignore]

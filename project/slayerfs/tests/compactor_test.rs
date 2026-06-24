@@ -261,6 +261,7 @@ mod tests {
             max_chunks_per_run: 100,
             max_concurrent_tasks: 2,
             lock_ttl: Default::default(),
+            ..Default::default()
         };
 
         let compactor = Compactor::with_config(

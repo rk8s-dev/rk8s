@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use gm_quic::prelude::QuicClient;
+use dquic::prelude::QuicClient;
 
 /// Transport layer configuration
 ///

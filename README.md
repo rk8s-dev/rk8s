@@ -7,18 +7,18 @@ The rk8s project is initiated by the Web3 Infrastructure Foundation and develope
 The project is currently in **WIP** stage and **should not be used in production environments**.
 
 ## Architecture Overview
-rk8s follows a distributed architecture with both standalone and cluster deployment modes: 
+rk8s follows a distributed architecture with both standalone and cluster deployment modes:
 
 ### Core Components
 - **RKL (Container Runtime Interface)** - The primary runtime component supporting CLI operations and daemon mode
-- **RKS (Control Plane)** - Kubernetes-like control plane combining API server, scheduler, and controller functionality  
+- **RKS (Control Plane)** - Kubernetes-like control plane combining API server, scheduler, and controller functionality
 - **Xline** - etcd-compatible distributed storage for cluster state
 - **Redfannel** - Centralized Flannel Network Solution Implemented in Rust
 
 ## Supported Workload Types
 
 ### 1. Single Container Workloads
-Manage standalone containers with resource limits and port mappings: 
+Manage standalone containers with resource limits and port mappings:
 
 **Example single container specification:**
 ```yaml
@@ -52,18 +52,18 @@ Group multiple containers sharing the same network namespace and lifecycle, impl
 apiVersion: v1
 kind: Pod
 metadata:
-  name: simple-container-task  
+  name: simple-container-task
   labels:
-    app: my-app 
+    app: my-app
     bundle: ./rk8s/project/test/bundles/pause
 spec:
   containers:
-    - name: main-container1    
+    - name: main-container1
       image: ./rk8s/project/test/bundles/busybox
-      args:             
-        - "dd"                   
-        - "if=/dev/zero"  
-        - "of=/dev/null"          
+      args:
+        - "dd"
+        - "if=/dev/zero"
+        - "of=/dev/null"
       ports:
         - containerPort: 80
       resources:
@@ -75,7 +75,7 @@ status:
 
 ### 3. Docker Compose-Style Applications
 
-The compose functionality represents rk8s's philosophy of providing familiar developer experiences while maintaining Kubernetes compatibility. This approach bridges the gap between local development workflows and production Kubernetes deployments. 
+The compose functionality represents rk8s's philosophy of providing familiar developer experiences while maintaining Kubernetes compatibility. This approach bridges the gap between local development workflows and production Kubernetes deployments.
 
 **Design Philosophy:**
 - **Developer Familiarity** - Use Docker Compose syntax that developers already know
@@ -115,13 +115,13 @@ configs:
 
 ## Deployment Modes
 
-### Local Mode (Standalone) 
+### Local Mode (Standalone)
 Direct CLI interaction with local container runtime:
 - No central control plane required
 - Immediate container creation and management
 - Ideal for development and testing
 
-### Cluster Mode (Distributed) 
+### Cluster Mode (Distributed)
 Full Kubernetes-like cluster with distributed components:
 - RKS control plane for scheduling and state management
 - RKL daemons on worker nodes
@@ -233,4 +233,4 @@ More information on contributing to rk8s is available in the [Contributing Guide
 
 ## Community
 
-Discord Channel: https://discord.gg/hKAypQUEzE 
+Discord Channel: https://discord.gg/hKAypQUEzE

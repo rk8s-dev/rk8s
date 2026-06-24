@@ -5,10 +5,10 @@ load("@buckal//:wrapper.bzl", "rust_library")
 
 http_archive(
     name = "vendor",
-    urls = ["https://static.crates.io/crates/libcontainer/libcontainer-0.5.7.crate"],
-    sha256 = "a6320ae84435bed00efb3e0a7c2de8a38bba4d619e801d8ab3a8527fcf427709",
+    urls = ["https://static.crates.io/crates/libcontainer/libcontainer-0.6.0.crate"],
+    sha256 = "4c0d145abd052d4f374d5b9fb8beaa7c817a691ef0143260353b69761a96dd6a",
     type = "tar.gz",
-    strip_prefix = "libcontainer-0.5.7",
+    strip_prefix = "libcontainer-0.6.0",
 )
 
 cargo_manifest(
@@ -23,6 +23,7 @@ rust_library(
     crate_root = "vendor/src/lib.rs",
     edition = "2024",
     features = [
+        "cgroupsv2_devices",
         "default",
         "libseccomp",
         "systemd",
@@ -36,12 +37,14 @@ rust_library(
         "//third-party/rust/crates/chrono/0.4.43:chrono",
         "//third-party/rust/crates/fastrand/2.3.0:fastrand",
         "//third-party/rust/crates/libc/0.2.182:libc",
-        "//third-party/rust/crates/libcgroups/0.5.7:libcgroups",
+        "//third-party/rust/crates/libcgroups/0.6.0:libcgroups",
         "//third-party/rust/crates/libseccomp/0.4.0:libseccomp",
         "//third-party/rust/crates/nc/0.9.7:nc",
+        "//third-party/rust/crates/netlink-packet-core/0.8.1:netlink-packet-core",
+        "//third-party/rust/crates/netlink-packet-route/0.26.0:netlink-packet-route",
+        "//third-party/rust/crates/netlink-sys/0.8.8:netlink-sys",
         "//third-party/rust/crates/nix/0.29.0:nix",
-        "//third-party/rust/crates/oci-spec/0.8.4:oci-spec",
-        "//third-party/rust/crates/once_cell/1.21.3:once_cell",
+        "//third-party/rust/crates/oci-spec/0.9.0:oci-spec",
         "//third-party/rust/crates/pathrs/0.2.3:pathrs",
         "//third-party/rust/crates/prctl/1.0.0:prctl",
         "//third-party/rust/crates/procfs/0.17.0:procfs",

@@ -1,7 +1,11 @@
 use anyhow::{Context, Result, anyhow};
 use cni_plugin::{Command, Inputs, config::NetworkConfig, reply::SuccessReply};
 use json::JsonValue;
-use libcni::rust_cni::config::ConfigFile;
+use libcni::{
+    ip::link,
+    ns::netns::{self, Netns},
+    rust_cni::config::ConfigFile,
+};
 use std::path::PathBuf;
 
 const DEFAULT_CNI_CONF_DIR: &str = "/etc/cni/net.d";
@@ -45,6 +49,8 @@ pub async fn setup_network_async(container_id: &str, netns_path: &str) -> Result
             ));
         }
     };
+
+    bring_up_loopback(netns_path).await?;
 
     success_reply_to_json(&reply)
 }
@@ -168,6 +174,28 @@ fn success_reply_to_json(reply: &SuccessReply) -> Result<JsonValue> {
     let payload = serde_json::to_string(reply).context("failed to serialize CNI success reply")?;
     let json = json::parse(&payload).map_err(|e| anyhow!("failed to parse CNI json reply: {e}"))?;
     Ok(json)
+}
+
+async fn bring_up_loopback(netns_path: &str) -> Result<()> {
+    let path = PathBuf::from(netns_path);
+    tokio::task::spawn_blocking(move || {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .context("failed to create loopback runtime")?;
+
+        let target_ns = Netns::get_from_path(&path)?
+            .ok_or_else(|| anyhow!("container netns not found at {path:?}"))?;
+        let cur_ns = Netns::get()?;
+
+        rt.block_on(netns::exec_netns(&cur_ns, &target_ns, async {
+            let lo = link::link_by_name("lo").await?;
+            link::link_set_up(&lo).await?;
+            Ok(())
+        }))
+    })
+    .await
+    .map_err(|e| anyhow!("loopback setup join error: {e}"))?
 }
 
 fn load_primary_plugin_config(conf_dir: &str) -> Result<NetworkConfig> {

@@ -771,8 +771,10 @@ mod tests {
     }
 
     fn test_pod_task(pod_name: &str) -> PodTask {
-        let mut metadata = ObjectMeta::default();
-        metadata.name = pod_name.to_string();
+        let metadata = ObjectMeta {
+            name: pod_name.to_string(),
+            ..Default::default()
+        };
 
         let probe = test_probe();
         PodTask {
@@ -781,6 +783,7 @@ mod tests {
             metadata,
             spec: PodSpec {
                 node_name: None,
+                pause_image: None,
                 containers: vec![
                     ContainerSpec {
                         name: "app".to_string(),
@@ -803,6 +806,8 @@ mod tests {
                 affinity: None,
                 restart_policy: RestartPolicy::Always,
                 volumes: vec![],
+                gang: None,
+                topology_constraints: vec![],
             },
             status: PodStatus::default(),
         }

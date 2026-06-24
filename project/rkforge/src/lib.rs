@@ -15,9 +15,15 @@ mod push;
 mod registry;
 mod repo;
 mod rt;
+#[cfg(feature = "sandbox")]
 pub mod sandbox;
 pub mod storage;
 mod task;
 mod utils;
 
 pub use image::build_runtime;
+#[cfg(feature = "sandbox")]
+pub use sandbox::{
+    SandboxClient, SandboxClientBuilder, SandboxCreateOptions, SandboxExecOptions,
+    SandboxExecResult, SandboxExecSpec, SandboxExecTarget, SandboxHandle, SandboxMetadata,
+};

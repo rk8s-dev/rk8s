@@ -530,6 +530,15 @@ pub async fn cmd_add(mut config: BridgeNetConf, inputs: Inputs) -> Result<Succes
     }
     setup_bridge_nftable(config.br_name.unwrap_or(BRIDGE_DEFAULT_NAME.to_owned())).await?;
 
+    if config.net_conf.ip_masq {
+        for ip_cfg in &bridge_result.ips {
+            let pod_ip = ip_cfg.address.ip().to_string();
+            if let Err(e) = setup_egress_masquerade(&pod_ip, &inputs.container_id).await {
+                error!("Failed to set up egress masquerade for {pod_ip}: {e}");
+            }
+        }
+    }
+
     Ok(bridge_result)
 }
 
@@ -664,9 +673,10 @@ pub async fn cmd_del(config: BridgeNetConf, inputs: Inputs) -> Result<SuccessRep
         specific: Default::default(),
     };
     let if_name = &inputs.ifname.clone();
+    let container_id = &inputs.container_id.clone();
     let ipam_del = || async move {
         if is_layer3 {
-            let _ = crate::ipam::plugin::cmd_del(&config.net_conf, &inputs.container_id, if_name)
+            let _ = crate::ipam::plugin::cmd_del(&config.net_conf, container_id, if_name)
                 .await
                 .map_err(|e| AppError::IpamError(e.to_string()))?;
         }
@@ -675,6 +685,9 @@ pub async fn cmd_del(config: BridgeNetConf, inputs: Inputs) -> Result<SuccessRep
 
     if inputs.netns.is_none() {
         ipam_del().await?;
+        if let Err(e) = cleanup_egress_masquerade(&inputs.container_id).await {
+            error!("Failed to clean up egress masquerade: {e}");
+        }
         return Ok(result);
     }
 
@@ -702,6 +715,9 @@ pub async fn cmd_del(config: BridgeNetConf, inputs: Inputs) -> Result<SuccessRep
 
     ipam_del().await?;
     cleanup_bridge_nftable().await?;
+    if let Err(e) = cleanup_egress_masquerade(&inputs.container_id).await {
+        error!("Failed to clean up egress masquerade: {e}");
+    }
     Ok(result)
 }
 
@@ -896,6 +912,136 @@ pub async fn setup_bridge_nftable(br_name: String) -> anyhow::Result<()> {
         Ok(()) => Ok(()),
         Err(e) => Err(anyhow::anyhow!("failed to apply nftables rules: {e}")),
     }
+}
+
+/// Sets up an nftables NAT masquerade rule for pod egress traffic.
+///
+/// Adds a rule: `ip nat POSTROUTING ip saddr <pod_ip> oifname <ext_iface> masquerade`
+/// tagged with a per-container comment so it can be cleaned up on pod deletion.
+async fn setup_egress_masquerade(pod_ip: &str, container_id: &str) -> anyhow::Result<()> {
+    let ext_iface = lookup_ext_iface(
+        None,
+        None,
+        None,
+        IPStack::Ipv4,
+        PublicIPOpts {
+            public_ip: None,
+            public_ipv6: None,
+        },
+    )
+    .await?;
+
+    let comment = format!("libbridge-egress-{container_id}");
+
+    let rule = Rule {
+        family: NfFamily::IP,
+        table: Cow::Owned("nat".to_string()),
+        chain: Cow::Owned("POSTROUTING".to_string()),
+        comment: Some(Cow::Owned(comment)),
+        expr: Cow::Owned(vec![
+            Statement::Match(StmtMatch {
+                left: Expression::Named(NamedExpression::Payload(
+                    nftables::expr::Payload::PayloadField(nftables::expr::PayloadField {
+                        protocol: Cow::Borrowed("ip"),
+                        field: Cow::Borrowed("saddr"),
+                    }),
+                )),
+                op: Operator::EQ,
+                right: Expression::String(Cow::Owned(pod_ip.to_string())),
+            }),
+            Statement::Match(StmtMatch {
+                left: Expression::Named(NamedExpression::Meta(ExprMeta {
+                    key: MetaKey::Oifname,
+                })),
+                op: Operator::EQ,
+                right: Expression::String(Cow::Owned(ext_iface.iface.name.clone())),
+            }),
+            Statement::Masquerade(None),
+        ]),
+        ..Default::default()
+    };
+
+    let nft = Nftables {
+        objects: Cow::Owned(vec![NfObject::CmdObject(NfCmd::Add(NfListObject::Rule(
+            rule,
+        )))]),
+    };
+
+    let payload = serde_json::to_string(&nft)
+        .map_err(|e| anyhow::anyhow!("failed to serialize egress masquerade rule: {e}"))?;
+
+    tokio::task::spawn_blocking(move || {
+        nft_helper::apply_ruleset_raw(&payload, nft_helper::DEFAULT_NFT, nft_helper::DEFAULT_ARGS)
+    })
+    .await
+    .map_err(|e| anyhow::anyhow!("failed to run nft helper task: {e}"))?
+    .map_err(|e| anyhow::anyhow!("failed to apply egress masquerade rule: {e}"))?;
+
+    Ok(())
+}
+
+/// Removes the egress masquerade rule tagged with the container ID comment.
+async fn cleanup_egress_masquerade(container_id: &str) -> anyhow::Result<()> {
+    let current = tokio::task::spawn_blocking(|| {
+        nft_helper::get_current_ruleset_with_args(None::<&String>, ["list", "table", "ip", "nat"])
+    })
+    .await
+    .map_err(|e| anyhow::anyhow!("failed to run nft helper task: {e}"))?;
+
+    let nft = match current {
+        Ok(ruleset) => ruleset,
+        Err(e) => {
+            let msg = e.to_string();
+            if msg.contains("No such file or directory") || msg.contains("No such file") {
+                return Ok(());
+            }
+            return Err(anyhow::anyhow!(
+                "failed to read nat table nftables rules: {e}"
+            ));
+        }
+    };
+
+    let comment = format!("libbridge-egress-{container_id}");
+    let mut delete_objects: Vec<NfObject> = Vec::new();
+
+    for obj in nft.objects.iter() {
+        if let NfObject::ListObject(listobj) = obj
+            && let NfListObject::Rule(r) = listobj
+            && let Some(c) = &r.comment
+            && c.as_ref() == comment
+        {
+            let del_rule = Rule {
+                family: r.family,
+                table: r.table.clone(),
+                chain: r.chain.clone(),
+                handle: r.handle,
+                ..Default::default()
+            };
+            delete_objects.push(NfObject::CmdObject(NfCmd::Delete(NfListObject::Rule(
+                del_rule,
+            ))));
+        }
+    }
+
+    if delete_objects.is_empty() {
+        return Ok(());
+    }
+
+    let to_apply = Nftables {
+        objects: Cow::Owned(delete_objects),
+    };
+
+    let payload = serde_json::to_string(&to_apply)
+        .map_err(|e| anyhow::anyhow!("failed to serialize egress cleanup payload: {e}"))?;
+
+    tokio::task::spawn_blocking(move || {
+        nft_helper::apply_ruleset_raw(&payload, nft_helper::DEFAULT_NFT, nft_helper::DEFAULT_ARGS)
+    })
+    .await
+    .map_err(|e| anyhow::anyhow!("failed to run nft helper task: {e}"))?
+    .map_err(|e| anyhow::anyhow!("failed to delete egress masquerade rule: {e}"))?;
+
+    Ok(())
 }
 
 pub async fn cleanup_bridge_nftable() -> anyhow::Result<()> {

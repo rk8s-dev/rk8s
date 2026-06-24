@@ -22,11 +22,6 @@ rust_library(
     crate = "libcgroups",
     crate_root = "vendor/src/lib.rs",
     edition = "2024",
-    features = [
-        "systemd",
-        "v1",
-        "v2",
-    ],
     rustc_flags = ["@$(location :manifest[env_flags])"],
     visibility = ["PUBLIC"],
     deps = [

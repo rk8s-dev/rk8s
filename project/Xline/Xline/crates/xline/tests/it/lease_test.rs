@@ -59,9 +59,12 @@ async fn test_lease_keep_alive() -> Result<(), Box<dyn Error>> {
     assert_eq!(res.kvs.len(), 1);
     assert_eq!(res.kvs[0].value, b"bar");
 
-    let mut c = Client::connect(vec![non_leader_ep], ClientOptions::default())
-        .await?
-        .lease_client();
+    let mut c = Client::connect(
+        vec![non_leader_ep],
+        ClientOptions::default().with_quic_tls_config(Cluster::create_quic_tls_config()),
+    )
+    .await?
+    .lease_client();
     let (mut keeper, mut stream) = c.keep_alive(lease_id).await?;
     let handle = tokio::spawn(async move {
         loop {

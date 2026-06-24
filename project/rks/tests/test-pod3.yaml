@@ -5,10 +5,9 @@ metadata:
   labels:
     app: my-app
 spec:
-  node_name: node1
   containers:
     - name: container1    
-      image: busybox:latest         
+      image: lingbou/busybox:latest         
       ports:
         - containerPort: 80
       args:             

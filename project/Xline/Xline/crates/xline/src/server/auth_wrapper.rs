@@ -14,9 +14,10 @@ use curp::{
 use futures::{Stream, StreamExt};
 use tracing::debug;
 use xlineapi::command::Command;
+use xlinerpc::server::EndPoint as RouterEndpoint;
 
 use super::xline_server::CurpServer;
-use crate::{router::endpoint::EndPoint as RouterEndpoint, storage::AuthStore};
+use crate::storage::AuthStore;
 
 /// Build transport-agnostic `Metadata` from `xlinerpc::MetaData`
 pub(crate) fn metadata_from_rpc(map: &xlinerpc::MetaData) -> Metadata {

@@ -1199,7 +1199,7 @@ fn resolve_container_status_name(
     match_container_name(container_name, &candidates).unwrap_or_else(|| container_name.to_string())
 }
 
-fn filter_non_workload_container_statuses(pod: &PodTask, status: &mut PodStatus) {
+pub(crate) fn filter_non_workload_container_statuses(pod: &PodTask, status: &mut PodStatus) {
     if status.container_statuses.is_empty() {
         return;
     }
@@ -1356,6 +1356,7 @@ mod tests {
             },
             spec: PodSpec {
                 node_name: None,
+                pause_image: None,
                 containers: container_names
                     .iter()
                     .map(|name| make_container_spec(name))
@@ -1365,6 +1366,8 @@ mod tests {
                 affinity: None,
                 restart_policy,
                 volumes: vec![],
+                gang: None,
+                topology_constraints: vec![],
             },
             status: PodStatus::default(),
         }

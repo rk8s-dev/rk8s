@@ -81,21 +81,16 @@ impl<W: Write> Write for HashingWriter<W> {
 pub struct TarGzCompressor;
 
 impl TarGzCompressor {
-    /// Skip virtual file system
-    fn should_skip_path(path: &Path) -> bool {
+    /// Skip virtual filesystems by checking the path RELATIVE to the layer root.
+    /// Must use relative path; absolute paths would incorrectly match paths under /dev/shm.
+    fn should_skip_relative_path(rel: &Path) -> bool {
         let vfs_roots = [
-            Path::new("/proc"),
-            Path::new("/sys"),
-            Path::new("/dev"),
-            Path::new("/run"),
+            Path::new("proc"),
+            Path::new("sys"),
+            Path::new("dev"),
+            Path::new("run"),
         ];
-
-        for vfs_root in &vfs_roots {
-            if path.starts_with(vfs_root) {
-                return true;
-            }
-        }
-        false
+        vfs_roots.iter().any(|r| rel.starts_with(r))
     }
 
     /// Add regular file
@@ -232,7 +227,10 @@ impl TarGzCompressor {
         for entry_result in WalkDir::new(source_path)
             .follow_links(false)
             .into_iter()
-            .filter_entry(|e| !Self::should_skip_path(e.path()))
+            .filter_entry(|e| {
+                let rel = e.path().strip_prefix(source_path).unwrap_or(Path::new(""));
+                !Self::should_skip_relative_path(rel)
+            })
         {
             let entry = match entry_result {
                 Ok(entry) => entry,

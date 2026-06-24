@@ -25,10 +25,11 @@ use bytes::Bytes;
 use rfuse3::Errno;
 use rfuse3::Result as FuseResult;
 use rfuse3::raw::Request;
+use rfuse3::raw::flags::FUSE_WRITE_CACHE;
 use rfuse3::raw::reply::{
-    DirectoryEntry, DirectoryEntryPlus, ReplyAttr, ReplyCreated, ReplyData, ReplyDirectory,
-    ReplyDirectoryPlus, ReplyEntry, ReplyInit, ReplyLock, ReplyOpen, ReplyStatFs, ReplyWrite,
-    ReplyXAttr,
+    DirectoryEntry, DirectoryEntryPlus, ReplyAttr, ReplyCopyFileRange, ReplyCreated, ReplyData,
+    ReplyDirectory, ReplyDirectoryPlus, ReplyEntry, ReplyInit, ReplyLock, ReplyOpen, ReplyStatFs,
+    ReplyWrite, ReplyXAttr,
 };
 use std::ffi::{OsStr, OsString};
 use std::time::Duration;
@@ -173,6 +174,15 @@ where
         }
     }
 }
+
+fn fuse_lock_end_to_exclusive(end: u64) -> u64 {
+    end.saturating_add(1)
+}
+
+fn exclusive_lock_end_to_fuse(end: u64) -> u64 {
+    end.saturating_sub(1)
+}
+
 #[allow(refining_impl_trait_reachable)]
 impl<S, M> Filesystem for VFS<S, M>
 where
@@ -229,7 +239,10 @@ where
             .await
             .map_err(Into::<Errno>::into)?;
 
-        Ok(ReplyOpen { fh, flags })
+        // ReplyOpen.flags carries FUSE FOPEN_* bits, not the caller's O_* flags.
+        // Passing O_RDWR/O_WRONLY through here accidentally enables KEEP_CACHE or
+        // DIRECT_IO and can break buffered mmap/truncate visibility semantics.
+        Ok(ReplyOpen { fh, flags: 0 })
     }
 
     // Open directory: create handle for caching
@@ -311,11 +324,25 @@ where
         fh: u64,
         offset: u64,
         data: &[u8],
-        _write_flags: u32,
+        write_flags: u32,
         _flags: u32,
     ) -> FuseResult<ReplyWrite> {
-        debug!(ino, fh, offset, size = data.len(), "fuse.write");
-        let n = if fh != 0 {
+        debug!(
+            ino,
+            fh,
+            offset,
+            size = data.len(),
+            write_flags,
+            "fuse.write"
+        );
+        let n = if write_flags & FUSE_WRITE_CACHE != 0 {
+            // With writeback cache, Linux may send delayed page-cache writes with
+            // a guessed file handle. Route them through inode-based write so they
+            // share inode serialization even if the guessed fh is stale.
+            self.write_ino(ino as i64, offset, data)
+                .await
+                .map_err(Into::<Errno>::into)? as u32
+        } else if fh != 0 {
             self.write(fh, offset, data)
                 .await
                 .map_err(Into::<Errno>::into)? as u32
@@ -393,10 +420,17 @@ where
             .map_err(Into::<Errno>::into)?;
 
         let attr = vfs_to_fuse_attr(&vattr, &req);
-        Ok(ReplyAttr {
-            ttl: Duration::from_secs(1),
-            attr,
-        })
+
+        // When a truncate (size change) is involved, use TTL=0 so the kernel
+        // does not cache a potentially stale size.  A wrong cached size can
+        // cause the kernel to call truncate_pagecache with the wrong boundary,
+        // invalidating (or keeping) wrong pages in the writeback-cache path.
+        let ttl = if meta_req.size.is_some() {
+            Duration::ZERO
+        } else {
+            Duration::from_secs(1)
+        };
+        Ok(ReplyAttr { ttl, attr })
     }
 
     // Call VFS to list directory and stream DirectoryEntry items (with error/offset handling)
@@ -1099,6 +1133,36 @@ where
         self.fsync(fh, datasync).await.map_err(Errno::from)
     }
 
+    #[allow(clippy::too_many_arguments)]
+    async fn copy_file_range(
+        &self,
+        _req: Request,
+        inode: u64,
+        fh_in: u64,
+        off_in: u64,
+        inode_out: u64,
+        fh_out: u64,
+        off_out: u64,
+        length: u64,
+        flags: u64,
+    ) -> FuseResult<ReplyCopyFileRange> {
+        debug!(
+            inode,
+            fh_in, off_in, inode_out, fh_out, off_out, length, flags, "fuse.copy_file_range"
+        );
+
+        if flags != 0 {
+            return Err(libc::EINVAL.into());
+        }
+
+        let copied = self
+            .copy_file_range(fh_in, off_in, fh_out, off_out, length)
+            .await
+            .map_err(Into::<Errno>::into)? as u64;
+
+        Ok(ReplyCopyFileRange { copied })
+    }
+
     async fn setxattr(
         &self,
         _req: Request,
@@ -1250,7 +1314,10 @@ where
         let query = FileLockQuery {
             owner: lock_owner as i64,
             lock_type: fl_type,
-            range: FileLockRange { start, end },
+            range: FileLockRange {
+                start,
+                end: fuse_lock_end_to_exclusive(end),
+            },
         };
 
         match self.get_plock_ino(inode as i64, &query).await {
@@ -1264,7 +1331,7 @@ where
                 Ok(ReplyLock {
                     r#type: fuse_type as u32,
                     start: info.range.start,
-                    end: info.range.end,
+                    end: exclusive_lock_end_to_fuse(info.range.end),
                     pid: info.pid,
                 })
             }
@@ -1297,7 +1364,10 @@ where
             _ => return Err(libc::EINVAL.into()),
         };
 
-        let range = FileLockRange { start, end };
+        let range = FileLockRange {
+            start,
+            end: fuse_lock_end_to_exclusive(end),
+        };
 
         // Forward block parameter to MetaStore; backend may choose to block or return conflicts
         match self

@@ -149,13 +149,13 @@ async fn wait_for_endpoints_ip_and_port(
     let deadline = Instant::now() + timeout;
     loop {
         let eps = store.list_endpoints().await?;
-        if let Some(ep) = eps.into_iter().find(|e| e.metadata.name == svc_name) {
-            if let Some(sub) = ep.subsets.get(0) {
-                let has_ip = sub.addresses.iter().any(|a| a.ip == expect_ip);
-                let has_port = sub.ports.iter().any(|p| p.port == expect_port);
-                if has_ip && has_port {
-                    return Ok(());
-                }
+        if let Some(ep) = eps.into_iter().find(|e| e.metadata.name == svc_name)
+            && let Some(sub) = ep.subsets.first()
+        {
+            let has_ip = sub.addresses.iter().any(|a| a.ip == expect_ip);
+            let has_port = sub.ports.iter().any(|p| p.port == expect_port);
+            if has_ip && has_port {
+                return Ok(());
             }
         }
         if Instant::now() > deadline {
@@ -187,10 +187,10 @@ async fn wait_no_endpoints(store: &XlineStore, svc_name: &str, timeout: Duration
 
 async fn get_endpoints_ips(store: &XlineStore, svc_name: &str) -> Result<Vec<String>> {
     let eps = store.list_endpoints().await?;
-    if let Some(ep) = eps.into_iter().find(|e| e.metadata.name == svc_name) {
-        if let Some(sub) = ep.subsets.get(0) {
-            return Ok(sub.addresses.iter().map(|a| a.ip.clone()).collect());
-        }
+    if let Some(ep) = eps.into_iter().find(|e| e.metadata.name == svc_name)
+        && let Some(sub) = ep.subsets.first()
+    {
+        return Ok(sub.addresses.iter().map(|a| a.ip.clone()).collect());
     }
     Ok(vec![])
 }

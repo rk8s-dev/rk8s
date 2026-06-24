@@ -1,3 +1,5 @@
+#![cfg(target_os = "linux")]
+
 use anyhow::{Context, Result};
 use qlean::{Distro, MachineConfig, create_image, with_machine};
 

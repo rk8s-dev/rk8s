@@ -35,6 +35,7 @@ pub mod delete;
 pub mod deployment;
 pub mod exec;
 pub mod get;
+pub mod job;
 pub mod logs;
 pub mod pod;
 pub mod replicaset;

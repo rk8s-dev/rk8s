@@ -5,9 +5,12 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
+#[cfg(target_os = "linux")]
+use super::InodeHandle;
+#[cfg(target_os = "linux")]
 use super::file_handle::FileHandle;
 use super::statx::StatExt;
-use super::{Inode, InodeData, InodeHandle};
+use super::{Inode, InodeData};
 
 #[derive(Clone, Copy, Default, PartialOrd, Ord, PartialEq, Eq, Debug, Hash)]
 /// Identify an inode in `PassthroughFs` by `InodeId`.
@@ -41,7 +44,10 @@ impl InodeId {
 pub struct InodeStore {
     data: BTreeMap<Inode, Arc<InodeData>>, // Maps inodes to their data.
     by_id: BTreeMap<InodeId, Inode>,       // Maps real inode IDs to inodes.
-    by_handle: BTreeMap<Arc<FileHandle>, Inode>, // Maps file handles to inodes.
+    /// Linux-only secondary index keyed by `name_to_handle_at` output.
+    /// Used to dedup inodes across mounts. macOS lacks the syscall.
+    #[cfg(target_os = "linux")]
+    by_handle: BTreeMap<Arc<FileHandle>, Inode>,
 }
 
 impl InodeStore {
@@ -51,6 +57,7 @@ impl InodeStore {
     /// will get lost.
     pub fn insert(&mut self, data: Arc<InodeData>) {
         self.by_id.insert(data.id, data.inode);
+        #[cfg(target_os = "linux")]
         if let InodeHandle::Handle(handle) = &data.handle {
             self.by_handle
                 .insert(handle.file_handle().clone(), data.inode);
@@ -106,6 +113,7 @@ impl InodeStore {
         }
 
         if let Some(data) = data.as_ref() {
+            #[cfg(target_os = "linux")]
             if let InodeHandle::Handle(handle) = &data.handle {
                 self.by_handle.remove(handle.file_handle());
             }
@@ -116,6 +124,7 @@ impl InodeStore {
 
     pub fn clear(&mut self) {
         self.data.clear();
+        #[cfg(target_os = "linux")]
         self.by_handle.clear();
         self.by_id.clear();
     }
@@ -134,10 +143,9 @@ impl InodeStore {
         self.get(inode)
     }
 
+    #[cfg(target_os = "linux")]
     pub fn get_by_handle(&self, handle: &FileHandle) -> Option<&Arc<InodeData>> {
-        // trace!("get_by_handle trying to get: handle={:?}", handle);
         let inode = self.inode_by_handle(handle)?;
-        // trace!("get_by_handle got: handle={:?}, inode={}", handle, inode);
         self.get(inode)
     }
 
@@ -145,19 +153,32 @@ impl InodeStore {
         self.by_id.get(id)
     }
 
+    #[cfg(target_os = "linux")]
     pub fn inode_by_handle(&self, handle: &FileHandle) -> Option<&Inode> {
         self.by_handle.get(handle)
+    }
+
+    /// Borrow-iterate over all (inode, data) pairs currently in the store.
+    /// Caller holds the surrounding map read or write lock; iteration order
+    /// follows BTreeMap ordering (by inode number).
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+    pub fn iter(&self) -> impl Iterator<Item = (&Inode, &Arc<InodeData>)> {
+        self.data.iter()
     }
 }
 
 #[cfg(test)]
 mod test {
+    #[cfg(target_os = "linux")]
     use super::super::*;
+    #[cfg(target_os = "linux")]
     use super::*;
 
+    #[cfg(target_os = "linux")]
     use vmm_sys_util::tempfile::TempFile;
 
     #[test]
+    #[cfg(target_os = "linux")]
     fn test_inode_store() {
         let mut m = InodeStore::default();
         let tmpfile1 = TempFile::new().unwrap();

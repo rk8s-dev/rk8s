@@ -62,6 +62,7 @@ fn test_container_spec(name: &str) -> ContainerSpec {
             limits: Some(Resource {
                 cpu: Some("100m".to_string()),
                 memory: Some("50Mi".to_string()),
+                ..Default::default()
             }),
         }),
         ..Default::default()

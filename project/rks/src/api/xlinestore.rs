@@ -630,37 +630,6 @@ impl XlineStore {
         Ok((watcher, stream))
     }
 
-    /// Get all jobs as a snapshot with the current revision.
-    pub async fn jobs_snapshot_with_rev(&self) -> Result<(Vec<(String, String)>, i64)> {
-        let prefix = "/registry/jobs/";
-        let opts = Some(GetOptions::new().with_prefix());
-        let mut client = self.client.write().await;
-        let resp = client.get(prefix, opts).await?;
-
-        let mut items = Vec::new();
-        let rev = resp.header().unwrap().revision();
-
-        for kv in resp.kvs() {
-            let key = String::from_utf8_lossy(kv.key()).replace("/registry/jobs/", "");
-            let yaml = String::from_utf8_lossy(kv.value()).to_string();
-            items.push((key, yaml));
-        }
-
-        Ok((items, rev))
-    }
-
-    /// Watch jobs starting from a specific revision.
-    pub async fn watch_jobs(&self, start_rev: i64) -> Result<(Watcher, WatchStream)> {
-        let key_prefix = "/registry/jobs/".to_string();
-        let opts = WatchOptions::new()
-            .with_prefix()
-            .with_prev_key()
-            .with_start_revision(start_rev);
-        let mut client = self.client.write().await;
-        let (watcher, stream) = client.watch(key_prefix, Some(opts)).await?;
-        Ok((watcher, stream))
-    }
-
     /// Insert a deployment YAML definition into xline.
     pub async fn insert_deployment_yaml(&self, deploy_name: &str, deploy_yaml: &str) -> Result<()> {
         let key = format!("/registry/deployments/{deploy_name}");
@@ -900,8 +869,66 @@ impl XlineStore {
         Ok(jobs)
     }
 
-    /// Delete a Job from xline (Background propagation — GC handles owned Pods).
+    /// Snapshot all Jobs under `/registry/jobs/` with the current store revision (for watch bootstrap).
+    pub async fn jobs_snapshot_with_rev(&self) -> Result<(Vec<(String, String)>, i64)> {
+        let key_prefix = "/registry/jobs/".to_string();
+        let mut client = self.client.write().await;
+        let resp = client
+            .get(key_prefix.clone(), Some(GetOptions::new().with_prefix()))
+            .await?;
+        let rev = resp.header().map(|h| h.revision()).unwrap_or(0);
+        let items: Vec<(String, String)> = resp
+            .kvs()
+            .iter()
+            .map(|kv| {
+                (
+                    String::from_utf8_lossy(kv.key()).replace("/registry/jobs/", ""),
+                    String::from_utf8_lossy(kv.value()).to_string(),
+                )
+            })
+            .collect();
+        Ok((items, rev))
+    }
+
+    /// Watch Job keys with prefix `/registry/jobs/` from `start_rev`.
+    pub async fn watch_jobs(&self, start_rev: i64) -> Result<(Watcher, WatchStream)> {
+        let key_prefix = "/registry/jobs/".to_string();
+        let opts = WatchOptions::new()
+            .with_prefix()
+            .with_prev_key()
+            .with_start_revision(start_rev);
+        let mut client = self.client.write().await;
+        let (watcher, stream) = client.watch(key_prefix, Some(opts)).await?;
+        Ok((watcher, stream))
+    }
+
+    /// Delete a Job and all Pods whose `ownerReferences` point at this Job (name + uid).
+    ///
+    /// Relying only on GC + watch `Delete` with `prev_kv` is brittle; this matches user
+    /// expectations when deleting a Job from the API.
     pub async fn delete_job(&self, job_name: &str) -> Result<()> {
+        let Some(job) = self.get_job(job_name).await? else {
+            return Ok(());
+        };
+        let job_uid = job.metadata.uid;
+
+        let pods = self.list_pods().await?;
+        for pod in pods {
+            let owned = pod
+                .metadata
+                .owner_references
+                .as_ref()
+                .map(|refs| {
+                    refs.iter().any(|r| {
+                        r.kind == ResourceKind::Job && r.name == job_name && r.uid == job_uid
+                    })
+                })
+                .unwrap_or(false);
+            if owned {
+                self.delete_pod(&pod.metadata.name).await?;
+            }
+        }
+
         self.delete_object(
             ResourceKind::Job,
             job_name,

@@ -16,6 +16,10 @@ pub fn copy(args: CopyArgs) -> Result<()> {
     switch_namespace(mount_pid)?;
 
     let dest_path = Path::new(&args.dest);
+    // Create parent directories (mirrors Docker COPY semantics)
+    if let Some(parent) = dest_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
     for s in args.src {
         let src_path = Path::new(&s);
         let status = Command::new("cp")

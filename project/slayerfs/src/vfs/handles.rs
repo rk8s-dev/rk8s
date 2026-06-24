@@ -261,6 +261,9 @@ where
                 .ok_or_else(|| anyhow!("file handle writer not initialized"))?
         };
         let written = writer.write_at(offset, data).await?;
+        // Keep write(2) close to POSIX visibility expectations: once the syscall
+        // returns, subsequent truncate/read/copy paths must observe the data.
+        writer.flush().await?;
         self.update_offset(offset + written as u64);
         Ok(written)
     }

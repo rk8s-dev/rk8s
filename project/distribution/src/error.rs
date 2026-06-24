@@ -244,13 +244,14 @@ impl IntoResponse for HeaderError {
                 name,
                 current_size,
             } => {
-                return Response::builder()
+                let mut builder = Response::builder()
                     .status(StatusCode::RANGE_NOT_SATISFIABLE)
                     .header(LOCATION, format!("/v2/{name}/blobs/uploads/{session_id}"))
-                    .header(RANGE, format!("0-{}", current_size.saturating_sub(1)))
-                    .header("Docker-Upload-UUID", session_id)
-                    .body(Body::empty())
-                    .unwrap();
+                    .header("Docker-Upload-UUID", session_id);
+                if current_size > 0 {
+                    builder = builder.header(RANGE, format!("0-{}", current_size - 1));
+                }
+                return builder.body(Body::empty()).unwrap();
             }
         };
         oci_error.into_response()

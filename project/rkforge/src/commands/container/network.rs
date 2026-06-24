@@ -28,7 +28,11 @@ fn default_aardvark_bin() -> Result<OsString> {
         return Ok(v);
     }
 
-    let candidates = ["/usr/libexec/podman/aardvark-dns", "/usr/bin/aardvark-dns"];
+    let candidates = [
+        "/usr/libexec/podman/aardvark-dns",
+        "/usr/lib/podman/aardvark-dns",
+        "/usr/bin/aardvark-dns",
+    ];
     for c in candidates {
         if Path::new(c).exists() {
             return Ok(OsString::from(c));

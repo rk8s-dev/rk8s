@@ -144,14 +144,9 @@ pub async fn init_network(cfg: &mut XlineConfig, cancel_token: CancellationToken
     let subnet = lease.subnet;
     let ipv6_subnet = lease.ipv6_subnet;
 
-    if let Err(e) = sm.handle_subnet_file(
-        DEFAULT_SUBNET_FILE,
-        &config,
-        false,
-        subnet,
-        ipv6_subnet,
-        mtu,
-    ) {
+    if let Err(e) =
+        sm.handle_subnet_file(DEFAULT_SUBNET_FILE, &config, true, subnet, ipv6_subnet, mtu)
+    {
         warn!("Failed to write subnet file: {e}");
     } else {
         info!("Wrote subnet file to {DEFAULT_SUBNET_FILE}");

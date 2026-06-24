@@ -21,6 +21,8 @@ pub struct InodeStore {
     deleted: HashMap<Inode, Arc<OverlayInode>>,
     // Path to inode mapping, used to reserve inode number for same path.
     path_mapping: Trie<String, Inode>,
+    // Reserved absolute paths for forgotten inodes (survives FORGET eviction).
+    inode_paths: HashMap<Inode, String>,
     next_inode: u64,
     inode_limit: u64,
     // FUSE inode to nlink mapping
@@ -33,6 +35,7 @@ impl InodeStore {
             inodes: HashMap::new(),
             deleted: HashMap::new(),
             path_mapping: Trie::new(),
+            inode_paths: HashMap::new(),
             next_inode: 1,
             inode_limit: VFS_MAX_INO,
             nlinks: HashMap::new(),
@@ -46,7 +49,10 @@ impl InodeStore {
             if ino > self.inode_limit {
                 ino = 1;
             }
-            if !self.inodes.contains_key(&ino) && !self.deleted.contains_key(&ino) {
+            if !self.inodes.contains_key(&ino)
+                && !self.deleted.contains_key(&ino)
+                && !self.inode_paths.contains_key(&ino)
+            {
                 self.next_inode = ino + 1;
                 return Ok(ino);
             }
@@ -63,19 +69,61 @@ impl InodeStore {
         match self.path_mapping.get(path) {
             // If the path is already in the mapping, return the reserved inode number.
             Some(v) => Ok(*v),
-            // Or allocate a new inode number.
-            None => self.alloc_unique_inode(),
+            // Or allocate and reserve a new inode number before the caller drops the lock.
+            None => {
+                let inode = self.alloc_unique_inode()?;
+                self.path_mapping.insert(path.to_string(), inode);
+                self.inode_paths.insert(inode, path.to_string());
+                Ok(inode)
+            }
         }
     }
 
-    pub(crate) async fn insert_inode(&mut self, inode: Inode, node: Arc<OverlayInode>) {
-        self.path_mapping
-            .insert(node.path.read().await.clone(), inode);
-        self.nlinks
-            .entry(inode)
-            .or_insert_with(|| Arc::new(AtomicU64::new(0)))
-            .fetch_add(1, Ordering::Relaxed);
-        self.inodes.entry(inode).or_insert(node);
+    pub(crate) async fn insert_inode(
+        &mut self,
+        inode: Inode,
+        node: Arc<OverlayInode>,
+    ) -> Arc<OverlayInode> {
+        let path = node.path.read().await.clone();
+        let same_active_path = self.path_mapping.get(&path).copied() == Some(inode)
+            && self.inodes.contains_key(&inode);
+        let old_path = self.inode_paths.get(&inode).cloned();
+        let current_nlink = self
+            .nlinks
+            .get(&inode)
+            .map(|nlink| nlink.load(Ordering::Relaxed))
+            .unwrap_or(0);
+
+        if let Some(old_path) = old_path.as_deref()
+            && old_path != path
+            && self.path_mapping.get(old_path).copied() == Some(inode)
+        {
+            self.path_mapping.remove(old_path);
+        }
+        self.path_mapping.insert(path.clone(), inode);
+        self.inode_paths.insert(inode, path);
+        self.deleted.remove(&inode);
+
+        if same_active_path && let Some(existing) = self.inodes.get(&inode).cloned() {
+            let real_inodes = node.real_inodes.lock().await.clone();
+            *existing.real_inodes.lock().await = real_inodes;
+            existing
+                .whiteout
+                .store(node.whiteout.load(Ordering::Relaxed), Ordering::Relaxed);
+            existing
+                .loaded
+                .store(node.loaded.load(Ordering::Relaxed), Ordering::Relaxed);
+            return existing;
+        }
+
+        if current_nlink == 0 || (!same_active_path && old_path.is_none()) {
+            self.nlinks
+                .entry(inode)
+                .or_insert_with(|| Arc::new(AtomicU64::new(0)))
+                .fetch_add(1, Ordering::Relaxed);
+        }
+        self.inodes.insert(inode, node.clone());
+        node
     }
 
     pub(crate) fn get_inode(&self, inode: Inode) -> Option<Arc<OverlayInode>> {
@@ -84,6 +132,11 @@ impl InodeStore {
 
     pub(crate) fn get_deleted_inode(&self, inode: Inode) -> Option<Arc<OverlayInode>> {
         self.deleted.get(&inode).cloned()
+    }
+
+    /// Reverse lookup for forgotten inodes whose path is still reserved.
+    pub(crate) fn path_for_inode(&self, inode: Inode) -> Option<String> {
+        self.inode_paths.get(&inode).cloned()
     }
 
     // Return the inode only if it's permanently deleted from both self.inodes and self.deleted_inodes.
@@ -96,6 +149,7 @@ impl InodeStore {
 
         if let Some(path) = path_removed {
             self.path_mapping.remove(&path);
+            self.inode_paths.remove(&inode);
         }
 
         if old_nlink == 1
@@ -162,6 +216,19 @@ impl InodeStore {
 mod test {
     use super::*;
 
+    fn test_node(path: &str, lookups: u64) -> Arc<OverlayInode> {
+        let mut node = OverlayInode::new();
+        node.path = tokio::sync::RwLock::new(path.to_string());
+        node.name = tokio::sync::RwLock::new(
+            path.rsplit('/')
+                .find(|component| !component.is_empty())
+                .unwrap_or("")
+                .to_string(),
+        );
+        node.lookups = AtomicU64::new(lookups);
+        Arc::new(node)
+    }
+
     #[tokio::test]
     async fn test_alloc_unique() {
         let mut store = InodeStore::new();
@@ -208,5 +275,86 @@ mod test {
 
         let inode = store.alloc_inode("/notexist").unwrap();
         assert_eq!(inode, 3);
+        assert_eq!(store.alloc_inode("/notexist").unwrap(), inode);
+        assert_ne!(store.alloc_inode("/other").unwrap(), inode);
+    }
+
+    #[tokio::test]
+    async fn test_duplicate_insert_same_path_does_not_add_nlink() {
+        let mut store = InodeStore::new();
+        let inode = store.alloc_inode("/a").unwrap();
+
+        store.insert_inode(inode, test_node("/a", 0)).await;
+
+        store.insert_inode(inode, test_node("/a", 0)).await;
+
+        let removed = store.remove_inode(inode, Some("/a".to_string())).await;
+        assert!(removed.is_some());
+        assert!(store.get_inode(inode).is_none());
+    }
+
+    #[tokio::test]
+    async fn test_reinsert_same_inode_updates_reserved_path() {
+        let mut store = InodeStore::new();
+        let inode = store.alloc_inode("/old").unwrap();
+        let node = test_node("/old", 0);
+        store.insert_inode(inode, node.clone()).await;
+
+        *node.path.write().await = "/new".to_string();
+        store.insert_inode(inode, node).await;
+
+        assert_eq!(store.path_for_inode(inode).as_deref(), Some("/new"));
+        assert_eq!(store.alloc_inode("/new").unwrap(), inode);
+    }
+
+    #[tokio::test]
+    async fn test_reinsert_same_path_keeps_active_node_for_lookup_accounting() {
+        let mut store = InodeStore::new();
+        let inode = store.alloc_inode("/buck-out/linker_wrapper.sh").unwrap();
+        let first = test_node("/buck-out/linker_wrapper.sh", 3);
+        let second = test_node("/buck-out/linker_wrapper.sh", 0);
+
+        store.insert_inode(inode, first.clone()).await;
+        let active = store.insert_inode(inode, second.clone()).await;
+
+        assert!(
+            Arc::ptr_eq(&active, &first),
+            "same inode/path reinsertion must keep the active node so pending FORGETs update the right lookup counter"
+        );
+        assert!(
+            !Arc::ptr_eq(&active, &second),
+            "same inode/path reinsertion must not swap in a fresh node"
+        );
+        assert!(Arc::ptr_eq(&active, &store.get_inode(inode).unwrap()));
+        assert_eq!(active.lookups.load(Ordering::Relaxed), 3);
+    }
+
+    #[tokio::test]
+    async fn test_rename_reinsert_live_inode_does_not_leave_deleted_alias() {
+        let mut store = InodeStore::new();
+        let inode = store
+            .alloc_inode("/buck-out/tmp-linker_wrapper.sh")
+            .unwrap();
+        let node = test_node("/buck-out/tmp-linker_wrapper.sh", 1);
+        store.insert_inode(inode, node.clone()).await;
+
+        let removed = store
+            .remove_inode(inode, Some("/buck-out/tmp-linker_wrapper.sh".to_string()))
+            .await;
+        assert!(removed.is_none());
+
+        *node.path.write().await = "/buck-out/linker_wrapper.sh".to_string();
+        *node.name.write().await = "linker_wrapper.sh".to_string();
+        store.insert_inode(inode, node).await;
+
+        assert!(store.get_inode(inode).is_some());
+        assert!(
+            store.get_deleted_inode(inode).is_none(),
+            "renaming a live inode must not leave the same inode in both active and deleted maps"
+        );
+        assert_eq!(
+            store.path_for_inode(inode).as_deref(),
+            Some("/buck-out/linker_wrapper.sh")
+        );
     }
 }

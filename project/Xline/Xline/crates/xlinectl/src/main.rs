@@ -191,7 +191,7 @@ fn cli() -> Command {
         .arg(
             arg!(--endpoints <"SERVER_NAME ADDR"> "Xline endpoints, using the format of [addr0, addr1, ...]")
                 .num_args(1..)
-                .default_values(["127.0.0.1:2379"])
+                .default_values(["https://server0:2379"])
                 .value_delimiter(',')
                 .global(true)
                 .help_heading(GLOBAL_HEADING),
@@ -282,7 +282,18 @@ async fn main() -> Result<()> {
             let ca_pem = fs::read(path).await?;
             Some(QuicTlsConfig::default().with_peer_ca_cert_pem(ca_pem))
         }
-        None => None,
+        None => {
+            // Default: load CA cert from fixtures directory relative to the project root.
+            // This allows xlinectl to work out-of-the-box with the local test cluster.
+            let default_ca_path =
+                PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/ca.crt");
+            if default_ca_path.exists() {
+                let ca_pem = fs::read(&default_ca_path).await?;
+                Some(QuicTlsConfig::default().with_peer_ca_cert_pem(ca_pem))
+            } else {
+                None
+            }
+        }
     };
     let options = ClientOptions::new(user_opt, quic_tls_config, client_config);
     let printer_type = match matches

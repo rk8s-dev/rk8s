@@ -4,10 +4,11 @@ use xlineapi::{
     AlarmAction, AlarmRequest, AlarmResponse, AlarmType, SnapshotRequest, SnapshotResponse,
     StatusRequest, StatusResponse,
 };
+use xlinerpc::MethodId;
 
 use crate::{
     error::Result,
-    transport::{Channel, MethodId, Streaming},
+    transport::{Channel, Streaming},
 };
 
 /// Client for Maintenance operations.

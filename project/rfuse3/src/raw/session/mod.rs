@@ -36,6 +36,8 @@ use std::pin::{pin, Pin};
 use std::sync::Arc;
 use std::task::Context;
 use std::task::Poll;
+#[cfg(target_os = "macos")]
+use std::time::Duration;
 
 #[cfg(all(not(feature = "tokio-runtime"), feature = "async-io-runtime"))]
 use async_fs::read_dir;
@@ -50,7 +52,10 @@ use async_global_executor::{self as task, Task as JoinHandle};
 use async_process::Command;
 use bincode::Options;
 use bytes::Bytes;
-use futures_channel::mpsc::{unbounded, UnboundedReceiver, UnboundedSender};
+use futures_channel::{
+    mpsc::{unbounded, UnboundedReceiver, UnboundedSender},
+    oneshot,
+};
 use futures_util::future::{Either, FutureExt};
 use futures_util::select;
 use futures_util::sink::SinkExt;
@@ -85,6 +90,160 @@ use crate::raw::reply::ReplyXAttr;
 use crate::raw::request::Request;
 use crate::raw::FuseData;
 use crate::{MountOptions, SetAttr};
+
+#[cfg(target_os = "macos")]
+const MACFUSE_INIT_TIMEOUT: Duration = Duration::from_secs(30);
+
+fn is_ignorable_reply_error(err: &IoError) -> bool {
+    match err.raw_os_error() {
+        Some(errno) if errno == libc::ENOENT => true,
+        #[cfg(target_os = "macos")]
+        Some(errno) if errno == libc::EINVAL => true,
+        _ => false,
+    }
+}
+
+fn negotiate_readdirplus(kernel_flags: u32, force: bool) -> (u32, bool) {
+    let supports_readdirplus = kernel_flags & FUSE_DO_READDIRPLUS > 0;
+    let supports_auto = kernel_flags & FUSE_READDIRPLUS_AUTO > 0;
+    let force_active = force && supports_readdirplus;
+    let mut reply_flags = 0;
+
+    if supports_readdirplus {
+        reply_flags |= FUSE_DO_READDIRPLUS;
+    }
+
+    if supports_auto && !force_active {
+        reply_flags |= FUSE_READDIRPLUS_AUTO;
+    }
+
+    // macOS-only INIT probe (PR-9.2). Empirically, macFUSE 4.x advertises
+    // `kernel_flags=0xef800008` on INIT — bits 13 (FUSE_DO_READDIRPLUS)
+    // and 14 (FUSE_READDIRPLUS_AUTO) are both clear. The Linux-only gate
+    // on `MountOptions::force_readdir_plus(true)` therefore matches the
+    // kernel reality; we keep the negotiation function platform-neutral
+    // for forward-compat (a future macFUSE may add the bits) and leave a
+    // `debug!` line so the negotiated state is recoverable from a normal
+    // `RUST_LOG=debug` run.
+    #[cfg(target_os = "macos")]
+    tracing::debug!(
+        target: "rfuse3::init_probe",
+        "readdirplus negotiation: kernel_flags=0x{kernel_flags:08x} \
+         supports_readdirplus={supports_readdirplus} \
+         supports_auto={supports_auto} \
+         force_requested={force} force_active={force_active} \
+         reply_flags=0x{reply_flags:08x}"
+    );
+
+    (reply_flags, force_active)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{is_ignorable_reply_error, negotiate_readdirplus};
+    use crate::raw::abi::{FUSE_DO_READDIRPLUS, FUSE_READDIRPLUS_AUTO};
+    use std::io::Error as IoError;
+
+    #[test]
+    fn enoent_reply_errors_are_ignorable() {
+        let err = IoError::from_raw_os_error(libc::ENOENT);
+
+        assert!(is_ignorable_reply_error(&err));
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_einval_reply_errors_are_ignorable() {
+        let err = IoError::from_raw_os_error(libc::EINVAL);
+
+        assert!(is_ignorable_reply_error(&err));
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[test]
+    fn non_macos_einval_reply_errors_are_not_ignorable() {
+        let err = IoError::from_raw_os_error(libc::EINVAL);
+
+        assert!(!is_ignorable_reply_error(&err));
+    }
+
+    #[test]
+    fn force_readdirplus_does_not_advertise_unsupported_capability() {
+        let (reply_flags, force_active) = negotiate_readdirplus(0, true);
+
+        assert_eq!(reply_flags & FUSE_DO_READDIRPLUS, 0);
+        assert!(!force_active);
+    }
+
+    #[test]
+    fn force_readdirplus_activates_when_kernel_supports_it() {
+        let (reply_flags, force_active) = negotiate_readdirplus(FUSE_DO_READDIRPLUS, true);
+
+        assert_ne!(reply_flags & FUSE_DO_READDIRPLUS, 0);
+        assert!(force_active);
+    }
+
+    #[test]
+    fn readdirplus_auto_is_disabled_only_when_force_is_active() {
+        let (reply_flags, force_active) =
+            negotiate_readdirplus(FUSE_DO_READDIRPLUS | FUSE_READDIRPLUS_AUTO, true);
+
+        assert!(force_active);
+        assert_eq!(reply_flags & FUSE_READDIRPLUS_AUTO, 0);
+
+        let (reply_flags, force_active) =
+            negotiate_readdirplus(FUSE_DO_READDIRPLUS | FUSE_READDIRPLUS_AUTO, false);
+
+        assert!(!force_active);
+        assert_ne!(reply_flags & FUSE_READDIRPLUS_AUTO, 0);
+    }
+}
+
+#[cfg(target_os = "macos")]
+async fn wait_for_mount_init_ready(ready_rx: oneshot::Receiver<IoResult<()>>) -> IoResult<()> {
+    #[cfg(all(not(feature = "async-io-runtime"), feature = "tokio-runtime"))]
+    {
+        match tokio::time::timeout(MACFUSE_INIT_TIMEOUT, ready_rx).await {
+            Ok(Ok(result)) => result,
+            Ok(Err(_)) => Err(IoError::other(
+                "FUSE mount task ended before init completed",
+            )),
+            Err(_) => Err(IoError::new(
+                std::io::ErrorKind::TimedOut,
+                format!(
+                    "timed out after {:?} waiting for FUSE INIT",
+                    MACFUSE_INIT_TIMEOUT
+                ),
+            )),
+        }
+    }
+
+    #[cfg(all(not(feature = "tokio-runtime"), feature = "async-io-runtime"))]
+    {
+        let ready = FutureExt::fuse(ready_rx);
+        let timeout = FutureExt::fuse(async_io::Timer::after(MACFUSE_INIT_TIMEOUT));
+        let mut ready = pin!(ready);
+        let mut timeout = pin!(timeout);
+
+        select! {
+            result = ready => {
+                match result {
+                    Ok(result) => result,
+                    Err(_) => Err(IoError::other("FUSE mount task ended before init completed")),
+                }
+            }
+            _ = timeout => {
+                Err(IoError::new(
+                    std::io::ErrorKind::TimedOut,
+                    format!(
+                        "timed out after {:?} waiting for FUSE INIT",
+                        MACFUSE_INIT_TIMEOUT
+                    ),
+                ))
+            }
+        }
+    }
+}
 
 /// A Future which returns when a file system is unmounted
 ///
@@ -130,10 +289,7 @@ struct MountHandleInner {
     task: JoinHandle<IoResult<()>>,
     mount_path: PathBuf,
     destroy_notify: Arc<async_notify::Notify>,
-    #[cfg(any(
-        all(target_os = "linux", feature = "unprivileged"),
-        target_os = "macos"
-    ))]
+    #[cfg(all(target_os = "linux", feature = "unprivileged"))]
     unprivileged: bool,
 }
 
@@ -298,6 +454,7 @@ pub struct Session<FS: Filesystem + Send + Sync + 'static> {
     _per_inode_serial: bool,
     /// Internal worker pool (created lazily when worker_count > 1).
     workers: Option<Workers<FS>>,
+    force_readdir_plus_active: bool,
     inflight: Arc<AtomicUsize>,
     inflight_notify: Arc<async_notify::Notify>,
 }
@@ -319,6 +476,7 @@ impl<FS: Filesystem + Send + Sync + 'static> Session<FS> {
             max_background: DEFAULT_MAX_BACKGROUND as usize,
             _per_inode_serial: false,
             workers: None,
+            force_readdir_plus_active: false,
             inflight: Arc::new(AtomicUsize::new(0)),
             inflight_notify: Arc::new(async_notify::Notify::new()),
         }
@@ -359,6 +517,7 @@ impl<FS: Filesystem + Send + Sync + 'static> Session<FS> {
                 fs,
                 resp: self.response_sender.clone(),
                 direct_io: self.mount_options.direct_io,
+                force_readdir_plus: self.force_readdir_plus_active,
                 _inflight: self.inflight.clone(),
                 _inflight_notify: self.inflight_notify.clone(),
             });
@@ -442,14 +601,23 @@ impl<FS: Filesystem + Send + Sync + 'static> Session<FS> {
 
         self.filesystem.replace(Arc::new(fs));
 
+        let (ready_tx, ready_rx) = oneshot::channel();
+        let task = task::spawn(self.inner_mount(Some(ready_tx)));
+        if let Err(err) = wait_for_mount_init_ready(ready_rx).await {
+            #[cfg(all(not(feature = "async-io-runtime"), feature = "tokio-runtime"))]
+            task.abort();
+            #[cfg(all(not(feature = "tokio-runtime"), feature = "async-io-runtime"))]
+            let _ = task.cancel().await;
+            return Err(err);
+        }
+
         debug!("mount {:?} success", mount_path);
 
         Ok(MountHandle {
             inner: Some(MountHandleInner {
-                task: task::spawn(self.inner_mount()),
+                task,
                 mount_path: mount_path.to_path_buf(),
                 destroy_notify: notify,
-                unprivileged: true,
             }),
         })
     }
@@ -481,7 +649,7 @@ impl<FS: Filesystem + Send + Sync + 'static> Session<FS> {
 
         Ok(MountHandle {
             inner: Some(MountHandleInner {
-                task: task::spawn(self.inner_mount()),
+                task: task::spawn(self.inner_mount(None)),
                 mount_path: mount_path.to_path_buf(),
                 destroy_notify: notify,
                 unprivileged: true,
@@ -531,7 +699,7 @@ impl<FS: Filesystem + Send + Sync + 'static> Session<FS> {
 
         Ok(MountHandle {
             inner: Some(MountHandleInner {
-                task: task::spawn(self.inner_mount()),
+                task: task::spawn(self.inner_mount(None)),
                 mount_path: mount_path.to_path_buf(),
                 destroy_notify: notify,
                 #[cfg(all(target_os = "linux", feature = "unprivileged"))]
@@ -574,7 +742,7 @@ impl<FS: Filesystem + Send + Sync + 'static> Session<FS> {
 
         Ok(MountHandle {
             inner: Some(MountHandleInner {
-                task: task::spawn(self.inner_mount()),
+                task: task::spawn(self.inner_mount(None)),
                 mount_path: mount_path.to_path_buf(),
                 destroy_notify: notify,
             }),
@@ -586,12 +754,15 @@ impl<FS: Filesystem + Send + Sync + 'static> Session<FS> {
         self.mount_with_unprivileged(fs, mount_path).await
     }
 
-    async fn inner_mount(mut self) -> IoResult<()> {
+    async fn inner_mount(
+        mut self,
+        ready_sender: Option<oneshot::Sender<IoResult<()>>>,
+    ) -> IoResult<()> {
         let fuse_write_connection = self.fuse_connection.as_ref().unwrap().clone();
 
         let receiver = self.response_receiver.take().unwrap();
 
-        let dispatch_task = self.dispatch().fuse();
+        let dispatch_task = self.dispatch(ready_sender).fuse();
         let mut dispatch_task = pin!(dispatch_task);
 
         #[cfg(all(not(feature = "tokio-runtime"), feature = "async-io-runtime"))]
@@ -652,8 +823,7 @@ impl<FS: Filesystem + Send + Sync + 'static> Session<FS> {
             };
 
             if let Err(err) = fuse_connection.write_vectored(data, extend_data).await.1 {
-                use std::io::ErrorKind;
-                if err.kind() == ErrorKind::NotFound {
+                if is_ignorable_reply_error(&err) {
                     warn!(
                         "may reply interrupted fuse request, ignore this error {}",
                         err
@@ -823,12 +993,34 @@ impl<FS: Filesystem + Send + Sync + 'static> Session<FS> {
         }
     }
 
-    async fn dispatch(&mut self) -> IoResult<()> {
+    async fn dispatch(
+        &mut self,
+        mut ready_sender: Option<oneshot::Sender<IoResult<()>>>,
+    ) -> IoResult<()> {
         let fuse_connection = self.fuse_connection.take().unwrap();
         let fs = self.filesystem.take().expect("filesystem not init");
         // defer worker initialization until after FUSE INIT handshake
 
-        let max_write = self.init_filesystem(&fs, &fuse_connection).await?.get() as usize;
+        let max_write = match self.init_filesystem(&fs, &fuse_connection).await {
+            Ok(max_write) => {
+                if let Some(sender) = ready_sender.take() {
+                    let _ = sender.send(Ok(()));
+                }
+                max_write.get() as usize
+            }
+            Err(err) => {
+                if let Some(sender) = ready_sender.take() {
+                    let return_err = if let Some(raw_os_error) = err.raw_os_error() {
+                        IoError::from_raw_os_error(raw_os_error)
+                    } else {
+                        IoError::new(err.kind(), err.to_string())
+                    };
+                    let _ = sender.send(Err(err));
+                    return Err(return_err);
+                }
+                return Err(err);
+            }
+        };
         let workers_active = self.worker_count > 1;
         if workers_active {
             self.ensure_workers(fs.clone());
@@ -1301,17 +1493,22 @@ impl<FS: Filesystem + Send + Sync + 'static> Session<FS> {
             reply_flags |= FUSE_AUTO_INVAL_DATA;
         }
 
-        if init_in.flags & FUSE_DO_READDIRPLUS > 0 || self.mount_options.force_readdir_plus {
+        let (readdirplus_flags, force_readdir_plus_active) =
+            negotiate_readdirplus(init_in.flags, self.mount_options.force_readdir_plus);
+        if readdirplus_flags & FUSE_DO_READDIRPLUS > 0 {
             debug!("enable FUSE_DO_READDIRPLUS");
-
-            reply_flags |= FUSE_DO_READDIRPLUS;
         }
 
-        if init_in.flags & FUSE_READDIRPLUS_AUTO > 0 && !self.mount_options.force_readdir_plus {
+        if readdirplus_flags & FUSE_READDIRPLUS_AUTO > 0 {
             debug!("enable FUSE_READDIRPLUS_AUTO");
-
-            reply_flags |= FUSE_READDIRPLUS_AUTO;
         }
+
+        if self.mount_options.force_readdir_plus && !force_readdir_plus_active {
+            warn!("force_readdir_plus requested but kernel did not advertise FUSE_DO_READDIRPLUS");
+        }
+
+        reply_flags |= readdirplus_flags;
+        self.force_readdir_plus_active = force_readdir_plus_active;
 
         if init_in.flags & FUSE_ASYNC_DIO > 0 {
             debug!("enable FUSE_ASYNC_DIO");
@@ -3234,7 +3431,7 @@ impl<FS: Filesystem + Send + Sync + 'static> Session<FS> {
         data: &[u8],
         fs: &Arc<FS>,
     ) {
-        if self.mount_options.force_readdir_plus {
+        if self.force_readdir_plus_active {
             reply_error_in_place(libc::ENOSYS.into(), request, &self.response_sender).await;
 
             return;

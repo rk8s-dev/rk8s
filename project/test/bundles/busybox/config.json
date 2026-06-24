@@ -1,19 +1,10 @@
 {
   "ociVersion": "1.0.2-dev",
   "root": {
-    "path": "rootfs",
+    "path": "/home/tcy/rk8s/project/test/bundles/busybox/rootfs",
     "readonly": false
   },
   "mounts": [
-    {
-      "destination": "/etc/resolv.conf",
-      "type": "bind",
-      "source": "/tmp/rkl-netavark/resolv.conf",
-      "options": [
-        "ro",
-        "rbind"
-      ]
-    },
     {
       "destination": "/proc",
       "type": "proc",
@@ -96,7 +87,9 @@
       "gid": 0
     },
     "args": [
-      "sh"
+      "sh",
+      "-c",
+      "while true; do sleep 3600; done"
     ],
     "env": [
       "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
@@ -105,89 +98,84 @@
     "cwd": "/",
     "capabilities": {
       "bounding": [
+        "CAP_MKNOD",
+        "CAP_NET_BIND_SERVICE",
+        "CAP_SYS_CHROOT",
+        "CAP_KILL",
+        "CAP_SETUID",
+        "CAP_SETPCAP",
+        "CAP_AUDIT_WRITE",
+        "CAP_FSETID",
+        "CAP_NET_RAW",
+        "CAP_DAC_OVERRIDE",
+        "CAP_SETGID",
         "CAP_CHOWN",
         "CAP_FOWNER",
-        "CAP_MKNOD",
-        "CAP_SETUID",
-        "CAP_DAC_OVERRIDE",
-        "CAP_FSETID",
-        "CAP_SETGID",
-        "CAP_SETFCAP",
-        "CAP_CHOWN",
-        "CAP_SETPCAP",
-        "CAP_SYS_CHROOT",
-        "CAP_NET_RAW",
-        "CAP_KILL",
-        "CAP_AUDIT_WRITE",
-        "CAP_NET_BIND_SERVICE"
+        "CAP_SETFCAP"
       ],
       "effective": [
+        "CAP_MKNOD",
+        "CAP_NET_BIND_SERVICE",
+        "CAP_SYS_CHROOT",
+        "CAP_KILL",
+        "CAP_SETUID",
+        "CAP_SETPCAP",
+        "CAP_AUDIT_WRITE",
+        "CAP_FSETID",
+        "CAP_NET_RAW",
+        "CAP_DAC_OVERRIDE",
+        "CAP_SETGID",
         "CAP_CHOWN",
         "CAP_FOWNER",
-        "CAP_MKNOD",
-        "CAP_SETUID",
-        "CAP_DAC_OVERRIDE",
-        "CAP_FSETID",
-        "CAP_SETGID",
-        "CAP_SETFCAP",
-        "CAP_CHOWN",
-        "CAP_SETPCAP",
-        "CAP_SYS_CHROOT",
-        "CAP_NET_RAW",
-        "CAP_KILL",
-        "CAP_AUDIT_WRITE",
-        "CAP_NET_BIND_SERVICE"
+        "CAP_SETFCAP"
       ],
       "inheritable": [
+        "CAP_MKNOD",
+        "CAP_NET_BIND_SERVICE",
+        "CAP_SYS_CHROOT",
+        "CAP_KILL",
+        "CAP_SETUID",
+        "CAP_SETPCAP",
+        "CAP_AUDIT_WRITE",
+        "CAP_FSETID",
+        "CAP_NET_RAW",
+        "CAP_DAC_OVERRIDE",
+        "CAP_SETGID",
         "CAP_CHOWN",
         "CAP_FOWNER",
-        "CAP_MKNOD",
-        "CAP_SETUID",
-        "CAP_DAC_OVERRIDE",
-        "CAP_FSETID",
-        "CAP_SETGID",
-        "CAP_SETFCAP",
-        "CAP_CHOWN",
-        "CAP_SETPCAP",
-        "CAP_SYS_CHROOT",
-        "CAP_NET_RAW",
-        "CAP_KILL",
-        "CAP_AUDIT_WRITE",
-        "CAP_NET_BIND_SERVICE"
+        "CAP_SETFCAP"
       ],
       "permitted": [
+        "CAP_MKNOD",
+        "CAP_NET_BIND_SERVICE",
+        "CAP_SYS_CHROOT",
+        "CAP_KILL",
+        "CAP_SETUID",
+        "CAP_SETPCAP",
+        "CAP_AUDIT_WRITE",
+        "CAP_FSETID",
+        "CAP_NET_RAW",
+        "CAP_DAC_OVERRIDE",
+        "CAP_SETGID",
         "CAP_CHOWN",
         "CAP_FOWNER",
-        "CAP_MKNOD",
-        "CAP_SETUID",
-        "CAP_DAC_OVERRIDE",
-        "CAP_FSETID",
-        "CAP_SETGID",
-        "CAP_SETFCAP",
-        "CAP_CHOWN",
-        "CAP_SETPCAP",
-        "CAP_SYS_CHROOT",
-        "CAP_NET_RAW",
-        "CAP_KILL",
-        "CAP_AUDIT_WRITE",
-        "CAP_NET_BIND_SERVICE"
+        "CAP_SETFCAP"
       ],
       "ambient": [
+        "CAP_MKNOD",
+        "CAP_NET_BIND_SERVICE",
+        "CAP_SYS_CHROOT",
+        "CAP_KILL",
+        "CAP_SETUID",
+        "CAP_SETPCAP",
+        "CAP_AUDIT_WRITE",
+        "CAP_FSETID",
+        "CAP_NET_RAW",
+        "CAP_DAC_OVERRIDE",
+        "CAP_SETGID",
         "CAP_CHOWN",
         "CAP_FOWNER",
-        "CAP_MKNOD",
-        "CAP_SETUID",
-        "CAP_DAC_OVERRIDE",
-        "CAP_FSETID",
-        "CAP_SETGID",
-        "CAP_SETFCAP",
-        "CAP_CHOWN",
-        "CAP_SETPCAP",
-        "CAP_SYS_CHROOT",
-        "CAP_NET_RAW",
-        "CAP_KILL",
-        "CAP_AUDIT_WRITE",
-        "CAP_NET_BIND_SERVICE"
+        "CAP_SETFCAP"
       ]
     },
     "rlimits": [
@@ -204,7 +192,7 @@
   "linux": {
     "resources": {
       "memory": {
-        "limit": 244318208
+        "limit": 536870912
       },
       "cpu": {
         "quota": 500000,
@@ -213,22 +201,26 @@
     },
     "namespaces": [
       {
-        "type": "pid"
-      },
-      {
-        "type": "network"
-      },
-      {
-        "type": "ipc"
-      },
-      {
-        "type": "uts"
-      },
-      {
         "type": "mount"
       },
       {
         "type": "cgroup"
+      },
+      {
+        "type": "pid",
+        "path": "/proc/54456/ns/pid"
+      },
+      {
+        "type": "network",
+        "path": "/proc/54456/ns/net"
+      },
+      {
+        "type": "ipc",
+        "path": "/proc/54456/ns/ipc"
+      },
+      {
+        "type": "uts",
+        "path": "/proc/54456/ns/uts"
       }
     ],
     "maskedPaths": [

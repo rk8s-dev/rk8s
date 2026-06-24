@@ -14,7 +14,7 @@ use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 /// File type enumeration
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum FileType {
     File,
     Dir,
@@ -226,7 +226,7 @@ pub struct LoadOption {
     pub allow_conflicts: bool,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum LockName {
     CleanupSessionsLock,
     ChunkCompactLock(u64), // chunk_id

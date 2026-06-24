@@ -13,12 +13,12 @@ use xlineapi::{
     command::{Command, CommandResponse, CurpClient, SyncResponse},
 };
 use xlinerpc::Status;
+use xlinerpc::server::EndPoint as RouterEndpoint;
 // TODO: use our own status type
 // use xlinerpc::status::Status;
 use super::command::CommandExecutor;
 use crate::{
     header_gen::HeaderGenerator,
-    router::endpoint::EndPoint as RouterEndpoint,
     rpc::{
         AlarmRequest, AlarmResponse, DefragmentRequest, DefragmentResponse, DowngradeRequest,
         DowngradeResponse, HashKvRequest, HashKvResponse, HashRequest, HashResponse,

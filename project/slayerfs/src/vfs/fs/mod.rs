@@ -9,7 +9,7 @@ use crate::meta::config::MetaClientConfig;
 use crate::meta::file_lock::{FileLockInfo, FileLockQuery, FileLockRange, FileLockType};
 use crate::meta::store::{AclRule, MetaStore, SetAttrFlags, SetAttrRequest, StatFsSnapshot};
 use dashmap::{DashMap, Entry};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
@@ -1527,7 +1527,11 @@ where
             guards.push(handle.lock_write().await);
         }
 
-        self.state.writer.flush_if_exists(ino as u64).await;
+        self.state
+            .writer
+            .flush_required(ino as u64)
+            .await
+            .map_err(|_| VfsError::Other)?;
 
         self.meta_truncate(ino, size, self.core.layout.chunk_size)
             .await?;
@@ -1559,14 +1563,24 @@ where
         req: &SetAttrRequest,
         flags: SetAttrFlags,
     ) -> Result<FileAttr, VfsError> {
-        if let Some(size) = req.size {
+        // Hold handle write guards across the ENTIRE truncate + meta_set_attr
+        // sequence so that no concurrent write_ino / FUSE_WRITE_CACHE can modify
+        // the inode between the truncate and the attribute read-back.  Dropping
+        // the guards too early allowed a race where meta_set_attr could read back
+        // a size extended by a concurrent commit, causing the FUSE setattr
+        // response to carry a wrong file size and confusing the kernel page cache.
+        let _guards = if let Some(size) = req.size {
             let handles = self.file_handles_for_inode(ino);
             let mut guards = Vec::with_capacity(handles.len());
             for handle in handles {
                 guards.push(handle.lock_write().await);
             }
 
-            self.state.writer.flush_if_exists(ino as u64).await;
+            self.state
+                .writer
+                .flush_required(ino as u64)
+                .await
+                .map_err(|_| VfsError::Other)?;
             self.meta_truncate(ino, size, self.core.layout.chunk_size)
                 .await?;
             self.state.reader.invalidate_all(ino as u64).await;
@@ -1582,23 +1596,30 @@ where
                 self.state.handles.update_attr_for_inode(ino, &attr);
             }
 
-            drop(guards);
-        }
+            Some(guards)
+        } else {
+            None
+        };
 
         let mut filtered = *req;
         filtered.size = None;
 
-        let attr = self.meta_set_attr(ino, &filtered, flags).await?;
+        let mut attr = self.meta_set_attr(ino, &filtered, flags).await?;
 
-        if let Some(size) = req.size
-            && let Some(inode) = self.state.inodes.get(&ino)
-        {
-            inode.update_size(size);
+        // Ensure the returned attr carries exactly the requested truncation size.
+        // The kernel trusts this value for truncate_pagecache decisions; a stale
+        // or extended size here can cause it to keep or invalidate wrong pages.
+        if let Some(size) = req.size {
+            attr.size = size;
+            if let Some(inode) = self.state.inodes.get(&ino) {
+                inode.update_size(size);
+            }
         }
 
         self.state.modified.touch(ino).await;
         self.state.handles.update_attr_for_inode(ino, &attr);
 
+        // _guards dropped here — after meta_set_attr has read the correct state
         Ok(attr)
     }
 
@@ -1680,6 +1701,16 @@ where
 
         let written = handle.write(offset, data).await?;
 
+        // Invalidate reader cache for the written range so subsequent reads
+        // (including FUSE reads on kernel page-cache miss) see committed data
+        // instead of a stale cached snapshot from before this write.
+        let _ = self
+            .state
+            .reader
+            .invalidate(handle.ino as u64, offset, data.len())
+            .await;
+
+        self.update_mtime_ctime(handle.ino).await?;
         self.state.modified.touch(handle.ino).await;
 
         tracing::trace!(fh, ino = handle.ino, written, "vfs.write_done");
@@ -1690,6 +1721,12 @@ where
     pub async fn write_ino(&self, ino: i64, offset: u64, data: &[u8]) -> Result<usize, VfsError> {
         if data.is_empty() {
             return Ok(0);
+        }
+
+        let handles = self.file_handles_for_inode(ino);
+        let mut guards = Vec::with_capacity(handles.len());
+        for handle in handles {
+            guards.push(handle.lock_write().await);
         }
 
         let attr = self.meta_stat_required(ino, PathHint::none()).await?;
@@ -1708,8 +1745,85 @@ where
             .write_at(offset, data)
             .await
             .map_err(VfsError::from)?;
+        writer.flush().await.map_err(|_| VfsError::Other)?;
 
+        // Invalidate reader cache for the written range so any subsequent
+        // FUSE read (kernel page-cache miss) fetches the freshly committed
+        // data instead of a stale cached zero-fill from a prior truncate.
+        let _ = self
+            .state
+            .reader
+            .invalidate(ino as u64, offset, data.len())
+            .await;
+
+        self.update_mtime_ctime(ino).await?;
         self.state.modified.touch(ino).await;
+        drop(guards);
+        Ok(written)
+    }
+
+    /// Copy a byte range between two opened file handles.
+    ///
+    /// This keeps the copy inside SlayerFS so we can serialize it with the
+    /// inode write path instead of falling back to kernel/user-space emulation.
+    pub async fn copy_file_range(
+        &self,
+        fh_in: u64,
+        off_in: u64,
+        fh_out: u64,
+        off_out: u64,
+        length: u64,
+    ) -> Result<usize, VfsError> {
+        if length == 0 {
+            return Ok(0);
+        }
+
+        let len = usize::try_from(length).map_err(|_| VfsError::InvalidInput)?;
+        let src = self.file_handle_required(fh_in)?;
+        let dst = self.file_handle_required(fh_out)?;
+
+        if !src.flags.read {
+            return Err(VfsError::PermissionDenied {
+                path: PathHint::none(),
+            });
+        }
+        if !dst.flags.write {
+            return Err(VfsError::PermissionDenied {
+                path: PathHint::none(),
+            });
+        }
+
+        let mut locked = Vec::new();
+        let mut unique = BTreeMap::new();
+        for handle in self.file_handles_for_inode(src.ino) {
+            unique.insert(handle.fh, handle);
+        }
+        for handle in self.file_handles_for_inode(dst.ino) {
+            unique.insert(handle.fh, handle);
+        }
+        for handle in unique.into_values() {
+            locked.push(handle.lock_write().await);
+        }
+
+        self.state.writer.flush_if_exists(src.ino as u64).await;
+        if dst.ino != src.ino {
+            self.state.writer.flush_if_exists(dst.ino as u64).await;
+        }
+
+        let src_attr = self.meta_stat_required(src.ino, PathHint::none()).await?;
+        let dst_attr = self.meta_stat_required(dst.ino, PathHint::none()).await?;
+        let src_guard = self.open_guard(src.ino, src_attr, true, false).await?;
+        let dst_guard = self.open_guard(dst.ino, dst_attr, false, true).await?;
+
+        // Read the full source snapshot before writing so same-file overlap keeps
+        // copy_file_range semantics close to a memmove-style copy.
+        let data = src_guard.read(off_in, len).await?;
+        let written = dst_guard.write(off_out, &data).await?;
+
+        drop(dst_guard);
+        drop(src_guard);
+        drop(locked);
+
         Ok(written)
     }
 

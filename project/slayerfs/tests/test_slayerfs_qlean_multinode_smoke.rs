@@ -509,7 +509,6 @@ async fn cleanup_etcd_metadata_remote(vm: &mut Machine, endpoint: &str) -> Resul
         "slayerfs:",
         "f:",
         "r:",
-        "c:",
         "p:",
         "l:",
         "session:",
