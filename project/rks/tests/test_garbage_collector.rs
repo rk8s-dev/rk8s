@@ -3,13 +3,18 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use common::{
-    ContainerSpec, LabelSelector, ObjectMeta, OwnerReference, PodSpec, PodStatus, PodTask,
-    PodTemplateSpec, ReplicaSet, ReplicaSetSpec, Resource, ResourceKind,
+    CompletionMode, ContainerSpec, Job, JobSpec, LabelSelector, ObjectMeta, OwnerReference,
+    PodSpec, PodStatus, PodTask, PodTemplateSpec, ReplicaSet, ReplicaSetSpec, Resource,
+    ResourceKind,
 };
 use libvault::storage::xline::XlineOptions;
 use rks::{
     api::xlinestore::XlineStore,
-    controllers::{ControllerManager, ReplicaSetController, garbage_collector::GarbageCollector},
+    controllers::{
+        Controller, ControllerManager, JobController, ReplicaSetController,
+        garbage_collector::GarbageCollector,
+        manager::{ResourceWatchResponse, WatchEvent},
+    },
     protocol::config::load_config,
 };
 use serial_test::serial;
@@ -49,29 +54,23 @@ async fn get_store() -> Option<Arc<XlineStore>> {
     }
 }
 
-fn pod_with_meta(name: &str, uid: Uuid, owners: Option<Vec<OwnerReference>>) -> PodTask {
-    let container = ContainerSpec {
-        name: "main".to_string(),
+fn test_container_spec(name: &str) -> ContainerSpec {
+    ContainerSpec {
+        name: name.to_string(),
         image: "busybox:latest".to_string(),
-        ports: vec![],
-        args: vec![],
-        tty: false,
-        gpus: None,
         resources: Some(common::ContainerRes {
             limits: Some(Resource {
                 cpu: Some("100m".to_string()),
                 memory: Some("50Mi".to_string()),
+                ..Default::default()
             }),
         }),
-        liveness_probe: None,
-        readiness_probe: None,
-        security_context: None,
-        env: None,
-        volume_mounts: None,
-        command: None,
-        working_dir: None,
-        startup_probe: None,
-    };
+        ..Default::default()
+    }
+}
+
+fn pod_with_meta(name: &str, uid: Uuid, owners: Option<Vec<OwnerReference>>) -> PodTask {
+    let container = test_container_spec("main");
 
     let meta = ObjectMeta {
         name: name.to_string(),
@@ -126,30 +125,57 @@ fn replicaset_with_meta(name: &str, uid: Uuid, replicas: i32) -> ReplicaSet {
                 },
                 spec: PodSpec {
                     node_name: None,
+                    containers: vec![test_container_spec("main")],
+                    init_containers: vec![],
+                    tolerations: vec![],
+                    ..Default::default()
+                },
+            },
+        },
+        status: Default::default(),
+    }
+}
+
+fn job_with_meta(name: &str, uid: Uuid) -> Job {
+    let mut labels = HashMap::new();
+    labels.insert("job".to_string(), name.to_string());
+
+    Job {
+        api_version: "v1".to_string(),
+        kind: "Job".to_string(),
+        metadata: ObjectMeta {
+            name: name.to_string(),
+            namespace: "default".to_string(),
+            uid,
+            labels: labels.clone(),
+            ..Default::default()
+        },
+        spec: JobSpec {
+            completion_mode: CompletionMode::NonIndexed,
+            completions: 1,
+            parallelism: 1,
+            backoff_limit: 0,
+            active_deadline_seconds: None,
+            ttl_seconds_after_finished: None,
+            template: PodTemplateSpec {
+                metadata: ObjectMeta {
+                    namespace: "default".to_string(),
+                    labels,
+                    ..Default::default()
+                },
+                spec: PodSpec {
+                    node_name: None,
                     containers: vec![ContainerSpec {
-                        name: "main".to_string(),
-                        image: "busybox:latest".to_string(),
-                        ports: vec![],
-                        args: vec![],
-                        tty: false,
-                        gpus: None,
-                        resources: Some(common::ContainerRes {
-                            limits: Some(Resource {
-                                cpu: Some("100m".to_string()),
-                                memory: Some("50Mi".to_string()),
-                            }),
-                        }),
-                        liveness_probe: None,
-                        readiness_probe: None,
-                        startup_probe: None,
-                        security_context: None,
-                        env: None,
-                        volume_mounts: None,
-                        command: None,
-                        working_dir: None,
+                        args: vec![
+                            "/bin/sh".to_string(),
+                            "-c".to_string(),
+                            "exit 0".to_string(),
+                        ],
+                        ..test_container_spec("main")
                     }],
                     init_containers: vec![],
                     tolerations: vec![],
+                    restart_policy: common::RestartPolicy::Never,
                     ..Default::default()
                 },
             },
@@ -198,16 +224,56 @@ async fn wait_for_replicaset_pods(
     }
 }
 
+async fn wait_for_job_pods(
+    store: &XlineStore,
+    job_uid: Uuid,
+    expected_count: usize,
+    timeout: Duration,
+) -> Result<Vec<PodTask>> {
+    let start = Instant::now();
+    loop {
+        let pods = store.list_pods().await?;
+        let matching: Vec<PodTask> = pods
+            .into_iter()
+            .filter(|p| {
+                p.metadata
+                    .owner_references
+                    .as_ref()
+                    .map(|refs| {
+                        refs.iter()
+                            .any(|o| o.kind == ResourceKind::Job && o.uid == job_uid)
+                    })
+                    .unwrap_or(false)
+            })
+            .collect();
+
+        if matching.len() == expected_count {
+            return Ok(matching);
+        }
+
+        if Instant::now().duration_since(start) > timeout {
+            anyhow::bail!(
+                "timeout waiting for {} pods owned by Job uid {} (found {})",
+                expected_count,
+                job_uid,
+                matching.len()
+            );
+        }
+
+        sleep(Duration::from_millis(100)).await;
+    }
+}
+
 async fn clean_store(store: &XlineStore) -> Result<()> {
-    let pods = store
-        .list_pods()
+    let jobs = store
+        .list_jobs()
         .await?
         .into_iter()
-        .filter(|pod| pod.metadata.name.starts_with("garbage-collector-test"))
+        .filter(|job| job.metadata.name.starts_with("garbage-collector-test"))
         .collect::<Vec<_>>();
 
-    for pod in pods {
-        store.delete_pod(&pod.metadata.name).await?;
+    for job in jobs {
+        store.delete_job(&job.metadata.name).await?;
     }
 
     let replicasets = store
@@ -219,6 +285,17 @@ async fn clean_store(store: &XlineStore) -> Result<()> {
 
     for rs in replicasets {
         store.delete_replicaset(&rs.metadata.name).await?;
+    }
+
+    let pods = store
+        .list_pods()
+        .await?
+        .into_iter()
+        .filter(|pod| pod.metadata.name.starts_with("garbage-collector-test"))
+        .collect::<Vec<_>>();
+
+    for pod in pods {
+        store.delete_pod(&pod.metadata.name).await?;
     }
     Ok(())
 }
@@ -564,6 +641,78 @@ async fn test_gc_background_cascade_deletion() -> Result<()> {
         }
         if Instant::now() >= dependent_deadline {
             panic!("dependent pod {dependent_name} was not deleted under background policy");
+        }
+        sleep(Duration::from_millis(100)).await;
+    }
+
+    clean_store(&store).await?;
+    Ok(())
+}
+
+#[tokio::test]
+#[serial]
+async fn test_gc_background_cascade_deletion_for_job_owned_pod() -> Result<()> {
+    let store = get_store().await;
+    if store.is_none() {
+        return Ok(());
+    }
+    let store = store.unwrap();
+
+    clean_store(&store).await?;
+
+    let (_mgr, _gc) = setup_gc(store.clone()).await?;
+
+    let job_uid = Uuid::new_v4();
+    let job_name = format!("garbage-collector-test-job-owner-{}", job_uid);
+    let job = job_with_meta(&job_name, job_uid);
+    let job_yaml = serde_yaml::to_string(&job)?;
+    store.insert_job_yaml(&job_name, &job_yaml).await?;
+
+    let mut job_ctrl = JobController::new(store.clone());
+    job_ctrl
+        .handle_watch_response(&ResourceWatchResponse {
+            kind: ResourceKind::Job,
+            key: job_name.clone(),
+            event: WatchEvent::Add {
+                yaml: job_yaml.clone(),
+            },
+        })
+        .await?;
+
+    let pods = wait_for_job_pods(&store, job_uid, 1, Duration::from_secs(6)).await?;
+    let job_pod = &pods[0];
+    let job_pod_name = job_pod.metadata.name.clone();
+    let owner_refs = job_pod
+        .metadata
+        .owner_references
+        .as_ref()
+        .expect("job-created pod missing owner reference");
+    assert_eq!(owner_refs.len(), 1);
+    assert_eq!(owner_refs[0].kind, ResourceKind::Job);
+    assert_eq!(owner_refs[0].name, job_name);
+    assert_eq!(owner_refs[0].uid, job_uid);
+    assert_eq!(owner_refs[0].block_owner_deletion, Some(true));
+
+    store.delete_job(&job_name).await?;
+
+    let job_deadline = Instant::now() + Duration::from_secs(6);
+    loop {
+        if store.get_job(&job_name).await?.is_none() {
+            break;
+        }
+        if Instant::now() >= job_deadline {
+            panic!("job {job_name} was not deleted under background policy");
+        }
+        sleep(Duration::from_millis(100)).await;
+    }
+
+    let pod_deadline = Instant::now() + Duration::from_secs(6);
+    loop {
+        if store.get_pod(&job_pod_name).await?.is_none() {
+            break;
+        }
+        if Instant::now() >= pod_deadline {
+            panic!("job-owned pod {job_pod_name} was not deleted after Job {job_name} deletion");
         }
         sleep(Duration::from_millis(100)).await;
     }

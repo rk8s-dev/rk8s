@@ -26,20 +26,16 @@ use tracing::{debug, info, warn};
 use uuid::Uuid;
 
 use crate::{
-    commands::{
-        delete, load_container,
-        pod::{PodInfo, TLSConnectionArgs},
-    },
+    commands::{delete, load_container, pod::PodInfo},
     daemon::status::{
-        get_pod_by_uid,
+        get_pod_task_by_uid,
         pleg::{PodLifecycleEvent, PodLifecycleEventType},
         probe::{
             probe_manager::{ProbeManager, ProbeResult, ProbeResultType},
             prober::match_container_name,
         },
-        status_manager::StatusManager,
+        status_manager::{self, StatusManager},
     },
-    quic::client::{Cli, QUICClient},
     task::TaskRunner,
 };
 
@@ -49,8 +45,6 @@ use crate::{
 /// the probe subsystem. It updates pod status via [`StatusManager`] and triggers container
 /// restarts when liveness probes fail (respecting [`common::RestartPolicy`]).
 pub struct PodWorker {
-    server_addr: String,
-    tls_cfg: Arc<TLSConnectionArgs>,
     status_manager: Arc<StatusManager>,
     pod_lifecycle_event_rx: Option<UnboundedReceiver<PodLifecycleEvent>>,
     liveness_probe_result_rx: tokio::sync::broadcast::Receiver<ProbeResult>,
@@ -63,8 +57,6 @@ pub struct PodWorker {
 const UNKNOWN_EXIT_CODE: i32 = -1;
 
 struct State {
-    server_addr: String,
-    tls_cfg: Arc<TLSConnectionArgs>,
     status_manager: Arc<StatusManager>,
     pod_lifecycle_event_rx: UnboundedReceiver<PodLifecycleEvent>,
     liveness_probe_result_rx: tokio::sync::broadcast::Receiver<ProbeResult>,
@@ -84,15 +76,11 @@ impl PodWorker {
     /// * `probe_manager` - Manager that provides probe result broadcast channels
     /// * `status_manager` - Manager for updating pod status
     pub fn new(
-        server_addr: String,
-        tls_cfg: Arc<TLSConnectionArgs>,
         pod_lifecycle_event_rx: UnboundedReceiver<PodLifecycleEvent>,
         probe_manager: Arc<ProbeManager>,
         status_manager: Arc<StatusManager>,
     ) -> Self {
         Self {
-            server_addr,
-            tls_cfg,
             status_manager,
             pod_lifecycle_event_rx: Some(pod_lifecycle_event_rx),
             liveness_probe_result_rx: probe_manager.liveness_results().updates(),
@@ -129,8 +117,6 @@ impl PodWorker {
         debug!("[PodWorker] Starting event loop task");
 
         let mut state = State {
-            server_addr: self.server_addr.clone(),
-            tls_cfg: self.tls_cfg.clone(),
             status_manager: self.status_manager.clone(),
             pod_lifecycle_event_rx,
             liveness_probe_result_rx: self.liveness_probe_result_rx.resubscribe(),
@@ -154,7 +140,7 @@ impl PodWorker {
                         }
                     }
                     Ok(probe_result) = state.liveness_probe_result_rx.recv() => {
-                        if let Err(e) = handle_liveness_probe_result(&state, probe_result).await {
+                        if let Err(e) = handle_liveness_probe_result(probe_result).await {
                             tracing::error!("Error handling liveness probe result: {e}");
                         }
                     }
@@ -251,10 +237,7 @@ async fn handle_readiness_probe_result(
     Ok(())
 }
 
-async fn handle_liveness_probe_result(
-    state: &State,
-    probe_result: ProbeResult,
-) -> anyhow::Result<()> {
+async fn handle_liveness_probe_result(probe_result: ProbeResult) -> anyhow::Result<()> {
     tracing::debug!(
         pod_id = %probe_result.pod_id,
         container_id = %probe_result.container_id,
@@ -298,8 +281,7 @@ async fn handle_liveness_probe_result(
         container_id = %probe_result.container_id,
         "[PodWorker] Querying pod for liveness failure handling"
     );
-    let client = QUICClient::<Cli>::connect(&state.server_addr, &state.tls_cfg).await?;
-    let pod = match get_pod_by_uid(&client, &pod_uid).await? {
+    let pod = match get_pod_task_by_uid(&pod_uid).await? {
         Some(pod) => pod,
         None => {
             tracing::debug!(
@@ -368,8 +350,17 @@ async fn sync_pod_for_pod_lifecycle_event(
         "[PodWorker] Syncing pod for lifecycle event"
     );
 
-    let client = QUICClient::<Cli>::connect(&state.server_addr, &state.tls_cfg).await?;
-    let pod = get_pod_by_uid(&client, &event.pod_uid)
+    if is_pod_sandbox_event(event) {
+        debug!(
+            pod_uid = %event.pod_uid,
+            pod_name = %event.pod_name,
+            container_id = %event.container.state.id,
+            "[PodWorker] Ignoring pod sandbox lifecycle event for workload status sync"
+        );
+        return Ok(());
+    }
+
+    let pod = get_pod_task_by_uid(&event.pod_uid)
         .await?
         .ok_or(anyhow::anyhow!("Pod not found"))?;
 
@@ -420,6 +411,11 @@ async fn sync_pod_for_pod_lifecycle_event(
         }
     }
     Ok(())
+}
+
+fn is_pod_sandbox_event(event: &PodLifecycleEvent) -> bool {
+    // TaskRunner uses the pod name as the sandbox container ID.
+    event.container.state.id == event.pod_name
 }
 
 async fn apply_pod_lifecycle_event(
@@ -586,6 +582,10 @@ async fn apply_pod_lifecycle_event(
             );
         }
     }
+
+    // Pause/sandbox shares the pod's container_status list from PLEG; it stays Running while the
+    // workload exits. Phase must only consider spec workload containers (same rule as StatusManager).
+    status_manager::filter_non_workload_container_statuses(pod_task, pod_status);
 
     // update pod phase to Succeeded or Failed if all containers are terminated
     if !pod_status.container_statuses.is_empty()
@@ -825,6 +825,8 @@ mod tests {
                 affinity: None,
                 restart_policy,
                 volumes: vec![],
+                gang: None,
+                topology_constraints: vec![],
             },
             status: PodStatus::default(),
         }
@@ -991,6 +993,21 @@ mod tests {
             .unwrap();
 
         assert_eq!(pod_status.phase, PodPhase::Running);
+    }
+
+    #[test]
+    fn sandbox_event_is_detected_by_matching_pod_name() {
+        let sandbox_event = make_event(
+            PodLifecycleEventType::ContainerStarted,
+            make_container("pod", None),
+        );
+        assert!(is_pod_sandbox_event(&sandbox_event));
+
+        let workload_event = make_event(
+            PodLifecycleEventType::ContainerStarted,
+            make_container("c1", None),
+        );
+        assert!(!is_pod_sandbox_event(&workload_event));
     }
 
     #[test]

@@ -17,14 +17,15 @@ mod task;
 
 use commands::{
     apply::ApplyCommand, attach::AttachCommand, container::ContainerCommand, delete::DeleteCommand,
-    deployment::DeploymentCommand, exec::ExecCommand, get::GetCommand, logs::LogCommand,
-    pod::PodCommand, replicaset::ReplicaSetCommand, run::RunCommand, service::ServiceCommand,
+    deployment::DeploymentCommand, exec::ExecCommand, get::GetCommand, job::JobCommand,
+    logs::LogCommand, pod::PodCommand, replicaset::ReplicaSetCommand, run::RunCommand,
+    service::ServiceCommand,
 };
 use commands::{
     apply::apply_execute, attach::attach_execute, container::container_execute,
     delete::delete_execute, deployment::deployment_execute, exec::exec_execute, get::get_execute,
-    logs::logs_execute, pod::pod_execute, replicaset::replicaset_execute, run::run_execute,
-    service::service_execute,
+    job::job_execute, logs::logs_execute, pod::pod_execute, replicaset::replicaset_execute,
+    run::run_execute, service::service_execute,
 };
 use tracing::error;
 
@@ -59,6 +60,7 @@ impl Cli {
             Workload::Container(cmd) => container_execute(cmd),
             Workload::Replicaset(cmd) => replicaset_execute(cmd),
             Workload::Deployment(cmd) => deployment_execute(cmd),
+            Workload::Job(cmd) => job_execute(cmd),
             Workload::Service(cmd) => service_execute(cmd),
             Workload::Logs(cmd) => logs_execute(cmd),
             Workload::Mount(args) => rkforge::overlayfs::do_mount(args),
@@ -107,6 +109,9 @@ enum Workload {
 
     #[command(subcommand, about = "(Deprecated)Manage Deployments", alias = "deploy")]
     Deployment(DeploymentCommand),
+
+    #[command(subcommand, about = "(Deprecated)Manage Jobs")]
+    Job(JobCommand),
 
     #[command(subcommand, about = "(Deprecated)Manage Services", alias = "svc")]
     Service(ServiceCommand),

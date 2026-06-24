@@ -34,7 +34,9 @@ impl MediaType {
 }
 
 pub fn get_media_type(media_type: &str) -> MediaType {
-    if media_type.ends_with("tar+gzip") {
+    // OCI uses `+gzip` (e.g. application/vnd.oci.image.layer.v1.tar+gzip),
+    // Docker uses `.gzip` (e.g. application/vnd.docker.image.rootfs.diff.tar.gzip).
+    if media_type.ends_with("tar+gzip") || media_type.ends_with("tar.gzip") {
         return MediaType::TarGzip;
     }
     if media_type.ends_with("tar") {

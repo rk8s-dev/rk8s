@@ -400,8 +400,12 @@ impl ContainerRunner {
         process.set_capabilities(Some(capabilities));
         process.set_terminal(Some(false));
         process.set_args(Some(config.args.clone()));
-        // TODO: env
-        // process.set_env(Some(config.envs));
+        let envs: Vec<String> = config
+            .envs
+            .iter()
+            .map(|kv| format!("{}={}", kv.key, kv.value))
+            .collect();
+        process.set_env(Some(envs));
 
         spec.set_process(Some(process));
 

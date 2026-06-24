@@ -27,9 +27,11 @@ use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
 use crate::{
-    commands::pod::{PodInfo, TLSConnectionArgs},
-    daemon::status::{get_pod_by_uid, probe::prober::match_container_name},
-    quic::client::{Cli, QUICClient},
+    commands::pod::PodInfo,
+    daemon::{
+        client::try_get_daemon_client,
+        status::{get_pod_task_by_uid, probe::prober::match_container_name},
+    },
 };
 
 const SYNC_DURATION: std::time::Duration = std::time::Duration::from_secs(5);
@@ -69,8 +71,6 @@ impl Default for VersionedPodStatus {
 /// and synchronizes changes to the rks API server over QUIC. Implements both on-demand (signal-driven)
 /// and periodic (5-second ticker) synchronization strategies.
 pub struct StatusManager {
-    server_address: String,
-    tls_cfg: Arc<TLSConnectionArgs>,
     pod_statuses: Arc<DashMap<Uuid, VersionedPodStatus>>,
     pending_container_readiness: Arc<DashMap<Uuid, HashMap<String, bool>>>,
     pod_status_update_signal: Arc<Notify>,
@@ -85,39 +85,25 @@ impl std::fmt::Debug for StatusManager {
 }
 
 struct State {
-    server_address: String,
-    tls_cfg: Arc<TLSConnectionArgs>,
     pod_statuses: Arc<DashMap<Uuid, VersionedPodStatus>>,
     pod_status_update_signal: Arc<Notify>,
     api_status_versions: Arc<DashMap<Uuid, u64>>,
 }
 
 impl StatusManager {
-    /// Creates a new [`StatusManager`] with a QUIC connection to the rks API server.
-    ///
-    /// # Arguments
-    /// * `server_addr` - The rks API server address (e.g., "127.0.0.1:6000")
-    /// * `tls_cfg` - TLS configuration for the QUIC connection
-    ///
-    /// # Errors
-    /// Returns an error if the QUIC connection fails to establish.
-    pub async fn try_new(
-        server_address: String,
-        tls_cfg: Arc<TLSConnectionArgs>,
-    ) -> anyhow::Result<Self> {
+    /// Creates a new [`StatusManager`].
+    pub async fn new() -> Self {
         let pod_statuses = Arc::new(DashMap::new());
         let pending_container_readiness = Arc::new(DashMap::new());
         let pod_status_update_signal = Arc::new(Notify::new());
         let api_status_versions = Arc::new(DashMap::new());
-        Ok(StatusManager {
-            server_address,
-            tls_cfg,
+        StatusManager {
             pod_statuses,
             pending_container_readiness,
             pod_status_update_signal,
             api_status_versions,
             sync_loop_handle: None,
-        })
+        }
     }
 
     /// Starts the background sync loop.
@@ -138,8 +124,6 @@ impl StatusManager {
         info!("[StatusManager] Starting to sync pod status to rks.");
 
         let state = Arc::new(State {
-            server_address: self.server_address.clone(),
-            tls_cfg: self.tls_cfg.clone(),
             pod_statuses: self.pod_statuses.clone(),
             pod_status_update_signal: self.pod_status_update_signal.clone(),
             api_status_versions: self.api_status_versions.clone(),
@@ -254,8 +238,7 @@ impl StatusManager {
             "[StatusManager] Setting container readiness"
         );
 
-        let client = QUICClient::<Cli>::connect(&self.server_address, &self.tls_cfg).await?;
-        let pod = match get_pod_by_uid(&client, &pod_uid).await? {
+        let pod = match get_pod_task_by_uid(&pod_uid).await? {
             Some(p) => p,
             None => {
                 debug!(
@@ -576,7 +559,7 @@ async fn sync_batch(state: &Arc<State>, sync_all: bool) -> anyhow::Result<()> {
                 updated_status.push((pod_uid, pod_status));
             }
             NeedUpdateDecision::Skip => {
-                if need_reconcile(state, &pod_uid, &pod_status).await? {
+                if need_reconcile(&pod_uid, &pod_status).await? {
                     state.api_status_versions.remove(&pod_uid);
                     updated_status.push((pod_uid, pod_status));
                 }
@@ -628,8 +611,7 @@ async fn sync_pod(
         version = pod_status.version,
         "[StatusManager] sync_pod start"
     );
-    let client = QUICClient::<Cli>::connect(&state.server_address, &state.tls_cfg).await?;
-    let pod = match get_pod_by_uid(&client, &pod_uid).await? {
+    let pod = match get_pod_task_by_uid(&pod_uid).await? {
         Some(p) => p,
         None => {
             debug!(
@@ -654,13 +636,7 @@ async fn sync_pod(
     );
 
     // Update the pod status on the server
-    update_pod_status(
-        state,
-        &pod.metadata.name,
-        &pod.metadata.namespace,
-        &merged_status,
-    )
-    .await?;
+    update_pod_status(&pod.metadata.name, &pod.metadata.namespace, &merged_status).await?;
 
     // After successful update, record the latest version
     state
@@ -677,7 +653,6 @@ async fn sync_pod(
 }
 
 async fn update_pod_status(
-    state: &State,
     pod_name: &str,
     pod_namespace: &str,
     pod_status: &PodStatus,
@@ -690,16 +665,18 @@ async fn update_pod_status(
         "[StatusManager] Sending UpdatePodStatus request"
     );
 
-    let client = QUICClient::<Cli>::connect(&state.server_address, &state.tls_cfg).await?;
-    client
+    let client = try_get_daemon_client().await?;
+    let mut stream = client.open_bi().await?;
+    stream
         .send_msg(&RksMessage::UpdatePodStatus {
             pod_name: pod_name.to_string(),
             pod_namespace: pod_namespace.to_string(),
             status: pod_status.clone(),
         })
         .await?;
+    stream.sender().finish()?;
 
-    match client.fetch_msg().await? {
+    match stream.fetch_msg().await? {
         RksMessage::Ack => {
             debug!(
                 pod_name,
@@ -820,8 +797,7 @@ async fn need_update(
         return Ok(NeedUpdateDecision::Upload);
     }
 
-    let client = QUICClient::<Cli>::connect(&state.server_address, &state.tls_cfg).await?;
-    let pod = match get_pod_by_uid(&client, pod_uid).await? {
+    let pod = match get_pod_task_by_uid(pod_uid).await? {
         Some(p) => p,
         None => {
             debug!(
@@ -856,13 +832,8 @@ fn can_be_deleted(local_status: &VersionedPodStatus, remote_pod: &PodTask) -> an
     Ok(false)
 }
 
-async fn need_reconcile(
-    state: &Arc<State>,
-    pod_uid: &Uuid,
-    pod_status: &VersionedPodStatus,
-) -> anyhow::Result<bool> {
-    let client = QUICClient::<Cli>::connect(&state.server_address, &state.tls_cfg).await?;
-    let pod_option = get_pod_by_uid(&client, pod_uid).await.ok().flatten();
+async fn need_reconcile(pod_uid: &Uuid, pod_status: &VersionedPodStatus) -> anyhow::Result<bool> {
+    let pod_option = get_pod_task_by_uid(pod_uid).await.ok().flatten();
     if pod_option.is_none() {
         return Ok(false);
     }
@@ -1228,7 +1199,7 @@ fn resolve_container_status_name(
     match_container_name(container_name, &candidates).unwrap_or_else(|| container_name.to_string())
 }
 
-fn filter_non_workload_container_statuses(pod: &PodTask, status: &mut PodStatus) {
+pub(crate) fn filter_non_workload_container_statuses(pod: &PodTask, status: &mut PodStatus) {
     if status.container_statuses.is_empty() {
         return;
     }
@@ -1370,19 +1341,7 @@ mod tests {
         common::ContainerSpec {
             name: name.to_string(),
             image: "image".to_string(),
-            ports: Vec::new(),
-            args: Vec::new(),
-            tty: false,
-            gpus: None,
-            resources: None,
-            liveness_probe: None,
-            readiness_probe: None,
-            startup_probe: None,
-            security_context: None,
-            env: None,
-            volume_mounts: None,
-            command: None,
-            working_dir: None,
+            ..Default::default()
         }
     }
 
@@ -1407,6 +1366,8 @@ mod tests {
                 affinity: None,
                 restart_policy,
                 volumes: vec![],
+                gang: None,
+                topology_constraints: vec![],
             },
             status: PodStatus::default(),
         }

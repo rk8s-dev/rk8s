@@ -7,13 +7,16 @@
 #![allow(dead_code)]
 
 use crate::cycle_state::CycleState;
+use crate::gang_state::GangStateStore;
 use crate::models::{NodeInfo, PodInfo};
 use crate::plugins::balanced_allocation::BalancedAllocation;
+use crate::plugins::node_gpu_resources_fit::NodeGpuResourcesFit;
 use crate::plugins::node_name::NodeName;
 use crate::plugins::node_resources_fit::Fit;
 use crate::plugins::node_unschedulable::NodeUnschedulable;
 use crate::plugins::scheduling_gates::SchedulingGates;
 use crate::plugins::taint_toleration::TaintToleration;
+use crate::plugins::topology_coaffinity::TopologyCoAffinityFilter;
 use bitflags::bitflags;
 use std::cmp::Ordering;
 use std::collections::HashMap;
@@ -22,12 +25,14 @@ use std::time::Duration;
 
 pub mod balanced_allocation;
 pub mod node_affinity;
+pub mod node_gpu_resources_fit;
 pub mod node_name;
 pub mod node_resources_fit;
 pub mod node_unschedulable;
 pub mod pod_affinity;
 pub mod scheduling_gates;
 pub mod taint_toleration;
+pub mod topology_coaffinity;
 
 /// Plugin specifies a plugin name and its weight when applicable. Weight is used only for Score plugins.
 #[derive(Clone)]
@@ -83,11 +88,19 @@ impl Default for Plugins {
         let taint_toleration = PluginInfo::with_weight("TaintToleration", 3);
         let balanced_allocation = PluginInfo::with_weight("NodeResourcesBalancedAllocation", 1);
         let pod_affinity = PluginInfo::with_weight("PodAffinity", 2);
+        let gpu_fit = PluginInfo::with_weight("NodeGpuResourcesFit", 1);
+        let topology_coaffinity = PluginInfo::new("TopologyCoAffinityFilter");
 
         Self {
             pre_enqueue: vec![scheduling_gates.clone()],
             queue_sort: PluginInfo::new("PrioritySort"),
-            pre_filter: vec![node_affinity.clone(), fit.clone(), pod_affinity.clone()],
+            pre_filter: vec![
+                node_affinity.clone(),
+                fit.clone(),
+                pod_affinity.clone(),
+                gpu_fit.clone(),
+                topology_coaffinity.clone(),
+            ],
             filter: vec![
                 node_affinity.clone(),
                 fit.clone(),
@@ -95,6 +108,8 @@ impl Default for Plugins {
                 node_name.clone(),
                 node_unschedulable.clone(),
                 pod_affinity.clone(),
+                gpu_fit.clone(),
+                topology_coaffinity.clone(),
             ],
             post_filter: vec![],
             pre_score: vec![
@@ -103,6 +118,7 @@ impl Default for Plugins {
                 balanced_allocation.clone(),
                 taint_toleration.clone(),
                 pod_affinity.clone(),
+                gpu_fit.clone(),
             ],
             score: vec![
                 node_affinity.clone(),
@@ -110,6 +126,7 @@ impl Default for Plugins {
                 balanced_allocation.clone(),
                 taint_toleration.clone(),
                 pod_affinity.clone(),
+                gpu_fit.clone(),
             ],
             reserve: vec![],
             permit: vec![],
@@ -123,6 +140,7 @@ impl Default for Plugins {
                 fit.clone(),
                 taint_toleration.clone(),
                 pod_affinity.clone(),
+                gpu_fit.clone(),
             ],
         }
     }
@@ -383,8 +401,8 @@ pub struct Registry {
     pub enqueue_extensions: Vec<Arc<dyn EnqueueExtension>>,
 }
 
-impl Default for Registry {
-    fn default() -> Self {
+impl Registry {
+    pub fn new(gang_state: Arc<GangStateStore>) -> Self {
         let node_affinity = Arc::new(node_affinity::NodeAffinity {});
         let node_name = Arc::new(NodeName {});
         let fit = Arc::new(Fit {});
@@ -393,10 +411,18 @@ impl Default for Registry {
         let taint_toleration = Arc::new(TaintToleration {});
         let balanced_allocation = Arc::new(BalancedAllocation::default());
         let pod_affinity = Arc::new(pod_affinity::PodAffinityPlugin);
+        let gpu_fit = Arc::new(NodeGpuResourcesFit {});
+        let topology_coaffinity = Arc::new(TopologyCoAffinityFilter { gang_state });
 
         Self {
             pre_enqueue: vec![scheduling_gates.clone()],
-            pre_filter: vec![node_affinity.clone(), fit.clone(), pod_affinity.clone()],
+            pre_filter: vec![
+                node_affinity.clone(),
+                fit.clone(),
+                pod_affinity.clone(),
+                gpu_fit.clone(),
+                topology_coaffinity.clone(),
+            ],
             filter: vec![
                 node_affinity.clone(),
                 fit.clone(),
@@ -404,6 +430,8 @@ impl Default for Registry {
                 node_name.clone(),
                 node_unschedulable.clone(),
                 pod_affinity.clone(),
+                gpu_fit.clone(),
+                topology_coaffinity.clone(),
             ],
             post_filter: vec![],
             pre_score: vec![
@@ -412,6 +440,7 @@ impl Default for Registry {
                 balanced_allocation.clone(),
                 taint_toleration.clone(),
                 pod_affinity.clone(),
+                gpu_fit.clone(),
             ],
             score: vec![
                 node_affinity.clone(),
@@ -419,6 +448,7 @@ impl Default for Registry {
                 balanced_allocation.clone(),
                 taint_toleration.clone(),
                 pod_affinity.clone(),
+                gpu_fit.clone(),
             ],
             // below features are unimplemented
             reserve: vec![],
@@ -433,8 +463,15 @@ impl Default for Registry {
                 fit.clone(),
                 taint_toleration.clone(),
                 pod_affinity.clone(),
+                gpu_fit.clone(),
             ],
         }
+    }
+}
+
+impl Default for Registry {
+    fn default() -> Self {
+        Self::new(Arc::new(GangStateStore::default()))
     }
 }
 

@@ -689,6 +689,7 @@ mod tests {
             spec: NodeSpec::default(),
             requested: ResourcesRequirements::default(),
             allocatable: ResourcesRequirements::default(),
+            gpu_resources: None,
         }
     }
 

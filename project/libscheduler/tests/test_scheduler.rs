@@ -31,6 +31,7 @@ fn make_node(name: &str, cpu: u64, memory: u64) -> NodeInfo {
         requested: ResourcesRequirements { cpu: 0, memory: 0 },
         spec: NodeSpec::default(),
         labels: HashMap::new(),
+        gpu_resources: None,
     }
 }
 

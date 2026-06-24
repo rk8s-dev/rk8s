@@ -12,8 +12,8 @@ spec:
       restart_policy: Never
       containers:
         - name: pi
-          image: perl:5.34.0
-          command:
+          image: lingbou/perl:5.34.0
+          args:
             - perl
             - -Mbignum=bpi
             - -wle

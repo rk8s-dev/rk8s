@@ -39,7 +39,7 @@ For manual installation, you can follow the steps below:
 
   ```bash
   sudo apt-get install build-essential clang lld pkg-config protobuf-compiler zstd
-  sudo apt-get install seccomp libseccomp-dev libpython3-dev openssl libssl-dev
+  sudo apt-get install seccomp libseccomp-dev libelf-dev libpython3-dev openssl libssl-dev
   ```
 
 - Install Rust:
