@@ -706,7 +706,7 @@ fn test_single_backend_uses_numgen_mod_1() {
 
     let json = generate_service_update(&svc, &ep).expect("generate_service_update failed");
     let parsed: serde_json::Value = serde_json::from_str(&json).expect("valid json expected");
-    let mod_v = numgen_mod_in_chain(&parsed, "svc-default-svc-one-80");
+    let mod_v = numgen_mod_in_chain(&parsed, "svc-default-svc-one-tcp-80");
     assert_eq!(mod_v, Some(1), "single backend must use numgen mod 1");
 }
 
@@ -771,7 +771,7 @@ fn test_multi_backend_uses_numgen_mod_n() {
 
     let json = generate_service_update(&svc, &ep).expect("generate_service_update failed");
     let parsed: serde_json::Value = serde_json::from_str(&json).expect("valid json expected");
-    let mod_v = numgen_mod_in_chain(&parsed, "svc-default-svc-multi-80");
+    let mod_v = numgen_mod_in_chain(&parsed, "svc-default-svc-multi-tcp-80");
     assert_eq!(mod_v, Some(3), "three backends must use numgen mod 3");
 }
 
@@ -850,7 +850,7 @@ fn test_no_endpoints_generates_reject_rule() {
     let parsed: serde_json::Value = serde_json::from_str(&json).expect("valid json expected");
 
     assert!(
-        has_reject_rule_in_chain(&parsed, "svc-default-svc-reject-80"),
+        has_reject_rule_in_chain(&parsed, "svc-default-svc-reject-tcp-80"),
         "service chain should reject traffic when endpoints are empty"
     );
 }
@@ -900,7 +900,7 @@ fn test_services_discovery_refresh_payload_only_rebuilds_shared_chain() {
         "services discovery refresh payload must not include delete-rule commands"
     );
     assert!(
-        !has_chain_object(&parsed, "svc-default-svc-refresh-80"),
+        !has_chain_object(&parsed, "svc-default-svc-refresh-tcp-80"),
         "services discovery refresh should not include per-service chain definitions"
     );
 }
@@ -958,23 +958,23 @@ fn test_service_delete_payload_flushes_and_deletes_chains_safely() {
     let parsed: serde_json::Value = serde_json::from_str(&json).expect("valid json expected");
 
     assert!(
-        has_flush_chain_cmd(&parsed, "svc-default-svc-del-80"),
+        has_flush_chain_cmd(&parsed, "svc-default-svc-del-tcp-80"),
         "service delete payload should flush service chain"
     );
     assert!(
-        has_flush_chain_cmd(&parsed, "mark-svc-default-svc-del-80"),
+        has_flush_chain_cmd(&parsed, "mark-svc-default-svc-del-tcp-80"),
         "service delete payload should flush mark chain"
     );
     assert!(
-        !has_delete_chain_cmd(&parsed, "ep-svc-default-svc-del-80-0"),
+        !has_delete_chain_cmd(&parsed, "ep-svc-default-svc-del-tcp-80-0"),
         "phase C default path should not manage endpoint chain lifecycle"
     );
     assert!(
-        has_delete_chain_cmd(&parsed, "svc-default-svc-del-80"),
+        has_delete_chain_cmd(&parsed, "svc-default-svc-del-tcp-80"),
         "service delete payload should delete service chain after reference cleanup"
     );
     assert!(
-        has_delete_chain_cmd(&parsed, "mark-svc-default-svc-del-80"),
+        has_delete_chain_cmd(&parsed, "mark-svc-default-svc-del-tcp-80"),
         "service delete payload should delete mark chain after reference cleanup"
     );
 }
@@ -1064,11 +1064,11 @@ fn test_endpoint_shrink_generates_stale_ep_chain_delete() {
     let parsed: serde_json::Value = serde_json::from_str(&json).expect("valid json expected");
 
     assert!(
-        !has_delete_chain_cmd(&parsed, "ep-svc-default-svc-shrink-80-1"),
+        !has_delete_chain_cmd(&parsed, "ep-svc-default-svc-shrink-tcp-80-1"),
         "phase C default path should not delete endpoint chains on shrink"
     );
     assert!(
-        !has_delete_chain_cmd(&parsed, "ep-svc-default-svc-shrink-80-2"),
+        !has_delete_chain_cmd(&parsed, "ep-svc-default-svc-shrink-tcp-80-2"),
         "phase C default path should not delete endpoint chains on shrink"
     );
 }
@@ -1140,15 +1140,15 @@ fn test_endpoint_empty_generates_all_ep_chain_deletes() {
     let parsed: serde_json::Value = serde_json::from_str(&json).expect("valid json expected");
 
     assert!(
-        !has_delete_chain_cmd(&parsed, "ep-svc-default-svc-empty-80-0"),
+        !has_delete_chain_cmd(&parsed, "ep-svc-default-svc-empty-tcp-80-0"),
         "phase C default path should not delete endpoint chains on empty transition"
     );
     assert!(
-        !has_delete_chain_cmd(&parsed, "ep-svc-default-svc-empty-80-1"),
+        !has_delete_chain_cmd(&parsed, "ep-svc-default-svc-empty-tcp-80-1"),
         "phase C default path should not delete endpoint chains on empty transition"
     );
     assert!(
-        has_reject_rule_in_chain(&parsed, "svc-default-svc-empty-80"),
+        has_reject_rule_in_chain(&parsed, "svc-default-svc-empty-tcp-80"),
         "endpoint empty transition should rebuild service chain with reject"
     );
 }
