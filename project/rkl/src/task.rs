@@ -33,6 +33,7 @@ use std::path::{Path, PathBuf};
 use tracing::{debug, error, info};
 
 use crate::network::plugin_chain;
+use crate::network::port_forward;
 
 /// Error indicating pause container is dead, Pod needs to be rebuilt
 #[derive(Debug, Error)]
@@ -193,16 +194,21 @@ impl TaskRunner {
             .containers
             .iter()
             .flat_map(|c| {
-                c.ports.iter().map(|p| PortMapping {
-                    protocol: match p.protocol.as_str() {
-                        "TCP" => Protocol::Tcp,
-                        "UDP" => Protocol::Udp,
-                        _ => Protocol::Tcp,
-                    } as i32,
-                    container_port: p.container_port,
-                    host_port: p.host_port,
-                    host_ip: p.host_ip.clone(),
-                })
+                // Only declared host ports (hostPort > 0) become host port mappings;
+                // a default hostPort of 0 means "no host mapping requested".
+                c.ports
+                    .iter()
+                    .filter(|p| p.host_port > 0)
+                    .map(|p| PortMapping {
+                        protocol: match p.protocol.as_str() {
+                            "TCP" => Protocol::Tcp,
+                            "UDP" => Protocol::Udp,
+                            _ => Protocol::Tcp,
+                        } as i32,
+                        container_port: p.container_port,
+                        host_port: p.host_port,
+                        host_ip: p.host_ip.clone(),
+                    })
             })
             .collect();
 
@@ -364,6 +370,11 @@ impl TaskRunner {
             .to_string();
         self.pause_pid = Some(pid_i32);
         // let podip = runner.ip().unwrap().to_string();
+        if let Some(config) = &self.sandbox_config
+            && !config.port_mappings.is_empty()
+        {
+            port_forward::apply_port_mappings(&config.port_mappings, &podip)?;
+        }
 
         info!("podip:{podip}");
         let response = RunPodSandboxResponse {
@@ -498,6 +509,11 @@ impl TaskRunner {
             .to_string();
         self.pause_pid = Some(pid_i32);
         // let podip = runner.ip().unwrap().to_string();
+        if let Some(config) = &self.sandbox_config
+            && !config.port_mappings.is_empty()
+        {
+            port_forward::apply_port_mappings(&config.port_mappings, &podip)?;
+        }
 
         info!("podip:{podip}");
         let response = RunPodSandboxResponse {
@@ -909,8 +925,19 @@ impl TaskRunner {
             signal: "SIGKILL".to_string(),
             all: false,
         };
-        kill(kill_args, root_path.clone())
-            .map_err(|e| anyhow!("Failed to stop PodSandbox {}: {}", pod_sandbox_id, e))?;
+        let kill_result = kill(kill_args, root_path.clone());
+
+        // Remove any port mappings applied for this sandbox (mirror of run_pod_sandbox).
+        // Run regardless of the kill outcome so an already-dead or kill-failed sandbox
+        // does not leak its host port mappings.
+        if let Some(config) = &self.sandbox_config
+            && !config.port_mappings.is_empty()
+            && let Err(e) = port_forward::remove_port_mappings(&config.port_mappings)
+        {
+            error!("Failed to remove port mappings for PodSandbox {pod_sandbox_id}: {e}");
+        }
+
+        kill_result.map_err(|e| anyhow!("Failed to stop PodSandbox {}: {}", pod_sandbox_id, e))?;
         Ok(StopPodSandboxResponse {})
     }
     //delete pause container
