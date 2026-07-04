@@ -1,0 +1,26 @@
+[package]
+name = "rk8s-runtime-api"
+version = "0.1.0"
+edition = "2024"
+authors = ["rk8s-dev team"]
+description = "Runtime provider traits and portable request types for rk8s"
+repository = "https://github.com/r2cn-dev/rk8s/tree/main/project/rk8s-runtime-api"
+license = "MIT OR Apache-2.0"
+readme = "README.md"
+publish = false
+
+[workspace]
+
+[lib]
+name = "rk8s_runtime_api"
+path = "src/lib.rs"
+
+[dependencies]
+async-trait = "0.1.89"
+rk8s-oci = { version = "0.1.0", path = "../rk8s-oci" }
+serde = { version = "1.0.228", features = ["derive"] }
+thiserror = "2.0.17"
+
+[dev-dependencies]
+futures = "0.3.31"
+serde_json = "1.0.145"
