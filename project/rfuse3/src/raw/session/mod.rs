@@ -103,6 +103,23 @@ fn is_ignorable_reply_error(err: &IoError) -> bool {
     }
 }
 
+/// Returns whether an aligned directory entry fits in the kernel-requested buffer.
+///
+/// Keep this calculation shared by the ordinary and worker response paths so every
+/// `readdir` variant accounts for the bytes appended as alignment padding. Treat
+/// arithmetic overflow as a non-fitting entry.
+fn directory_entry_fits(
+    current_len: usize,
+    serialized_entry_size: usize,
+    alignment_padding: usize,
+    requested_size: usize,
+) -> bool {
+    current_len
+        .checked_add(serialized_entry_size)
+        .and_then(|len| len.checked_add(alignment_padding))
+        .is_some_and(|len| len <= requested_size)
+}
+
 fn negotiate_readdirplus(kernel_flags: u32, force: bool) -> (u32, bool) {
     let supports_readdirplus = kernel_flags & FUSE_DO_READDIRPLUS > 0;
     let supports_auto = kernel_flags & FUSE_READDIRPLUS_AUTO > 0;
@@ -140,8 +157,11 @@ fn negotiate_readdirplus(kernel_flags: u32, force: bool) -> (u32, bool) {
 
 #[cfg(test)]
 mod tests {
-    use super::{is_ignorable_reply_error, negotiate_readdirplus};
-    use crate::raw::abi::{FUSE_DO_READDIRPLUS, FUSE_READDIRPLUS_AUTO};
+    use super::{directory_entry_fits, is_ignorable_reply_error, negotiate_readdirplus};
+    use crate::helper::get_padding_size;
+    use crate::raw::abi::{
+        FUSE_DIRENTPLUS_SIZE, FUSE_DIRENT_SIZE, FUSE_DO_READDIRPLUS, FUSE_READDIRPLUS_AUTO,
+    };
     use std::io::Error as IoError;
 
     #[test]
@@ -196,6 +216,95 @@ mod tests {
 
         assert!(!force_active);
         assert_ne!(reply_flags & FUSE_READDIRPLUS_AUTO, 0);
+    }
+
+    #[test]
+    fn exact_fit_directory_entry_is_accepted() {
+        assert!(directory_entry_fits(32, 29, 3, 64));
+    }
+
+    #[test]
+    fn alignment_padding_can_make_directory_entry_too_large() {
+        assert!(!directory_entry_fits(32, 29, 3, 63));
+    }
+
+    #[test]
+    fn already_full_directory_buffer_rejects_another_entry() {
+        assert!(!directory_entry_fits(64, 1, 7, 64));
+    }
+
+    #[test]
+    fn directory_entry_larger_than_requested_buffer_is_rejected() {
+        assert!(!directory_entry_fits(0, 65, 7, 64));
+    }
+
+    #[test]
+    fn directory_entry_size_overflow_is_rejected() {
+        assert!(!directory_entry_fits(usize::MAX - 1, 1, 1, usize::MAX));
+        assert!(!directory_entry_fits(1, usize::MAX, 0, usize::MAX));
+    }
+
+    fn pack_page(
+        fixed_record_size: usize,
+        name_lengths: &[usize],
+        start_index: usize,
+        requested_size: usize,
+    ) -> (Vec<u8>, usize) {
+        let mut response = Vec::new();
+
+        for (index, &name_len) in name_lengths.iter().enumerate().skip(start_index) {
+            let serialized_entry_size = fixed_record_size + name_len;
+            let alignment_padding = get_padding_size(serialized_entry_size);
+            if !directory_entry_fits(
+                response.len(),
+                serialized_entry_size,
+                alignment_padding,
+                requested_size,
+            ) {
+                return (response, index);
+            }
+
+            response.resize(
+                response.len() + serialized_entry_size + alignment_padding,
+                0,
+            );
+        }
+
+        (response, name_lengths.len())
+    }
+
+    #[test]
+    fn regular_directory_pages_stay_bounded_and_resume_at_first_non_fitting_entry() {
+        let names = [17, 9, 1];
+        let first_entry_size = FUSE_DIRENT_SIZE + names[0];
+        let first_entry_padding = get_padding_size(first_entry_size);
+        let requested_size = first_entry_size + first_entry_padding;
+
+        let (first_page, resume_index) = pack_page(FUSE_DIRENT_SIZE, &names, 0, requested_size);
+        assert!(first_page.len() <= requested_size);
+        assert_eq!(resume_index, 1);
+
+        let (second_page, next_resume_index) =
+            pack_page(FUSE_DIRENT_SIZE, &names, resume_index, requested_size);
+        assert!(second_page.len() <= requested_size);
+        assert_eq!(next_resume_index, 2);
+    }
+
+    #[test]
+    fn plus_directory_pages_stay_bounded_and_resume_at_first_non_fitting_entry() {
+        let names = [19, 11, 3];
+        let first_entry_size = FUSE_DIRENTPLUS_SIZE + names[0];
+        let first_entry_padding = get_padding_size(first_entry_size);
+        let requested_size = first_entry_size + first_entry_padding;
+
+        let (first_page, resume_index) = pack_page(FUSE_DIRENTPLUS_SIZE, &names, 0, requested_size);
+        assert!(first_page.len() <= requested_size);
+        assert_eq!(resume_index, 1);
+
+        let (second_page, next_resume_index) =
+            pack_page(FUSE_DIRENTPLUS_SIZE, &names, resume_index, requested_size);
+        assert!(second_page.len() <= requested_size);
+        assert_eq!(next_resume_index, 2);
     }
 }
 
@@ -3502,7 +3611,12 @@ impl<FS: Filesystem + Send + Sync + 'static> Session<FS> {
                 let padding_size = get_padding_size(dir_entry_size);
 
                 // Check against max_size (entry_data portion only)
-                if data.len() - FUSE_OUT_HEADER_SIZE + dir_entry_size > max_size {
+                if !directory_entry_fits(
+                    data.len() - FUSE_OUT_HEADER_SIZE,
+                    dir_entry_size,
+                    padding_size,
+                    max_size,
+                ) {
                     break;
                 }
 
@@ -4409,7 +4523,12 @@ impl<FS: Filesystem + Send + Sync + 'static> Session<FS> {
                 let padding_size = get_padding_size(dir_entry_size);
 
                 // Check against max_size (entry_data portion only)
-                if data.len() - FUSE_OUT_HEADER_SIZE + dir_entry_size > max_size {
+                if !directory_entry_fits(
+                    data.len() - FUSE_OUT_HEADER_SIZE,
+                    dir_entry_size,
+                    padding_size,
+                    max_size,
+                ) {
                     break;
                 }
 

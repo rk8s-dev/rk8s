@@ -24,6 +24,7 @@ use crate::raw::reply::ReplyXAttr;
 use crate::raw::request::Request;
 use crate::SetAttr;
 
+use super::directory_entry_fits;
 use super::utils::{apply_direct_io, reply_error_in_worker, spawn};
 use super::worker::{DispatchCtx, WorkItem};
 pub(super) async fn worker_lookup<FS: Filesystem + Send + Sync + 'static>(
@@ -398,7 +399,7 @@ pub(super) async fn worker_readdir<FS: Filesystem + Send + Sync + 'static>(
             let name = &entry.name;
             let dir_entry_size = FUSE_DIRENT_SIZE + name.len();
             let padding_size = get_padding_size(dir_entry_size);
-            if entry_data.len() + dir_entry_size > max_size {
+            if !directory_entry_fits(entry_data.len(), dir_entry_size, padding_size, max_size) {
                 break;
             }
             let dir_entry = fuse_dirent {
@@ -1931,7 +1932,7 @@ pub(super) async fn worker_readdirplus<FS: Filesystem + Send + Sync + 'static>(
             let dirent_plus_size = FUSE_DIRENTPLUS_SIZE + name.len();
             let padding_size = get_padding_size(dirent_plus_size);
 
-            if entry_data.len() + dirent_plus_size > max_size {
+            if !directory_entry_fits(entry_data.len(), dirent_plus_size, padding_size, max_size) {
                 break;
             }
 
