@@ -7,8 +7,8 @@ use libfuse_fs::passthrough::{PassthroughArgs, new_passthroughfs_layer};
 #[cfg(target_os = "macos")]
 use libfuse_fs::passthrough::{PassthroughFs, config::Config};
 use libfuse_fs::util::bind_mount::{BindMount, BindMountManager};
-use rfuse3::raw::logfs::LoggingFileSystem;
-use rfuse3::{MountOptions, raw::Session};
+use asyncfuse::raw::logfs::LoggingFileSystem;
+use asyncfuse::{MountOptions, raw::Session};
 use std::ffi::OsString;
 #[cfg(target_os = "macos")]
 use std::path::PathBuf;

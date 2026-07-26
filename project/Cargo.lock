@@ -531,6 +531,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "asyncfuse"
+version = "0.1.12"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "73944bd789372ebf1f10a25ee59296bbb437b31dbe234dcd959e98a1f3238fac"
+dependencies = [
+ "aligned_box",
+ "async-notify",
+ "async-trait",
+ "bincode",
+ "bytes",
+ "dashmap",
+ "futures-channel",
+ "futures-util",
+ "libc",
+ "nix 0.29.0",
+ "serde",
+ "slab",
+ "tokio",
+ "tracing",
+ "trait-make",
+ "which",
+]
+
+[[package]]
 name = "atoi"
 version = "2.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4945,10 +4969,11 @@ dependencies = [
 
 [[package]]
 name = "libfuse-fs"
-version = "0.1.14"
+version = "0.1.15"
 dependencies = [
  "anyhow",
  "async-trait",
+ "asyncfuse",
  "bitflags 2.11.0",
  "bytes",
  "clap",
@@ -4963,7 +4988,6 @@ dependencies = [
  "qlean",
  "radix_trie",
  "reqwest 0.12.28",
- "rfuse3",
  "serde",
  "serde_json",
  "tempfile",
@@ -6712,7 +6736,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "059a34f111a9dee2ce1ac2826a68b24601c4298cfeb1a587c3cb493d5ab46f52"
 dependencies = [
  "libc",
- "nix 0.30.1",
+ "nix 0.31.2",
 ]
 
 [[package]]

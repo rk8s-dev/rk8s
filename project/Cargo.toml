@@ -39,6 +39,7 @@ dagrs-derive = { path = "dagrs-derive", version = "0.5.0" }
 quote = "1.0"
 proc-macro2 = "1.0"
 rfuse3 = { path = "rfuse3", version = "0.0.9", features = ["tokio-runtime", "unprivileged"] }
+asyncfuse = { version = "0.1.12", features = ["tokio-runtime", "unprivileged", "file-lock"] }
 slayerfs = { path = "slayerfs" }
 libcgroups = { version = "0.5.7", default-features = false }
 libcontainer = { version = "0.6.0", features = ["cgroupsv2_devices"] }

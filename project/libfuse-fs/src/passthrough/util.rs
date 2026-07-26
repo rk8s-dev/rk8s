@@ -14,7 +14,7 @@ use std::os::unix::io::{AsRawFd, FromRawFd};
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicU8, AtomicU64, Ordering};
 
-use rfuse3::{FileType, Timestamp, raw::reply::FileAttr};
+use asyncfuse::{FileType, Timestamp, raw::reply::FileAttr};
 use tracing::error;
 
 #[cfg(target_os = "macos")]

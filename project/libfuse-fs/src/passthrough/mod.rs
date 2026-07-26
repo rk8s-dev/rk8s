@@ -11,7 +11,7 @@ use inode_store::{InodeId, InodeStore};
 use libc::{self, statx_timestamp};
 
 use moka::future::Cache;
-use rfuse3::{Errno, raw::reply::ReplyEntry};
+use asyncfuse::{Errno, raw::reply::ReplyEntry};
 use uuid::Uuid;
 
 use crate::passthrough::mmap::{MmapCachedValue, MmapChunkKey};
@@ -1932,7 +1932,7 @@ mod tests {
     use std::ffi::{CStr, OsStr, OsString};
 
     use nix::unistd::{Gid, Uid, getgid, getuid};
-    use rfuse3::{
+    use asyncfuse::{
         MountOptions,
         raw::{Filesystem, Request, Session},
     };
@@ -2033,7 +2033,7 @@ mod tests {
 
     #[tokio::test]
     async fn lookup_rejects_nul_name_without_panicking() {
-        use rfuse3::raw::{Filesystem, Request};
+        use asyncfuse::raw::{Filesystem, Request};
         use std::os::unix::ffi::OsStrExt;
 
         let temp_dir = tempfile::tempdir().unwrap();
@@ -2094,7 +2094,7 @@ mod tests {
 
         let entry = fs.do_lookup(ROOT_ID, name).await.unwrap();
 
-        assert_eq!(entry.attr.kind, rfuse3::FileType::Symlink);
+        assert_eq!(entry.attr.kind, asyncfuse::FileType::Symlink);
     }
 
     /// PR-9.3 finding: `O_NOFOLLOW_ANY` is *not* a drop-in upgrade for
@@ -2135,7 +2135,7 @@ mod tests {
     #[tokio::test]
     async fn macos_lazy_dir_rename_rewrites_descendants() {
         use super::Config;
-        use rfuse3::raw::Request;
+        use asyncfuse::raw::Request;
         use std::ffi::OsStr;
 
         let temp_dir = tempfile::tempdir().unwrap();
@@ -2160,7 +2160,7 @@ mod tests {
 
         // Drive the FUSE rename trait directly — it issues the underlying
         // `renameat(2)` and runs the lazy-path descendant walk.
-        use rfuse3::raw::Filesystem;
+        use asyncfuse::raw::Filesystem;
         fs.rename(
             Request::default(),
             ROOT_ID,
@@ -2362,7 +2362,7 @@ mod tests {
     #[cfg(target_os = "macos")]
     #[tokio::test]
     async fn macos_setvolname_accepts_and_returns_ok() {
-        use rfuse3::raw::{Filesystem, Request};
+        use asyncfuse::raw::{Filesystem, Request};
         use std::ffi::OsStr;
 
         let temp_dir = tempfile::tempdir().unwrap();
@@ -2387,7 +2387,7 @@ mod tests {
     #[cfg(target_os = "macos")]
     #[tokio::test]
     async fn macos_getxtimes_reports_creation_time() {
-        use rfuse3::raw::{Filesystem, Request};
+        use asyncfuse::raw::{Filesystem, Request};
 
         let temp_dir = tempfile::tempdir().unwrap();
         let target = temp_dir.path().join("birthcheck.txt");
@@ -2422,7 +2422,7 @@ mod tests {
     #[cfg(target_os = "macos")]
     #[tokio::test]
     async fn macos_exchange_swaps_two_siblings() {
-        use rfuse3::raw::{Filesystem, Request};
+        use asyncfuse::raw::{Filesystem, Request};
         use std::ffi::OsStr;
 
         let temp_dir = tempfile::tempdir().unwrap();
@@ -2466,7 +2466,7 @@ mod tests {
     #[cfg(target_os = "macos")]
     #[tokio::test]
     async fn macos_resource_fork_xattr_honors_position() {
-        use rfuse3::raw::{Filesystem, Request};
+        use asyncfuse::raw::{Filesystem, Request};
         use std::ffi::OsStr;
 
         let temp_dir = tempfile::tempdir().unwrap();
@@ -2493,7 +2493,7 @@ mod tests {
             .await
             .unwrap();
         match data {
-            rfuse3::raw::reply::ReplyXAttr::Data(bytes) => assert_eq!(&bytes[..], b"abEF"),
+            asyncfuse::raw::reply::ReplyXAttr::Data(bytes) => assert_eq!(&bytes[..], b"abEF"),
             other => panic!("expected resource-fork data, got {other:?}"),
         }
     }

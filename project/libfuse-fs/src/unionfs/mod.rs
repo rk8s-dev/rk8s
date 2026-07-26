@@ -19,17 +19,17 @@ use std::path::Path;
 
 use config::Config;
 use futures::StreamExt as _;
-use rfuse3::raw::reply::{
+use asyncfuse::raw::reply::{
     DirectoryEntry, DirectoryEntryPlus, ReplyAttr, ReplyEntry, ReplyOpen, ReplyStatFs,
 };
-use rfuse3::raw::{Request, Session};
+use asyncfuse::raw::{Request, Session};
 use std::sync::{Arc, Weak};
 use tracing::debug;
 use tracing::error;
 use tracing::info;
 use tracing::trace;
 
-use rfuse3::{Errno, FileType, MountOptions, mode_from_kind_and_perm};
+use asyncfuse::{Errno, FileType, MountOptions, mode_from_kind_and_perm};
 const SLASH_ASCII: char = '/';
 
 pub(super) fn is_recoverable_lookup_miss(error: &Error) -> bool {
@@ -47,7 +47,7 @@ use crate::util::convert_stat64_to_file_attr;
 use crate::util::whiteout::{WhiteoutFormat, is_user_creatable_name, oci_whiteout_name};
 use inode_store::InodeStore;
 use layer::Layer;
-use rfuse3::raw::logfs::LoggingFileSystem;
+use asyncfuse::raw::logfs::LoggingFileSystem;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use tokio::sync::{Mutex, RwLock};
@@ -3341,7 +3341,7 @@ where
 /// A mount handle on success.
 pub async fn mount_fs<P, Q, R, M, N, I>(
     args: OverlayArgs<P, Q, R, M, N, I>,
-) -> rfuse3::raw::MountHandle
+) -> asyncfuse::raw::MountHandle
 where
     P: AsRef<Path>,
     Q: AsRef<Path>,

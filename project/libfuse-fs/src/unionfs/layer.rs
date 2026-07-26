@@ -1,8 +1,8 @@
 #![allow(clippy::unnecessary_cast)]
 use async_trait::async_trait;
-use rfuse3::raw::reply::{FileAttr, ReplyCreated, ReplyXAttr};
-use rfuse3::raw::{ObjectSafeFilesystem, Request, reply::ReplyEntry};
-use rfuse3::{Inode, Result};
+use asyncfuse::raw::reply::{FileAttr, ReplyCreated, ReplyXAttr};
+use asyncfuse::raw::{ObjectSafeFilesystem, Request, reply::ReplyEntry};
+use asyncfuse::{Inode, Result};
 use std::ffi::OsStr;
 use std::io::Error;
 use std::time::Duration;
@@ -178,7 +178,7 @@ pub trait Layer: ObjectSafeFilesystem {
     async fn is_opaque(&self, ctx: Request, inode: Inode) -> Result<bool> {
         let ino: u64 = inode;
 
-        let attr: rfuse3::raw::prelude::ReplyAttr = self.getattr(ctx, ino, None, 0).await?;
+        let attr: asyncfuse::raw::prelude::ReplyAttr = self.getattr(ctx, ino, None, 0).await?;
         if !is_dir(&attr.attr) {
             return Err(Error::from_raw_os_error(libc::ENOTDIR).into());
         }
@@ -447,7 +447,7 @@ async fn oci_create_marker<F: ObjectSafeFilesystem + ?Sized>(
 mod test {
     use std::{ffi::OsStr, path::PathBuf};
 
-    use rfuse3::raw::{Filesystem as _, Request};
+    use asyncfuse::raw::{Filesystem as _, Request};
 
     use crate::{
         passthrough::{PassthroughArgs, PassthroughFs, config::Config, new_passthroughfs_layer},
