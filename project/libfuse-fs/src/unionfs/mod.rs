@@ -685,7 +685,7 @@ impl OverlayInode {
             return Err(Error::from_raw_os_error(libc::ENOTDIR));
         }
 
-        for (_, child) in self.childrens.lock().await.iter() {
+        for child in self.childrens.lock().await.values() {
             if child.whiteout.load(Ordering::Relaxed) {
                 whiteouts += 1;
             } else {
