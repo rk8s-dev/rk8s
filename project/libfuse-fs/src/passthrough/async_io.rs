@@ -1,8 +1,8 @@
 use crate::util::open_options::OpenOptions;
+use asyncfuse::{Errno, Inode, Result, raw::prelude::*};
 use bytes::Bytes;
 use futures::stream;
 use libc::{off_t, pread, size_t};
-use asyncfuse::{Errno, Inode, Result, raw::prelude::*};
 use std::{
     ffi::{CStr, CString, OsStr, OsString},
     fs::File,

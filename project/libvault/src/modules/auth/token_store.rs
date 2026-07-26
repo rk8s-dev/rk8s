@@ -558,7 +558,7 @@ impl TokenStore {
 
         Box::pin(async move {
             let view = self_ref.view.as_ref().ok_or(RvError::ErrModuleNotInit)?;
-            let path = format!("{TOKEN_PARENT_PREFIX}{}", &salted_id);
+            let path = format!("{TOKEN_PARENT_PREFIX}{}", salted_id);
             let children = view.list(&path).await?;
 
             for child in children {

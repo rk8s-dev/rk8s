@@ -8,11 +8,11 @@ use tracing::error;
 
 use std::{fmt::Display, path::PathBuf};
 
+use asyncfuse::{FileType, Timestamp, raw::reply::FileAttr};
 #[cfg(target_os = "macos")]
 use libc::stat as stat64;
 #[cfg(target_os = "linux")]
 use libc::stat64;
-use asyncfuse::{FileType, Timestamp, raw::reply::FileAttr};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Deserialize, Serialize, Clone, Default)]

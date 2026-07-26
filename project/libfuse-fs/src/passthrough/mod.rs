@@ -10,8 +10,8 @@ use inode_store::{InodeId, InodeStore};
 #[cfg(target_os = "linux")]
 use libc::{self, statx_timestamp};
 
-use moka::future::Cache;
 use asyncfuse::{Errno, raw::reply::ReplyEntry};
+use moka::future::Cache;
 use uuid::Uuid;
 
 use crate::passthrough::mmap::{MmapCachedValue, MmapChunkKey};
@@ -1931,11 +1931,11 @@ mod tests {
     };
     use std::ffi::{CStr, OsStr, OsString};
 
-    use nix::unistd::{Gid, Uid, getgid, getuid};
     use asyncfuse::{
         MountOptions,
         raw::{Filesystem, Request, Session},
     };
+    use nix::unistd::{Gid, Uid, getgid, getuid};
 
     macro_rules! pass {
         () => {

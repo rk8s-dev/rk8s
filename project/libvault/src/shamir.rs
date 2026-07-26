@@ -153,11 +153,9 @@ impl ShamirSecret {
                 fxs.push(share[0..share.len()][byte_to_use]);
             }
 
-            match ShamirSecret::full_lagrange(&xs, &fxs) {
-                None => return None,
-                Some(resulting_poly) => {
-                    mysecretdata.push(resulting_poly[0]);
-                }
+            {
+                let resulting_poly = ShamirSecret::full_lagrange(&xs, &fxs)?;
+                mysecretdata.push(resulting_poly[0]);
             }
         }
 

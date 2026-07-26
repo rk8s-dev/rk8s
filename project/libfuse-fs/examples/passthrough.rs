@@ -2,13 +2,13 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 // Simple passthrough filesystem example for integration tests.
 
+use asyncfuse::raw::logfs::LoggingFileSystem;
+use asyncfuse::{MountOptions, raw::Session};
 use clap::Parser;
 use libfuse_fs::passthrough::{PassthroughArgs, new_passthroughfs_layer};
 #[cfg(target_os = "macos")]
 use libfuse_fs::passthrough::{PassthroughFs, config::Config};
 use libfuse_fs::util::bind_mount::{BindMount, BindMountManager};
-use asyncfuse::raw::logfs::LoggingFileSystem;
-use asyncfuse::{MountOptions, raw::Session};
 use std::ffi::OsString;
 #[cfg(target_os = "macos")]
 use std::path::PathBuf;

@@ -130,13 +130,13 @@ impl MountsRouter {
 
         for mount_entry in mounts.values() {
             let entry = mount_entry.read()?;
-            let barrier_path = format!("{}{}/", self.barrier_prefix, &entry.uuid);
+            let barrier_path = format!("{}{}/", self.barrier_prefix, entry.uuid);
 
             let backend_new_func = self.get_backend(&entry.logical_type)?;
             let backend = backend_new_func(core.clone())?;
 
             let view = BarrierView::new(self.barrier.clone(), &barrier_path);
-            let path = format!("{}{}", self.router_prefix, &entry.path);
+            let path = format!("{}{}", self.router_prefix, entry.path);
 
             self.router
                 .mount(backend, &path, mount_entry.clone(), view)?;
@@ -544,7 +544,7 @@ impl Core {
 
             entry.uuid = generate_uuid();
 
-            let prefix = format!("{}{}/", LOGICAL_BARRIER_PREFIX, &entry.uuid);
+            let prefix = format!("{}{}/", LOGICAL_BARRIER_PREFIX, entry.uuid);
             let view = BarrierView::new(self.barrier.clone(), &prefix);
 
             let path = entry.path.clone();

@@ -426,7 +426,7 @@ impl ExpirationManager {
 
         let mut le = le.unwrap();
 
-        log::debug!("revoke lease_id: {}", &le.lease_id);
+        log::debug!("revoke lease_id: {}", le.lease_id);
 
         self.revoke_lease_entry(&le).await?;
         self.delete_lease_entry(lease_id).await?;

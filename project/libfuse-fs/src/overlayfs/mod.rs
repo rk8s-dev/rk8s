@@ -17,12 +17,12 @@ use std::future::Future;
 use std::io::{Error, Result};
 use std::path::Path;
 
-use config::Config;
-use futures::StreamExt as _;
 use asyncfuse::raw::reply::{
     DirectoryEntry, DirectoryEntryPlus, ReplyAttr, ReplyEntry, ReplyOpen, ReplyStatFs,
 };
 use asyncfuse::raw::{Filesystem, Request, Session};
+use config::Config;
+use futures::StreamExt as _;
 use std::sync::{Arc, Weak};
 use tracing::debug;
 use tracing::error;
@@ -37,9 +37,9 @@ use futures::stream::iter;
 use crate::passthrough::{PassthroughArgs, PassthroughFs, new_passthroughfs_layer};
 use crate::util::convert_stat64_to_file_attr;
 use crate::util::whiteout::{WhiteoutFormat, is_user_creatable_name, oci_whiteout_name};
+use asyncfuse::raw::logfs::LoggingFileSystem;
 use inode_store::InodeStore;
 use layer::Layer;
-use asyncfuse::raw::logfs::LoggingFileSystem;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use tokio::sync::{Mutex, RwLock};
