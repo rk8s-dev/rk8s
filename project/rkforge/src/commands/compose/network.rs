@@ -349,7 +349,7 @@ impl NetworkManager {
         }
         let netns_path_clone = netns_path.clone();
         let setup = Setup::new(netns_path);
-        let json_path = create_tmp_netavark_json(opts, container_id)?;
+        let json_path = create_tmp_netavark_json(opts, &container_id)?;
         let config_dir = default_netavark_config_dir();
         fs::create_dir_all(PathBuf::from(&config_dir))?;
         setup
