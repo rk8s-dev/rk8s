@@ -4969,7 +4969,7 @@ dependencies = [
 
 [[package]]
 name = "libfuse-fs"
-version = "0.1.15"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "async-trait",
