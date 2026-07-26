@@ -88,7 +88,7 @@ pub async fn serve(
     // We are ready now, this is far from perfect we should at least wait for the first bind
     // to work but this is not really possible with the current code flow and needs more changes.
     daemonize()?;
-    let msg: [u8; 1] = [b'1'];
+    let msg: [u8; 1] = *b"1";
     unistd::write(&ready, &msg)?;
     drop(ready);
 
@@ -307,7 +307,7 @@ async fn read_config_and_spawn(
 
         let path = Path::new(config_path).join(AARDVARK_PID_FILE);
         if let Err(err) = fs::remove_file(path) {
-            error!("failed to remove the pid file: {}", &err);
+            error!("failed to remove the pid file: {}", err);
             process::exit(1);
         }
 

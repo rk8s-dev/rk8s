@@ -119,18 +119,16 @@ impl DNSBackend {
     pub fn get_network_scoped_resolvers(&self, requester: &IpAddr) -> Option<Vec<IpAddr>> {
         let mut results: Vec<IpAddr> = Vec::new();
 
-        match self.ip_mappings.get(requester) {
-            Some(nets) => {
-                for net in nets {
-                    match self.network_dns_server.get(net) {
-                        Some(resolvers) => results.extend_from_slice(resolvers),
-                        None => {
-                            continue;
-                        }
-                    };
-                }
+        {
+            let nets = self.ip_mappings.get(requester)?;
+            for net in nets {
+                match self.network_dns_server.get(net) {
+                    Some(resolvers) => results.extend_from_slice(resolvers),
+                    None => {
+                        continue;
+                    }
+                };
             }
-            None => return None,
         };
 
         Some(results)

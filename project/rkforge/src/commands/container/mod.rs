@@ -634,7 +634,7 @@ pub fn remove_container(root_path: &Path, state: &State) -> Result<()> {
     };
     let pid = state
         .pid
-        .ok_or(anyhow!("failed to get pid of container {}", &state.id))?;
+        .ok_or(anyhow!("failed to get pid of container {}", state.id))?;
     // delete the network
     remove_container_network(Pid::from_raw(pid), &state.id)?;
     delete(delete_args, root_path.to_path_buf())?;

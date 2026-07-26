@@ -169,7 +169,7 @@ impl CoreDns {
         trace!("requested record type: {record_type:?}");
         debug!(
             "checking if backend has entry for: {:?}",
-            &request_name_string
+            request_name_string
         );
         trace!("server backend.name_mappings: {:?}", backend.name_mappings);
         trace!("server backend.ip_mappings: {:?}", backend.ip_mappings);
@@ -216,7 +216,7 @@ impl CoreDns {
         } else {
             debug!(
                 "Forwarding dns request for {} type: {}",
-                &request_name_string, record_type
+                request_name_string, record_type
             );
             let mut nameservers = Vec::new();
             // Add resolvers configured for container
@@ -416,26 +416,23 @@ fn reply_ptr(
         Some(n) => ptr_lookup_ip = n.split('.').rev().collect::<Vec<&str>>().join("."),
         None => {
             // not ipv4
-            match name.strip_suffix(".ip6.arpa.") {
-                Some(n) => {
-                    // ipv6 string is 39 chars max
-                    let mut tmp_ip = String::with_capacity(40);
-                    for (i, c) in n.split('.').rev().enumerate() {
-                        tmp_ip.push_str(c);
-                        // insert colon after 4 hex chars but not at the end
-                        if i % 4 == 3 && i < 31 {
-                            tmp_ip.push(':');
-                        }
+            {
+                let n = name.strip_suffix(".ip6.arpa.")?;
+                // ipv6 string is 39 chars max
+                let mut tmp_ip = String::with_capacity(40);
+                for (i, c) in n.split('.').rev().enumerate() {
+                    tmp_ip.push_str(c);
+                    // insert colon after 4 hex chars but not at the end
+                    if i % 4 == 3 && i < 31 {
+                        tmp_ip.push(':');
                     }
-                    ptr_lookup_ip = tmp_ip;
                 }
-                // neither ipv4 or ipv6, something we do not understand
-                None => return None,
+                ptr_lookup_ip = tmp_ip;
             }
         }
     }
 
-    trace!("Performing reverse lookup for ip: {}", &ptr_lookup_ip);
+    trace!("Performing reverse lookup for ip: {}", ptr_lookup_ip);
 
     // We should probably log malformed queries, but for now if-let should be fine.
     if let Ok(lookup_ip) = ptr_lookup_ip.parse() {
