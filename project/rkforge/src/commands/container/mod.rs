@@ -625,7 +625,7 @@ pub fn delete_container(id: &str) -> Result<()> {
 
 pub fn remove_container(root_path: &Path, state: &State) -> Result<()> {
     // Get bundle_path before delete
-    let container = load_container(root_path, &state.id)?;
+    let container = load_container(root_path, state.id)?;
     let bundle_path = container.bundle().to_path_buf();
 
     let delete_args = Delete {
@@ -636,7 +636,7 @@ pub fn remove_container(root_path: &Path, state: &State) -> Result<()> {
         .pid
         .ok_or(anyhow!("failed to get pid of container {}", &state.id))?;
     // delete the network
-    remove_container_network(Pid::from_raw(pid), &state.id)?;
+    remove_container_network(Pid::from_raw(pid), state.id)?;
     delete(delete_args, root_path.to_path_buf())?;
 
     // Stop overlay rootfs mount

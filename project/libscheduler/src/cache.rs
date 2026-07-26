@@ -65,11 +65,8 @@ impl Cache {
     pub fn unassume(&mut self, pod_name: &str) -> Option<PodInfo> {
         let pod_info = self.pods.get_mut(pod_name)?;
         let node_name_opt = pod_info.scheduled.clone();
-        let node = if let Some(node_name) = node_name_opt {
-            self.nodes.get_mut(&node_name)?
-        } else {
-            return None;
-        };
+        let node_name = node_name_opt?;
+        let node = self.nodes.get_mut(&node_name)?;
 
         pod_info.scheduled = None;
         node.requested.cpu -= pod_info.spec.resources.cpu;

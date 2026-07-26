@@ -349,7 +349,7 @@ impl NetworkManager {
         }
         let netns_path_clone = netns_path.clone();
         let setup = Setup::new(netns_path);
-        let json_path = create_tmp_netavark_json(opts, &container_id)?;
+        let json_path = create_tmp_netavark_json(opts, container_id)?;
         let config_dir = default_netavark_config_dir();
         fs::create_dir_all(PathBuf::from(&config_dir))?;
         setup
@@ -364,7 +364,7 @@ impl NetworkManager {
             .map_err(|e| anyhow!("[compose {}] netavark setup failed: {e}", &container_id))?;
 
         // Create bind mount backup of network namespace
-        let bind_mount_name = format!("rkforge-{}", &container_id);
+        let bind_mount_name = format!("rkforge-{}", container_id);
         match bind_mount_netns(&netns_path_clone, &bind_mount_name) {
             Ok(bind_path) => {
                 debug!(
