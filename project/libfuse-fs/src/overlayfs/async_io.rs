@@ -5,8 +5,8 @@ use crate::overlayfs::HandleData;
 use crate::overlayfs::RealHandle;
 use crate::overlayfs::{AtomicU64, CachePolicy};
 use crate::util::open_options::OpenOptions;
-use rfuse3::raw::prelude::*;
-use rfuse3::*;
+use asyncfuse::raw::prelude::*;
+use asyncfuse::*;
 use std::ffi::OsStr;
 use std::io::Error;
 use std::io::ErrorKind;
@@ -1185,7 +1185,7 @@ impl Filesystem for OverlayFs {
 mod tests {
     use std::{ffi::OsString, path::PathBuf, sync::Arc};
 
-    use rfuse3::{MountOptions, raw::Session};
+    use asyncfuse::{MountOptions, raw::Session};
     use tokio::signal;
     use tracing_subscriber::EnvFilter;
 
@@ -1193,7 +1193,7 @@ mod tests {
         overlayfs::{OverlayFs, config::Config},
         passthrough::{PassthroughArgs, new_passthroughfs_layer},
     };
-    use rfuse3::raw::logfs::LoggingFileSystem;
+    use asyncfuse::raw::logfs::LoggingFileSystem;
 
     #[tokio::test]
     #[ignore]
@@ -1251,7 +1251,7 @@ mod tests {
         mount_options.force_readdir_plus(true);
         mount_options.uid(uid).gid(gid);
 
-        let mut mount_handle: rfuse3::raw::MountHandle = if !not_unprivileged {
+        let mut mount_handle: asyncfuse::raw::MountHandle = if !not_unprivileged {
             Session::new(mount_options)
                 .mount_with_unprivileged(logfs, mount_path)
                 .await

@@ -1,5 +1,5 @@
-use rfuse3::raw::{Filesystem, MountHandle};
-use rfuse3::{MountOptions, raw::Session};
+use asyncfuse::raw::{Filesystem, MountHandle};
+use asyncfuse::{MountOptions, raw::Session};
 use std::ffi::{OsStr, OsString};
 
 #[allow(unused)]

@@ -25,7 +25,7 @@ rust_library(
     },
     visibility = ["PUBLIC"],
     deps = [
-        "//project/rfuse3:rfuse3",
+        "//third-party/rust/crates/asyncfuse/0.1.12:asyncfuse",
         "//third-party/rust/crates/async-trait/0.1.89:async-trait",
         "//third-party/rust/crates/bitflags/2.11.0:bitflags",
         "//third-party/rust/crates/bytes/1.11.1:bytes",

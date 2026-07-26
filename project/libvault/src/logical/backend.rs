@@ -43,11 +43,11 @@ impl Backend for LogicalBackend {
         for path in &self.paths {
             let mut pattern = path.pattern.clone();
             if !path.pattern.starts_with('^') {
-                pattern = format!("^{}", &pattern);
+                pattern = format!("^{}", pattern);
             }
 
             if !path.pattern.ends_with('$') {
-                pattern = format!("{}$", &pattern);
+                pattern = format!("{}$", pattern);
             }
 
             let re = Regex::new(&pattern)?;

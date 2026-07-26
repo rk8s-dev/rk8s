@@ -1,8 +1,8 @@
 use crate::util::open_options::OpenOptions;
+use asyncfuse::{Errno, Inode, Result, raw::prelude::*};
 use bytes::Bytes;
 use futures::stream;
 use libc::{off_t, pread, size_t};
-use rfuse3::{Errno, Inode, Result, raw::prelude::*};
 use std::{
     ffi::{CStr, CString, OsStr, OsString},
     fs::File,
@@ -1095,7 +1095,7 @@ impl Filesystem for PassthroughFs {
                     // Check user, group, and other permissions
                     // NOTE: This currently only checks the primary gid. A complete POSIX-compliant
                     // implementation should check all supplementary groups from req.groups if available.
-                    // However, rfuse3::Request currently doesn't expose supplementary group information.
+                    // However, asyncfuse::Request currently doesn't expose supplementary group information.
                     let has_user_write = st.st_uid == uid && st.st_mode & 0o200 != 0;
                     let has_group_write = st.st_gid == gid && st.st_mode & 0o020 != 0;
                     let has_other_write = st.st_mode & 0o002 != 0;
@@ -1328,7 +1328,7 @@ impl Filesystem for PassthroughFs {
     /// Filesystem may also implement stateless file I/O and not store anything in fh. There are
     /// also some flags (`direct_io`, `keep_cache`) which the filesystem may set, to change the way
     /// the file is opened. A filesystem need not implement this method if it
-    /// sets [`MountOptions::no_open_support`][rfuse3::MountOptions::no_open_support] and if the
+    /// sets [`MountOptions::no_open_support`][asyncfuse::MountOptions::no_open_support] and if the
     /// kernel supports `FUSE_NO_OPEN_SUPPORT`.
     ///
     /// # Notes:
@@ -1453,7 +1453,7 @@ impl Filesystem for PassthroughFs {
     /// return value of the write system call will reflect the return value of this operation. `fh`
     /// will contain the value set by the open method, or will be undefined if the open method
     /// didn't set any value. When `write_flags` contains
-    /// [`FUSE_WRITE_CACHE`][rfuse3::raw::flags::FUSE_WRITE_CACHE], means the write operation is a
+    /// [`FUSE_WRITE_CACHE`][asyncfuse::raw::flags::FUSE_WRITE_CACHE], means the write operation is a
     /// delay write.
     #[allow(clippy::too_many_arguments)]
     async fn write(
@@ -1868,7 +1868,7 @@ impl Filesystem for PassthroughFs {
     /// ([`readdir`][Filesystem::readdir], [`releasedir`][Filesystem::releasedir],
     /// [`fsyncdir`][Filesystem::fsyncdir]). Filesystem may also implement stateless directory
     /// I/O and not store anything in `fh`.  A file system need not implement this method if it
-    /// sets [`MountOptions::no_open_dir_support`][rfuse3::MountOptions::no_open_dir_support] and
+    /// sets [`MountOptions::no_open_dir_support`][asyncfuse::MountOptions::no_open_dir_support] and
     /// if the kernel supports `FUSE_NO_OPENDIR_SUPPORT`.
     async fn opendir(&self, _req: Request, inode: Inode, flags: u32) -> Result<ReplyOpen> {
         if self.no_opendir.load(Ordering::Relaxed) {
@@ -2769,12 +2769,12 @@ impl Filesystem for PassthroughFs {
         &self,
         _req: Request,
         inode: Inode,
-    ) -> Result<rfuse3::raw::reply::ReplyXTimes> {
+    ) -> Result<asyncfuse::raw::reply::ReplyXTimes> {
         let data = self.inode_map.get(inode).await?;
         let st = data.handle.stat()?;
         // libc::stat on macOS exposes st_birthtimespec.
-        let crtime = rfuse3::Timestamp::new(st.st_birthtime as i64, st.st_birthtime_nsec as u32);
-        Ok(rfuse3::raw::reply::ReplyXTimes {
+        let crtime = asyncfuse::Timestamp::new(st.st_birthtime as i64, st.st_birthtime_nsec as u32);
+        Ok(asyncfuse::raw::reply::ReplyXTimes {
             bkuptime: crtime,
             crtime,
         })

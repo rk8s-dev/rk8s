@@ -8,11 +8,11 @@ use tracing::error;
 
 use std::{fmt::Display, path::PathBuf};
 
+use asyncfuse::{FileType, Timestamp, raw::reply::FileAttr};
 #[cfg(target_os = "macos")]
 use libc::stat as stat64;
 #[cfg(target_os = "linux")]
 use libc::stat64;
-use rfuse3::{FileType, Timestamp, raw::reply::FileAttr};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Deserialize, Serialize, Clone, Default)]
@@ -107,7 +107,7 @@ pub fn filetype_from_mode(st_mode: u32) -> FileType {
         return FileType::Socket;
     }
     // Handle whiteout files on macOS (0xE000 / 57344)
-    // rfuse3 doesn't seem to have a specific Whiteout variant exposed or we don't have it imported.
+    // asyncfuse doesn't seem to have a specific Whiteout variant exposed or we don't have it imported.
     // Treating as regular file or simply not panicking.
     // Ideally we should filter these out if they are not real files, or map to closest.
     #[cfg(target_os = "macos")]

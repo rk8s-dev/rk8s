@@ -432,7 +432,7 @@ impl ComposeManager {
                 } else {
                     format!(
                         "{}_{}",
-                        &compose_spec
+                        compose_spec
                             .name
                             .clone()
                             .unwrap_or(String::from("compose_default")),

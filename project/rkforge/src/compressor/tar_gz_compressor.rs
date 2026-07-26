@@ -308,7 +308,7 @@ impl LayerCompressor for TarGzCompressor {
 
         let gz_path = compression_config
             .output_dir
-            .join(format!("{}.tar.gz", &random_string));
+            .join(format!("{}.tar.gz", random_string));
 
         let (tar_sha256sum, tar_size, gz_sha256sum, gz_size) =
             self.create_tar_and_compress(source_dir, &gz_path)?;

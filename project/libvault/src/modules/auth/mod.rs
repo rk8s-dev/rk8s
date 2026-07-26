@@ -106,12 +106,12 @@ impl AuthModule {
                 return Err(RvError::ErrMountPathProtected);
             }
 
-            for (_, mount_entry) in auth_table.iter() {
+            for mount_entry in auth_table.values() {
                 let ent = mount_entry.read()?;
                 if ent.path.starts_with(&entry.path) || entry.path.starts_with(&ent.path) {
                     return Err(rv_error_response_status!(
                         409,
-                        &format!("path is already in use at {}", &entry.path)
+                        &format!("path is already in use at {}", entry.path)
                     ));
                 }
             }
@@ -129,10 +129,10 @@ impl AuthModule {
 
             entry.uuid = generate_uuid();
 
-            let prefix = format!("{}{}/", AUTH_BARRIER_PREFIX, &entry.uuid);
+            let prefix = format!("{}{}/", AUTH_BARRIER_PREFIX, entry.uuid);
             let view = BarrierView::new(self.barrier.clone(), &prefix);
 
-            let path = format!("{}{}", AUTH_ROUTER_PREFIX, &entry.path);
+            let path = format!("{}{}", AUTH_ROUTER_PREFIX, entry.path);
             let key = entry.path.clone();
 
             let mount_entry = Arc::new(RwLock::new(entry));
@@ -161,7 +161,7 @@ impl AuthModule {
             return Err(RvError::ErrMountPathProtected);
         }
 
-        let full_path = format!("{}{}", AUTH_ROUTER_PREFIX, &path);
+        let full_path = format!("{}{}", AUTH_ROUTER_PREFIX, path);
         let view = mounts_router.router.matching_view(&full_path)?;
 
         self.taint_auth_entry(&path).await?;

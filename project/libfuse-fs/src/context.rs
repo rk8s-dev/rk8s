@@ -1,7 +1,7 @@
 /// Operation context for filesystem operations.
 /// This provides a way to pass additional parameters beyond the FUSE Request,
 /// allowing internal operations to override UID/GID or other parameters.
-use rfuse3::raw::Request;
+use asyncfuse::raw::Request;
 
 #[derive(Debug, Clone, Copy)]
 pub struct OperationContext {

@@ -361,10 +361,10 @@ impl NetworkManager {
                 None,
                 false,
             )
-            .map_err(|e| anyhow!("[compose {}] netavark setup failed: {e}", &container_id))?;
+            .map_err(|e| anyhow!("[compose {}] netavark setup failed: {e}", container_id))?;
 
         // Create bind mount backup of network namespace
-        let bind_mount_name = format!("rkforge-{}", &container_id);
+        let bind_mount_name = format!("rkforge-{}", container_id);
         match bind_mount_netns(&netns_path_clone, &bind_mount_name) {
             Ok(bind_path) => {
                 debug!(
