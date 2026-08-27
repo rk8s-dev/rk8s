@@ -381,6 +381,7 @@ async fn test_deployment_hash_collision() -> Result<()> {
                     name: "".to_string(),
                     namespace: "default".to_string(),
                     uid: uuid::Uuid::new_v4(),
+                    resource_version: None,
                     labels: {
                         let mut labels = std::collections::HashMap::new();
                         labels.insert("app".to_string(), "blocker".to_string());
@@ -677,6 +678,7 @@ fn create_test_deployment(name: &str, replicas: i32) -> Deployment {
                     name: "".to_string(),
                     namespace: "default".to_string(),
                     uid: uuid::Uuid::new_v4(),
+                    resource_version: None,
                     labels: {
                         let mut labels = std::collections::HashMap::new();
                         labels.insert("app".to_string(), name.to_string());

@@ -21,9 +21,13 @@ ipnetwork = { workspace = true }
 anyhow = { workspace = true }
 bincode = { workspace = true }
 async-trait = { workspace = true }
+base64 = { workspace = true }
 bytes = { workspace = true }
 log = { workspace = true }
 libvault = { workspace = true, features = ["storage_xline"]}
 uuid = { workspace = true, features = ["v4", "serde"] }
 etcd-client = { workspace = true }
 libcontainer = { workspace = true }
+
+[dev-dependencies]
+serde_yaml = { workspace = true }
