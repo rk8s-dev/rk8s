@@ -223,7 +223,7 @@ impl SliceDesc {
             return None;
         }
         let mut out = Vec::with_capacity(data.len() / 20);
-        for chunk in data.chunks_exact(20) {
+        for chunk in data.as_chunks::<20>().0 {
             let slice_id = u64::from_le_bytes(chunk[0..8].try_into().unwrap());
             let offset = u64::from_le_bytes(chunk[8..16].try_into().unwrap());
             let size = u32::from_le_bytes(chunk[16..20].try_into().unwrap());
@@ -343,6 +343,32 @@ mod tests {
             chunk_id: 1,
             offset,
             length,
+        }
+    }
+
+    #[test]
+    fn test_delayed_data_decode_boundaries() {
+        assert_eq!(SliceDesc::decode_delayed_data(&[]), Some(vec![]));
+
+        let slices = [
+            make_slice(1, 0, 0),
+            make_slice(u64::MAX, u64::MAX, u32::MAX as u64),
+        ];
+        let encoded = SliceDesc::encode_delayed_data(&slices, &[1, u64::MAX]);
+        assert_eq!(
+            SliceDesc::decode_delayed_data(&encoded),
+            Some(vec![(1, 0, 0), (u64::MAX, u64::MAX, u32::MAX)])
+        );
+
+        for partial_len in 1..20 {
+            assert_eq!(
+                SliceDesc::decode_delayed_data(&encoded[..partial_len]),
+                None
+            );
+            assert_eq!(
+                SliceDesc::decode_delayed_data(&encoded[..20 + partial_len]),
+                None
+            );
         }
     }
 

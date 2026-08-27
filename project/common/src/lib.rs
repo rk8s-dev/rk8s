@@ -15,8 +15,11 @@ pub mod _private {
     pub use log::error;
 }
 
+pub mod configmap;
 pub mod lease;
 pub mod quic;
+
+pub use configmap::{ConfigMap, ConfigMapList, ConfigMapValidationError, ListMeta};
 
 use libcontainer::oci_spec::runtime::Capability;
 pub use libvault::modules::pki::types::{IssueCertificateRequest, IssueCertificateResponse};
@@ -38,6 +41,9 @@ pub struct ObjectMeta {
     pub namespace: String,
     #[serde(default = "Uuid::new_v4")]
     pub uid: Uuid,
+    /// Opaque storage version. Omitted from JSON/YAML when absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resource_version: Option<String>,
     #[serde(default)]
     pub labels: HashMap<String, String>,
     #[serde(default)]
@@ -60,6 +66,7 @@ impl Default for ObjectMeta {
             name: String::new(),
             namespace: default_namespace(),
             uid: Uuid::new_v4(),
+            resource_version: None,
             labels: HashMap::new(),
             annotations: HashMap::new(),
             owner_references: None,
@@ -2196,6 +2203,35 @@ pub struct Job {
 #[cfg(test)]
 mod pod_spec_tests {
     use super::*;
+
+    #[test]
+    fn object_metadata_version_is_optional_and_opaque() {
+        let legacy = serde_json::json!({
+            "name": "app",
+            "namespace": "default",
+            "uid": "00000000-0000-0000-0000-000000000001",
+            "labels": {},
+            "annotations": {},
+            "ownerReferences": null,
+            "creationTimestamp": null,
+            "deletionTimestamp": null,
+            "finalizers": null,
+            "generation": null
+        });
+        let mut meta: ObjectMeta = serde_json::from_value(legacy.clone()).unwrap();
+        assert_eq!(meta.resource_version, None);
+        assert_eq!(serde_json::to_value(&meta).unwrap(), legacy);
+        assert_eq!(ObjectMeta::default().resource_version, None);
+
+        meta.resource_version = Some("opaque-version".into());
+        let serialized = serde_json::to_value(&meta).unwrap();
+        assert_eq!(serialized["resourceVersion"], "opaque-version");
+        assert!(serialized.get("resource_version").is_none());
+        assert_eq!(
+            serde_json::from_value::<ObjectMeta>(serialized).unwrap(),
+            meta
+        );
+    }
 
     #[test]
     fn pod_spec_omits_gang_when_absent() {
