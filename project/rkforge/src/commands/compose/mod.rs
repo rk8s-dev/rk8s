@@ -653,11 +653,18 @@ volumes:
     }
 
     fn get_test_multiple_service() -> String {
-        r#"
+        let bundle = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../test/bundles/busybox")
+            .canonicalize()
+            .expect("the checked-in BusyBox bundle must exist");
+        // A JSON string is also a quoted YAML scalar, including paths with spaces.
+        let bundle = serde_json::to_string(&bundle).unwrap();
+        format!(
+            r#"
 services:
   backend:
     container_name: back
-    image: ./test/bundles/busybox
+    image: {bundle}
     command: ["sleep", "300"]
     ports:
       - "8080:8080"
@@ -667,7 +674,7 @@ services:
       - /tmp/mount/dir:/mnt
   frontend:
     container_name: front
-    image: ./test/bundles/busybox
+    image: {bundle}
     command: ["sleep", "300"]
     ports:
       - "80:80"
@@ -675,7 +682,18 @@ networks:
   libra-net:
     driver: bridge
 "#
-        .to_string()
+        )
+    }
+
+    #[test]
+    fn test_multiple_service_bundle_paths() {
+        let spec: ComposeSpec = serde_yaml::from_str(&get_test_multiple_service()).unwrap();
+        for service in spec.services.values() {
+            let bundle = Path::new(&service.image);
+            assert!(bundle.is_absolute());
+            assert!(bundle.join("config.json").is_file());
+            assert!(bundle.join("rootfs").is_dir());
+        }
     }
 
     #[test]

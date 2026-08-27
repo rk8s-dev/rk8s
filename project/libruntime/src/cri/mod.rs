@@ -13,6 +13,9 @@ use tabwriter::TabWriter;
 use tracing::info;
 
 pub mod config;
+// Generated tonic clients return tonic::Status as part of their public API.
+// Keep the generated signatures intact without relaxing checks on runtime code.
+#[allow(clippy::result_large_err)]
 pub mod cri_api;
 
 fn construct_container_root<P: AsRef<Path>>(root_path: P, container_id: &str) -> Result<PathBuf> {
