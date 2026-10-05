@@ -223,7 +223,7 @@ impl SliceDesc {
             return None;
         }
         let mut out = Vec::with_capacity(data.len() / 20);
-        for chunk in data.chunks_exact(20) {
+        for chunk in data.as_chunks::<20>().0 {
             let slice_id = u64::from_le_bytes(chunk[0..8].try_into().unwrap());
             let offset = u64::from_le_bytes(chunk[8..16].try_into().unwrap());
             let size = u32::from_le_bytes(chunk[16..20].try_into().unwrap());
