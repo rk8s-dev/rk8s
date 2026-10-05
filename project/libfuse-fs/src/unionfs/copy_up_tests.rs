@@ -838,6 +838,47 @@ async fn enospc_does_not_hide_a_second_release_error_or_drop_its_live_owner() {
 }
 
 #[tokio::test]
+async fn filesystem_open_preserves_primary_errno_and_reports_actual_cleanup_failure() {
+    for (fault, expected_live, expected_state) in [
+        (
+            Fault::ReleaseBeforeClose,
+            1,
+            super::copy_up::CopyUpHandleState::Open,
+        ),
+        (
+            Fault::ReleaseAfterClose,
+            0,
+            super::copy_up::CopyUpHandleState::Closed,
+        ),
+    ] {
+        let f = fixture(fault, Fault::NoSpace).await;
+        f.overlay.insert_inode(f.node.inode, f.node.clone()).await;
+        let error = Filesystem::open(
+            f.overlay.as_ref(),
+            request(),
+            f.node.inode,
+            libc::O_WRONLY as u32,
+        )
+        .await
+        .err()
+        .expect("actual writable OPEN must surface ENOSPC");
+        assert_eq!(i32::from(error), -libc::ENOSPC);
+        let reports = f.overlay.take_copy_up_cleanup_failures().await;
+        assert_eq!(reports.len(), 1);
+        assert_eq!(reports[0].0, f.node.inode);
+        assert_eq!(reports[0].1.primary_errno, Some(libc::ENOSPC));
+        assert_eq!(reports[0].1.cleanup_errno, Some(libc::EIO));
+        assert_eq!(reports[0].1.ownership, expected_state);
+        assert_eq!(f.lower.active.load(Ordering::SeqCst), expected_live);
+        assert_eq!(f.overlay.copyups.lock().await.len(), expected_live as usize);
+        assert!(f.overlay.take_copy_up_cleanup_failures().await.is_empty());
+        f.assert_no_final();
+        f.overlay.recover_cancelled_copyups().await.unwrap();
+        f.assert_source_and_handles();
+    }
+}
+
+#[tokio::test]
 async fn unknown_release_ownership_is_retained_until_a_real_witness_appears() {
     for (fault, expected_live, expected_releases) in [
         (Fault::ReleaseUnknownBeforeClose, 1, 2),

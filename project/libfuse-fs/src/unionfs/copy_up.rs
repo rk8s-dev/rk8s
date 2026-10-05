@@ -52,6 +52,24 @@ impl std::fmt::Display for CopyUpCleanupFailure {
 
 impl std::error::Error for CopyUpCleanupFailure {}
 
+pub(super) fn kernel_error(error: Error) -> Error {
+    let Some(failure) = error
+        .get_ref()
+        .and_then(|error| error.downcast_ref::<CopyUpCleanupFailure>())
+    else {
+        return error;
+    };
+    // asyncfuse maps custom io::Error payloads without a raw errno to EIO.
+    // The kernel receives the primary errno; the typed secondary cleanup
+    // failure remains in the task and the bounded diagnostic reports.
+    Error::from_raw_os_error(
+        failure
+            .primary_errno
+            .or(failure.cleanup_errno)
+            .unwrap_or(libc::EIO),
+    )
+}
+
 #[derive(Clone)]
 struct SourceHandle {
     layer: Arc<BoxedLayer>,

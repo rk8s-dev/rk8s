@@ -14,7 +14,7 @@ mod utils;
 
 //mod tempfile;
 use core::panic;
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::ffi::{OsStr, OsString};
 use std::future::Future;
 use std::io::{Error, Result};
@@ -114,6 +114,7 @@ pub struct OverlayFs {
     perfile_dax: AtomicBool,
     root_inodes: u64,
     copyups: Mutex<HashMap<u64, Arc<copy_up::CopyUpTask>>>,
+    copyup_failures: Mutex<VecDeque<(Inode, copy_up::CopyUpCleanupFailure)>>,
 }
 
 // This is a wrapper of one inode in specific layer, It can't impl Clone trait.
@@ -1083,6 +1084,7 @@ impl OverlayFs {
             perfile_dax: AtomicBool::new(false),
             root_inodes: root_inode,
             copyups: Mutex::new(HashMap::new()),
+            copyup_failures: Mutex::new(VecDeque::new()),
         })
     }
 
@@ -2612,6 +2614,9 @@ impl OverlayFs {
             }
         };
         let result = task.wait_for_caller().await;
+        if let Err(error) = &result {
+            self.record_copy_up_cleanup_failure(node.inode, error).await;
+        }
         let mut copyups = self.copyups.lock().await;
         if task.complete()
             && copyups
@@ -2621,6 +2626,30 @@ impl OverlayFs {
             copyups.remove(&node.inode);
         }
         result
+    }
+
+    async fn record_copy_up_cleanup_failure(&self, inode: Inode, error: &Error) {
+        if let Some(failure) = error
+            .get_ref()
+            .and_then(|error| error.downcast_ref::<copy_up::CopyUpCleanupFailure>())
+        {
+            let mut reports = self.copyup_failures.lock().await;
+            if reports.len() == copy_up::MAX_PENDING_COPYUPS {
+                reports.pop_front();
+            }
+            reports.push_back((inode, failure.clone()));
+        }
+    }
+
+    /// Take the most recent source cleanup reports, including closed owners.
+    ///
+    /// The bounded diagnostic queue retains at most 64 reports. Consuming a
+    /// report never releases or discards a pending source owner. Kernel-facing
+    /// requests keep their primary errno while this API exposes both errors.
+    pub async fn take_copy_up_cleanup_failures(
+        &self,
+    ) -> Vec<(Inode, copy_up::CopyUpCleanupFailure)> {
+        self.copyup_failures.lock().await.drain(..).collect()
     }
 
     /// Finish real cleanup for cancelled copy-ups, without detached tasks.
@@ -2642,6 +2671,9 @@ impl OverlayFs {
         let outcomes = join_all(pending.iter().map(|(_, task)| task.recover())).await;
         let mut failure = None;
         for ((inode, task), result) in pending.into_iter().zip(outcomes) {
+            if let Err(error) = &result {
+                self.record_copy_up_cleanup_failure(inode, error).await;
+            }
             let mut copyups = self.copyups.lock().await;
             if task.complete()
                 && copyups
@@ -2709,7 +2741,9 @@ impl OverlayFs {
             }
             FileType::RegularFile => {
                 // For regular file.
-                self.copy_regfile_up(ctx, node).await
+                self.copy_regfile_up(ctx, node)
+                    .await
+                    .map_err(copy_up::kernel_error)
             }
             _ => {
                 // For other file types. return error.
