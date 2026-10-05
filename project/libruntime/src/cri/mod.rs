@@ -13,6 +13,9 @@ use tabwriter::TabWriter;
 use tracing::info;
 
 pub mod config;
+// Prost/tonic-generated RPC signatures require tonic::Status as their error
+// type; boxing it here would change the generated transport API contract.
+#[allow(clippy::result_large_err)]
 pub mod cri_api;
 
 fn construct_container_root<P: AsRef<Path>>(root_path: P, container_id: &str) -> Result<PathBuf> {

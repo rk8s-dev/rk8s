@@ -5,13 +5,16 @@
 #![allow(missing_docs)]
 mod async_io;
 pub mod config;
+pub mod copy_up;
+#[cfg(all(test, target_os = "linux"))]
+mod copy_up_tests;
 mod inode_store;
 pub mod layer;
 mod utils;
 
 //mod tempfile;
 use core::panic;
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::ffi::{OsStr, OsString};
 use std::future::Future;
 use std::io::{Error, Result};
@@ -24,10 +27,7 @@ use asyncfuse::raw::{Request, Session};
 use config::Config;
 use futures::StreamExt as _;
 use std::sync::{Arc, Weak};
-use tracing::debug;
-use tracing::error;
-use tracing::info;
-use tracing::trace;
+use tracing::{debug, error, info, trace, warn};
 
 use asyncfuse::{Errno, FileType, MountOptions, mode_from_kind_and_perm};
 const SLASH_ASCII: char = '/';
@@ -113,6 +113,8 @@ pub struct OverlayFs {
     killpriv_v2: AtomicBool,
     perfile_dax: AtomicBool,
     root_inodes: u64,
+    copyups: Mutex<HashMap<u64, Arc<copy_up::CopyUpTask>>>,
+    copyup_failures: Mutex<VecDeque<(Inode, copy_up::CopyUpCleanupFailure)>>,
 }
 
 // This is a wrapper of one inode in specific layer, It can't impl Clone trait.
@@ -130,6 +132,10 @@ struct HandleData {
     // Cache the directory entries for stable readdir offsets.
     // The snapshot contains all necessary info to avoid re-accessing childrens map.
     dir_snapshot: Mutex<Option<Vec<DirectoryEntryPlus>>>,
+    /// True for handles reconstructed outside a kernel OPEN (no_open-style
+    /// requests that carry fh=0). Such handles own a layer fd the kernel will
+    /// never RELEASE, so the I/O sites must release them when done.
+    ephemeral: bool,
 }
 
 // RealInode is a wrapper of one inode in specific layer.
@@ -1077,6 +1083,8 @@ impl OverlayFs {
             killpriv_v2: AtomicBool::new(false),
             perfile_dax: AtomicBool::new(false),
             root_inodes: root_inode,
+            copyups: Mutex::new(HashMap::new()),
+            copyup_failures: Mutex::new(VecDeque::new()),
         })
     }
 
@@ -1490,10 +1498,18 @@ impl OverlayFs {
                             // The kernel can issue LOOKUP/GETATTR/OPEN using a parent inode after
                             // userspace has evicted the in-memory node on FORGET. Rebuild the
                             // parent from its reserved path, then continue resolving `name` below.
-                            self.materialize_node_by_path(ctx, &path).await?
+                            match self.materialize_node_by_path(ctx, &path).await {
+                                Ok(node) => node,
+                                Err(e) => {
+                                    warn!(
+                                        "lookup_node: re-materialize of forgotten parent {parent} at {path:?} failed: {e}"
+                                    );
+                                    return Err(e);
+                                }
+                            }
                         } else {
-                            trace!(
-                                "overlayfs:mod.rs:1034:lookup_node: parent inode {parent} not found"
+                            warn!(
+                                "lookup_node: parent inode {parent} not found and no path mapping to re-materialize"
                             );
                             // Parent inode is not found, return ENOENT.
                             return Err(Error::from_raw_os_error(libc::ENOENT));
@@ -1539,7 +1555,10 @@ impl OverlayFs {
                 {
                     return Ok(v);
                 }
-                trace!("lookup_node: child {name} not found");
+                warn!(
+                    "lookup_node: child {name} not found under parent {parent} (path {:?})",
+                    pnode.path.read().await
+                );
                 Err(Error::from_raw_os_error(libc::ENOENT))
             }
         }
@@ -1791,6 +1810,7 @@ impl OverlayFs {
                     node,
                     real_handle: None,
                     dir_snapshot: Mutex::new(None),
+                    ephemeral: false,
                 })
             }
         };
@@ -2198,6 +2218,7 @@ impl OverlayFs {
                             handle: AtomicU64::new(hd),
                         }),
                         dir_snapshot: Mutex::new(None),
+                        ephemeral: false,
                     };
                     self.handles
                         .lock()
@@ -2563,95 +2584,11 @@ impl OverlayFs {
         Ok(node)
     }
 
-    /// macOS-only twin of `overlayfs::OverlayFs::try_macos_apfs_clone_up`.
-    /// See that method for the full reasoning; this duplicates it because
-    /// the unionfs layer trait carries `async_trait` bounds and a different
-    /// `RealInode` shape, so they can't be folded into one helper without
-    /// further refactoring.
-    #[cfg(target_os = "macos")]
-    async fn try_macos_apfs_clone_up_unionfs(
-        &self,
-        lower_layer: &Arc<BoxedLayer>,
-        lower_inode: Inode,
-        parent_node: &Arc<OverlayInode>,
-        node: &Arc<OverlayInode>,
-    ) -> Result<Option<Arc<OverlayInode>>> {
-        use std::ffi::CString;
-        use std::os::unix::ffi::OsStrExt;
-
-        let Some(src_path) = lower_layer.host_path_of(lower_inode).await else {
-            return Ok(None);
-        };
-
-        let parent_layer_inode = std::sync::Arc::new(tokio::sync::Mutex::new(None));
-        {
-            let pli = parent_layer_inode.clone();
-            parent_node
-                .handle_upper_inode_locked(&mut |parent_upper: Option<Arc<RealInode>>| async {
-                    if let Some(p) = parent_upper {
-                        *pli.lock().await = Some((p.layer.clone(), p.inode));
-                    }
-                    Ok(false)
-                })
-                .await?;
-        }
-        let Some((upper_layer, upper_parent_inode)) = parent_layer_inode.lock().await.clone()
-        else {
-            return Ok(None);
-        };
-
-        let Some(dst_dir_path) = upper_layer.host_path_of(upper_parent_inode).await else {
-            return Ok(None);
-        };
-
-        let name_owned = node.name.read().await.clone();
-        let dst_full = dst_dir_path.join(&name_owned);
-
-        let src_c = CString::new(src_path.as_os_str().as_bytes())
-            .map_err(|_| Error::from_raw_os_error(libc::EINVAL))?;
-        let dst_c = CString::new(dst_full.as_os_str().as_bytes())
-            .map_err(|_| Error::from_raw_os_error(libc::EINVAL))?;
-
-        match crate::passthrough::util::try_apfs_clonefile(&src_c, &dst_c) {
-            Ok(true) => {}
-            Ok(false) => return Ok(None),
-            Err(e) => {
-                if e.raw_os_error() != Some(libc::ENOTSUP) && e.raw_os_error() != Some(libc::EXDEV)
-                {
-                    return Err(e);
-                }
-                return Ok(None);
-            }
-        }
-
-        let entry = upper_layer
-            .lookup(
-                Request::default(),
-                upper_parent_inode,
-                OsStr::new(&name_owned),
-            )
-            .await?;
-        let real = RealInode {
-            layer: upper_layer,
-            in_upper_layer: true,
-            inode: entry.attr.ino,
-            whiteout: false,
-            opaque: false,
-            stat: Some(ReplyAttr {
-                ttl: entry.ttl,
-                attr: entry.attr,
-            }),
-        };
-        node.add_upper_inode(real, true).await;
-        Ok(Some(Arc::clone(node)))
-    }
-
     /// Copies a regular file and its contents from a lower layer to the upper layer.
     ///
     /// This function is a core part of the copy-up process, triggered when a regular file
-    /// that only exists in a lower layer is written to. It creates an empty file in the
-    /// upper layer with the original file's attributes (mode, UID, GID), and then copies
-    /// the entire content from the lower layer file to the new upper layer file.
+    /// that only exists in a lower layer is written to. It copies the fixed source
+    /// handle to private storage before atomically exposing complete upper bytes.
     async fn copy_regfile_up(
         &self,
         ctx: Request,
@@ -2660,165 +2597,114 @@ impl OverlayFs {
         if node.in_upper_layer().await {
             return Ok(node);
         }
-
-        let parent_node = if let Some(ref n) = node.parent.lock().await.upgrade() {
-            Arc::clone(n)
-        } else {
-            return Err(Error::other("no parent?"));
+        let task = {
+            let mut copyups = self.copyups.lock().await;
+            // A cancelled OPEN may still be waiting for a real source handle.
+            // Independent inode writes do not wait for that recovery job.
+            copyups.retain(|_, task| !task.complete());
+            if let Some(task) = copyups.get(&node.inode) {
+                task.clone()
+            } else {
+                if copyups.len() >= copy_up::MAX_PENDING_COPYUPS {
+                    return Err(Error::from_raw_os_error(libc::ENFILE));
+                }
+                let task = Arc::new(copy_up::CopyUpTask::new(ctx, node.clone()));
+                copyups.insert(node.inode, task.clone());
+                task
+            }
         };
-
-        // To preserve original ownership, we must get the raw, unmapped host attributes.
-        // We achieve this by calling `do_getattr_helper`, which is specifically designed
-        // to bypass the ID mapping logic. This is safe and does not affect other
-        // functionalities because `do_getattr_helper` and the standard `stat64()` call
-        // both rely on the same underlying `stat` system call; they only differ in
-        // whether the resulting `uid` and `gid` are mapped.
-        let (lower_layer, _, lower_inode) = node.first_layer_inode().await;
-        let re = lower_layer
-            .getattr_with_mapping(lower_inode, None, false)
-            .await?;
-        let st = ReplyAttr {
-            ttl: re.1,
-            attr: convert_stat64_to_file_attr(re.0),
-        };
-        trace!(
-            "copy_regfile_up: node {} in lower layer's inode {}",
-            node.inode, lower_inode
-        );
-
-        if !parent_node.in_upper_layer().await {
-            parent_node.clone().create_upper_dir(ctx, None).await?;
+        let result = task.wait_for_caller().await;
+        if let Err(error) = &result {
+            self.record_copy_up_cleanup_failure(node.inode, error).await;
         }
-
-        // === macOS APFS reflink fast path =================================
-        // Mirrors the overlayfs path: if both layers expose a host-fs path,
-        // try `clonefile(2)` and skip the create + read/write loop. Falls
-        // back silently on EXDEV/ENOTSUP or layers that have no host path.
-        #[cfg(target_os = "macos")]
-        if let Some(node) = self
-            .try_macos_apfs_clone_up_unionfs(&lower_layer, lower_inode, &parent_node, &node)
-            .await?
+        let mut copyups = self.copyups.lock().await;
+        if task.complete()
+            && copyups
+                .get(&node.inode)
+                .is_some_and(|current| Arc::ptr_eq(current, &task))
         {
-            return Ok(node);
+            copyups.remove(&node.inode);
         }
+        result
+    }
 
-        // create the file in upper layer using information from lower layer
-
-        let flags = libc::O_WRONLY;
-        let mode = mode_from_kind_and_perm(st.attr.kind, st.attr.perm);
-
-        let upper_handle = Arc::new(Mutex::new(0));
-        let upper_real_inode = Arc::new(Mutex::new(None));
-        parent_node
-            .handle_upper_inode_locked(&mut |parent_upper_inode: Option<Arc<RealInode>>| async {
-                // We already create upper dir for parent_node.
-                let parent_real_inode = parent_upper_inode.ok_or_else(|| {
-                    error!("parent {} has no upper inode", parent_node.inode);
-                    Error::from_raw_os_error(libc::EINVAL)
-                })?;
-                // We manually unfold the `create` logic here instead of calling the `create` method directly.
-                // This is necessary to preserve the original file's UID and GID during the copy-up process.
-                if !parent_real_inode.in_upper_layer {
-                    return Err(Error::from_raw_os_error(libc::EROFS));
-                }
-                let name = node.name.read().await;
-                let name = OsStr::new(name.as_str());
-                let op_ctx = crate::context::OperationContext::with_credentials(
-                    ctx,
-                    st.attr.uid,
-                    st.attr.gid,
-                );
-                let create_rep = parent_real_inode
-                    .layer
-                    .create_with_context(
-                        op_ctx,
-                        parent_real_inode.inode,
-                        name,
-                        mode,
-                        flags.try_into().unwrap(),
-                    )
-                    .await?;
-
-                let (inode, h) = (
-                    RealInode {
-                        layer: parent_real_inode.layer.clone(),
-                        in_upper_layer: true,
-                        inode: create_rep.attr.ino,
-                        whiteout: false,
-                        opaque: false,
-                        stat: Some(ReplyAttr {
-                            ttl: create_rep.ttl,
-                            attr: create_rep.attr,
-                        }),
-                    },
-                    Some(create_rep.fh),
-                );
-                trace!(
-                    "copy_regfile_up: created upper file {name:?} with inode {}",
-                    inode.inode
-                );
-                *upper_handle.lock().await = h.unwrap_or(0);
-                upper_real_inode.lock().await.replace(inode);
-                Ok(false)
-            })
-            .await?;
-
-        let rep = lower_layer
-            .open(ctx, lower_inode, libc::O_RDONLY as u32)
-            .await?;
-
-        let lower_handle = rep.fh;
-
-        // need to use work directory and then rename file to
-        // final destination for atomic reasons.. not deal with it for now,
-        // use stupid copy at present.
-        // FIXME: this need a lot of work here, ntimes, xattr, etc.
-
-        // Copy from lower real inode to upper real inode.
-        // TODO: use sendfile here.
-
-        let u_handle = *upper_handle.lock().await;
-        let ri = upper_real_inode.lock().await.take();
-        if let Some(ri) = ri {
-            let mut offset: usize = 0;
-            let size = 4 * 1024 * 1024;
-
-            loop {
-                let ret = lower_layer
-                    .read(ctx, lower_inode, lower_handle, offset as u64, size)
-                    .await?;
-
-                let len = ret.data.len();
-                if len == 0 {
-                    break;
-                }
-
-                let ret = ri
-                    .layer
-                    .write(ctx, ri.inode, u_handle, offset as u64, &ret.data, 0, 0)
-                    .await?;
-
-                assert_eq!(ret.written as usize, len);
-                offset += ret.written as usize;
+    async fn record_copy_up_cleanup_failure(&self, inode: Inode, error: &Error) {
+        if let Some(failure) = error
+            .get_ref()
+            .and_then(|error| error.downcast_ref::<copy_up::CopyUpCleanupFailure>())
+        {
+            let mut reports = self.copyup_failures.lock().await;
+            if reports.len() == copy_up::MAX_PENDING_COPYUPS {
+                reports.pop_front();
             }
-
-            if let Err(e) = ri.layer.release(ctx, ri.inode, u_handle, 0, 0, true).await {
-                let e: std::io::Error = e.into();
-                // Ignore ENOSYS.
-                if e.raw_os_error() != Some(libc::ENOSYS) {
-                    return Err(e);
-                }
-            }
-            node.add_upper_inode(ri, true).await;
-        } else {
-            error!("BUG: upper real inode is None after copy up");
+            reports.push_back((inode, failure.clone()));
         }
+    }
 
-        lower_layer
-            .release(ctx, lower_inode, lower_handle, 0, 0, true)
-            .await?;
+    /// Take the most recent source cleanup reports, including closed owners.
+    ///
+    /// The bounded diagnostic queue retains at most 64 reports. Consuming a
+    /// report never releases or discards a pending source owner. Kernel-facing
+    /// requests keep their primary errno while this API exposes both errors.
+    pub async fn take_copy_up_cleanup_failures(
+        &self,
+    ) -> Vec<(Inode, copy_up::CopyUpCleanupFailure)> {
+        self.copyup_failures.lock().await.drain(..).collect()
+    }
 
-        Ok(Arc::clone(&node))
+    /// Finish real cleanup for cancelled copy-ups, without detached tasks.
+    ///
+    /// Cancellation leaves its bounded source-open future in this ledger.
+    /// Await this method before dropping a cancelled overlay. Independent
+    /// writable inodes keep making progress; normal `destroy` recovers all jobs.
+    pub async fn recover_cancelled_copyups(&self) -> Result<()> {
+        let pending: Vec<_> = self
+            .copyups
+            .lock()
+            .await
+            .iter()
+            .filter(|(_, task)| task.cancelled_or_complete())
+            .map(|(&inode, task)| (inode, task.clone()))
+            .collect();
+        // Every admitted recovery future is driven concurrently. One source
+        // OPEN awaiting its real handle does not hold back another cleanup.
+        let outcomes = join_all(pending.iter().map(|(_, task)| task.recover())).await;
+        let mut failure = None;
+        for ((inode, task), result) in pending.into_iter().zip(outcomes) {
+            if let Err(error) = &result {
+                self.record_copy_up_cleanup_failure(inode, error).await;
+            }
+            let mut copyups = self.copyups.lock().await;
+            if task.complete()
+                && copyups
+                    .get(&inode)
+                    .is_some_and(|current| Arc::ptr_eq(current, &task))
+            {
+                copyups.remove(&inode);
+            }
+            if let Err(error) = result
+                && error.raw_os_error() != Some(libc::ECANCELED)
+            {
+                failure.get_or_insert(error);
+            }
+        }
+        match failure {
+            Some(error) => Err(error),
+            None => Ok(()),
+        }
+    }
+
+    /// Cancel admitted copy-ups and await their actual source cleanup.
+    ///
+    /// A shutdown owner should drain new requests first, then await this
+    /// result before dropping the overlay. Unlike Filesystem::destroy's void
+    /// callback, this reports typed cleanup failures and retains unknown jobs
+    /// so the owner can retry after obtaining an authoritative witness.
+    pub async fn recover_all_copyups(&self) -> Result<()> {
+        for task in self.copyups.lock().await.values() {
+            task.cancel();
+        }
+        self.recover_cancelled_copyups().await
     }
 
     /// Copies the specified node to the upper layer of the filesystem
@@ -2855,7 +2741,9 @@ impl OverlayFs {
             }
             FileType::RegularFile => {
                 // For regular file.
-                self.copy_regfile_up(ctx, node).await
+                self.copy_regfile_up(ctx, node)
+                    .await
+                    .map_err(copy_up::kernel_error)
             }
             _ => {
                 // For other file types. return error.
@@ -3205,53 +3093,73 @@ impl OverlayFs {
         flags: u32,
     ) -> Result<Arc<HandleData>> {
         let no_open = self.no_open.load(Ordering::Relaxed);
-        if !no_open {
-            if let Some(h) = handle
-                && let Some(v) = self.handles.lock().await.get(&h)
-                && v.node.inode == inode
-            {
-                // trace!("get_data: found handle");
-                return Ok(Arc::clone(v));
-            }
-        } else {
-            let readonly: bool = flags
-                & (libc::O_APPEND | libc::O_CREAT | libc::O_TRUNC | libc::O_RDWR | libc::O_WRONLY)
-                    as u32
-                == 0;
+        if !no_open
+            && let Some(h) = handle
+            && let Some(v) = self.handles.lock().await.get(&h)
+            && v.node.inode == inode
+        {
+            // trace!("get_data: found handle");
+            return Ok(Arc::clone(v));
+        }
+        // Handle miss with an open-supporting mount: the kernel issued an
+        // I/O for a file whose OPEN we never saw (no_open-style write after
+        // an attr-cache-only path, a stale fh after FORGET, ...). Fall
+        // through to the reconstruction below instead of failing with
+        // ENOENT — it re-resolves the node, copies it up for writes, and
+        // opens the target layer for a real fh.
 
-            // lookup node
-            let node = self.lookup_node(ctx, inode, "").await?;
+        let readonly: bool = flags
+            & (libc::O_APPEND | libc::O_CREAT | libc::O_TRUNC | libc::O_RDWR | libc::O_WRONLY)
+                as u32
+            == 0;
 
-            // whiteout node
-            if node.whiteout.load(Ordering::Relaxed) {
-                return Err(Error::from_raw_os_error(libc::ENOENT));
-            }
+        // lookup node
+        let node = self.lookup_node(ctx, inode, "").await?;
 
-            if !readonly {
-                // Check if upper layer exists, return EROFS is not exists.
-                self.upper_layer
-                    .as_ref()
-                    .cloned()
-                    .ok_or_else(|| Error::from_raw_os_error(libc::EROFS))?;
-                // copy up to upper layer
-                self.copy_node_up(ctx, Arc::clone(&node)).await?;
-            }
-
-            let (layer, in_upper_layer, inode) = node.first_layer_inode().await;
-            let handle_data = HandleData {
-                node: Arc::clone(&node),
-                real_handle: Some(RealHandle {
-                    layer,
-                    in_upper_layer,
-                    inode,
-                    handle: AtomicU64::new(0),
-                }),
-                dir_snapshot: Mutex::new(None),
-            };
-            return Ok(Arc::new(handle_data));
+        // whiteout node
+        if node.whiteout.load(Ordering::Relaxed) {
+            return Err(Error::from_raw_os_error(libc::ENOENT));
         }
 
-        Err(Error::from_raw_os_error(libc::ENOENT))
+        if !readonly {
+            // Check if upper layer exists, return EROFS is not exists.
+            self.upper_layer
+                .as_ref()
+                .cloned()
+                .ok_or_else(|| Error::from_raw_os_error(libc::EROFS))?;
+            // copy up to upper layer
+            self.copy_node_up(ctx, Arc::clone(&node)).await?;
+        }
+
+        let (layer, in_upper_layer, inode) = node.first_layer_inode().await;
+
+        // A no_open-style request carries fh=0: the kernel never sent an
+        // OPEN, so no handle exists for the layers that locate files by
+        // their own open handle (passthrough). Perform a real open on the
+        // target layer and hand the resulting fh to the caller, otherwise
+        // every write lands as ENOENT inside the passthrough layer.
+        // Read-only callers keep fh=0: inode-addressed layers (dicfuse and
+        // friends) ignore it, and passthrough reads only happen on nodes
+        // that were properly opened before.
+        // Every reconstructed handle must carry a *real* fh: the upper
+        // passthrough locates files by its own open handle, and a fh=0 read
+        // or write fails with EBADF inside the passthrough pread/pwrite.
+        let opened = layer.open(ctx, inode, flags).await?;
+        let (real_fh, real_layer, real_inode) = (opened.fh, layer.clone(), inode);
+
+        let handle_data = Arc::new(HandleData {
+            node: Arc::clone(&node),
+            real_handle: Some(RealHandle {
+                layer: real_layer,
+                in_upper_layer,
+                inode: real_inode,
+                handle: AtomicU64::new(real_fh),
+            }),
+            dir_snapshot: Mutex::new(None),
+            ephemeral: true,
+        });
+
+        Ok(handle_data)
     }
 
     // extend or init the inodes number to one overlay if the current number is done.
