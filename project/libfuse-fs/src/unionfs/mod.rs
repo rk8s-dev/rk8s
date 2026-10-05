@@ -5,6 +5,8 @@
 #![allow(missing_docs)]
 mod async_io;
 pub mod config;
+#[cfg(all(test, target_os = "linux"))]
+mod copy_up_tests;
 mod inode_store;
 pub mod layer;
 mod utils;
