@@ -29,6 +29,65 @@ struct FaultLayer {
 }
 
 impl Filesystem for FaultLayer {
+    async fn init(&self, req: Request) -> asyncfuse::Result<ReplyInit> {
+        Filesystem::init(&self.inner, req).await
+    }
+
+    async fn destroy(&self, req: Request) {
+        Filesystem::destroy(&self.inner, req).await;
+    }
+
+    async fn getlk(
+        &self,
+        req: Request,
+        inode: Inode,
+        fh: u64,
+        lock_owner: u64,
+        start: u64,
+        end: u64,
+        typ: u32,
+        pid: u32,
+    ) -> asyncfuse::Result<ReplyLock> {
+        Filesystem::getlk(
+            &self.inner,
+            req,
+            inode,
+            fh,
+            lock_owner,
+            start,
+            end,
+            typ,
+            pid,
+        )
+        .await
+    }
+
+    async fn setlk(
+        &self,
+        req: Request,
+        inode: Inode,
+        fh: u64,
+        lock_owner: u64,
+        start: u64,
+        end: u64,
+        typ: u32,
+        pid: u32,
+        block: bool,
+    ) -> asyncfuse::Result<()> {
+        Filesystem::setlk(
+            &self.inner,
+            req,
+            inode,
+            fh,
+            lock_owner,
+            start,
+            end,
+            typ,
+            pid,
+            block,
+        )
+        .await
+    }
     async fn lookup(
         &self,
         req: Request,
@@ -374,7 +433,7 @@ async fn cancelled_copy_up_never_publishes_a_partial_file() {
     .await
     .unwrap();
     task.abort();
-    assert!(task.await.unwrap_err().is_cancelled());
+    assert!(task.await.err().unwrap().is_cancelled());
     f.assert_no_final();
     f.assert_source_and_handles();
 }
