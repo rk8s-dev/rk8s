@@ -16,6 +16,79 @@ use std::sync::{
 };
 use tokio::sync::{Mutex, Notify};
 
+/// Confirmed ownership of one exact copy-up source handle.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum CopyUpHandleState {
+    /// The exact handle still owns an open resource and can be released.
+    Open,
+    /// The backend confirms that this exact handle is already closed.
+    Closed,
+    /// Closure could not be confirmed; do not retry or discard ownership.
+    Unknown,
+}
+
+/// A copy-up failure together with its independently observed cleanup state.
+#[derive(Clone, Debug)]
+pub struct CopyUpCleanupFailure {
+    /// Primary operation errno, retained even when cleanup also failed.
+    pub primary_errno: Option<i32>,
+    /// The actual source RELEASE errno, when available.
+    pub cleanup_errno: Option<i32>,
+    /// Ownership observation after the failed RELEASE.
+    pub ownership: CopyUpHandleState,
+    primary: String,
+    cleanup: String,
+}
+
+impl std::fmt::Display for CopyUpCleanupFailure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}; source cleanup failed: {} (ownership: {:?})",
+            self.primary, self.cleanup, self.ownership
+        )
+    }
+}
+
+impl std::error::Error for CopyUpCleanupFailure {}
+
+#[derive(Clone)]
+struct SourceHandle {
+    layer: Arc<BoxedLayer>,
+    ctx: Request,
+    inode: u64,
+    handle: u64,
+}
+
+type SourceOwner = Arc<std::sync::Mutex<Option<SourceHandle>>>;
+
+fn cleanup_failure(primary: Option<&Error>, cleanup: Error, ownership: CopyUpHandleState) -> Error {
+    let kind = primary.map_or(cleanup.kind(), Error::kind);
+    let previous = primary.and_then(|error| {
+        error
+            .get_ref()
+            .and_then(|error| error.downcast_ref::<CopyUpCleanupFailure>())
+    });
+    let primary_errno = previous.map_or_else(
+        || primary.map_or(cleanup.raw_os_error(), Error::raw_os_error),
+        |failure| failure.primary_errno,
+    );
+    let primary = previous.map_or_else(
+        || primary.map_or_else(|| cleanup.to_string(), ToString::to_string),
+        |failure| failure.primary.clone(),
+    );
+    Error::new(
+        kind,
+        CopyUpCleanupFailure {
+            primary_errno,
+            cleanup_errno: cleanup.raw_os_error(),
+            ownership,
+            primary,
+            cleanup: cleanup.to_string(),
+        },
+    )
+}
+
 /// A private destination owned by one copy-up operation.
 ///
 /// Drop must synchronously close its actual destination resources and remove
@@ -80,9 +153,40 @@ impl Cancellation {
     }
 }
 
+struct Failure {
+    raw: Option<i32>,
+    kind: std::io::ErrorKind,
+    message: String,
+    cleanup: Option<CopyUpCleanupFailure>,
+}
+
+impl Failure {
+    fn new(error: &Error) -> Self {
+        Self {
+            raw: error.raw_os_error(),
+            kind: error.kind(),
+            message: error.to_string(),
+            cleanup: error
+                .get_ref()
+                .and_then(|e| e.downcast_ref::<CopyUpCleanupFailure>())
+                .cloned(),
+        }
+    }
+
+    fn error(&self) -> Error {
+        if let Some(cleanup) = &self.cleanup {
+            return Error::new(self.kind, cleanup.clone());
+        }
+        match self.raw {
+            Some(raw) => Error::from_raw_os_error(raw),
+            None => Error::new(self.kind, self.message.clone()),
+        }
+    }
+}
+
 struct Outcome {
     node: Option<Arc<OverlayInode>>,
-    error: Option<(Option<i32>, std::io::ErrorKind, String)>,
+    error: Option<Failure>,
 }
 
 impl Outcome {
@@ -94,7 +198,7 @@ impl Outcome {
             },
             Err(error) => Self {
                 node: None,
-                error: Some((error.raw_os_error(), error.kind(), error.to_string())),
+                error: Some(Failure::new(error)),
             },
         }
     }
@@ -103,41 +207,46 @@ impl Outcome {
         if let Some(node) = &self.node {
             return Ok(node.clone());
         }
-        let (raw, kind, message) = self.error.as_ref().expect("copy-up outcome");
-        Err(match raw {
-            Some(raw) => Error::from_raw_os_error(*raw),
-            None => Error::new(*kind, message.clone()),
-        })
+        Err(self.error.as_ref().expect("copy-up outcome").error())
     }
 }
 
 struct TaskState {
     future: Option<CopyFuture>,
     outcome: Option<Outcome>,
+    recovery: Option<Pin<Box<dyn Future<Output = Result<()>> + Send>>>,
+    recovered: Option<std::result::Result<(), Failure>>,
 }
 
 pub(super) struct CopyUpTask {
     cancellation: Arc<Cancellation>,
     complete: AtomicBool,
+    finished: AtomicBool,
+    source: SourceOwner,
     state: Mutex<TaskState>,
 }
 
 impl CopyUpTask {
     pub(super) fn new(ctx: Request, node: Arc<OverlayInode>) -> Self {
         let cancellation = Arc::new(Cancellation::new());
-        let future = Box::pin(copy_file(ctx, node, cancellation.clone()));
+        let source = Arc::new(std::sync::Mutex::new(None));
+        let future = Box::pin(copy_file(ctx, node, cancellation.clone(), source.clone()));
         Self {
             cancellation,
             complete: AtomicBool::new(false),
+            finished: AtomicBool::new(false),
+            source,
             state: Mutex::new(TaskState {
                 future: Some(future),
                 outcome: None,
+                recovery: None,
+                recovered: None,
             }),
         }
     }
 
     pub(super) fn cancelled_or_complete(&self) -> bool {
-        self.cancellation.cancelled.load(Ordering::Acquire) || self.complete.load(Ordering::Acquire)
+        self.cancellation.cancelled.load(Ordering::Acquire) || self.finished.load(Ordering::Acquire)
     }
 
     pub(super) fn complete(&self) -> bool {
@@ -158,7 +267,46 @@ impl CopyUpTask {
         let result = state.future.as_mut().expect("pending copy-up").await;
         state.future.take();
         state.outcome = Some(Outcome::new(&result));
-        self.complete.store(true, Ordering::Release);
+        self.complete.store(
+            self.source.lock().expect("source ownership").is_none(),
+            Ordering::Release,
+        );
+        self.finished.store(true, Ordering::Release);
+        result
+    }
+
+    pub(super) async fn recover(&self) -> Result<()> {
+        let primary = self.wait().await;
+        let mut state = self.state.lock().await;
+        // Another recovery can finish after wait() releases this lock. Its
+        // confirmed result supersedes the original, possibly Open, failure.
+        if self.complete() {
+            if let Some(result) = &state.recovered {
+                return result.as_ref().map(|_| ()).map_err(Failure::error);
+            }
+            return match primary {
+                Err(error)
+                    if error
+                        .get_ref()
+                        .is_some_and(|e| e.is::<CopyUpCleanupFailure>()) =>
+                {
+                    Err(error)
+                }
+                _ => Ok(()),
+            };
+        }
+        if state.recovery.is_none() {
+            state.recovery = Some(Box::pin(recover_source(self.source.clone(), primary.err())));
+        }
+        // A cancelled recovery caller also retains its in-flight RELEASE and
+        // observation future, preventing a guessed retry or lost ownership.
+        let result = state.recovery.as_mut().expect("source recovery").await;
+        state.recovery.take();
+        state.recovered = Some(result.as_ref().map(|_| ()).map_err(Failure::new));
+        self.complete.store(
+            self.source.lock().expect("source ownership").is_none(),
+            Ordering::Release,
+        );
         result
     }
 
@@ -187,24 +335,67 @@ impl Drop for WaiterGuard {
 }
 
 async fn release_source(
-    layer: &Arc<BoxedLayer>,
-    ctx: Request,
-    inode: u64,
-    handle: u64,
-) -> Result<()> {
-    match layer
-        .release(ctx, inode, handle, libc::O_RDONLY as u32, 0, false)
+    owner: &SourceOwner,
+) -> std::result::Result<(), (Error, CopyUpHandleState)> {
+    let source = owner
+        .lock()
+        .expect("source ownership")
+        .clone()
+        .expect("open source handle");
+    match source
+        .layer
+        .release(
+            source.ctx,
+            source.inode,
+            source.handle,
+            libc::O_RDONLY as u32,
+            0,
+            false,
+        )
         .await
     {
-        Ok(()) => Ok(()),
+        Ok(()) => {
+            owner.lock().expect("source ownership").take();
+            Ok(())
+        }
         Err(error) => {
             let error: Error = error.into();
-            if error.raw_os_error() == Some(libc::ENOSYS) {
-                Ok(())
-            } else {
-                Err(error)
+            let ownership = source
+                .layer
+                .copy_up_handle_state(source.inode, source.handle)
+                .await
+                .unwrap_or(CopyUpHandleState::Unknown);
+            if ownership == CopyUpHandleState::Closed {
+                owner.lock().expect("source ownership").take();
             }
+            Err((error, ownership))
         }
+    }
+}
+
+async fn recover_source(owner: SourceOwner, primary: Option<Error>) -> Result<()> {
+    let source = owner.lock().expect("source ownership").clone();
+    let Some(source) = source else {
+        return Ok(());
+    };
+    let ownership = source
+        .layer
+        .copy_up_handle_state(source.inode, source.handle)
+        .await
+        .map_err(|error| cleanup_failure(primary.as_ref(), error, CopyUpHandleState::Unknown))?;
+    match ownership {
+        CopyUpHandleState::Closed => {
+            owner.lock().expect("source ownership").take();
+            Ok(())
+        }
+        CopyUpHandleState::Open => release_source(&owner)
+            .await
+            .map_err(|(error, ownership)| cleanup_failure(primary.as_ref(), error, ownership)),
+        CopyUpHandleState::Unknown => Err(cleanup_failure(
+            primary.as_ref(),
+            Error::other("source closure remains unknown; no RELEASE was retried"),
+            ownership,
+        )),
     }
 }
 
@@ -212,6 +403,7 @@ async fn copy_file(
     ctx: Request,
     node: Arc<OverlayInode>,
     cancellation: Arc<Cancellation>,
+    source: SourceOwner,
 ) -> Result<Arc<OverlayInode>> {
     cancellation.check()?;
     if node.in_upper_layer().await {
@@ -244,7 +436,13 @@ async fn copy_file(
         .open(ctx, lower_inode, libc::O_RDONLY as u32)
         .await?
         .fh;
-    let mut source_released = false;
+    *source.lock().expect("source ownership") = Some(SourceHandle {
+        layer: lower.clone(),
+        ctx,
+        inode: lower_inode,
+        handle,
+    });
+    let mut source_release_attempted = false;
     let result = async {
         cancellation.check()?;
         let op_ctx = OperationContext::with_credentials(ctx, attr.uid, attr.gid);
@@ -279,8 +477,8 @@ async fn copy_file(
             data = lower.read(ctx, lower_inode, handle, offset, 1) => data?,
         };
         if !eof.data.is_empty() { return Err(Error::from_raw_os_error(libc::EIO)); }
-        source_released = true;
-        release_source(&lower, ctx, lower_inode, handle).await?;
+        source_release_attempted = true;
+        release_source(&source).await.map_err(|(error, ownership)| cleanup_failure(None, error, ownership))?;
         cancellation.check()?;
 
         // Namespace promotion and ownership commit use the fixed node lock.
@@ -300,17 +498,9 @@ async fn copy_file(
         destination.commit();
         Ok(node.clone())
     }.await;
-    if !source_released {
-        if let Err(error) = release_source(&lower, ctx, lower_inode, handle).await {
-            if result.is_ok()
-                || result
-                    .as_ref()
-                    .err()
-                    .is_some_and(|e| e.raw_os_error() == Some(libc::ECANCELED))
-            {
-                return Err(error);
-            }
-            tracing::error!("copy-up source cleanup failed after its primary error: {error}");
+    if !source_release_attempted {
+        if let Err((error, ownership)) = release_source(&source).await {
+            return Err(cleanup_failure(result.as_ref().err(), error, ownership));
         }
     }
     result

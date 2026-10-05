@@ -84,6 +84,23 @@ fn directory_matches(parent: &File, name: &std::ffi::CStr, file: &File) -> Resul
 }
 
 impl PassthroughFs {
+    pub(crate) async fn private_copy_up_handle_state(
+        &self,
+        inode: u64,
+        handle: u64,
+    ) -> Result<crate::unionfs::copy_up::CopyUpHandleState> {
+        // The map is the actual descriptor owner. These private handles are
+        // not exposed to another kernel request while copy-up is in progress.
+        let handles = self.handle_map.handles.read().await;
+        Ok(
+            if handles.get(&handle).is_some_and(|data| data.inode == inode) {
+                crate::unionfs::copy_up::CopyUpHandleState::Open
+            } else {
+                crate::unionfs::copy_up::CopyUpHandleState::Closed
+            },
+        )
+    }
+
     pub(crate) async fn begin_private_copy_up(
         &self,
         ctx: OperationContext,

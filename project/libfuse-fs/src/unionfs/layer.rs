@@ -26,6 +26,16 @@ pub trait Layer: ObjectSafeFilesystem {
     /// Return the root inode number
     fn root_inode(&self) -> Inode;
 
+    /// Observe ownership of the exact source handle after a failed RELEASE.
+    /// Unknown retains the recovery job and prevents a guessed repeat RELEASE.
+    async fn copy_up_handle_state(
+        &self,
+        _inode: Inode,
+        _handle: u64,
+    ) -> std::io::Result<super::copy_up::CopyUpHandleState> {
+        Ok(super::copy_up::CopyUpHandleState::Unknown)
+    }
+
     /// Begin an isolated regular-file copy-up. Storage must be outside the
     /// upper namespace and its scans. The returned owner must close actual
     /// resources and remove unpublished storage synchronously on Drop.
@@ -326,6 +336,14 @@ pub trait Layer: ObjectSafeFilesystem {
 impl Layer for PassthroughFs {
     fn root_inode(&self) -> Inode {
         1
+    }
+
+    async fn copy_up_handle_state(
+        &self,
+        inode: Inode,
+        handle: u64,
+    ) -> std::io::Result<super::copy_up::CopyUpHandleState> {
+        self.private_copy_up_handle_state(inode, handle).await
     }
 
     async fn begin_copy_up(

@@ -2613,9 +2613,10 @@ impl OverlayFs {
         };
         let result = task.wait_for_caller().await;
         let mut copyups = self.copyups.lock().await;
-        if copyups
-            .get(&node.inode)
-            .is_some_and(|current| Arc::ptr_eq(current, &task))
+        if task.complete()
+            && copyups
+                .get(&node.inode)
+                .is_some_and(|current| Arc::ptr_eq(current, &task))
         {
             copyups.remove(&node.inode);
         }
@@ -2638,13 +2639,14 @@ impl OverlayFs {
             .collect();
         // Every admitted recovery future is driven concurrently. One source
         // OPEN awaiting its real handle does not hold back another cleanup.
-        let outcomes = join_all(pending.iter().map(|(_, task)| task.wait())).await;
+        let outcomes = join_all(pending.iter().map(|(_, task)| task.recover())).await;
         let mut failure = None;
         for ((inode, task), result) in pending.into_iter().zip(outcomes) {
             let mut copyups = self.copyups.lock().await;
-            if copyups
-                .get(&inode)
-                .is_some_and(|current| Arc::ptr_eq(current, &task))
+            if task.complete()
+                && copyups
+                    .get(&inode)
+                    .is_some_and(|current| Arc::ptr_eq(current, &task))
             {
                 copyups.remove(&inode);
             }
@@ -2660,7 +2662,13 @@ impl OverlayFs {
         }
     }
 
-    async fn recover_all_copyups(&self) -> Result<()> {
+    /// Cancel admitted copy-ups and await their actual source cleanup.
+    ///
+    /// A shutdown owner should drain new requests first, then await this
+    /// result before dropping the overlay. Unlike Filesystem::destroy's void
+    /// callback, this reports typed cleanup failures and retains unknown jobs
+    /// so the owner can retry after obtaining an authoritative witness.
+    pub async fn recover_all_copyups(&self) -> Result<()> {
         for task in self.copyups.lock().await.values() {
             task.cancel();
         }

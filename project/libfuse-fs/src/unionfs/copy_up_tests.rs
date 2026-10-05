@@ -20,6 +20,11 @@ enum Fault {
     OverreportedWrite,
     LookupFailure,
     PendingOpen,
+    ReleaseBeforeClose,
+    ReleaseAfterClose,
+    ReleaseUnknownBeforeClose,
+    ReleaseUnknownAfterClose,
+    PendingRecoveryRelease,
 }
 
 struct FaultLayer {
@@ -31,6 +36,7 @@ struct FaultLayer {
     resume: Notify,
     opens: AtomicUsize,
     releases: std::sync::Mutex<Vec<u64>>,
+    witness_available: AtomicBool,
 }
 
 impl Filesystem for FaultLayer {
@@ -192,11 +198,40 @@ impl Filesystem for FaultLayer {
         lock_owner: u64,
         flush: bool,
     ) -> asyncfuse::Result<()> {
-        self.releases.lock().unwrap().push(fh);
+        let call = {
+            let mut releases = self.releases.lock().unwrap();
+            let call = releases.len();
+            releases.push(fh);
+            call
+        };
+        if call == 0
+            && matches!(
+                self.fault,
+                Fault::ReleaseBeforeClose
+                    | Fault::ReleaseUnknownBeforeClose
+                    | Fault::PendingRecoveryRelease
+            )
+        {
+            return Err(Error::from_raw_os_error(libc::EIO).into());
+        }
         let result =
             Filesystem::release(&self.inner, req, inode, fh, flags, lock_owner, flush).await;
         if result.is_ok() {
             self.active.fetch_sub(1, Ordering::SeqCst);
+            if call == 1 && matches!(self.fault, Fault::PendingRecoveryRelease) {
+                // The real native resource is closed, but RELEASE has not
+                // delivered its result. Cancelling recovery must retain it.
+                self.entered.notify_one();
+                self.resume.notified().await;
+            }
+            if call == 0
+                && matches!(
+                    self.fault,
+                    Fault::ReleaseAfterClose | Fault::ReleaseUnknownAfterClose
+                )
+            {
+                return Err(Error::from_raw_os_error(libc::EIO).into());
+            }
         }
         result
     }
@@ -206,6 +241,17 @@ impl Filesystem for FaultLayer {
 impl Layer for FaultLayer {
     fn root_inode(&self) -> Inode {
         1
+    }
+
+    async fn copy_up_handle_state(
+        &self,
+        inode: Inode,
+        handle: u64,
+    ) -> Result<super::copy_up::CopyUpHandleState> {
+        if !self.witness_available.load(Ordering::SeqCst) {
+            return Ok(super::copy_up::CopyUpHandleState::Unknown);
+        }
+        Layer::copy_up_handle_state(&self.inner, inode, handle).await
     }
 
     async fn begin_copy_up(
@@ -328,6 +374,10 @@ async fn make_layer(path: std::path::PathBuf, fault: Fault) -> Arc<FaultLayer> {
         resume: Notify::new(),
         opens: AtomicUsize::new(0),
         releases: std::sync::Mutex::new(Vec::new()),
+        witness_available: AtomicBool::new(!matches!(
+            fault,
+            Fault::ReleaseUnknownBeforeClose | Fault::ReleaseUnknownAfterClose
+        )),
     })
 }
 
@@ -655,4 +705,174 @@ async fn a_cancelled_pending_open_does_not_block_an_independent_inode_copy_up() 
     );
     assert!(!f.temp.path().join("upper/file").exists());
     f.assert_source_and_handles();
+}
+
+fn cleanup_error(error: &Error) -> &super::copy_up::CopyUpCleanupFailure {
+    error
+        .get_ref()
+        .unwrap()
+        .downcast_ref()
+        .expect("typed primary/cleanup error and ownership state")
+}
+
+#[tokio::test]
+async fn a_release_error_before_actual_close_keeps_ownership_until_confirmed_recovery() {
+    let f = fixture(Fault::ReleaseBeforeClose, Fault::None).await;
+    let error = f
+        .overlay
+        .copy_regfile_up(request(), f.node.clone())
+        .await
+        .err()
+        .unwrap();
+    let failure = cleanup_error(&error);
+    assert_eq!(failure.primary_errno, Some(libc::EIO));
+    assert_eq!(failure.cleanup_errno, Some(libc::EIO));
+    assert_eq!(failure.ownership, super::copy_up::CopyUpHandleState::Open);
+    f.assert_no_final();
+    assert_eq!(f.lower.active.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        f.overlay.copyups.lock().await.len(),
+        1,
+        "failed resource owner stays in the bounded ledger"
+    );
+    f.overlay.recover_cancelled_copyups().await.unwrap();
+    assert_eq!(f.lower.releases.lock().unwrap().len(), 2);
+    assert_eq!(f.overlay.copyups.lock().await.len(), 0);
+    f.assert_no_final();
+    f.assert_source_and_handles();
+}
+
+#[tokio::test]
+async fn a_release_error_after_actual_close_is_reported_and_never_released_twice() {
+    let f = fixture(Fault::ReleaseAfterClose, Fault::None).await;
+    let error = f
+        .overlay
+        .copy_regfile_up(request(), f.node.clone())
+        .await
+        .err()
+        .unwrap();
+    assert_eq!(
+        cleanup_error(&error).ownership,
+        super::copy_up::CopyUpHandleState::Closed
+    );
+    assert_eq!(cleanup_error(&error).cleanup_errno, Some(libc::EIO));
+    assert_eq!(f.overlay.copyups.lock().await.len(), 0);
+    f.overlay.recover_cancelled_copyups().await.unwrap();
+    assert_eq!(
+        f.lower.releases.lock().unwrap().len(),
+        1,
+        "closed handle must not receive a guessed repeated RELEASE"
+    );
+    f.assert_no_final();
+    f.assert_source_and_handles();
+}
+
+#[tokio::test]
+async fn concurrent_recovery_callers_share_the_confirmed_close_result() {
+    let f = fixture(Fault::ReleaseBeforeClose, Fault::None).await;
+    assert!(
+        f.overlay
+            .copy_regfile_up(request(), f.node.clone())
+            .await
+            .is_err()
+    );
+    let task = f.overlay.copyups.lock().await[&f.node.inode].clone();
+    let (first, second) = tokio::join!(task.recover(), task.recover());
+    first.unwrap();
+    second.expect("the original Open error must not supersede confirmed recovery");
+    assert_eq!(f.lower.releases.lock().unwrap().len(), 2);
+    f.overlay.recover_cancelled_copyups().await.unwrap();
+    assert_eq!(f.overlay.copyups.lock().await.len(), 0);
+    f.assert_no_final();
+    f.assert_source_and_handles();
+}
+
+#[tokio::test]
+async fn cancelling_recovery_retains_the_actual_pending_release_future() {
+    let f = fixture(Fault::PendingRecoveryRelease, Fault::None).await;
+    assert!(
+        f.overlay
+            .copy_regfile_up(request(), f.node.clone())
+            .await
+            .is_err()
+    );
+    let overlay = f.overlay.clone();
+    let recovery = tokio::spawn(async move { overlay.recover_cancelled_copyups().await });
+    tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        f.lower.entered.notified(),
+    )
+    .await
+    .unwrap();
+    recovery.abort();
+    assert!(recovery.await.err().unwrap().is_cancelled());
+    assert_eq!(f.lower.active.load(Ordering::SeqCst), 0);
+    assert_eq!(f.lower.releases.lock().unwrap().len(), 2);
+    assert_eq!(f.overlay.copyups.lock().await.len(), 1);
+    f.lower.resume.notify_one();
+    f.overlay.recover_cancelled_copyups().await.unwrap();
+    assert_eq!(f.lower.releases.lock().unwrap().len(), 2);
+    assert_eq!(f.overlay.copyups.lock().await.len(), 0);
+    f.assert_no_final();
+    f.assert_source_and_handles();
+}
+
+#[tokio::test]
+async fn enospc_does_not_hide_a_second_release_error_or_drop_its_live_owner() {
+    let f = fixture(Fault::ReleaseBeforeClose, Fault::NoSpace).await;
+    let error = f
+        .overlay
+        .copy_regfile_up(request(), f.node.clone())
+        .await
+        .err()
+        .unwrap();
+    let failure = cleanup_error(&error);
+    assert_eq!(failure.primary_errno, Some(libc::ENOSPC));
+    assert_eq!(failure.cleanup_errno, Some(libc::EIO));
+    assert_eq!(failure.ownership, super::copy_up::CopyUpHandleState::Open);
+    assert_eq!(f.lower.active.load(Ordering::SeqCst), 1);
+    assert_eq!(f.overlay.copyups.lock().await.len(), 1);
+    f.assert_no_final();
+    f.overlay.recover_cancelled_copyups().await.unwrap();
+    f.assert_source_and_handles();
+}
+
+#[tokio::test]
+async fn unknown_release_ownership_is_retained_until_a_real_witness_appears() {
+    for (fault, expected_live, expected_releases) in [
+        (Fault::ReleaseUnknownBeforeClose, 1, 2),
+        (Fault::ReleaseUnknownAfterClose, 0, 1),
+    ] {
+        let f = fixture(fault, Fault::NoSpace).await;
+        let error = f
+            .overlay
+            .copy_regfile_up(request(), f.node.clone())
+            .await
+            .err()
+            .unwrap();
+        assert_eq!(
+            cleanup_error(&error).ownership,
+            super::copy_up::CopyUpHandleState::Unknown
+        );
+        assert_eq!(cleanup_error(&error).primary_errno, Some(libc::ENOSPC));
+        let error = f.overlay.recover_cancelled_copyups().await.unwrap_err();
+        assert_eq!(
+            cleanup_error(&error).ownership,
+            super::copy_up::CopyUpHandleState::Unknown
+        );
+        assert_eq!(cleanup_error(&error).primary_errno, Some(libc::ENOSPC));
+        assert_eq!(f.lower.active.load(Ordering::SeqCst), expected_live);
+        assert_eq!(
+            f.lower.releases.lock().unwrap().len(),
+            1,
+            "unknown ownership must not cause a blind RELEASE retry"
+        );
+        assert_eq!(f.overlay.copyups.lock().await.len(), 1);
+        f.assert_no_final();
+        f.lower.witness_available.store(true, Ordering::SeqCst);
+        f.overlay.recover_cancelled_copyups().await.unwrap();
+        assert_eq!(f.lower.releases.lock().unwrap().len(), expected_releases);
+        assert_eq!(f.overlay.copyups.lock().await.len(), 0);
+        f.assert_source_and_handles();
+    }
 }
