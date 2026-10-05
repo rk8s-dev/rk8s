@@ -17,13 +17,15 @@ enum Fault {
     NoSpace,
     LateRead,
     CancelRead,
+    OverreportedWrite,
+    LookupFailure,
 }
 
 struct FaultLayer {
     inner: crate::passthrough::PassthroughFs,
     fault: Fault,
-    active: AtomicI64,
-    writes: AtomicUsize,
+    active: Arc<AtomicI64>,
+    writes: Arc<AtomicUsize>,
     entered: Notify,
     resume: Notify,
 }
@@ -94,6 +96,9 @@ impl Filesystem for FaultLayer {
         parent: Inode,
         name: &OsStr,
     ) -> asyncfuse::Result<ReplyEntry> {
+        if matches!(self.fault, Fault::LookupFailure) {
+            return Err(Error::from_raw_os_error(libc::EIO).into());
+        }
         Filesystem::lookup(&self.inner, req, parent, name).await
     }
 
@@ -192,6 +197,22 @@ impl Layer for FaultLayer {
         1
     }
 
+    async fn begin_copy_up(
+        &self,
+        ctx: crate::context::OperationContext,
+        parent: Inode,
+        mode: u32,
+    ) -> asyncfuse::Result<Box<dyn super::copy_up::CopyUpFile>> {
+        let inner = Layer::begin_copy_up(&self.inner, ctx, parent, mode).await?;
+        self.active.fetch_add(1, Ordering::SeqCst);
+        Ok(Box::new(FaultStage {
+            inner: Some(inner),
+            fault: self.fault,
+            active: self.active.clone(),
+            writes: self.writes.clone(),
+        }))
+    }
+
     async fn getattr_with_mapping(
         &self,
         inode: Inode,
@@ -213,6 +234,49 @@ impl Layer for FaultLayer {
             Layer::create_with_context(&self.inner, ctx, parent, name, mode, flags).await?;
         self.active.fetch_add(1, Ordering::SeqCst);
         Ok(created)
+    }
+}
+
+struct FaultStage {
+    inner: Option<Box<dyn super::copy_up::CopyUpFile>>,
+    fault: Fault,
+    active: Arc<AtomicI64>,
+    writes: Arc<AtomicUsize>,
+}
+
+#[async_trait]
+impl super::copy_up::CopyUpFile for FaultStage {
+    async fn write(&mut self, offset: u64, data: &[u8]) -> Result<u32> {
+        let call = self.writes.fetch_add(1, Ordering::SeqCst);
+        let len = match self.fault {
+            Fault::ShortWrite => data.len().min(4093),
+            Fault::ZeroWrite => return Ok(0),
+            Fault::OverreportedWrite => return Ok(data.len() as u32 + 1),
+            Fault::NoSpace if call > 0 => return Err(Error::from_raw_os_error(libc::ENOSPC)),
+            _ => data.len(),
+        };
+        self.inner
+            .as_mut()
+            .unwrap()
+            .write(offset, &data[..len])
+            .await
+    }
+
+    fn promote(&mut self, name: &OsStr) -> Result<()> {
+        self.inner.as_mut().unwrap().promote(name)
+    }
+    fn verify_promotion(&self) -> Result<()> {
+        self.inner.as_ref().unwrap().verify_promotion()
+    }
+    fn commit(&mut self) {
+        self.inner.as_mut().unwrap().commit();
+    }
+}
+
+impl Drop for FaultStage {
+    fn drop(&mut self) {
+        drop(self.inner.take());
+        self.active.fetch_sub(1, Ordering::SeqCst);
     }
 }
 
@@ -247,8 +311,8 @@ async fn make_layer(path: std::path::PathBuf, fault: Fault) -> Arc<FaultLayer> {
     Arc::new(FaultLayer {
         inner,
         fault,
-        active: AtomicI64::new(0),
-        writes: AtomicUsize::new(0),
+        active: Arc::new(AtomicI64::new(0)),
+        writes: Arc::new(AtomicUsize::new(0)),
         entered: Notify::new(),
         resume: Notify::new(),
     })
@@ -346,6 +410,11 @@ impl Fixture {
             0,
             "upper handle must be released"
         );
+        assert_eq!(
+            std::fs::read_dir(self.temp.path()).unwrap().count(),
+            2,
+            "all private staging storage must be removed"
+        );
     }
 
     fn assert_no_final(&self) {
@@ -434,6 +503,66 @@ async fn cancelled_copy_up_never_publishes_a_partial_file() {
     .unwrap();
     task.abort();
     assert!(task.await.err().unwrap().is_cancelled());
+    f.assert_no_final();
+    assert_eq!(
+        f.lower.active.load(Ordering::SeqCst),
+        1,
+        "cancellation does not pretend the retained real handle is released"
+    );
+    f.overlay.recover_cancelled_copyups().await.unwrap();
+    f.assert_no_final();
+    f.assert_source_and_handles();
+}
+
+#[tokio::test]
+async fn copy_up_rejects_an_overreported_write_and_rolls_back_failed_promotion_lookup() {
+    for fault in [Fault::OverreportedWrite, Fault::LookupFailure] {
+        let f = fixture(Fault::None, fault).await;
+        let error = f
+            .overlay
+            .copy_regfile_up(request(), f.node.clone())
+            .await
+            .err()
+            .unwrap();
+        assert_eq!(error.raw_os_error(), Some(libc::EIO));
+        f.assert_no_final();
+        f.assert_source_and_handles();
+    }
+}
+
+#[tokio::test]
+async fn copy_up_does_not_overwrite_a_concurrently_created_upper_name() {
+    let f = fixture(Fault::None, Fault::None).await;
+    std::fs::write(f.temp.path().join("upper/file"), b"other writer").unwrap();
+    let error = f
+        .overlay
+        .copy_regfile_up(request(), f.node.clone())
+        .await
+        .err()
+        .unwrap();
+    assert_eq!(error.raw_os_error(), Some(libc::EEXIST));
+    assert_eq!(
+        std::fs::read(f.temp.path().join("upper/file")).unwrap(),
+        b"other writer"
+    );
+    f.assert_source_and_handles();
+}
+
+#[tokio::test]
+async fn destroy_drives_real_cancelled_copy_up_cleanup() {
+    let f = fixture(Fault::CancelRead, Fault::None).await;
+    let overlay = f.overlay.clone();
+    let node = f.node.clone();
+    let task = tokio::spawn(async move { overlay.copy_regfile_up(request(), node).await });
+    tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        f.lower.entered.notified(),
+    )
+    .await
+    .unwrap();
+    task.abort();
+    assert!(task.await.err().unwrap().is_cancelled());
+    Filesystem::destroy(f.overlay.as_ref(), request()).await;
     f.assert_no_final();
     f.assert_source_and_handles();
 }

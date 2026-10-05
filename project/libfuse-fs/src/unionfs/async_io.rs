@@ -11,7 +11,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use tokio::sync::Mutex;
 use tracing::trace;
-use tracing::{error, info, warn};
+use tracing::{error, info};
 
 impl Filesystem for OverlayFs {
     /// initialize filesystem. Called before any other filesystem method.
@@ -50,7 +50,11 @@ impl Filesystem for OverlayFs {
     /// kernel may call forget for root. There is some discuss for this
     /// <https://github.com/bazil/fuse/issues/82#issuecomment-88126886>,
     /// <https://sourceforge.net/p/fuse/mailman/message/31995737/>
-    async fn destroy(&self, _req: Request) {}
+    async fn destroy(&self, _req: Request) {
+        if let Err(error) = self.recover_all_copyups().await {
+            tracing::error!("unionfs cancelled copy-up cleanup failed during destroy: {error}");
+        }
+    }
 
     /// look up a directory entry by name and get its attributes.
     async fn lookup(&self, req: Request, parent: Inode, name: &OsStr) -> Result<ReplyEntry> {

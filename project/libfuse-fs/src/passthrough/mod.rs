@@ -13,6 +13,7 @@ use libc::{self, statx_timestamp};
 use asyncfuse::{Errno, raw::reply::ReplyEntry};
 use moka::future::Cache;
 use uuid::Uuid;
+mod copy_up;
 
 use crate::passthrough::mmap::{MmapCachedValue, MmapChunkKey};
 use crate::util::convert_stat64_to_file_attr;

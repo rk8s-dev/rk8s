@@ -190,6 +190,11 @@ pub struct Config {
     /// `OciWhiteout` on macOS (avoids the root requirement of `mknod` char dev).
     pub whiteout_format: WhiteoutFormat,
 
+    /// Private copy-up work storage, outside the upper root and on the same
+    /// device. Defaults to the upper root's parent. A mount-root upper must
+    /// configure a private same-device directory when its parent differs.
+    pub copy_up_work_dir: Option<PathBuf>,
+
     /// **Experimental configuration knob — semantics not API-stable.**
     ///
     /// On macOS, store inode references as path components + lazily-opened
@@ -242,6 +247,7 @@ impl Default for Config {
             max_mmap_size: 1024 * 1024 * 1024,
             mapping: IdMappings::default(),
             whiteout_format: WhiteoutFormat::default(),
+            copy_up_work_dir: None,
             #[cfg(target_os = "macos")]
             macos_lazy_inode_fd: true,
             #[cfg(target_os = "macos")]
