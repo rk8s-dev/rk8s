@@ -19,6 +19,7 @@ enum Fault {
     CancelRead,
     OverreportedWrite,
     LookupFailure,
+    PendingOpen,
 }
 
 struct FaultLayer {
@@ -28,6 +29,8 @@ struct FaultLayer {
     writes: Arc<AtomicUsize>,
     entered: Notify,
     resume: Notify,
+    opens: AtomicUsize,
+    releases: std::sync::Mutex<Vec<u64>>,
 }
 
 impl Filesystem for FaultLayer {
@@ -117,8 +120,15 @@ impl Filesystem for FaultLayer {
     }
 
     async fn open(&self, req: Request, inode: Inode, flags: u32) -> asyncfuse::Result<ReplyOpen> {
+        let call = self.opens.fetch_add(1, Ordering::SeqCst);
         let opened = Filesystem::open(&self.inner, req, inode, flags).await?;
         self.active.fetch_add(1, Ordering::SeqCst);
+        if matches!(self.fault, Fault::PendingOpen) && call == 0 {
+            // A real native OPEN has already allocated a handle, but this
+            // Layer call has not delivered that handle to its caller yet.
+            self.entered.notify_one();
+            self.resume.notified().await;
+        }
         Ok(opened)
     }
 
@@ -182,6 +192,7 @@ impl Filesystem for FaultLayer {
         lock_owner: u64,
         flush: bool,
     ) -> asyncfuse::Result<()> {
+        self.releases.lock().unwrap().push(fh);
         let result =
             Filesystem::release(&self.inner, req, inode, fh, flags, lock_owner, flush).await;
         if result.is_ok() {
@@ -315,6 +326,8 @@ async fn make_layer(path: std::path::PathBuf, fault: Fault) -> Arc<FaultLayer> {
         writes: Arc::new(AtomicUsize::new(0)),
         entered: Notify::new(),
         resume: Notify::new(),
+        opens: AtomicUsize::new(0),
+        releases: std::sync::Mutex::new(Vec::new()),
     })
 }
 
@@ -564,5 +577,82 @@ async fn destroy_drives_real_cancelled_copy_up_cleanup() {
     assert!(task.await.err().unwrap().is_cancelled());
     Filesystem::destroy(f.overlay.as_ref(), request()).await;
     f.assert_no_final();
+    f.assert_source_and_handles();
+}
+
+#[tokio::test]
+async fn a_cancelled_pending_open_does_not_block_an_independent_inode_copy_up() {
+    let f = fixture(Fault::PendingOpen, Fault::None).await;
+    let overlay = f.overlay.clone();
+    let node = f.node.clone();
+    let task = tokio::spawn(async move { overlay.copy_regfile_up(request(), node).await });
+    tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        f.lower.entered.notified(),
+    )
+    .await
+    .unwrap();
+    task.abort();
+    assert!(task.await.err().unwrap().is_cancelled());
+    assert_eq!(f.lower.active.load(Ordering::SeqCst), 1);
+    assert_eq!(f.lower.releases.lock().unwrap().len(), 0);
+    f.assert_no_final();
+
+    let second_bytes = b"independent inode keeps progressing";
+    std::fs::write(f.temp.path().join("lower/second"), second_bytes).unwrap();
+    let entry = Filesystem::lookup(f.lower.as_ref(), request(), 1, OsStr::new("second"))
+        .await
+        .unwrap();
+    let second = Arc::new(
+        OverlayInode::new_from_real_inode(
+            "second",
+            3,
+            "second".into(),
+            RealInode {
+                layer: f.lower.clone(),
+                in_upper_layer: false,
+                inode: entry.attr.ino,
+                whiteout: false,
+                opaque: false,
+                stat: Some(ReplyAttr {
+                    ttl: entry.ttl,
+                    attr: entry.attr,
+                }),
+            },
+        )
+        .await,
+    );
+    *second.parent.lock().await = Arc::downgrade(&f._parent);
+    tokio::time::timeout(
+        std::time::Duration::from_secs(2),
+        f.overlay.copy_regfile_up(request(), second),
+    )
+    .await
+    .expect("another inode must not await the cancelled pending OPEN")
+    .unwrap();
+    assert_eq!(
+        std::fs::read(f.temp.path().join("upper/second")).unwrap(),
+        second_bytes
+    );
+    assert!(!f.temp.path().join("upper/file").exists());
+    assert_eq!(f.lower.active.load(Ordering::SeqCst), 1);
+    assert_eq!(f.lower.releases.lock().unwrap().len(), 1);
+
+    f.lower.resume.notify_one();
+    f.overlay.recover_cancelled_copyups().await.unwrap();
+    let mut released = f.lower.releases.lock().unwrap().clone();
+    assert_eq!(
+        released.len(),
+        2,
+        "both actual OPEN handles must each be released once"
+    );
+    released.sort_unstable();
+    released.dedup();
+    assert_eq!(
+        released.len(),
+        2,
+        "recovery must not repeat an earlier RELEASE"
+    );
+    assert!(!f.temp.path().join("upper/file").exists());
     f.assert_source_and_handles();
 }

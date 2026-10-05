@@ -2592,12 +2592,14 @@ impl OverlayFs {
         ctx: Request,
         node: Arc<OverlayInode>,
     ) -> Result<Arc<OverlayInode>> {
-        self.recover_cancelled_copyups().await?;
         if node.in_upper_layer().await {
             return Ok(node);
         }
         let task = {
             let mut copyups = self.copyups.lock().await;
+            // A cancelled OPEN may still be waiting for a real source handle.
+            // Independent inode writes do not wait for that recovery job.
+            copyups.retain(|_, task| !task.complete());
             if let Some(task) = copyups.get(&node.inode) {
                 task.clone()
             } else {
@@ -2623,8 +2625,8 @@ impl OverlayFs {
     /// Finish real cleanup for cancelled copy-ups, without detached tasks.
     ///
     /// Cancellation leaves its bounded source-open future in this ledger.
-    /// Await this method before dropping a cancelled overlay. Writable copy-up
-    /// entry points recover it automatically; normal `destroy` recovers all jobs.
+    /// Await this method before dropping a cancelled overlay. Independent
+    /// writable inodes keep making progress; normal `destroy` recovers all jobs.
     pub async fn recover_cancelled_copyups(&self) -> Result<()> {
         let pending: Vec<_> = self
             .copyups
@@ -2634,9 +2636,11 @@ impl OverlayFs {
             .filter(|(_, task)| task.cancelled_or_complete())
             .map(|(&inode, task)| (inode, task.clone()))
             .collect();
+        // Every admitted recovery future is driven concurrently. One source
+        // OPEN awaiting its real handle does not hold back another cleanup.
+        let outcomes = join_all(pending.iter().map(|(_, task)| task.wait())).await;
         let mut failure = None;
-        for (inode, task) in pending {
-            let result = task.wait().await;
+        for ((inode, task), result) in pending.into_iter().zip(outcomes) {
             let mut copyups = self.copyups.lock().await;
             if copyups
                 .get(&inode)

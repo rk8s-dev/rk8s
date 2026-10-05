@@ -140,6 +140,10 @@ impl CopyUpTask {
         self.cancellation.cancelled.load(Ordering::Acquire) || self.complete.load(Ordering::Acquire)
     }
 
+    pub(super) fn complete(&self) -> bool {
+        self.complete.load(Ordering::Acquire)
+    }
+
     pub(super) fn cancel(&self) {
         self.cancellation.cancel();
     }

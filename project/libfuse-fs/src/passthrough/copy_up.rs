@@ -7,7 +7,7 @@ use async_trait::async_trait;
 use std::ffi::{CString, OsStr};
 use std::fs::File;
 use std::io::{Error, Result};
-use std::os::fd::{AsRawFd, FromRawFd};
+use std::os::fd::{AsFd, AsRawFd, FromRawFd};
 use std::os::unix::{
     ffi::OsStrExt,
     fs::{FileExt, MetadataExt},
@@ -56,7 +56,7 @@ fn open_at(parent: &File, name: &std::ffi::CStr, flags: i32, mode: u32) -> Resul
             parent.as_raw_fd(),
             name.as_ptr(),
             flags,
-            mode as libc::mode_t,
+            mode as libc::c_uint,
         )
     };
     if fd < 0 {
@@ -91,7 +91,7 @@ impl PassthroughFs {
         mode: u32,
     ) -> Result<PrivateCopyUp> {
         let inode = self.inode_map.get(parent).await?;
-        let parent = inode.get_file()?;
+        let parent = File::from(inode.get_file()?.as_fd().try_clone_to_owned()?);
         let root = self.cfg.root_dir.canonicalize()?;
         let base_path = match &self.cfg.copy_up_work_dir {
             Some(path) => path.canonicalize()?,
