@@ -40,7 +40,7 @@ impl Drop for StageDirectory {
     }
 }
 
-pub(super) struct PrivateCopyUp {
+pub(crate) struct PrivateCopyUp {
     stage: StageDirectory,
     file: File,
     parent: File,
@@ -84,7 +84,7 @@ fn directory_matches(parent: &File, name: &std::ffi::CStr, file: &File) -> Resul
 }
 
 impl PassthroughFs {
-    pub(super) async fn begin_private_copy_up(
+    pub(crate) async fn begin_private_copy_up(
         &self,
         ctx: OperationContext,
         parent: u64,
