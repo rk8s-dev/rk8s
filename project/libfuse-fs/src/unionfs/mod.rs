@@ -24,10 +24,7 @@ use asyncfuse::raw::{Request, Session};
 use config::Config;
 use futures::StreamExt as _;
 use std::sync::{Arc, Weak};
-use tracing::debug;
-use tracing::error;
-use tracing::info;
-use tracing::trace;
+use tracing::{debug, error, info, trace, warn};
 
 use asyncfuse::{Errno, FileType, MountOptions, mode_from_kind_and_perm};
 const SLASH_ASCII: char = '/';
@@ -130,6 +127,10 @@ struct HandleData {
     // Cache the directory entries for stable readdir offsets.
     // The snapshot contains all necessary info to avoid re-accessing childrens map.
     dir_snapshot: Mutex<Option<Vec<DirectoryEntryPlus>>>,
+    /// True for handles reconstructed outside a kernel OPEN (no_open-style
+    /// requests that carry fh=0). Such handles own a layer fd the kernel will
+    /// never RELEASE, so the I/O sites must release them when done.
+    ephemeral: bool,
 }
 
 // RealInode is a wrapper of one inode in specific layer.
@@ -1490,10 +1491,18 @@ impl OverlayFs {
                             // The kernel can issue LOOKUP/GETATTR/OPEN using a parent inode after
                             // userspace has evicted the in-memory node on FORGET. Rebuild the
                             // parent from its reserved path, then continue resolving `name` below.
-                            self.materialize_node_by_path(ctx, &path).await?
+                            match self.materialize_node_by_path(ctx, &path).await {
+                                Ok(node) => node,
+                                Err(e) => {
+                                    warn!(
+                                        "lookup_node: re-materialize of forgotten parent {parent} at {path:?} failed: {e}"
+                                    );
+                                    return Err(e);
+                                }
+                            }
                         } else {
-                            trace!(
-                                "overlayfs:mod.rs:1034:lookup_node: parent inode {parent} not found"
+                            warn!(
+                                "lookup_node: parent inode {parent} not found and no path mapping to re-materialize"
                             );
                             // Parent inode is not found, return ENOENT.
                             return Err(Error::from_raw_os_error(libc::ENOENT));
@@ -1539,7 +1548,10 @@ impl OverlayFs {
                 {
                     return Ok(v);
                 }
-                trace!("lookup_node: child {name} not found");
+                warn!(
+                    "lookup_node: child {name} not found under parent {parent} (path {:?})",
+                    pnode.path.read().await
+                );
                 Err(Error::from_raw_os_error(libc::ENOENT))
             }
         }
@@ -1791,6 +1803,7 @@ impl OverlayFs {
                     node,
                     real_handle: None,
                     dir_snapshot: Mutex::new(None),
+                    ephemeral: false,
                 })
             }
         };
@@ -2198,6 +2211,7 @@ impl OverlayFs {
                             handle: AtomicU64::new(hd),
                         }),
                         dir_snapshot: Mutex::new(None),
+                        ephemeral: false,
                     };
                     self.handles
                         .lock()
@@ -3213,45 +3227,66 @@ impl OverlayFs {
                 // trace!("get_data: found handle");
                 return Ok(Arc::clone(v));
             }
-        } else {
-            let readonly: bool = flags
-                & (libc::O_APPEND | libc::O_CREAT | libc::O_TRUNC | libc::O_RDWR | libc::O_WRONLY)
-                    as u32
-                == 0;
-
-            // lookup node
-            let node = self.lookup_node(ctx, inode, "").await?;
-
-            // whiteout node
-            if node.whiteout.load(Ordering::Relaxed) {
-                return Err(Error::from_raw_os_error(libc::ENOENT));
-            }
-
-            if !readonly {
-                // Check if upper layer exists, return EROFS is not exists.
-                self.upper_layer
-                    .as_ref()
-                    .cloned()
-                    .ok_or_else(|| Error::from_raw_os_error(libc::EROFS))?;
-                // copy up to upper layer
-                self.copy_node_up(ctx, Arc::clone(&node)).await?;
-            }
-
-            let (layer, in_upper_layer, inode) = node.first_layer_inode().await;
-            let handle_data = HandleData {
-                node: Arc::clone(&node),
-                real_handle: Some(RealHandle {
-                    layer,
-                    in_upper_layer,
-                    inode,
-                    handle: AtomicU64::new(0),
-                }),
-                dir_snapshot: Mutex::new(None),
-            };
-            return Ok(Arc::new(handle_data));
+            // Handle miss with an open-supporting mount: the kernel issued an
+            // I/O for a file whose OPEN we never saw (no_open-style write after
+            // an attr-cache-only path, a stale fh after FORGET, ...). Fall
+            // through to the reconstruction below instead of failing with
+            // ENOENT — it re-resolves the node, copies it up for writes, and
+            // opens the target layer for a real fh.
         }
 
-        Err(Error::from_raw_os_error(libc::ENOENT))
+        let readonly: bool = flags
+            & (libc::O_APPEND | libc::O_CREAT | libc::O_TRUNC | libc::O_RDWR | libc::O_WRONLY)
+                as u32
+            == 0;
+
+        // lookup node
+        let node = self.lookup_node(ctx, inode, "").await?;
+
+        // whiteout node
+        if node.whiteout.load(Ordering::Relaxed) {
+            return Err(Error::from_raw_os_error(libc::ENOENT));
+        }
+
+        if !readonly {
+            // Check if upper layer exists, return EROFS is not exists.
+            self.upper_layer
+                .as_ref()
+                .cloned()
+                .ok_or_else(|| Error::from_raw_os_error(libc::EROFS))?;
+            // copy up to upper layer
+            self.copy_node_up(ctx, Arc::clone(&node)).await?;
+        }
+
+        let (layer, in_upper_layer, inode) = node.first_layer_inode().await;
+
+        // A no_open-style request carries fh=0: the kernel never sent an
+        // OPEN, so no handle exists for the layers that locate files by
+        // their own open handle (passthrough). Perform a real open on the
+        // target layer and hand the resulting fh to the caller, otherwise
+        // every write lands as ENOENT inside the passthrough layer.
+        // Read-only callers keep fh=0: inode-addressed layers (dicfuse and
+        // friends) ignore it, and passthrough reads only happen on nodes
+        // that were properly opened before.
+        // Every reconstructed handle must carry a *real* fh: the upper
+        // passthrough locates files by its own open handle, and a fh=0 read
+        // or write fails with EBADF inside the passthrough pread/pwrite.
+        let opened = layer.open(ctx, inode, flags).await?;
+        let (real_fh, real_layer, real_inode) = (opened.fh, layer.clone(), inode);
+
+        let handle_data = Arc::new(HandleData {
+            node: Arc::clone(&node),
+            real_handle: Some(RealHandle {
+                layer: real_layer,
+                in_upper_layer,
+                inode: real_inode,
+                handle: AtomicU64::new(real_fh),
+            }),
+            dir_snapshot: Mutex::new(None),
+            ephemeral: true,
+        });
+
+        return Ok(handle_data);
     }
 
     // extend or init the inodes number to one overlay if the current number is done.

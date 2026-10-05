@@ -16,6 +16,7 @@ use uuid::Uuid;
 
 use crate::passthrough::mmap::{MmapCachedValue, MmapChunkKey};
 use crate::util::convert_stat64_to_file_attr;
+use crate::util::whiteout::WhiteoutFormat;
 #[cfg(target_os = "linux")]
 use mount_fd::MountFds;
 use statx::StatExt;
@@ -114,7 +115,31 @@ where
     pub mapping: Option<M>,
 }
 
+/// Build an Antares passthrough layer using the platform-default whiteout format
+/// (`CharDev` on Linux, `OciWhiteout` on macOS).
+///
+/// Prefer [`new_antares_passthroughfs_layer_with`] when the caller must control how a
+/// deletion is recorded — for example an overlay whose upper layer is scanned by a
+/// separate process that needs deletions to be observable without `CAP_MKNOD`.
 pub async fn new_antares_passthroughfs_layer<P: AsRef<Path>>(root_dir: P) -> Result<PassthroughFs> {
+    new_antares_passthroughfs_layer_with(root_dir, WhiteoutFormat::default()).await
+}
+
+/// Build an Antares passthrough layer with an explicit whiteout format.
+///
+/// The format decides how a deletion is recorded in this layer:
+///
+/// - [`WhiteoutFormat::CharDev`] — a character device created via `mknod`, following the
+///   Linux kernel-overlayfs convention. **Requires `CAP_MKNOD`**, so under an unprivileged
+///   mount a deletion of a lower-layer file can fail with `EPERM`.
+/// - [`WhiteoutFormat::OciWhiteout`] — an empty `.wh.<name>` regular file, following the OCI
+///   image-spec convention. Needs no elevated capability, at the cost of reserving the `.wh.`
+///   name prefix from user-created files (see
+///   [`crate::util::whiteout::is_user_creatable_name`]).
+pub async fn new_antares_passthroughfs_layer_with<P: AsRef<Path>>(
+    root_dir: P,
+    whiteout_format: WhiteoutFormat,
+) -> Result<PassthroughFs> {
     // Use libfuse-fs default dentry/attr TTL (5s) and cache policy. Correctness after
     // kernel FORGET is handled by unionfs `materialize_child_from_layers()`.
     let config = Config {
@@ -122,6 +147,7 @@ pub async fn new_antares_passthroughfs_layer<P: AsRef<Path>>(root_dir: P) -> Res
         xattr: true,
         do_import: true,
         writeback: false,
+        whiteout_format,
         ..Default::default()
     };
 
