@@ -516,10 +516,8 @@ async fn copy_file(
         destination.commit();
         Ok(node.clone())
     }.await;
-    if !source_release_attempted {
-        if let Err((error, ownership)) = release_source(&source).await {
-            return Err(cleanup_failure(result.as_ref().err(), error, ownership));
-        }
+    if !source_release_attempted && let Err((error, ownership)) = release_source(&source).await {
+        return Err(cleanup_failure(result.as_ref().err(), error, ownership));
     }
     result
 }

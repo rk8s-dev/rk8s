@@ -80,7 +80,11 @@ fn directory_matches(parent: &File, name: &std::ffi::CStr, file: &File) -> Resul
     }
     let stat = unsafe { stat.assume_init() };
     let owned = file.metadata()?;
-    Ok(stat.st_dev as u64 == owned.dev() && stat.st_ino as u64 == owned.ino())
+    #[cfg(target_os = "linux")]
+    let device = stat.st_dev;
+    #[cfg(target_os = "macos")]
+    let device = stat.st_dev as u64;
+    Ok(device == owned.dev() && stat.st_ino == owned.ino())
 }
 
 impl PassthroughFs {
@@ -250,13 +254,12 @@ impl CopyUpFile for PrivateCopyUp {
 
 impl Drop for PrivateCopyUp {
     fn drop(&mut self) {
-        if !self.committed {
-            if let Some(name) = &self.final_name {
-                if directory_matches(&self.parent, name, &self.file).unwrap_or(false) {
-                    unsafe {
-                        libc::unlinkat(self.parent.as_raw_fd(), name.as_ptr(), 0);
-                    }
-                }
+        if !self.committed
+            && let Some(name) = &self.final_name
+            && directory_matches(&self.parent, name, &self.file).unwrap_or(false)
+        {
+            unsafe {
+                libc::unlinkat(self.parent.as_raw_fd(), name.as_ptr(), 0);
             }
         }
         // File and directory owners close their actual native descriptors.
